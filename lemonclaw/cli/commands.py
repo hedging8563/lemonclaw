@@ -155,14 +155,23 @@ def main(
 
 
 @app.command()
+def init(
+    telegram: bool = typer.Option(False, "--telegram", help="Only run Telegram pairing step"),
+):
+    """Interactive setup wizard: config, service, watchdog, Telegram."""
+    from lemonclaw.cli.init import run_init
+    run_init(telegram_only=telegram)
+
+
+@app.command()
 def onboard():
-    """Initialize lemonclaw configuration and workspace."""
+    """Quick config setup (legacy). Use `lemonclaw init` for full setup."""
     from lemonclaw.config.loader import get_config_path, load_config, save_config
     from lemonclaw.config.schema import Config
     from lemonclaw.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
@@ -178,22 +187,21 @@ def onboard():
     else:
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
-    
+
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     sync_workspace_templates(workspace)
-    
+
     console.print(f"\n{__logo__} lemonclaw is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.lemonclaw/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]lemonclaw agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/hedging8563/lemonclaw[/dim]")
+    console.print("  1. Full setup: [cyan]lemonclaw init[/cyan]")
+    console.print("  2. Quick chat: [cyan]lemonclaw agent -m \"Hello!\"[/cyan]")
+    console.print("\n[dim]Want Telegram/WhatsApp? Run: lemonclaw init[/dim]")
 
 
 
