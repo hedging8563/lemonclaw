@@ -391,7 +391,18 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
-    
+
+    # Create in-process watchdog (Layer 1: asyncio health checks)
+    from lemonclaw.watchdog.service import WatchdogService, create_loguru_error_sink
+    from loguru import logger as _logger
+
+    watchdog = WatchdogService(
+        port=port,
+        session_manager=session_manager,
+    )
+    # Feed error log events to watchdog for rate tracking
+    _logger.add(create_loguru_error_sink(watchdog), level="ERROR")
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -402,6 +413,7 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    console.print(f"[green]✓[/green] Watchdog: in-process health monitor")
 
     # Build HTTP server
     from lemonclaw import __version__
@@ -421,10 +433,12 @@ def gateway(
 
         await cron.start()
         await heartbeat.start()
+        await watchdog.start()
 
         # Run agent, channels, HTTP server, and shutdown watcher concurrently
         async def _shutdown_watcher():
             await shutdown.wait()
+            watchdog.stop()
             await shutdown.execute(
                 channels=channels,
                 agent=agent,
