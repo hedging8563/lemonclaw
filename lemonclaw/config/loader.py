@@ -1,7 +1,10 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
+
+from loguru import logger
 
 from lemonclaw.config.schema import Config
 
@@ -18,14 +21,21 @@ def get_data_dir() -> Path:
 
 
 def load_config(config_path: Path | None = None) -> Config:
-    """
-    Load configuration from file or create default.
+    """Load configuration from file, then overlay environment variables.
 
-    Args:
-        config_path: Optional path to config file. Uses default if not provided.
+    Priority (highest wins):
+    1. Environment variables (Orchestrator-injected)
+    2. Config file (~/.lemonclaw/config.json)
+    3. Pydantic defaults
 
-    Returns:
-        Loaded configuration object.
+    Env vars recognized:
+    - GATEWAY_TOKEN  → gateway.auth_token
+    - GATEWAY_BIND   → gateway.host
+    - GATEWAY_PORT   → gateway.port
+    - API_BASE_URL   → lemondata.api_base_url + auto-populate providers
+    - API_KEY        → lemondata.api_key + auto-populate providers
+    - DEFAULT_MODEL  → agents.defaults.model
+    - INSTANCE_ID    → lemondata.instance_id
     """
     path = config_path or get_config_path()
 
@@ -34,22 +44,19 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Failed to load config from {path}: {e}")
-            print("Using default configuration.")
+            logger.warning(f"Failed to load config from {path}: {e}, using defaults")
+            config = Config()
+    else:
+        config = Config()
 
-    return Config()
+    _apply_env_overrides(config)
+    return config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
-    """
-    Save configuration to file.
-
-    Args:
-        config: Configuration to save.
-        config_path: Optional path to save to. Uses default if not provided.
-    """
+    """Save configuration to file."""
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -57,6 +64,56 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _apply_env_overrides(config: Config) -> None:
+    """Overlay environment variables onto loaded config.
+
+    K8s scenario: Orchestrator sets these env vars on the Deployment.
+    Self-hosted: Users can also set them in launchd/systemd env.
+    """
+    if token := os.environ.get("GATEWAY_TOKEN"):
+        config.gateway.auth_token = token
+
+    if bind := os.environ.get("GATEWAY_BIND"):
+        config.gateway.host = bind
+
+    if port := os.environ.get("GATEWAY_PORT"):
+        try:
+            config.gateway.port = int(port)
+        except ValueError:
+            logger.warning(f"Invalid GATEWAY_PORT={port}, ignoring")
+
+    if model := os.environ.get("DEFAULT_MODEL"):
+        config.agents.defaults.model = model
+
+    if instance_id := os.environ.get("INSTANCE_ID"):
+        config.lemondata.instance_id = instance_id
+
+    # API_BASE_URL + API_KEY: populate LemonData config and provider entries
+    api_base = os.environ.get("API_BASE_URL")
+    api_key = os.environ.get("API_KEY")
+
+    if api_base:
+        config.lemondata.api_base_url = api_base
+
+    if api_key:
+        config.lemondata.api_key = api_key
+
+    if api_key:
+        base = api_base or "https://api.lemondata.cc"
+        base_v1 = f"{base}/v1" if not base.endswith("/v1") else base
+        base_no_v1 = base.removesuffix("/v1")
+
+        # Auto-populate the 3 LemonData providers
+        config.providers.lemondata.api_key = api_key
+        config.providers.lemondata.api_base = base_v1
+
+        config.providers.lemondata_claude.api_key = api_key
+        config.providers.lemondata_claude.api_base = base_no_v1
+
+        config.providers.lemondata_minimax.api_key = api_key
+        config.providers.lemondata_minimax.api_base = base_no_v1
 
 
 def _migrate_config(data: dict) -> dict:

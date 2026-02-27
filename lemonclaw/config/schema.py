@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore")
 
 
 class WhatsAppConfig(Base):
@@ -184,20 +184,6 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""                       # e.g. @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True               # end-to-end encryption support
-    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
-    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
@@ -242,9 +228,24 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class LemonDataConfig(Base):
+    """LemonData platform integration configuration (K8s managed instances)."""
+
+    api_base_url: str = ""  # e.g. https://api.lemondata.cc
+    api_key: str = ""
+    default_model: str = ""
+    instance_id: str = ""  # Orchestrator-assigned instance ID
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    # LemonData gateways (highest priority when configured)
+    lemondata: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI-compat, api_base with /v1
+    lemondata_claude: ProviderConfig = Field(default_factory=ProviderConfig)  # Anthropic format, no /v1
+    lemondata_minimax: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI-compat, no /v1
+
+    # Standard providers
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -272,10 +273,17 @@ class HeartbeatConfig(Base):
 
 
 class GatewayConfig(Base):
-    """Gateway/server configuration."""
+    """Gateway/server configuration.
 
-    host: str = "0.0.0.0"
-    port: int = 18790
+    Security defaults (fail-closed):
+    - bind="localhost": only accepts local connections by default
+    - auth_token=None: rejects non-localhost requests when unset
+    K8s overrides via env: GATEWAY_BIND=0.0.0.0 + GATEWAY_TOKEN=xxx
+    """
+
+    host: str = "localhost"
+    port: int = 18789  # Matches OpenClaw for K8s probe compatibility
+    auth_token: str | None = None  # Required for non-localhost access
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
@@ -327,6 +335,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    lemondata: LemonDataConfig = Field(default_factory=LemonDataConfig)
 
     @property
     def workspace_path(self) -> Path:
@@ -406,4 +415,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="LEMONCLAW_", env_nested_delimiter="__")

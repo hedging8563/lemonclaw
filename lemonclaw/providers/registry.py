@@ -81,6 +81,71 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_direct=True,
     ),
 
+    # === LemonData Gateways (highest priority when configured) =============
+    # Three providers for different API formats. All share the same API key.
+    # Order matters: lemondata_claude and lemondata_minimax match by keyword
+    # BEFORE the generic lemondata fallback gateway.
+
+    # LemonData Claude: Anthropic messages format, api_base WITHOUT /v1.
+    # Matches "claude" keyword — must come before standard "anthropic" provider.
+    ProviderSpec(
+        name="lemondata_claude",
+        keywords=("claude",),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="LemonData (Claude)",
+        litellm_prefix="",                     # LiteLLM handles claude-* natively
+        skip_prefixes=(),
+        env_extras=(
+            ("ANTHROPIC_API_BASE", "{api_base}"),
+        ),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.lemondata.cc",  # NO /v1 for Anthropic
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=True,
+    ),
+
+    # LemonData MiniMax: OpenAI-compatible, api_base WITHOUT /v1.
+    # Matches "minimax" keyword — must come before standard "minimax" provider.
+    ProviderSpec(
+        name="lemondata_minimax",
+        keywords=("minimax",),
+        env_key="OPENAI_API_KEY",
+        display_name="LemonData (MiniMax)",
+        litellm_prefix="openai",               # MiniMax-M2.1 → openai/MiniMax-M2.1
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.lemondata.cc",  # NO /v1 for MiniMax
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
+    # LemonData main: OpenAI-compatible gateway for all other models.
+    # Fallback gateway — matches when no keyword-specific provider wins.
+    ProviderSpec(
+        name="lemondata",
+        keywords=(),                            # No keywords — pure fallback gateway
+        env_key="OPENAI_API_KEY",
+        display_name="LemonData",
+        litellm_prefix="openai",               # gpt-4.1 → openai/gpt-4.1
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="lemondata",    # Detect by api_base URL
+        default_api_base="https://api.lemondata.cc/v1",  # WITH /v1 for OpenAI-compat
+        strip_model_prefix=True,               # anthropic/claude-3 → claude-3 → openai/claude-3
+        model_overrides=(),
+    ),
+
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
 

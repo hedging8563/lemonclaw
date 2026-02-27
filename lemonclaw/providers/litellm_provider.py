@@ -7,6 +7,13 @@ from typing import Any
 
 import litellm
 from litellm import acompletion
+from litellm.exceptions import (
+    AuthenticationError,
+    RateLimitError,
+    APIConnectionError,
+    APIError,
+)
+from loguru import logger
 
 from lemonclaw.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from lemonclaw.providers.registry import find_by_model, find_gateway
@@ -224,10 +231,35 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
+        except AuthenticationError as e:
+            logger.error(f"Authentication failed: {e}")
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content="API key 无效或已过期，请检查配置。",
+                finish_reason="error",
+            )
+        except RateLimitError as e:
+            # P0: 直接报错 (LemonData 熔断器兜底)，P2-D 启用 LiteLLM 内置重试
+            logger.warning(f"Rate limited: {e}")
+            return LLMResponse(
+                content="请求频率超限，请稍后重试。",
+                finish_reason="error",
+            )
+        except (APIConnectionError, APIError) as e:
+            # Retry once for transient errors (connection / 5xx)
+            logger.warning(f"API error (will retry once): {e}")
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except Exception as retry_err:
+                logger.error(f"Retry failed: {retry_err}")
+                return LLMResponse(
+                    content=f"LLM 服务暂时不可用: {retry_err}",
+                    finish_reason="error",
+                )
+        except Exception as e:
+            logger.error(f"Unexpected LLM error: {e}")
+            return LLMResponse(
+                content=f"调用 LLM 时发生错误: {e}",
                 finish_reason="error",
             )
     
