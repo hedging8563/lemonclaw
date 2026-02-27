@@ -1,6 +1,8 @@
 """Session management for conversation history."""
 
+import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -81,6 +83,13 @@ class SessionManager:
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".lemonclaw" / "sessions"
         self._cache: dict[str, Session] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, key: str) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for a session key."""
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -113,7 +122,7 @@ class SessionManager:
         return session
     
     def _load(self, key: str) -> Session | None:
-        """Load a session from disk."""
+        """Load a session from disk with JSONL integrity check."""
         path = self._get_session_path(key)
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
@@ -132,14 +141,24 @@ class SessionManager:
             metadata = {}
             created_at = None
             last_consolidated = 0
+            truncated = False
 
             with open(path, encoding="utf-8") as f:
-                for line in f:
+                for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
 
-                    data = json.loads(line)
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        # Incomplete last line from crash — truncate
+                        logger.warning(
+                            "Session {}: truncating corrupt line {} (partial write)",
+                            key, line_num,
+                        )
+                        truncated = True
+                        break
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
@@ -148,34 +167,50 @@ class SessionManager:
                     else:
                         messages.append(data)
 
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
             )
+
+            # Re-save to remove the corrupt trailing line
+            if truncated:
+                self._atomic_save(path, session)
+
+            return session
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
             return None
     
-    def save(self, session: Session) -> None:
-        """Save a session to disk."""
-        path = self._get_session_path(session.key)
+    def _atomic_save(self, path: Path, session: Session) -> None:
+        """Write session to a temp file then atomically rename.
 
-        with open(path, "w", encoding="utf-8") as f:
+        This prevents data loss if the process crashes mid-write.
+        """
+        tmp_path = path.with_suffix(".jsonl.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",
                 "key": session.key,
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
+        os.rename(str(tmp_path), str(path))
+
+    def save(self, session: Session) -> None:
+        """Save a session to disk (atomic write-then-rename)."""
+        path = self._get_session_path(session.key)
+        self._atomic_save(path, session)
         self._cache[session.key] = session
     
     def invalidate(self, key: str) -> None:

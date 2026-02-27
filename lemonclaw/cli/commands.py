@@ -244,11 +244,13 @@ def _make_provider(config: Config):
 
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int = typer.Option(18789, "--port", "-p", help="Gateway HTTP port"),
+    bind: str = typer.Option("localhost", "--bind", "-b", help="Bind address (localhost|lan|0.0.0.0)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the lemonclaw gateway."""
     from lemonclaw.config.loader import load_config, get_data_dir
+    from lemonclaw.config.logging import setup_logging
     from lemonclaw.bus.queue import MessageBus
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.channels.manager import ChannelManager
@@ -256,12 +258,20 @@ def gateway(
     from lemonclaw.cron.service import CronService
     from lemonclaw.cron.types import CronJob
     from lemonclaw.heartbeat.service import HeartbeatService
-    
+    from lemonclaw.gateway.server import create_app, GatewayServer, GracefulShutdown
+
+    setup_logging()
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
-    console.print(f"{__logo__} Starting lemonclaw gateway on port {port}...")
+
+    # Resolve bind address
+    host = bind
+    if bind == "lan":
+        host = "0.0.0.0"
+
+    console.print(f"{__logo__} Starting lemonclaw gateway on {host}:{port}...")
     
     config = load_config()
     sync_workspace_templates(config.workspace_path)
@@ -375,24 +385,47 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
+    # Build HTTP server
+    from lemonclaw import __version__
+    asgi_app = create_app(
+        auth_token=config.gateway.auth_token,
+        channel_manager=channels,
+        version=__version__,
+        model=config.agents.defaults.model,
+        instance_id=getattr(config.lemondata, "instance_id", ""),
+    )
+    http_server = GatewayServer(asgi_app, host=host, port=port)
+    console.print(f"[green]✓[/green] HTTP server: {host}:{port}")
+
     async def run():
+        shutdown = GracefulShutdown()
+        shutdown.register_signals()
+
+        await cron.start()
+        await heartbeat.start()
+
+        # Run agent, channels, HTTP server, and shutdown watcher concurrently
+        async def _shutdown_watcher():
+            await shutdown.wait()
+            await shutdown.execute(
+                channels=channels,
+                agent=agent,
+                cron=cron,
+                heartbeat=heartbeat,
+                http_server=http_server,
+            )
+
         try:
-            await cron.start()
-            await heartbeat.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                http_server.serve(),
+                _shutdown_watcher(),
             )
-        except KeyboardInterrupt:
-            console.print("\nShutting down...")
-        finally:
-            await agent.close_mcp()
-            heartbeat.stop()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
-    
+        except asyncio.CancelledError:
+            pass
+
     asyncio.run(run())
 
 
