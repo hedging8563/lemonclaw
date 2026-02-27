@@ -183,6 +183,12 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
+            # Mid-loop compaction: tool calls can rapidly grow the context
+            if iteration > 1:
+                from lemonclaw.session.compaction import compact, needs_compaction
+                if needs_compaction(messages, self.model):
+                    messages = await compact(messages, self.model, self.provider)
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
@@ -330,6 +336,10 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
+            # Token-level compaction for system messages too
+            from lemonclaw.session.compaction import compact, needs_compaction
+            if needs_compaction(messages, self.model):
+                messages = await compact(messages, self.model, self.provider)
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -410,6 +420,13 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        # Token-level compaction: summarize middle messages if over threshold
+        from lemonclaw.session.compaction import compact, needs_compaction
+        if needs_compaction(initial_messages, self.model):
+            initial_messages = await compact(
+                initial_messages, self.model, self.provider,
+            )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
