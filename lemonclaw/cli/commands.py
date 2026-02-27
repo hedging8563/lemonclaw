@@ -259,6 +259,7 @@ def gateway(
     """Start the lemonclaw gateway."""
     from lemonclaw.config.loader import load_config, get_data_dir
     from lemonclaw.config.logging import setup_logging
+    from lemonclaw.config.sync import run_config_sync
     from lemonclaw.bus.queue import MessageBus
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.channels.manager import ChannelManager
@@ -280,8 +281,16 @@ def gateway(
         host = "0.0.0.0"
 
     console.print(f"{__logo__} Starting lemonclaw gateway on {host}:{port}...")
-    
+
     config = load_config()
+
+    # Run config-sync (K8s: applies Orchestrator env vars; self-hosted: validation only)
+    sync_report = run_config_sync(config)
+    if sync_report.changed:
+        console.print(f"[green]✓[/green] {sync_report.summary()}")
+    if sync_report.failures:
+        console.print(f"[yellow]Warning: {sync_report.summary()}[/yellow]")
+
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)

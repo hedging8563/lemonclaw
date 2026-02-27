@@ -90,6 +90,10 @@ def _apply_env_overrides(config: Config) -> None:
     if instance_id := os.environ.get("INSTANCE_ID"):
         config.lemondata.instance_id = instance_id
 
+    # Trusted proxies (K8s internal network CIDRs)
+    if proxies := os.environ.get("TRUSTED_PROXIES"):
+        config.gateway.trusted_proxies = [p.strip() for p in proxies.split(",") if p.strip()]
+
     # API_BASE_URL + API_KEY: populate LemonData config and provider entries
     api_base = os.environ.get("API_BASE_URL")
     api_key = os.environ.get("API_KEY")

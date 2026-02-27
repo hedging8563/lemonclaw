@@ -284,6 +284,7 @@ class GatewayConfig(Base):
     host: str = "localhost"
     port: int = 18789  # Matches OpenClaw for K8s probe compatibility
     auth_token: str | None = None  # Required for non-localhost access
+    trusted_proxies: list[str] = Field(default_factory=list)  # CIDR list, e.g. ["10.42.0.0/16"]
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
