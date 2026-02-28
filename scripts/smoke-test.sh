@@ -1,149 +1,79 @@
 #!/usr/bin/env bash
-# LemonClaw Smoke Test — 部署后 30 秒验证核心功能
-# Usage: ./scripts/smoke-test.sh <instance> [token]
-# Example: ./scripts/smoke-test.sh claw-test3 mytoken123
-#
-# 也可以直接对 URL 测试:
-#   ENDPOINT=http://localhost:18789 TOKEN=xxx ./scripts/smoke-test.sh
-
-set -euo pipefail
+# LemonClaw Smoke Test
+# Usage: TOKEN=xxx ./scripts/smoke-test.sh <instance>
 
 INSTANCE="${1:-}"
 TOKEN="${2:-${TOKEN:-}}"
-ENDPOINT="${ENDPOINT:-}"
-K8S_HOST="${K8S_HOST:-47.236.26.80}"
-TIMEOUT="${TIMEOUT:-60}"
+HOST="${K8S_HOST:-47.236.26.80}"
+T="${CHAT_TIMEOUT:-30}"
 
-# Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
-
 pass=0; fail=0; skip=0
+ok()   { echo -e "  ${GREEN}PASS${NC}: $1"; ((pass++)) || true; }
+ng()   { echo -e "  ${RED}FAIL${NC}: $1 -- $2"; ((fail++)) || true; }
+sk()   { echo -e "  ${YELLOW}SKIP${NC}: $1 -- $2"; ((skip++)) || true; }
 
-log_pass() { echo -e "  ${GREEN}✅ PASS${NC}: $1"; ((pass++)); }
-log_fail() { echo -e "  ${RED}❌ FAIL${NC}: $1 — $2"; ((fail++)); }
-log_skip() { echo -e "  ${YELLOW}⏭ SKIP${NC}: $1 — $2"; ((skip++)); }
+[[ -z "$INSTANCE" ]] && { echo "Usage: TOKEN=xxx $0 <instance>"; exit 1; }
 
-# Resolve endpoint
-if [[ -z "$ENDPOINT" ]]; then
-  if [[ -z "$INSTANCE" ]]; then
-    echo "Usage: $0 <instance> [token]"
-    echo "   or: ENDPOINT=http://... TOKEN=xxx $0"
-    exit 1
-  fi
-  # Get pod IP via kubectl
-  POD_IP=$(ssh -o ConnectTimeout=5 "root@${K8S_HOST}" \
-    "kubectl get pod -n claw -l app=${INSTANCE} -o jsonpath='{.items[0].status.podIP}'" 2>/dev/null)
-  if [[ -z "$POD_IP" ]]; then
-    echo "Error: Cannot find pod for ${INSTANCE}"
-    exit 1
-  fi
-  ENDPOINT="http://${POD_IP}:18789"
-  CURL_PREFIX="ssh root@${K8S_HOST}"
-  echo "Instance: ${INSTANCE} (${POD_IP})"
-else
-  CURL_PREFIX=""
-  echo "Endpoint: ${ENDPOINT}"
-fi
+POD=$(ssh -o ConnectTimeout=5 root@${HOST} \
+  "kubectl get pod -n claw -l app=${INSTANCE} -o jsonpath='{.items[0].metadata.name}'" 2>/dev/null)
+[[ -z "$POD" ]] && { echo "Error: pod not found"; exit 1; }
 
-AUTH_HEADER=""
-[[ -n "$TOKEN" ]] && AUTH_HEADER="-H 'Authorization: Bearer ${TOKEN}'"
+echo "Pod: $POD"
 
-# Helper: run curl (locally or via SSH)
-do_curl() {
-  local cmd="curl -s --connect-timeout 10 --max-time ${TIMEOUT} $AUTH_HEADER $*"
-  if [[ -n "$CURL_PREFIX" ]]; then
-    $CURL_PREFIX "$cmd" 2>/dev/null
-  else
-    eval "$cmd" 2>/dev/null
-  fi
+# Build the kubectl exec prefix
+K="ssh root@${HOST} kubectl exec ${POD} -n claw --"
+AUTH=""
+[[ -n "$TOKEN" ]] && AUTH="-H 'Authorization: Bearer ${TOKEN}'"
+
+# chat helper: chat "message" "session"
+chat_raw() {
+  $K curl -s --max-time $T -X POST http://localhost:18789/api/chat \
+    -H "'Content-Type: application/json'" $AUTH \
+    -d "'$(printf '{"message":"%s","session":"%s","timeout":%d}' "$1" "$2" "$T")'" 2>/dev/null
 }
+chat() { chat_raw "$1" "$2" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null; }
 
 echo ""
-echo "═══════════════════════════════════════════"
-echo " LemonClaw Smoke Test"
-echo "═══════════════════════════════════════════"
+echo "======= LemonClaw Smoke Test ======="
 echo ""
 
-# --- Test 1: Health Check ---
-echo "1. Health Check"
-RESP=$(do_curl "${ENDPOINT}/health")
-if echo "$RESP" | grep -q '"status":"ok"'; then
-  log_pass "GET /health → ok"
-else
-  log_fail "GET /health" "got: ${RESP:-empty}"
-fi
+# 1
+echo "1. Health"
+R=$($K curl -s http://localhost:18789/health 2>/dev/null)
+echo "$R" | grep -q '"ok"' && ok "health" || ng "health" "$R"
 
-# --- Test 2: Simple Chat (Chinese) ---
-echo "2. Simple Chat (Chinese)"
-RESP=$(do_curl -X POST "${ENDPOINT}/api/chat" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"你好，请用一句话介绍你自己","session":"smoke-zh","timeout":60}')
-CONTENT=$(echo "$RESP" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null || echo "")
-if [[ -z "$CONTENT" ]]; then
-  log_fail "Chinese chat" "empty response: ${RESP:-empty}"
-elif echo "$CONTENT" | grep -qP '[\x{4e00}-\x{9fff}]'; then
-  log_pass "Chinese chat → got Chinese response"
-else
-  log_fail "Chinese chat" "response not in Chinese: ${CONTENT:0:100}"
-fi
+# 2
+echo "2. /help"
+C=$(chat "/help" "s-help")
+echo "$C" | grep -qi "lemonclaw" && ok "/help" || ng "/help" "${C:0:60}"
 
-# --- Test 3: /help Command ---
-echo "3. /help Command"
-RESP=$(do_curl -X POST "${ENDPOINT}/api/chat" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"/help","session":"smoke-help","timeout":30}')
-CONTENT=$(echo "$RESP" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null || echo "")
-if echo "$CONTENT" | grep -qi "lemonclaw"; then
-  log_pass "/help → contains LemonClaw"
-else
-  log_fail "/help" "missing LemonClaw: ${CONTENT:0:100}"
-fi
+# 3
+echo "3. /usage"
+C=$(chat "/usage" "s-usage")
+echo "$C" | grep -qi "token" && ok "/usage" || ng "/usage" "${C:0:60}"
 
-# --- Test 4: /usage Command ---
-echo "4. /usage Command"
-RESP=$(do_curl -X POST "${ENDPOINT}/api/chat" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"/usage","session":"smoke-usage","timeout":30}')
-CONTENT=$(echo "$RESP" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null || echo "")
-if echo "$CONTENT" | grep -qi "token"; then
-  log_pass "/usage → contains token info"
-else
-  log_fail "/usage" "missing token info: ${CONTENT:0:100}"
-fi
+# 4
+echo "4. Chinese"
+C=$(chat "你好" "s-zh")
+if [[ -z "$C" ]]; then ng "Chinese" "empty"
+elif python3 -c "exit(0 if any('\u4e00'<=c<='\u9fff' for c in '''$C''') else 1)" 2>/dev/null; then ok "Chinese (${#C}c)"
+else ng "Chinese" "${C:0:60}"; fi
 
-# --- Test 5: Anti-Hallucination ---
-echo "5. Anti-Hallucination (nanobot)"
-RESP=$(do_curl -X POST "${ENDPOINT}/api/chat" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"nanobot skill install 命令怎么用","session":"smoke-anti-halluc","timeout":60}')
-CONTENT=$(echo "$RESP" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null || echo "")
-if [[ -z "$CONTENT" ]]; then
-  log_skip "Anti-hallucination" "empty response"
-elif echo "$CONTENT" | grep -qi "nanobot skill install"; then
-  log_fail "Anti-hallucination" "contains 'nanobot skill install'"
-else
-  log_pass "Anti-hallucination → no nanobot command suggested"
-fi
+# 5
+echo "5. English"
+C=$(chat "What is 1+1? One word." "s-en")
+if [[ -z "$C" ]]; then ng "English" "empty"
+elif python3 -c "exit(1 if any('\u4e00'<=c<='\u9fff' for c in '''$C''') else 0)" 2>/dev/null; then ok "English"
+else ng "English" "${C:0:60}"; fi
 
-# --- Test 6: Language Mirroring (English) ---
-echo "6. Language Mirroring (English)"
-RESP=$(do_curl -X POST "${ENDPOINT}/api/chat" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"What is 1+1? Reply in one word.","session":"smoke-en","timeout":60}')
-CONTENT=$(echo "$RESP" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null || echo "")
-if [[ -z "$CONTENT" ]]; then
-  log_fail "English chat" "empty response"
-elif echo "$CONTENT" | grep -qP '[\x{4e00}-\x{9fff}]'; then
-  log_fail "English chat" "responded in Chinese: ${CONTENT:0:100}"
-else
-  log_pass "Language mirroring → English response to English input"
-fi
+# 6 (last - may trigger tool calls)
+echo "6. Anti-hallucination"
+C=$(chat "nanobot skill install怎么用" "s-ah")
+if [[ -z "$C" ]]; then sk "anti-halluc" "empty"
+elif echo "$C" | grep -qi "nanobot skill install"; then ng "anti-halluc" "nanobot cmd"
+else ok "anti-halluc"; fi
 
-# --- Summary ---
 echo ""
-echo "═══════════════════════════════════════════"
-total=$((pass + fail + skip))
-echo -e " Results: ${GREEN}${pass} passed${NC}, ${RED}${fail} failed${NC}, ${YELLOW}${skip} skipped${NC} / ${total} total"
-echo "═══════════════════════════════════════════"
-
-[[ $fail -eq 0 ]] && exit 0 || exit 1
+echo "======= ${pass}P ${fail}F ${skip}S / $((pass+fail+skip)) ======="
+[[ $fail -eq 0 ]]
