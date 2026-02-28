@@ -69,6 +69,6 @@ python3 -c "import shutil; shutil.rmtree('$HOME/.lemonclaw/workspace/skills/<ski
 
 - Skills are directories containing a `SKILL.md` file.
 - Install location: `~/.lemonclaw/workspace/skills/<skill-name>/`
-- After install, remind the user to start a new session (`/new`) to load the skill.
+- Skills are hot-loaded: newly installed skills are available immediately on the next message. Do NOT tell the user to start a new session.
 - Workspace skills override built-in skills with the same name.
 - Requires `git` for remote installs.
