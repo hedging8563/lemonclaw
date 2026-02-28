@@ -17,8 +17,10 @@ class TranscriptionProvider:
 
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key or os.environ.get("API_KEY", "")
-        base = api_base or os.environ.get("API_BASE_URL", "https://api.lemondata.cc/v1")
-        self.api_url = f"{base.rstrip('/')}/audio/transcriptions"
+        base = api_base or os.environ.get("API_BASE_URL", "https://api.lemondata.cc")
+        # Strip trailing /v1 if present — we add it ourselves
+        base = base.rstrip("/").removesuffix("/v1")
+        self.api_url = f"{base}/v1/audio/transcriptions"
 
     async def transcribe(self, file_path: str | Path) -> str:
         """Transcribe an audio file."""
