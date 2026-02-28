@@ -437,7 +437,7 @@ def gateway(
 
         # Start incremental memory backup
         from lemonclaw.watchdog.memory_backup import MemoryBackup
-        mem_backup = MemoryBackup(workspace)
+        mem_backup = MemoryBackup(config.workspace_path)
         await mem_backup.start()
 
         # Run agent, channels, HTTP server, and shutdown watcher concurrently
