@@ -22,6 +22,7 @@ LEMONDATA_API_BASE_V1 = f"{LEMONDATA_API_BASE}/v1"
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_VISION_MODEL = "gpt-4.1-mini"
 DEFAULT_FAST_MODEL = "gpt-4.1-mini"
+DEFAULT_CONSOLIDATION_MODEL = "llama-3.3-70b-versatile"  # Groq: fast + cheap + good tool calling
 
 # ---------------------------------------------------------------------------
 # STT (Speech-to-Text)

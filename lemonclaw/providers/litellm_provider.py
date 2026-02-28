@@ -320,12 +320,12 @@ class LiteLLMProvider(LLMProvider):
     async def _chat_with_retry(
         self, kwargs: dict[str, Any], original_model: str,
     ) -> LLMResponse:
-        """Call LLM with exponential backoff retries and automatic fallback.
+        """Call LLM with exponential backoff retries and chained fallback.
 
         Retry logic:
         - AuthenticationError: never retry, never fallback
         - RateLimitError / APIConnectionError / APIError: retry up to _MAX_RETRIES
-        - All retries exhausted: try fallback model (one shot, no further retries)
+        - All retries exhausted: walk MODEL_MAP fallback chain (A→B→C→…)
         """
         last_error: Exception | None = None
 
@@ -357,26 +357,30 @@ class LiteLLMProvider(LLMProvider):
                 logger.error("Unexpected LLM error: {}", e)
                 break  # Don't retry unexpected errors
 
-        # All retries exhausted — try fallback model
-        entry = MODEL_MAP.get(original_model)
-        if entry and entry.fallback and entry.fallback != original_model:
-            logger.info("Falling back from {} → {}", original_model, entry.fallback)
-            fb_original = entry.fallback
-            fb_gw = self._resolve_gateway_for_model(fb_original) or self._gateway
-            fb_model = self._resolve_model(fb_original, gateway=fb_gw)
-            fb_kwargs = {**kwargs, "model": fb_model}
+        # All retries exhausted — walk fallback chain
+        visited = {original_model}
+        fb_model_id = original_model
+        while True:
+            entry = MODEL_MAP.get(fb_model_id)
+            if not entry or not entry.fallback or entry.fallback in visited:
+                break
+            fb_model_id = entry.fallback
+            visited.add(fb_model_id)
+            logger.info("Falling back {} → {}", original_model, fb_model_id)
+            fb_gw = self._resolve_gateway_for_model(fb_model_id) or self._gateway
+            fb_resolved = self._resolve_model(fb_model_id, gateway=fb_gw)
+            fb_kwargs = {**kwargs, "model": fb_resolved}
             # Set correct api_base for fallback model's gateway.
-            # The original kwargs may carry a different gateway's api_base
-            # (e.g. /v1 for OpenAI-compat) which breaks Anthropic (/v1/v1/messages).
             if fb_gw and fb_gw.default_api_base:
                 fb_kwargs["api_base"] = fb_gw.default_api_base
             elif fb_gw and not fb_gw.default_api_base:
-                fb_kwargs.pop("api_base", None)  # Let LiteLLM use its default
+                fb_kwargs.pop("api_base", None)
             try:
                 response = await acompletion(**fb_kwargs)
                 return await self._collect_stream(response)
             except Exception as fb_err:
-                logger.error("Fallback model {} also failed: {}", entry.fallback, fb_err)
+                logger.warning("Fallback model {} failed: {}", fb_model_id, fb_err)
+                last_error = fb_err
 
         # Everything failed
         error_msg = str(last_error) if last_error else "Unknown error"

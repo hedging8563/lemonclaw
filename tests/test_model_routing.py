@@ -211,16 +211,18 @@ class TestFallbackRetry:
                 model=kwargs.get("model", "test"),
             )
 
-        # claude-sonnet-4-6 falls back to claude-sonnet-4-5
+        # claude-sonnet-4-6 falls back to claude-sonnet-4-5 → gpt-4.1-mini → claude-haiku-4-5
         with patch("lemonclaw.providers.litellm_provider.acompletion", mock_acompletion):
             with patch.object(provider, "_resolve_model", side_effect=lambda m, **kw: f"resolved/{m}"):
                 result = await provider._chat_with_retry(
                     {"model": "resolved/claude-sonnet-4-6", "messages": [], "stream": True},
                     "claude-sonnet-4-6",
                 )
-        # 3 retries on primary + 1 fallback attempt = 4 total calls
-        assert len(models_tried) == 4
-        assert "resolved/claude-sonnet-4-5" in models_tried[-1]
+        # 3 retries on primary + chained fallback (sonnet-4-5 → gpt-4.1-mini → haiku-4-5)
+        assert len(models_tried) == 6
+        assert models_tried[3] == "resolved/claude-sonnet-4-5"
+        assert models_tried[4] == "resolved/gpt-4.1-mini"
+        assert models_tried[5] == "resolved/claude-haiku-4-5"
         assert result.finish_reason == "error"
 
 

@@ -16,6 +16,7 @@ class ModelEntry:
     tier: str                    # "flagship" | "standard" | "economy" | "specialist"
     description: str             # Short note (shown in /model list)
     fallback: str | None = None  # Model ID to try when this one fails
+    hidden: bool = False         # If True, excluded from /model list (internal use only)
 
 
 # ── Catalog ──────────────────────────────────────────────────────────────────
@@ -42,6 +43,11 @@ MODEL_CATALOG: list[ModelEntry] = [
     ModelEntry("minimax-m2.5",            "MiniMax M2.5",             "economy",    "Cheapest option",           fallback="gpt-4.1-mini"),
     ModelEntry("glm-5",                   "GLM-5",                    "economy",    "128K output",               fallback="deepseek-v3-2"),
 
+    # Groq (ultra-fast inference, used for consolidation — hidden from /model)
+    ModelEntry("llama-3.3-70b-versatile",          "Llama 3.3 70B (Groq)",   "economy", "394 TPS, strong tool calling", fallback="qwen3-32b", hidden=True),
+    ModelEntry("qwen3-32b",                        "Qwen3 32B (Groq)",       "economy", "662 TPS, fast and cheap",      fallback="llama-4-scout-17b-16e-instruct", hidden=True),
+    ModelEntry("llama-4-scout-17b-16e-instruct",   "Llama 4 Scout (Groq)",   "economy", "594 TPS, cheapest Groq",       fallback="gpt-4.1-mini", hidden=True),
+
     # Specialist
     ModelEntry("gpt-5.3-codex",           "GPT-5.3 Codex",            "specialist", "Code generation",           fallback="claude-sonnet-4-6"),
     ModelEntry("deepseek-r1",             "DeepSeek R1",               "specialist", "Deep reasoning (CoT)",      fallback="claude-opus-4-6"),
@@ -66,28 +72,32 @@ TIER_LABELS: dict[str, str] = {
 def fuzzy_match(query: str) -> ModelEntry | None:
     """Find a model by exact ID, partial ID, or label substring (case-insensitive).
 
+    Only searches visible (non-hidden) models.
     Priority: exact id > id prefix > id substring > label substring.
     """
     q = query.lower().strip()
     if not q:
         return None
 
-    # Exact match
-    if q in MODEL_MAP:
-        return MODEL_MAP[q]
+    visible = [m for m in MODEL_CATALOG if not m.hidden]
+
+    # Exact match (visible only)
+    for m in visible:
+        if m.id == q:
+            return m
 
     # Prefix match (e.g. "claude-sonnet" → "claude-sonnet-4-6")
-    prefix_hits = [m for m in MODEL_CATALOG if m.id.startswith(q)]
+    prefix_hits = [m for m in visible if m.id.startswith(q)]
     if len(prefix_hits) == 1:
         return prefix_hits[0]
 
     # Substring match on id
-    sub_hits = [m for m in MODEL_CATALOG if q in m.id]
+    sub_hits = [m for m in visible if q in m.id]
     if len(sub_hits) == 1:
         return sub_hits[0]
 
     # Label substring
-    label_hits = [m for m in MODEL_CATALOG if q in m.label.lower()]
+    label_hits = [m for m in visible if q in m.label.lower()]
     if len(label_hits) == 1:
         return label_hits[0]
 
@@ -104,6 +114,8 @@ def format_model_list(current_model: str | None = None) -> str:
     lines: list[str] = []
     grouped: dict[str, list[ModelEntry]] = {}
     for m in MODEL_CATALOG:
+        if m.hidden:
+            continue
         grouped.setdefault(m.tier, []).append(m)
 
     for tier in sorted(grouped, key=lambda t: TIER_ORDER.get(t, 99)):

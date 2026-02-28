@@ -20,3 +20,6 @@ poetry.lock
 .pytest_cache/
 botpy.log
 
+
+.DS_Store
+deploy/k8s/
