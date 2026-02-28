@@ -44,6 +44,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _LLM_CALL_TIMEOUT = 300  # seconds: hard timeout for a single provider.chat() call
 
     def __init__(
         self,
@@ -189,13 +190,24 @@ class AgentLoop:
                 if needs_compaction(messages, self.model):
                     messages = await compact(messages, self.model, self.provider)
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
+            try:
+                response = await asyncio.wait_for(
+                    self.provider.chat(
+                        messages=messages,
+                        tools=self.tools.get_definitions(),
+                        model=self.model,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                    ),
+                    timeout=self._LLM_CALL_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error("LLM call timed out after {}s (iteration {})", self._LLM_CALL_TIMEOUT, iteration)
+                final_content = (
+                    f"The AI model did not respond within {self._LLM_CALL_TIMEOUT}s. "
+                    "This may indicate a network issue or an overloaded provider. Please try again."
+                )
+                break
 
             if response.has_tool_calls:
                 if on_progress:

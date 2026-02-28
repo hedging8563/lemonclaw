@@ -1080,6 +1080,131 @@ def status():
 
 
 # ============================================================================
+# Doctor (pre-flight diagnostics)
+# ============================================================================
+
+
+@app.command()
+def doctor(
+    fix: bool = typer.Option(False, "--fix", "-f", help="Auto-fix issues where possible"),
+):
+    """Pre-flight diagnostics: check config, API key, port, workspace, versions."""
+    import socket
+    from lemonclaw.config.loader import get_config_path, load_config
+    from lemonclaw.config.defaults import DEFAULT_GATEWAY_PORT
+
+    console.print(f"{__logo__} lemonclaw doctor\n")
+
+    issues: list[str] = []
+    fixed: list[str] = []
+
+    # 1. Config file exists
+    config_path = get_config_path()
+    if config_path.exists():
+        console.print(f"  [green]✓[/green] Config: {config_path}")
+        config = load_config()
+    else:
+        console.print(f"  [red]✗[/red] Config: {config_path} not found")
+        if fix:
+            from lemonclaw.config.schema import Config
+            from lemonclaw.config.loader import save_config
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config = Config()
+            save_config(config)
+            console.print(f"    [cyan]→ Created default config[/cyan]")
+            fixed.append("config")
+        else:
+            issues.append("config missing (run with --fix or `lemonclaw init`)")
+            config = None
+
+    # 2. API key configured
+    if config:
+        ld = config.providers.lemondata
+        if ld.api_key and ld.api_key.startswith("sk-"):
+            masked = f"{ld.api_key[:12]}...{ld.api_key[-4:]}"
+            console.print(f"  [green]✓[/green] API key: {masked}")
+        else:
+            console.print(f"  [red]✗[/red] API key: not configured")
+            issues.append("API key missing (run `lemonclaw init`)")
+
+    # 3. Workspace exists
+    if config:
+        ws = config.workspace_path
+        if ws.exists():
+            console.print(f"  [green]✓[/green] Workspace: {ws}")
+        else:
+            console.print(f"  [red]✗[/red] Workspace: {ws} not found")
+            if fix:
+                ws.mkdir(parents=True, exist_ok=True)
+                sync_workspace_templates(ws)
+                console.print(f"    [cyan]→ Created workspace[/cyan]")
+                fixed.append("workspace")
+            else:
+                issues.append("workspace missing (run with --fix)")
+
+    # 4. Required subdirectories
+    if config:
+        config_dir = config_path.parent
+        for subdir in ("sessions", "memory", "credentials"):
+            d = config_dir / subdir
+            if d.exists():
+                console.print(f"  [green]✓[/green] Dir: {subdir}/")
+            else:
+                console.print(f"  [red]✗[/red] Dir: {subdir}/ missing")
+                if fix:
+                    d.mkdir(parents=True, exist_ok=True)
+                    console.print(f"    [cyan]→ Created {subdir}/[/cyan]")
+                    fixed.append(subdir)
+                else:
+                    issues.append(f"{subdir}/ missing (run with --fix)")
+
+    # 5. Port available
+    port = DEFAULT_GATEWAY_PORT
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(("127.0.0.1", port))
+            if result == 0:
+                console.print(f"  [yellow]![/yellow] Port {port}: in use (gateway may be running)")
+            else:
+                console.print(f"  [green]✓[/green] Port {port}: available")
+    except Exception:
+        console.print(f"  [green]✓[/green] Port {port}: available")
+
+    # 6. Python version
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_ok = sys.version_info >= (3, 11)
+    console.print(f"  {'[green]✓[/green]' if py_ok else '[red]✗[/red]'} Python: {py_ver}")
+    if not py_ok:
+        issues.append("Python >= 3.11 required")
+
+    # 7. Node.js (optional)
+    import shutil
+    if shutil.which("node"):
+        try:
+            import subprocess
+            result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
+            node_ver = result.stdout.strip().lstrip("v")
+            console.print(f"  [green]✓[/green] Node.js: {node_ver}")
+        except Exception:
+            console.print(f"  [yellow]![/yellow] Node.js: found but version check failed")
+    else:
+        console.print(f"  [dim]-[/dim] Node.js: not found (optional, for WhatsApp bridge)")
+
+    # Summary
+    console.print()
+    if fixed:
+        console.print(f"  [cyan]Fixed {len(fixed)} issue(s): {', '.join(fixed)}[/cyan]")
+    if issues:
+        console.print(f"  [red]{len(issues)} issue(s) found:[/red]")
+        for issue in issues:
+            console.print(f"    • {issue}")
+        raise typer.Exit(1)
+    else:
+        console.print(f"  [green]All checks passed.[/green]")
+
+
+# ============================================================================
 # OAuth Login
 # ============================================================================
 

@@ -65,28 +65,38 @@ def run_init(*, telegram_only: bool = False) -> None:
         _step_telegram_pairing()
         return
 
-    # Step 1: Environment detection
-    if not _step_detect_environment():
+    # Step 1: OS detection
+    if not _step_detect_os():
         raise typer.Exit(1)
 
-    # Step 2: API key input
+    # Step 2: Python version check
+    if not _step_check_python():
+        raise typer.Exit(1)
+
+    # Step 3: Node.js detection (optional)
+    _step_check_node()
+
+    # Step 4: API key input
     api_key = _step_api_key_input()
 
-    # Step 3: Generate config
+    # Step 5: Generate config
     gateway_token = _step_generate_config(api_key)
 
-    # Step 4: Register system service
+    # Step 6: Create subdirectories
+    _step_create_subdirectories()
+
+    # Step 7: Register system service
     service_registered = _step_register_service()
 
-    # Step 5: Generate watchdog
+    # Step 8: Generate watchdog
     if service_registered:
         _step_generate_watchdog()
 
-    # Step 6: Start service
+    # Step 9: Start service
     if service_registered:
         _step_start_service()
 
-    # Step 7: Telegram pairing (optional)
+    # Step 10: Telegram pairing (optional)
     _step_telegram_pairing()
 
     # Summary
@@ -94,44 +104,27 @@ def run_init(*, telegram_only: bool = False) -> None:
 
 
 # ============================================================================
-# Step 1: Environment detection
+# Step 1: OS detection
 # ============================================================================
 
 
-def _step_detect_environment() -> bool:
-    """Detect OS, architecture, Python version, Node.js availability."""
-    console.print("[bold]Step 1/7: Environment Detection[/bold]\n")
+def _step_detect_os() -> bool:
+    """Detect OS and architecture."""
+    console.print("[bold]Step 1/10: OS Detection[/bold]\n")
 
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Check", style="dim")
     table.add_column("Value")
     table.add_column("Status")
 
-    # OS
     os_name = platform.system()
     os_ver = platform.release()
     os_ok = os_name in ("Darwin", "Linux")
     table.add_row("OS", f"{os_name} {os_ver}", _check(os_ok))
 
-    # Arch
     arch = platform.machine()
     table.add_row("Arch", arch, _check(True))
 
-    # Python
-    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    py_ok = sys.version_info >= (3, 11)
-    table.add_row("Python", py_ver, _check(py_ok, fail=">=3.11 required"))
-
-    # Node.js (optional, only for WhatsApp bridge)
-    node_ver = _get_node_version()
-    if node_ver:
-        node_major = int(node_ver.split(".")[0])
-        node_ok = node_major >= 20
-        table.add_row("Node.js", node_ver, _check(node_ok, fail=">=20 for WhatsApp"))
-    else:
-        table.add_row("Node.js", "not found", "[yellow]optional[/yellow] (WhatsApp)")
-
-    # lemonclaw binary
     lc_path = shutil.which("lemonclaw")
     table.add_row("Binary", lc_path or "running from source", _check(True))
 
@@ -141,6 +134,23 @@ def _step_detect_environment() -> bool:
     if not os_ok:
         console.print("[red]Unsupported OS. LemonClaw requires macOS or Linux.[/red]")
         return False
+    return True
+
+
+# ============================================================================
+# Step 2: Python version check
+# ============================================================================
+
+
+def _step_check_python() -> bool:
+    """Verify Python >= 3.11."""
+    console.print("[bold]Step 2/10: Python Version[/bold]\n")
+
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_ok = sys.version_info >= (3, 11)
+    console.print(f"  Python: {py_ver} {_check(py_ok, fail='>=3.11 required')}")
+    console.print()
+
     if not py_ok:
         console.print("[red]Python >=3.11 required. Please upgrade.[/red]")
         return False
@@ -148,13 +158,32 @@ def _step_detect_environment() -> bool:
 
 
 # ============================================================================
-# Step 2: API key input
+# Step 3: Node.js detection (optional)
+# ============================================================================
+
+
+def _step_check_node() -> None:
+    """Check Node.js availability (optional, for WhatsApp bridge)."""
+    console.print("[bold]Step 3/10: Node.js (optional)[/bold]\n")
+
+    node_ver = _get_node_version()
+    if node_ver:
+        node_major = int(node_ver.split(".")[0])
+        node_ok = node_major >= 20
+        console.print(f"  Node.js: {node_ver} {_check(node_ok, fail='>=20 for WhatsApp')}")
+    else:
+        console.print("  Node.js: not found [yellow](optional)[/yellow] — needed for WhatsApp bridge")
+    console.print()
+
+
+# ============================================================================
+# Step 4: API key input
 # ============================================================================
 
 
 def _step_api_key_input() -> str:
     """Get API key from existing config, env var, or interactive input."""
-    console.print("[bold]Step 2/7: API Key[/bold]\n")
+    console.print("[bold]Step 4/10: API Key[/bold]\n")
 
     # Check existing config
     if CONFIG_FILE.exists():
@@ -193,7 +222,7 @@ def _step_api_key_input() -> str:
 
 
 # ============================================================================
-# Step 3: Generate configuration
+# Step 5: Generate configuration
 # ============================================================================
 
 
@@ -201,13 +230,9 @@ def _step_generate_config(api_key: str) -> str:
     """Generate ~/.lemonclaw/config.json via Pydantic for format safety."""
     from lemonclaw.config.loader import load_config, save_config
 
-    console.print("[bold]Step 3/7: Generate Configuration[/bold]\n")
+    console.print("[bold]Step 5/10: Generate Configuration[/bold]\n")
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Create required subdirectories
-    for subdir in ("sessions", "memory", "credentials", "workspace"):
-        (CONFIG_DIR / subdir).mkdir(exist_ok=True)
 
     # Load existing config (preserves channels, tools, etc.) or create new
     config = load_config()
@@ -252,13 +277,29 @@ def _step_generate_config(api_key: str) -> str:
 
 
 # ============================================================================
-# Step 4: Register system service
+# Step 6: Create subdirectories
+# ============================================================================
+
+
+def _step_create_subdirectories() -> None:
+    """Create required subdirectories under ~/.lemonclaw/."""
+    console.print("[bold]Step 6/10: Create Subdirectories[/bold]\n")
+
+    for subdir in ("sessions", "memory", "credentials", "workspace"):
+        d = CONFIG_DIR / subdir
+        d.mkdir(parents=True, exist_ok=True)
+        console.print(f"  [green]✓[/green] {d}")
+    console.print()
+
+
+# ============================================================================
+# Step 7: Register system service
 # ============================================================================
 
 
 def _step_register_service() -> bool:
     """Register launchd (macOS) or systemd (Linux) service."""
-    console.print("[bold]Step 4/7: System Service[/bold]\n")
+    console.print("[bold]Step 7/10: System Service[/bold]\n")
 
     system = platform.system()
     if system == "Darwin":
@@ -271,13 +312,13 @@ def _step_register_service() -> bool:
 
 
 # ============================================================================
-# Step 5: Watchdog
+# Step 8: Watchdog
 # ============================================================================
 
 
 def _step_generate_watchdog() -> None:
     """Generate external watchdog (launchd plist / systemd timer)."""
-    console.print("[bold]Step 5/7: Watchdog[/bold]\n")
+    console.print("[bold]Step 8/10: Watchdog[/bold]\n")
 
     system = platform.system()
     if system == "Darwin":
@@ -287,13 +328,13 @@ def _step_generate_watchdog() -> None:
 
 
 # ============================================================================
-# Step 6: Start service
+# Step 9: Start service
 # ============================================================================
 
 
 def _step_start_service() -> None:
     """Start the registered service."""
-    console.print("[bold]Step 6/7: Start Service[/bold]\n")
+    console.print("[bold]Step 9/10: Start Service[/bold]\n")
 
     if not typer.confirm("  Start LemonClaw now?", default=True):
         console.print("  [dim]Skipped. Start manually later.[/dim]\n")
@@ -328,13 +369,13 @@ def _step_start_service() -> None:
 
 
 # ============================================================================
-# Step 7: Telegram pairing
+# Step 10: Telegram pairing
 # ============================================================================
 
 
 def _step_telegram_pairing() -> None:
     """Interactive Telegram bot pairing guide."""
-    console.print("[bold]Step 7/7: Telegram Pairing (optional)[/bold]\n")
+    console.print("[bold]Step 10/10: Telegram Pairing (optional)[/bold]\n")
 
     if not typer.confirm("  Set up Telegram bot?", default=False):
         console.print("  [dim]Skipped. Run `lemonclaw init --telegram` later.[/dim]\n")

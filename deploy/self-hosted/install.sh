@@ -130,6 +130,33 @@ else
     fail "lemonclaw installation failed."
 fi
 
+# -- Verify checksum (optional, if EXPECTED_SHA256 is set) --
+if [ -n "${EXPECTED_SHA256:-}" ]; then
+    LC_BIN="$(command -v lemonclaw 2>/dev/null || echo "")"
+    if [ -n "$LC_BIN" ]; then
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA256="$(sha256sum "$LC_BIN" | awk '{print $1}')"
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL_SHA256="$(shasum -a 256 "$LC_BIN" | awk '{print $1}')"
+        else
+            warn "sha256sum/shasum not found, skipping checksum verification."
+            ACTUAL_SHA256=""
+        fi
+
+        if [ -n "$ACTUAL_SHA256" ]; then
+            if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
+                ok "Checksum verified: $ACTUAL_SHA256"
+            else
+                fail "Checksum mismatch!\n  Expected: $EXPECTED_SHA256\n  Actual:   $ACTUAL_SHA256\n  This may indicate a tampered package. Aborting."
+            fi
+        fi
+    else
+        warn "Cannot locate lemonclaw binary for checksum verification."
+    fi
+else
+    info "Tip: Set EXPECTED_SHA256=<hash> before running to verify package integrity."
+fi
+
 # -- Run init wizard --
 echo ""
 info "Starting LemonClaw setup wizard..."

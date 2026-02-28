@@ -34,6 +34,7 @@ MEMORY_LIMIT_MB = 900             # soft limit before triggering action
 COOLDOWN_SECONDS = 600            # 10 minutes between hard restarts
 ERROR_RATE_WINDOW = 300           # 5-minute sliding window for error tracking
 ERROR_RATE_THRESHOLD = 20         # errors in window before triggering action
+ALARM_TIMEOUT = 60                # seconds: signal.alarm for event loop blocking detection
 
 
 # ============================================================================
@@ -104,15 +105,50 @@ class WatchdogService:
         if self._running:
             return
         self._running = True
+        self._setup_alarm()
         self._task = asyncio.create_task(self._run_loop())
         logger.info(f"watchdog: started (interval={self._interval}s, memory_limit={self._memory_limit_mb}MB)")
 
     def stop(self) -> None:
         """Stop the watchdog."""
         self._running = False
+        # Cancel alarm
+        if hasattr(signal, "alarm"):
+            signal.alarm(0)
         if self._task:
             self._task.cancel()
             self._task = None
+
+    # ------------------------------------------------------------------
+    # Event loop blocking detection (signal.alarm)
+    # ------------------------------------------------------------------
+
+    def _setup_alarm(self) -> None:
+        """Set up SIGALRM-based event loop blocking detection (POSIX only).
+
+        signal.alarm fires independently of the event loop. If the loop is
+        blocked (e.g. a synchronous call hangs), the alarm will still fire
+        and log a critical warning. Each _tick() resets the alarm, so it
+        only fires if the loop is stuck for > ALARM_TIMEOUT seconds.
+        """
+        if not hasattr(signal, "alarm"):
+            return  # Windows: no signal.alarm
+
+        def _on_alarm(signum, frame):
+            logger.critical(
+                f"watchdog: SIGALRM — event loop blocked for >{ALARM_TIMEOUT}s! "
+                "This indicates a synchronous call is blocking the asyncio loop."
+            )
+            # Don't exit here — just log. The external watchdog (Layer 2)
+            # will handle restart if /health stops responding.
+
+        signal.signal(signal.SIGALRM, _on_alarm)
+        signal.alarm(ALARM_TIMEOUT)
+
+    def _reset_alarm(self) -> None:
+        """Reset the alarm timer (called each tick to prove the loop is alive)."""
+        if hasattr(signal, "alarm"):
+            signal.alarm(ALARM_TIMEOUT)
 
     # ------------------------------------------------------------------
     # Error tracking (called externally by loguru sink)
@@ -150,6 +186,7 @@ class WatchdogService:
 
     async def _tick(self) -> None:
         """Run all health checks and take recovery action if needed."""
+        self._reset_alarm()  # Prove the event loop is alive
         self._state.total_checks += 1
         self._state.last_check_time = time.monotonic()
 
