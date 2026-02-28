@@ -32,6 +32,7 @@ from lemonclaw.config.defaults import (
     LEMONDATA_API_BASE_V1,
     PROVIDER_LEMONDATA,
     PROVIDER_LEMONDATA_CLAUDE,
+    PROVIDER_LEMONDATA_GEMINI,
     PROVIDER_LEMONDATA_MINIMAX,
 )
 from lemonclaw.config.schema import Config
@@ -133,16 +134,17 @@ def run_config_sync(config: Config) -> SyncReport:
 
 
 def _lemondata_providers(config: Config):
-    """Return the 3 LemonData provider (name, config) tuples."""
+    """Return the 4 LemonData provider (name, config) tuples."""
     return [
         (PROVIDER_LEMONDATA, config.providers.lemondata),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude),
         (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax),
+        (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini),
     ]
 
 
 # ============================================================================
-# Operation 1: Sync API key across all 3 LemonData providers
+# Operation 1: Sync API key across all 4 LemonData providers
 # ============================================================================
 
 
@@ -258,11 +260,12 @@ def _migrate_base_urls(config: Config) -> bool:
 
     changed = False
 
-    # Check all 3 LemonData providers
+    # Check all 4 LemonData providers
     providers = [
         (PROVIDER_LEMONDATA, config.providers.lemondata, api_base_v1),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude, api_base_no_v1),
-        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, api_base_v1),
+        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, api_base_no_v1),
+        (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini, api_base_no_v1),
     ]
 
     for name, prov, expected_base in providers:
@@ -291,7 +294,8 @@ def _validate_providers(config: Config) -> bool:
     Rules:
     - lemondata (OpenAI-compat): must end with /v1
     - lemondata_claude (Anthropic): must NOT end with /v1
-    - lemondata_minimax (OpenAI-compat): must end with /v1
+    - lemondata_minimax (Anthropic format): must NOT end with /v1
+    - lemondata_gemini (Gemini native): must NOT end with /v1
     """
     changed = False
 
@@ -299,7 +303,8 @@ def _validate_providers(config: Config) -> bool:
     rules = [
         (PROVIDER_LEMONDATA, config.providers.lemondata, True),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude, False),
-        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, True),
+        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, False),
+        (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini, False),
     ]
 
     for name, prov, needs_v1 in rules:
@@ -351,7 +356,7 @@ def _sync_model_config(config: Config) -> bool:
     changed = False
     api_key = config.providers.lemondata.api_key or os.environ.get("API_KEY", "")
 
-    # Ensure all 3 providers have correct api_base
+    # Ensure all 4 providers have correct api_base
     if api_key:
         if not config.providers.lemondata.api_base:
             config.providers.lemondata.api_base = LEMONDATA_API_BASE_V1
@@ -360,7 +365,10 @@ def _sync_model_config(config: Config) -> bool:
             config.providers.lemondata_claude.api_base = LEMONDATA_API_BASE
             changed = True
         if not config.providers.lemondata_minimax.api_base:
-            config.providers.lemondata_minimax.api_base = LEMONDATA_API_BASE_V1
+            config.providers.lemondata_minimax.api_base = LEMONDATA_API_BASE
+            changed = True
+        if not config.providers.lemondata_gemini.api_base:
+            config.providers.lemondata_gemini.api_base = LEMONDATA_API_BASE
             changed = True
 
     # Ensure LemonData platform config

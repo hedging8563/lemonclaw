@@ -246,7 +246,8 @@ class ProvidersConfig(Base):
     # LemonData gateways (highest priority when configured)
     lemondata: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI-compat, api_base with /v1
     lemondata_claude: ProviderConfig = Field(default_factory=ProviderConfig)  # Anthropic format, no /v1
-    lemondata_minimax: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI-compat, no /v1
+    lemondata_minimax: ProviderConfig = Field(default_factory=ProviderConfig)  # Anthropic format (MiniMax native = Anthropic), no /v1
+    lemondata_gemini: ProviderConfig = Field(default_factory=ProviderConfig)  # Gemini native format, no /v1
 
     # Standard providers
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint

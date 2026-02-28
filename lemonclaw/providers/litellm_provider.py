@@ -128,10 +128,15 @@ class LiteLLMProvider(LLMProvider):
             return None
         gw_keywords = self._gateway.keywords
         model_lower = model.lower()
-        # Current gateway matches this model
-        if not gw_keywords or any(kw in model_lower for kw in gw_keywords):
+
+        # If current gateway has keywords and they match this model, keep it.
+        if gw_keywords and any(kw in model_lower for kw in gw_keywords):
             return None
-        # Find a sibling gateway by model keywords
+
+        # Find a more specific sibling gateway by model keywords.
+        # This handles both: (a) current gateway has wrong keywords,
+        # and (b) current gateway is the fallback (no keywords) but a
+        # keyword-specific gateway exists (e.g. lemondata_claude for claude models).
         from lemonclaw.providers.registry import PROVIDERS
         for spec in PROVIDERS:
             if not spec.is_gateway:
@@ -140,7 +145,12 @@ class LiteLLMProvider(LLMProvider):
                 continue
             if spec.keywords and any(kw in model_lower for kw in spec.keywords):
                 return spec
-        # No keyword match — use the generic fallback gateway (no keywords)
+
+        # No keyword match found — if current gateway is already the fallback, keep it.
+        if not gw_keywords:
+            return None
+
+        # Current gateway has keywords that don't match — fall back to generic gateway.
         for spec in PROVIDERS:
             if spec.is_gateway and not spec.keywords:
                 return spec

@@ -108,21 +108,43 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
 
-    # LemonData MiniMax: OpenAI-compatible, api_base WITHOUT /v1.
+    # LemonData MiniMax: Anthropic messages format (PT), api_base WITHOUT /v1.
+    # MiniMax uses Anthropic-style /v1/messages API on LemonData gateway.
     # Matches "minimax" keyword — must come before standard "minimax" provider.
     ProviderSpec(
         name="lemondata_minimax",
         keywords=("minimax",),
-        env_key="OPENAI_API_KEY",
+        env_key="ANTHROPIC_API_KEY",
         display_name="LemonData (MiniMax)",
-        litellm_prefix="openai",               # MiniMax-M2.1 → openai/MiniMax-M2.1
+        litellm_prefix="anthropic",            # minimax-m2.5 → anthropic/minimax-m2.5
         skip_prefixes=(),
+        env_extras=(
+            ("ANTHROPIC_API_BASE", "{api_base}"),
+        ),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.lemondata.cc",  # NO /v1 for Anthropic format
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
+    # LemonData Gemini: native Gemini format (PT), api_base WITHOUT /v1.
+    # Matches "gemini" keyword — must come before standard "gemini" provider.
+    ProviderSpec(
+        name="lemondata_gemini",
+        keywords=("gemini",),
+        env_key="GEMINI_API_KEY",
+        display_name="LemonData (Gemini)",
+        litellm_prefix="gemini",               # gemini-3-flash → gemini/gemini-3-flash
+        skip_prefixes=("gemini/",),
         env_extras=(),
         is_gateway=True,
         is_local=False,
         detect_by_key_prefix="",
         detect_by_base_keyword="",
-        default_api_base="https://api.lemondata.cc",  # NO /v1 for MiniMax
+        default_api_base="https://api.lemondata.cc",  # NO /v1 for Gemini format
         strip_model_prefix=False,
         model_overrides=(),
     ),
