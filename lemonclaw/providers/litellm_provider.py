@@ -98,7 +98,7 @@ class LiteLLMProvider(LLMProvider):
             if prefix and not model.startswith(f"{prefix}/"):
                 model = f"{prefix}/{model}"
             return model
-        
+
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
@@ -107,6 +107,37 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{spec.litellm_prefix}/{model}"
 
         return model
+
+    def _resolve_gateway_for_model(self, model: str) -> "ProviderSpec | None":
+        """Find the correct gateway spec for a model, considering keyword matching.
+
+        When the user switches models at runtime (e.g. claude → kimi), the
+        initial _gateway may not match. This method finds the right sibling
+        gateway so chat() can override api_base and prefix accordingly.
+
+        Returns None if the current _gateway already matches or no gateway is active.
+        """
+        if not self._gateway:
+            return None
+        gw_keywords = self._gateway.keywords
+        model_lower = model.lower()
+        # Current gateway matches this model
+        if not gw_keywords or any(kw in model_lower for kw in gw_keywords):
+            return None
+        # Find a sibling gateway by model keywords
+        from lemonclaw.providers.registry import PROVIDERS
+        for spec in PROVIDERS:
+            if not spec.is_gateway:
+                continue
+            if spec.name == self._gateway.name:
+                continue
+            if spec.keywords and any(kw in model_lower for kw in spec.keywords):
+                return spec
+        # No keyword match — use the generic fallback gateway (no keywords)
+        for spec in PROVIDERS:
+            if spec.is_gateway and not spec.keywords:
+                return spec
+        return None
 
     @staticmethod
     def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
@@ -195,6 +226,15 @@ class LiteLLMProvider(LLMProvider):
             LLMResponse with content and/or tool calls.
         """
         original_model = model or self.default_model
+
+        # Dynamic gateway resolution: when user switches models at runtime,
+        # the initial gateway may not match (e.g. claude gw for kimi model).
+        # Temporarily swap _gateway so _resolve_model uses the correct prefix.
+        override_gw = self._resolve_gateway_for_model(original_model)
+        saved_gw = self._gateway
+        if override_gw:
+            self._gateway = override_gw
+
         model = self._resolve_model(original_model)
 
         if self._supports_cache_control(original_model):
@@ -203,24 +243,30 @@ class LiteLLMProvider(LLMProvider):
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
-        
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
+
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
-        
+
         # Pass api_key directly — more reliable than env vars alone
         if self.api_key:
             kwargs["api_key"] = self.api_key
-        
-        # Pass api_base for custom endpoints
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
+
+        # Pass api_base — use override gateway's default if switched
+        effective_base = self.api_base
+        if override_gw and override_gw.default_api_base:
+            effective_base = override_gw.default_api_base
+        if effective_base:
+            kwargs["api_base"] = effective_base
+
+        # Restore original gateway
+        self._gateway = saved_gw
         
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
