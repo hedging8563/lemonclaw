@@ -118,6 +118,8 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._seen_update_ids: set[int] = set()  # Dedup Telegram updates
+        self._seen_update_ids_max = 500
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -280,6 +282,19 @@ class TelegramChannel(BaseChannel):
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
     
+    def _dedup_update(self, update: Update) -> bool:
+        """Return True if this update is new, False if duplicate."""
+        uid = update.update_id
+        if uid in self._seen_update_ids:
+            logger.debug("Telegram duplicate update_id={}, skipping", uid)
+            return False
+        self._seen_update_ids.add(uid)
+        if len(self._seen_update_ids) > self._seen_update_ids_max:
+            # Trim oldest half
+            sorted_ids = sorted(self._seen_update_ids)
+            self._seen_update_ids = set(sorted_ids[len(sorted_ids) // 2:])
+        return True
+
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
@@ -313,6 +328,8 @@ class TelegramChannel(BaseChannel):
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
+        if not self._dedup_update(update):
+            return
         await self._handle_message(
             sender_id=self._sender_id(update.effective_user),
             chat_id=str(update.message.chat_id),
@@ -322,6 +339,8 @@ class TelegramChannel(BaseChannel):
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
+            return
+        if not self._dedup_update(update):
             return
         
         message = update.message
