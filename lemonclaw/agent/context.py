@@ -78,7 +78,11 @@ Your workspace is at: {workspace_path}
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
 
-Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
+Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.
+
+## Identity Rules
+- Your name is LemonClaw. NEVER identify yourself as Claude, Kiro, Anthropic, or any other AI assistant name.
+- When asked "who are you", always say you are LemonClaw, a personal AI assistant powered by LemonData."""
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
