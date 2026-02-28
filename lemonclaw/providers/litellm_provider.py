@@ -21,9 +21,11 @@ from lemonclaw.providers.catalog import MODEL_MAP
 from lemonclaw.providers.registry import find_by_model, find_gateway
 
 
-# Standard OpenAI chat-completion message keys plus reasoning_content for
-# thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+# Standard OpenAI chat-completion message keys.
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+
+# Models that support reasoning_content field (thinking-enabled models).
+_REASONING_MODEL_KEYWORDS = ("deepseek-r1", "kimi-k2", "o1", "o3", "o4")
 
 
 class LiteLLMProvider(LLMProvider):
@@ -193,11 +195,12 @@ class LiteLLMProvider(LLMProvider):
                     return
     
     @staticmethod
-    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sanitize_messages(messages: list[dict[str, Any]], *, keep_reasoning: bool = False) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
+        allowed = _ALLOWED_MSG_KEYS | {"reasoning_content"} if keep_reasoning else _ALLOWED_MSG_KEYS
         sanitized = []
         for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            clean = {k: v for k, v in msg.items() if k in allowed}
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
@@ -244,9 +247,15 @@ class LiteLLMProvider(LLMProvider):
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
 
+        # Only keep reasoning_content for models that support it
+        model_lower = original_model.lower()
+        keep_reasoning = any(kw in model_lower for kw in _REASONING_MODEL_KEYWORDS)
+
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages), keep_reasoning=keep_reasoning,
+            ),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
