@@ -24,6 +24,7 @@ from lemonclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.providers.base import LLMProvider
+from lemonclaw.providers.catalog import MODEL_MAP, fuzzy_match, format_model_list
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
@@ -179,8 +180,10 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         stop_event: asyncio.Event | None = None,
+        session_model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
+        effective_model = session_model or self.model
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -200,15 +203,15 @@ class AgentLoop:
             # Mid-loop compaction: tool calls can rapidly grow the context
             if iteration > 1:
                 from lemonclaw.session.compaction import compact, needs_compaction
-                if needs_compaction(messages, self.model):
-                    messages = await compact(messages, self.model, self.provider)
+                if needs_compaction(messages, effective_model):
+                    messages = await compact(messages, effective_model, self.provider)
 
             try:
                 response = await asyncio.wait_for(
                     self.provider.chat(
                         messages=messages,
                         tools=self.tools.get_definitions(),
-                        model=self.model,
+                        model=effective_model,
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
                     ),
@@ -419,6 +422,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            session_model = session.metadata.get("current_model")
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
@@ -427,10 +431,10 @@ class AgentLoop:
             )
             # Token-level compaction for system messages too
             from lemonclaw.session.compaction import compact, needs_compaction
-            if needs_compaction(messages, self.model):
-                messages = await compact(messages, self.model, self.provider)
+            if needs_compaction(messages, session_model or self.model):
+                messages = await compact(messages, session_model or self.model, self.provider)
             final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
-                messages, stop_event=stop_event,
+                messages, stop_event=stop_event, session_model=session_model,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             # Record usage for system messages
@@ -485,7 +489,9 @@ class AgentLoop:
             )
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐾 LemonClaw commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/usage — Show token usage\n/help — Show available commands")
+                                  content="🐾 LemonClaw commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/model — List or switch models\n/usage — Show token usage\n/help — Show available commands")
+        if cmd == "/model" or cmd.startswith("/model "):
+            return self._handle_model_command(msg, session)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -512,6 +518,9 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        # Per-session model override
+        session_model = session.metadata.get("current_model")
+
         history = session.get_history(max_messages=self.memory_window)
         initial_messages = self.context.build_messages(
             history=history,
@@ -522,9 +531,9 @@ class AgentLoop:
 
         # Token-level compaction: summarize middle messages if over threshold
         from lemonclaw.session.compaction import compact, needs_compaction
-        if needs_compaction(initial_messages, self.model):
+        if needs_compaction(initial_messages, session_model or self.model):
             initial_messages = await compact(
-                initial_messages, self.model, self.provider,
+                initial_messages, session_model or self.model, self.provider,
             )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -537,7 +546,7 @@ class AgentLoop:
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
-            stop_event=stop_event,
+            stop_event=stop_event, session_model=session_model,
         )
 
         if final_content is None:
@@ -565,6 +574,31 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
+        )
+
+    def _handle_model_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        """Handle /model [name] — list models or switch the session model."""
+        arg = msg.content.strip()[6:].strip()  # strip "/model" prefix
+
+        if not arg:
+            current = session.metadata.get("current_model") or self.model
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=format_model_list(current),
+            )
+
+        match = fuzzy_match(arg)
+        if not match:
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"No model matching `{arg}`. Use `/model` to see available models.",
+            )
+
+        session.metadata["current_model"] = match.id
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content=f"Switched to **{match.label}** (`{match.id}`) — {match.description}",
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:

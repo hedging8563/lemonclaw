@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import json
 import json_repair
 import os
@@ -16,6 +17,7 @@ from litellm.exceptions import (
 from loguru import logger
 
 from lemonclaw.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from lemonclaw.providers.catalog import MODEL_MAP
 from lemonclaw.providers.registry import find_by_model, find_gateway
 
 
@@ -232,40 +234,71 @@ class LiteLLMProvider(LLMProvider):
         # tool_use.input in non-streaming Anthropic responses (e.g. Packy).
         kwargs["stream"] = True
 
-        try:
-            response = await acompletion(**kwargs)
-            return await self._collect_stream(response)
-        except AuthenticationError as e:
-            logger.error(f"Authentication failed: {e}")
-            return LLMResponse(
-                content="API key 无效或已过期，请检查配置。",
-                finish_reason="error",
-            )
-        except RateLimitError as e:
-            # P0: 直接报错 (LemonData 熔断器兜底)，P2-D 启用 LiteLLM 内置重试
-            logger.warning(f"Rate limited: {e}")
-            return LLMResponse(
-                content="请求频率超限，请稍后重试。",
-                finish_reason="error",
-            )
-        except (APIConnectionError, APIError) as e:
-            # Retry once for transient errors (connection / 5xx)
-            logger.warning(f"API error (will retry once): {e}")
+        return await self._chat_with_retry(kwargs, original_model)
+
+    # ── Retry + fallback engine ──────────────────────────────────────────
+
+    _MAX_RETRIES = 2
+    _RETRY_DELAYS = (1.0, 2.0, 4.0)  # exponential backoff seconds
+
+    async def _chat_with_retry(
+        self, kwargs: dict[str, Any], original_model: str,
+    ) -> LLMResponse:
+        """Call LLM with exponential backoff retries and automatic fallback.
+
+        Retry logic:
+        - AuthenticationError: never retry, never fallback
+        - RateLimitError / APIConnectionError / APIError: retry up to _MAX_RETRIES
+        - All retries exhausted: try fallback model (one shot, no further retries)
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(1 + self._MAX_RETRIES):
             try:
                 response = await acompletion(**kwargs)
                 return await self._collect_stream(response)
-            except Exception as retry_err:
-                logger.error(f"Retry failed: {retry_err}")
+            except AuthenticationError as e:
+                logger.error("Authentication failed: {}", e)
                 return LLMResponse(
-                    content=f"LLM 服务暂时不可用: {retry_err}",
+                    content="API key 无效或已过期，请检查配置。",
                     finish_reason="error",
                 )
-        except Exception as e:
-            logger.error(f"Unexpected LLM error: {e}")
-            return LLMResponse(
-                content=f"调用 LLM 时发生错误: {e}",
-                finish_reason="error",
-            )
+            except (RateLimitError, APIConnectionError, APIError) as e:
+                last_error = e
+                if attempt < self._MAX_RETRIES:
+                    delay = self._RETRY_DELAYS[min(attempt, len(self._RETRY_DELAYS) - 1)]
+                    logger.warning(
+                        "LLM error (attempt {}/{}), retrying in {:.0f}s: {}",
+                        attempt + 1, 1 + self._MAX_RETRIES, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.warning(
+                        "LLM error after {} attempts: {}", 1 + self._MAX_RETRIES, e,
+                    )
+            except Exception as e:
+                last_error = e
+                logger.error("Unexpected LLM error: {}", e)
+                break  # Don't retry unexpected errors
+
+        # All retries exhausted — try fallback model
+        entry = MODEL_MAP.get(original_model)
+        if entry and entry.fallback and entry.fallback != original_model:
+            logger.info("Falling back from {} → {}", original_model, entry.fallback)
+            fb_model = self._resolve_model(entry.fallback)
+            fb_kwargs = {**kwargs, "model": fb_model}
+            try:
+                response = await acompletion(**fb_kwargs)
+                return await self._collect_stream(response)
+            except Exception as fb_err:
+                logger.error("Fallback model {} also failed: {}", entry.fallback, fb_err)
+
+        # Everything failed
+        error_msg = str(last_error) if last_error else "Unknown error"
+        return LLMResponse(
+            content=f"LLM 服务暂时不可用: {error_msg}",
+            finish_reason="error",
+        )
     
     async def _collect_stream(self, stream: Any) -> LLMResponse:
         """Collect streaming chunks into a complete LLMResponse."""

@@ -99,6 +99,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
+        BotCommand("model", "List or switch AI models"),
         BotCommand("help", "Show available commands"),
     ]
     
