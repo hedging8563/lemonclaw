@@ -1,5 +1,6 @@
 <div align="center">
-  <h1>🐈 LemonClaw</h1>
+  <img src="assets/logo.svg" width="128" height="128" alt="LemonClaw Logo">
+  <h1>LemonClaw</h1>
   <p>Ultra-lightweight AI agent platform for LemonData</p>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">

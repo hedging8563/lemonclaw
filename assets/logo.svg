@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- LemonClaw Logo - Brand family of LemonData -->
+  <rect x="0" y="0" width="512" height="512" rx="115" fill="#7C3AED"/>
+
+  <!-- Main paw pad -->
+  <ellipse cx="256" cy="300" rx="100" ry="80" fill="#F8FAFC"/>
+
+  <!-- Toe 1 (left) -->
+  <ellipse cx="177.5" cy="174" rx="27.5" ry="34" fill="#F8FAFC" transform="rotate(-20 177.5 174)"/>
+
+  <!-- Toe 2 (center) -->
+  <ellipse cx="251" cy="151" rx="26" ry="33" fill="#F8FAFC"/>
+
+  <!-- Toe 3 (right) -->
+  <ellipse cx="324" cy="165" rx="26" ry="33" fill="#F8FAFC" transform="rotate(20 324 165)"/>
+
+  <!-- Lemon dot (4th toe - brand element) -->
+  <ellipse cx="374" cy="107" rx="26" ry="19" fill="#FACC15" transform="rotate(-18 374 107)"/>
+  <ellipse cx="350" cy="87" rx="10" ry="7" fill="#FFFBEB" opacity="0.5" transform="rotate(-18 350 87)"/>
+</svg>
