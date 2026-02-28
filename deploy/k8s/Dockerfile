@@ -28,11 +28,13 @@ FROM python:3.12-slim-bookworm
 
 # tini: proper init process (reaps zombies, forwards signals)
 # git: required by skill-installer to clone skill repos
+# ffmpeg: required by yt-dlp for video/audio merging
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     curl \
     git \
     ca-certificates \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 20 for WhatsApp bridge sidecar
@@ -49,7 +51,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY lemonclaw/ ./lemonclaw/
 COPY bridge/ ./bridge/
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir . yt-dlp \
     && (pip cache purge 2>/dev/null || true)
 
 # Overwrite bridge with compiled version from builder
