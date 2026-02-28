@@ -213,7 +213,7 @@ class TestFallbackRetry:
 
         # claude-sonnet-4-6 falls back to claude-sonnet-4-5
         with patch("lemonclaw.providers.litellm_provider.acompletion", mock_acompletion):
-            with patch.object(provider, "_resolve_model", side_effect=lambda m: f"resolved/{m}"):
+            with patch.object(provider, "_resolve_model", side_effect=lambda m, **kw: f"resolved/{m}"):
                 result = await provider._chat_with_retry(
                     {"model": "resolved/claude-sonnet-4-6", "messages": [], "stream": True},
                     "claude-sonnet-4-6",

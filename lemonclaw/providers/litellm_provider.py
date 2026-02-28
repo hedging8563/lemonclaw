@@ -1,7 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import asyncio
-import json
 import json_repair
 import os
 from typing import Any
@@ -90,12 +89,18 @@ class LiteLLMProvider(LLMProvider):
             resolved = resolved.replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
     
-    def _resolve_model(self, model: str) -> str:
-        """Resolve model name by applying provider/gateway prefixes."""
-        if self._gateway:
+    def _resolve_model(self, model: str, *, gateway: "ProviderSpec | None" = None) -> str:
+        """Resolve model name by applying provider/gateway prefixes.
+
+        Args:
+            gateway: Override gateway to use instead of self._gateway.
+                     Avoids mutating instance state for concurrent safety.
+        """
+        gw = gateway if gateway is not None else self._gateway
+        if gw:
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
-            prefix = self._gateway.litellm_prefix
-            if self._gateway.strip_model_prefix:
+            prefix = gw.litellm_prefix
+            if gw.strip_model_prefix:
                 model = model.split("/")[-1]
             if prefix and not model.startswith(f"{prefix}/"):
                 model = f"{prefix}/{model}"
@@ -151,10 +156,11 @@ class LiteLLMProvider(LLMProvider):
             return model
         return f"{canonical_prefix}/{remainder}"
     
-    def _supports_cache_control(self, model: str) -> bool:
+    def _supports_cache_control(self, model: str, *, gateway: "ProviderSpec | None" = None) -> bool:
         """Return True when the provider supports cache_control on content blocks."""
-        if self._gateway is not None:
-            return self._gateway.supports_prompt_caching
+        gw = gateway if gateway is not None else self._gateway
+        if gw is not None:
+            return gw.supports_prompt_caching
         spec = find_by_model(model)
         return spec is not None and spec.supports_prompt_caching
 
@@ -239,15 +245,12 @@ class LiteLLMProvider(LLMProvider):
 
         # Dynamic gateway resolution: when user switches models at runtime,
         # the initial gateway may not match (e.g. claude gw for kimi model).
-        # Temporarily swap _gateway so _resolve_model uses the correct prefix.
-        override_gw = self._resolve_gateway_for_model(original_model)
-        saved_gw = self._gateway
-        if override_gw:
-            self._gateway = override_gw
+        # We pass the effective gateway as a parameter — never mutate self._gateway.
+        effective_gw = self._resolve_gateway_for_model(original_model) or self._gateway
 
-        model = self._resolve_model(original_model)
+        model = self._resolve_model(original_model, gateway=effective_gw)
 
-        if self._supports_cache_control(original_model):
+        if self._supports_cache_control(original_model, gateway=effective_gw):
             messages, tools = self._apply_cache_control(messages, tools)
 
         # Clamp max_tokens to at least 1 — negative or zero values cause
@@ -274,15 +277,10 @@ class LiteLLMProvider(LLMProvider):
         if self.api_key:
             kwargs["api_key"] = self.api_key
 
-        # Pass api_base — use override gateway's default if switched
-        effective_base = self.api_base
-        if override_gw and override_gw.default_api_base:
-            effective_base = override_gw.default_api_base
+        # Pass api_base from the effective gateway
+        effective_base = (effective_gw.default_api_base if effective_gw else None) or self.api_base
         if effective_base:
             kwargs["api_base"] = effective_base
-
-        # Restore original gateway
-        self._gateway = saved_gw
 
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
@@ -297,9 +295,9 @@ class LiteLLMProvider(LLMProvider):
         kwargs["stream"] = True
 
         logger.debug(
-            "LLM request: model={}, api_base={}, override_gw={}",
+            "LLM request: model={}, api_base={}, effective_gw={}",
             kwargs.get("model"), kwargs.get("api_base", "-"),
-            override_gw.name if override_gw else None,
+            effective_gw.name if effective_gw else None,
         )
 
         return await self._chat_with_retry(kwargs, original_model)
@@ -353,23 +351,17 @@ class LiteLLMProvider(LLMProvider):
         entry = MODEL_MAP.get(original_model)
         if entry and entry.fallback and entry.fallback != original_model:
             logger.info("Falling back from {} → {}", original_model, entry.fallback)
-            # Resolve fallback model with dynamic gateway (same logic as chat())
             fb_original = entry.fallback
-            fb_override = self._resolve_gateway_for_model(fb_original)
-            saved_gw = self._gateway
-            if fb_override:
-                self._gateway = fb_override
-            fb_model = self._resolve_model(fb_original)
+            fb_gw = self._resolve_gateway_for_model(fb_original) or self._gateway
+            fb_model = self._resolve_model(fb_original, gateway=fb_gw)
             fb_kwargs = {**kwargs, "model": fb_model}
-            # Always set correct api_base for fallback model's gateway.
+            # Set correct api_base for fallback model's gateway.
             # The original kwargs may carry a different gateway's api_base
             # (e.g. /v1 for OpenAI-compat) which breaks Anthropic (/v1/v1/messages).
-            effective_gw = fb_override or self._gateway
-            if effective_gw and effective_gw.default_api_base:
-                fb_kwargs["api_base"] = effective_gw.default_api_base
-            elif effective_gw and not effective_gw.default_api_base:
+            if fb_gw and fb_gw.default_api_base:
+                fb_kwargs["api_base"] = fb_gw.default_api_base
+            elif fb_gw and not fb_gw.default_api_base:
                 fb_kwargs.pop("api_base", None)  # Let LiteLLM use its default
-            self._gateway = saved_gw
             try:
                 response = await acompletion(**fb_kwargs)
                 return await self._collect_stream(response)
@@ -458,43 +450,6 @@ class LiteLLMProvider(LLMProvider):
             reasoning_content="".join(reasoning_parts) or None,
         )
 
-    def _parse_response(self, response: Any) -> LLMResponse:
-        """Parse LiteLLM response into our standard format."""
-        choice = response.choices[0]
-        message = choice.message
-        
-        tool_calls = []
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            for tc in message.tool_calls:
-                # Parse arguments from JSON string if needed
-                args = tc.function.arguments
-                if isinstance(args, str):
-                    args = json_repair.loads(args)
-                
-                tool_calls.append(ToolCallRequest(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=args,
-                ))
-        
-        usage = {}
-        if hasattr(response, "usage") and response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
-        
-        reasoning_content = getattr(message, "reasoning_content", None) or None
-        
-        return LLMResponse(
-            content=message.content,
-            tool_calls=tool_calls,
-            finish_reason=choice.finish_reason or "stop",
-            usage=usage,
-            reasoning_content=reasoning_content,
-        )
-    
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
