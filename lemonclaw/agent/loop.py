@@ -626,9 +626,10 @@ class AgentLoop:
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
+        """Delegate to MemoryStore.consolidate(). Uses fast model for speed."""
+        from lemonclaw.config.defaults import DEFAULT_FAST_MODEL
         return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
+            session, self.provider, DEFAULT_FAST_MODEL,
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
