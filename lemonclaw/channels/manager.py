@@ -28,8 +28,15 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        
+
         self._init_channels()
+
+        # Enable auto-pairing on all channels if configured
+        if config.channels.auto_pairing:
+            from lemonclaw.utils.helpers import get_data_path
+            data_dir = get_data_path()
+            for channel in self.channels.values():
+                channel.enable_auto_pairing(data_dir)
     
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
