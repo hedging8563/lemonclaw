@@ -15,8 +15,10 @@ validation.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from loguru import logger
@@ -106,6 +108,7 @@ def run_config_sync(config: Config) -> SyncReport:
         ("migrate_base_urls", _migrate_base_urls),
         ("validate_providers", _validate_providers),
         ("sync_model_config", _sync_model_config),
+        ("clear_stale_credentials", _clear_stale_credentials),
     ]
 
     for name, fn in ops:
@@ -373,5 +376,92 @@ def _sync_model_config(config: Config) -> bool:
 
     if changed:
         logger.info(f"config-sync: model config synced to v{MODEL_CONFIG_VERSION}")
+
+    return changed
+
+
+# ============================================================================
+# Operation 8: Clear stale credentials on channel token change
+# ============================================================================
+
+# Maps channel name → (config attr path, token field name)
+# When a channel's auth token changes, old pairing/allowFrom files must be
+# cleared so auto-pairing can re-trigger with the new bot identity.
+_CHANNEL_TOKEN_KEYS: dict[str, str] = {
+    "telegram": "token",
+    "discord": "token",
+    "slack": "bot_token",
+    "feishu": "app_id",
+    "dingtalk": "app_key",
+    "qq": "app_id",
+}
+
+_TOKEN_SNAPSHOT_FILE = ".channel-token-snapshot.json"
+
+
+def _clear_stale_credentials(config: Config) -> bool:
+    """Detect channel auth token changes and clear old pairing data.
+
+    Mirrors the fix in Orchestrator's updateInstanceConfig() (k8s.ts):
+    when a channel's botToken/appId changes, the old .{ch}-owner-paired
+    sentinel and {ch}-allowFrom.json must be removed so auto-pairing
+    re-triggers with the new bot identity.
+    """
+    from lemonclaw.config.loader import get_config_path
+
+    cred_dir = get_config_path().parent / "credentials"
+    snapshot_file = get_config_path().parent / _TOKEN_SNAPSHOT_FILE
+
+    # Load previous token snapshot
+    old_tokens: dict[str, str] = {}
+    try:
+        old_tokens = json.loads(snapshot_file.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # Build current token snapshot
+    channels_cfg = config.channels
+    current_tokens: dict[str, str] = {}
+    for ch, token_field in _CHANNEL_TOKEN_KEYS.items():
+        ch_cfg = getattr(channels_cfg, ch, None)
+        if ch_cfg is None:
+            continue
+        token_val = getattr(ch_cfg, token_field, "")
+        if token_val:
+            current_tokens[ch] = token_val
+
+    # Detect changes
+    channels_to_reset: list[str] = []
+    for ch, new_token in current_tokens.items():
+        old_token = old_tokens.get(ch, "")
+        if old_token and new_token != old_token:
+            channels_to_reset.append(ch)
+
+    # Clear stale credential files
+    changed = False
+    if channels_to_reset and cred_dir.exists():
+        for ch in channels_to_reset:
+            for pattern in [
+                f".{ch}-owner-paired",
+                f"{ch}-allowFrom.json",
+                f"{ch}-pairing.json",
+            ]:
+                path = cred_dir / pattern
+                if path.exists():
+                    path.unlink()
+                    changed = True
+        if changed:
+            logger.info(
+                f"config-sync: cleared stale pairing data for: "
+                f"{', '.join(channels_to_reset)}"
+            )
+
+    # Always save current snapshot (even if no change, to bootstrap)
+    if current_tokens != old_tokens:
+        try:
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_file.write_text(json.dumps(current_tokens))
+        except OSError as e:
+            logger.warning(f"config-sync: failed to write token snapshot: {e}")
 
     return changed
