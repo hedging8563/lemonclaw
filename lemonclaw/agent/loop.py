@@ -25,6 +25,7 @@ from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.providers.base import LLMProvider
 from lemonclaw.session.manager import Session, SessionManager
+from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 if TYPE_CHECKING:
     from lemonclaw.config.schema import ChannelsConfig, ExecToolConfig
@@ -63,6 +64,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        usage_tracker: UsageTracker | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.bus = bus
@@ -96,6 +98,7 @@ class AgentLoop:
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
+        self.usage_tracker = usage_tracker or UsageTracker()
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
@@ -174,12 +177,13 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+    ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        turn_usage = TurnUsage()
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -208,6 +212,10 @@ class AgentLoop:
                     "This may indicate a network issue or an overloaded provider. Please try again."
                 )
                 break
+
+            # Track token usage from this LLM call
+            if response.usage:
+                turn_usage.record(response.usage)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -255,7 +263,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, turn_usage
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -358,8 +366,11 @@ class AgentLoop:
             from lemonclaw.session.compaction import compact, needs_compaction
             if needs_compaction(messages, self.model):
                 messages = await compact(messages, self.model, self.provider)
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs, turn_usage = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
+            # Record usage for system messages
+            if turn_usage.llm_calls:
+                self.usage_tracker.record_turn(key, turn_usage, session.metadata)
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
@@ -402,9 +413,14 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+        if cmd == "/usage":
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=self.usage_tracker.format_session_usage(session.metadata),
+            )
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐾 LemonClaw commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐾 LemonClaw commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/usage — Show token usage\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -454,7 +470,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -462,7 +478,18 @@ class AgentLoop:
             final_content = "I've completed processing but have no response to give."
 
         self._save_turn(session, all_msgs, 1 + len(history))
+
+        # Record usage and check budgets
+        alerts: list[str] = []
+        if turn_usage.llm_calls:
+            alerts = self.usage_tracker.record_turn(key, turn_usage, session.metadata)
         self.sessions.save(session)
+
+        # Send budget alerts as separate messages
+        for alert in alerts:
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=alert,
+            ))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None

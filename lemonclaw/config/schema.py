@@ -213,6 +213,8 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    token_budget_per_session: int | None = None  # Max tokens per session (None = unlimited)
+    cost_budget_per_day: float | None = None  # Max USD cost per day (None = unlimited)
 
 
 class AgentsConfig(Base):

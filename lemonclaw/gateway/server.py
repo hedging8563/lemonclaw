@@ -26,6 +26,8 @@ from lemonclaw.gateway.health import liveness, readiness, set_context
 
 if TYPE_CHECKING:
     from lemonclaw.channels.manager import ChannelManager
+    from lemonclaw.session.manager import SessionManager
+    from lemonclaw.telemetry.usage import UsageTracker
 
 
 def _build_status_handler(
@@ -55,6 +57,55 @@ def _build_status_handler(
     return status_handler
 
 
+def _build_usage_handler(
+    auth_token: str | None,
+    usage_tracker: UsageTracker | None,
+    session_manager: SessionManager | None,
+):
+    """Return a handler for GET /api/usage (token-protected)."""
+
+    async def usage_handler(request: Request) -> JSONResponse:
+        if auth_token:
+            header = request.headers.get("authorization", "")
+            if header != f"Bearer {auth_token}":
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+        if not usage_tracker:
+            return JSONResponse({"error": "usage tracking not available"}, status_code=503)
+
+        # Instance-level summary
+        data: dict[str, Any] = usage_tracker.get_instance_summary()
+
+        # Optional: per-session detail
+        session_key = request.query_params.get("session")
+        if session_key and session_manager:
+            session = session_manager.get_or_create(session_key)
+            data["session"] = {
+                "key": session_key,
+                **usage_tracker.get_session_summary(session.metadata),
+            }
+        elif session_manager:
+            # List all sessions with usage data (from metadata in JSONL)
+            sessions_usage = []
+            for info in session_manager.list_sessions():
+                key = info.get("key", "")
+                if not key:
+                    continue
+                s = session_manager.get_or_create(key)
+                stats = s.metadata.get("usage_stats")
+                if stats and stats.get("total_tokens", 0) > 0:
+                    sessions_usage.append({
+                        "key": key,
+                        **usage_tracker.get_session_summary(s.metadata),
+                    })
+            if sessions_usage:
+                data["sessions"] = sessions_usage
+
+        return JSONResponse(data)
+
+    return usage_handler
+
+
 def create_app(
     *,
     auth_token: str | None = None,
@@ -62,6 +113,8 @@ def create_app(
     version: str = "unknown",
     model: str = "",
     instance_id: str = "",
+    usage_tracker: UsageTracker | None = None,
+    session_manager: SessionManager | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -78,6 +131,7 @@ def create_app(
         Route("/health", liveness, methods=["GET"]),
         Route("/readyz", readiness, methods=["GET"]),
         Route("/api/status", _build_status_handler(auth_token, channel_manager, extra), methods=["GET"]),
+        Route("/api/usage", _build_usage_handler(auth_token, usage_tracker, session_manager), methods=["GET"]),
     ]
     return Starlette(routes=routes)
 

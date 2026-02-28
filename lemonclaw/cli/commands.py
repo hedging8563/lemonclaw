@@ -295,11 +295,18 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
+    # Create usage tracker with budget config
+    from lemonclaw.telemetry.usage import UsageTracker
+    usage_tracker = UsageTracker(
+        token_budget_per_session=config.agents.defaults.token_budget_per_session,
+        cost_budget_per_day=config.agents.defaults.cost_budget_per_day,
+    )
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -317,6 +324,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        usage_tracker=usage_tracker,
     )
     
     # Set cron callback (needs agent)
@@ -423,6 +431,8 @@ def gateway(
         version=__version__,
         model=config.agents.defaults.model,
         instance_id=getattr(config.lemondata, "instance_id", ""),
+        usage_tracker=usage_tracker,
+        session_manager=session_manager,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     console.print(f"[green]✓[/green] HTTP server: {host}:{port}")
