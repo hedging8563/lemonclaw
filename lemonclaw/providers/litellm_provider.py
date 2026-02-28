@@ -227,10 +227,14 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
+        # Always use streaming to work around upstream gateways that drop
+        # tool_use.input in non-streaming Anthropic responses (e.g. Packy).
+        kwargs["stream"] = True
+
         try:
             response = await acompletion(**kwargs)
-            return self._parse_response(response)
+            return await self._collect_stream(response)
         except AuthenticationError as e:
             logger.error(f"Authentication failed: {e}")
             return LLMResponse(
@@ -249,7 +253,7 @@ class LiteLLMProvider(LLMProvider):
             logger.warning(f"API error (will retry once): {e}")
             try:
                 response = await acompletion(**kwargs)
-                return self._parse_response(response)
+                return await self._collect_stream(response)
             except Exception as retry_err:
                 logger.error(f"Retry failed: {retry_err}")
                 return LLMResponse(
@@ -263,6 +267,81 @@ class LiteLLMProvider(LLMProvider):
                 finish_reason="error",
             )
     
+    async def _collect_stream(self, stream: Any) -> LLMResponse:
+        """Collect streaming chunks into a complete LLMResponse."""
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        # tool_calls indexed by position: {index: {id, name, arguments_parts}}
+        tc_accum: dict[int, dict[str, Any]] = {}
+        finish_reason = "stop"
+        usage: dict[str, int] = {}
+
+        async for chunk in stream:
+            if not chunk.choices:
+                # Final chunk may carry only usage
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                        "completion_tokens": chunk.usage.completion_tokens or 0,
+                        "total_tokens": chunk.usage.total_tokens or 0,
+                    }
+                continue
+
+            delta = chunk.choices[0].delta
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+
+            # Text content
+            if getattr(delta, "content", None):
+                content_parts.append(delta.content)
+
+            # Reasoning / thinking content
+            if getattr(delta, "reasoning_content", None):
+                reasoning_parts.append(delta.reasoning_content)
+
+            # Tool call deltas
+            if getattr(delta, "tool_calls", None):
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index if hasattr(tc_delta, "index") else 0
+                    if idx not in tc_accum:
+                        tc_accum[idx] = {"id": "", "name": "", "arguments_parts": []}
+                    acc = tc_accum[idx]
+                    if getattr(tc_delta, "id", None):
+                        acc["id"] = tc_delta.id
+                    if hasattr(tc_delta, "function") and tc_delta.function:
+                        if getattr(tc_delta.function, "name", None):
+                            acc["name"] = tc_delta.function.name
+                        if getattr(tc_delta.function, "arguments", None):
+                            acc["arguments_parts"].append(tc_delta.function.arguments)
+
+            # Usage in final chunk
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                    "total_tokens": chunk.usage.total_tokens or 0,
+                }
+
+        # Assemble tool calls
+        tool_calls: list[ToolCallRequest] = []
+        for idx in sorted(tc_accum):
+            acc = tc_accum[idx]
+            raw_args = "".join(acc["arguments_parts"])
+            args = json_repair.loads(raw_args) if raw_args else {}
+            tool_calls.append(ToolCallRequest(
+                id=acc["id"],
+                name=acc["name"],
+                arguments=args if isinstance(args, dict) else {},
+            ))
+
+        return LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
+        )
+
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
