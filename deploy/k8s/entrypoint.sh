@@ -73,6 +73,20 @@ else
     echo "Config exists at $CONFIG_FILE, preserving"
 fi
 
+# --- Ensure workspace has latest SOUL.md ---
+WORKSPACE_DIR="$CONFIG_DIR/workspace"
+SOUL_FILE="$WORKSPACE_DIR/SOUL.md"
+TEMPLATE_SOUL="/app/lemonclaw/templates/SOUL.md"
+mkdir -p "$WORKSPACE_DIR"
+
+if [ ! -f "$SOUL_FILE" ]; then
+    cp "$TEMPLATE_SOUL" "$SOUL_FILE"
+    echo "Initialized SOUL.md from template"
+elif grep -q "nanobot" "$SOUL_FILE" 2>/dev/null; then
+    cp "$TEMPLATE_SOUL" "$SOUL_FILE"
+    echo "Upgraded SOUL.md (replaced nanobot version)"
+fi
+
 # --- Run user startup script if present ---
 USER_STARTUP="$CONFIG_DIR/startup.sh"
 if [ -f "$USER_STARTUP" ]; then
