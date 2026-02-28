@@ -24,9 +24,15 @@ class TurnUsage:
 
     def record(self, usage: dict[str, int]) -> None:
         """Accumulate usage from a single LLM response."""
-        self.prompt_tokens += usage.get("prompt_tokens", 0)
-        self.completion_tokens += usage.get("completion_tokens", 0)
-        self.total_tokens += usage.get("total_tokens", 0)
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        total = usage.get("total_tokens", 0)
+        # Fallback: if provider doesn't return total_tokens, compute it
+        if total == 0 and (prompt or completion):
+            total = prompt + completion
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        self.total_tokens += total
         self.llm_calls += 1
 
     def to_dict(self) -> dict[str, int]:
@@ -51,7 +57,7 @@ class UsageTracker:
         cost_budget_per_day: float | None = None,
     ) -> None:
         self.token_budget_per_session = token_budget_per_session
-        self.cost_budget_per_day = cost_budget_per_day
+        self.cost_budget_per_day = cost_budget_per_day  # TODO: cost tracking requires model pricing data from Orchestrator
         self._start_time = time.monotonic()
         # Instance-level cumulative counters (reset on restart)
         self._instance_totals: dict[str, int] = {
@@ -60,8 +66,6 @@ class UsageTracker:
             "total_tokens": 0,
             "llm_calls": 0,
         }
-        # Per-day cost tracking (key: "YYYY-MM-DD")
-        self._daily_costs: dict[str, float] = {}
 
     def record_turn(self, session_key: str, turn: TurnUsage, session_metadata: dict[str, Any]) -> list[str]:
         """Record a completed turn's usage. Returns list of alert messages (empty if none)."""
@@ -123,7 +127,7 @@ class UsageTracker:
             f"  Total:  {s['total_tokens']:,}",
             f"  LLM calls: {s['llm_calls']}",
         ]
-        if self.token_budget_per_session:
+        if self.token_budget_per_session and self.token_budget_per_session > 0:
             pct = round(s["total_tokens"] / self.token_budget_per_session * 100, 1)
             lines.append(f"  Budget: {s['total_tokens']:,} / {self.token_budget_per_session:,} ({pct}%)")
         return "\n".join(lines)

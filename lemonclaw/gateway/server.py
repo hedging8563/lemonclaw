@@ -79,11 +79,15 @@ def _build_usage_handler(
         # Optional: per-session detail
         session_key = request.query_params.get("session")
         if session_key and session_manager:
-            session = session_manager.get_or_create(session_key)
-            data["session"] = {
-                "key": session_key,
-                **usage_tracker.get_session_summary(session.metadata),
-            }
+            # Use _load to avoid creating empty sessions from arbitrary query params
+            session = session_manager._load(session_key)
+            if session:
+                data["session"] = {
+                    "key": session_key,
+                    **usage_tracker.get_session_summary(session.metadata),
+                }
+            else:
+                data["session"] = {"key": session_key, "error": "not found"}
         elif session_manager:
             # List all sessions with usage data (from metadata in JSONL)
             sessions_usage = []
@@ -91,7 +95,9 @@ def _build_usage_handler(
                 key = info.get("key", "")
                 if not key:
                     continue
-                s = session_manager.get_or_create(key)
+                s = session_manager._load(key)
+                if not s:
+                    continue
                 stats = s.metadata.get("usage_stats")
                 if stats and stats.get("total_tokens", 0) > 0:
                     sessions_usage.append({
