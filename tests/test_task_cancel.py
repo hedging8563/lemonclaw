@@ -126,6 +126,93 @@ class TestDispatch:
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
 
+    @pytest.mark.asyncio
+    async def test_stop_sets_stop_event(self):
+        """Verify /stop sets the cooperative stop_event."""
+        from lemonclaw.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        stop_event = asyncio.Event()
+        loop._stop_events["test:c1"] = stop_event
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
+        await loop._handle_stop(msg)
+
+        assert stop_event.is_set()
+
+
+class TestSteeringLoop:
+    @pytest.mark.asyncio
+    async def test_stop_event_breaks_tool_loop(self):
+        """Agent loop should exit when stop_event is set between tool calls."""
+        from lemonclaw.agent.loop import AgentLoop
+
+        loop, bus = _make_loop()
+        stop_event = asyncio.Event()
+
+        # Mock provider to return tool calls
+        mock_response = MagicMock()
+        mock_response.has_tool_calls = True
+        mock_response.content = None
+        mock_response.reasoning_content = None
+        mock_response.usage = None
+        tc = MagicMock()
+        tc.id = "tc1"
+        tc.name = "exec"
+        tc.arguments = {"command": "echo hi"}
+        mock_response.tool_calls = [tc]
+        loop.provider.chat = AsyncMock(return_value=mock_response)
+
+        # Set stop event before execution
+        stop_event.set()
+
+        messages = [{"role": "user", "content": "test"}]
+        final, tools_used, _, _ = await loop._run_agent_loop(
+            messages, stop_event=stop_event,
+        )
+        assert final == "⏹ Task stopped."
+        assert tools_used == []
+
+    @pytest.mark.asyncio
+    async def test_per_session_lock_allows_concurrency(self):
+        """Different sessions should not block each other."""
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        order = []
+
+        async def mock_process(m, **kwargs):
+            order.append(f"start-{m.sender_id}")
+            await asyncio.sleep(0.05)
+            order.append(f"end-{m.sender_id}")
+            return OutboundMessage(channel="test", chat_id=m.chat_id, content="ok")
+
+        loop._process_message = mock_process
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="a")
+        msg2 = InboundMessage(channel="test", sender_id="u2", chat_id="c2", content="b")
+
+        t1 = asyncio.create_task(loop._dispatch(msg1))
+        t2 = asyncio.create_task(loop._dispatch(msg2))
+        await asyncio.gather(t1, t2)
+
+        # Both should start before either ends (concurrent)
+        assert order[0].startswith("start-")
+        assert order[1].startswith("start-")
+
+    @pytest.mark.asyncio
+    async def test_dispatch_cleans_up_stop_event(self):
+        """stop_event should be cleaned up after dispatch completes."""
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        loop._process_message = AsyncMock(
+            return_value=OutboundMessage(channel="test", chat_id="c1", content="ok")
+        )
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hi")
+        await loop._dispatch(msg)
+        assert "test:c1" not in loop._stop_events
+
+
 class TestSubagentCancellation:
     @pytest.mark.asyncio
     async def test_cancel_by_session(self):

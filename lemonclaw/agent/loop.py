@@ -106,7 +106,8 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
+        self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
+        self._session_locks: dict[str, asyncio.Lock] = {}  # per-session processing locks
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -177,6 +178,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
         messages = initial_messages
@@ -189,6 +191,11 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+
+            # Cooperative stop: check at the start of each iteration
+            if stop_event and stop_event.is_set():
+                final_content = final_content or "⏹ Task stopped."
+                break
 
             # Mid-loop compaction: tool calls can rapidly grow the context
             if iteration > 1:
@@ -242,6 +249,11 @@ class AgentLoop:
                 )
 
                 for tool_call in response.tool_calls:
+                    # Cooperative stop: check between tool executions
+                    if stop_event and stop_event.is_set():
+                        final_content = "⏹ Task stopped."
+                        break
+
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
@@ -311,6 +323,11 @@ class AgentLoop:
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
+        # Signal cooperative stop first (graceful)
+        stop_event = self._stop_events.get(msg.session_key)
+        if stop_event:
+            stop_event.set()
+
         tasks = self._active_tasks.pop(msg.session_key, [])
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
@@ -326,10 +343,19 @@ class AgentLoop:
         ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under a per-session lock."""
+        # Per-session lock: different sessions can run concurrently
+        if msg.session_key not in self._session_locks:
+            self._session_locks[msg.session_key] = asyncio.Lock()
+        lock = self._session_locks[msg.session_key]
+
+        # Create a fresh stop event for this dispatch
+        stop_event = asyncio.Event()
+        self._stop_events[msg.session_key] = stop_event
+
+        async with lock:
             try:
-                response = await self._process_message(msg)
+                response = await self._process_message(msg, stop_event=stop_event)
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
@@ -346,6 +372,8 @@ class AgentLoop:
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+            finally:
+                self._stop_events.pop(msg.session_key, None)
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -366,6 +394,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -385,7 +414,9 @@ class AgentLoop:
             from lemonclaw.session.compaction import compact, needs_compaction
             if needs_compaction(messages, self.model):
                 messages = await compact(messages, self.model, self.provider)
-            final_content, _, all_msgs, turn_usage = await self._run_agent_loop(messages)
+            final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
+                messages, stop_event=stop_event,
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             # Record usage for system messages
             if turn_usage.llm_calls:
@@ -491,6 +522,7 @@ class AgentLoop:
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            stop_event=stop_event,
         )
 
         if final_content is None:
