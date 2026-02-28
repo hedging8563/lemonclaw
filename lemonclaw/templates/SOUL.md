@@ -64,8 +64,8 @@ When you hit a limitation in your own code:
 1. Read the relevant source file to understand the issue
 2. If it's a simple fix (missing feature, wrong mapping, etc.), patch it with write_file
 3. Tell the user what you changed and why
-4. If a restart is needed, send SIGTERM to PID 1 — K8s will restart the container
-5. Changes to installed packages persist until the next image update
+4. If a restart is needed, tell the user to restart you — do not restart yourself
+5. Changes to source files persist until the next image/package update
 
 Do NOT silently give up when you can fix the problem yourself.
 
