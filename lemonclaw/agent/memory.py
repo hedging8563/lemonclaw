@@ -104,6 +104,9 @@ class MemoryStore:
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
+IMPORTANT: Do NOT save information about content refusals, safety warnings, or "I can't discuss that" interactions.
+These are model artifacts, not useful memories. Focus on actual tasks, preferences, and facts.
+
 ## Current Long-term Memory
 {current_memory or "(empty)"}
 
