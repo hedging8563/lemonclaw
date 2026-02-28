@@ -34,7 +34,7 @@ MEMORY_LIMIT_MB = 900             # soft limit before triggering action
 COOLDOWN_SECONDS = 600            # 10 minutes between hard restarts
 ERROR_RATE_WINDOW = 300           # 5-minute sliding window for error tracking
 ERROR_RATE_THRESHOLD = 20         # errors in window before triggering action
-ALARM_TIMEOUT = 60                # seconds: signal.alarm for event loop blocking detection
+ALARM_TIMEOUT = 150               # seconds: must be > CHECK_INTERVAL + tick duration
 
 
 # ============================================================================
@@ -181,6 +181,7 @@ class WatchdogService:
             except Exception as e:
                 logger.error(f"watchdog: tick error: {e}")
 
+            self._reset_alarm()  # Reset before sleep so alarm doesn't fire during interval
             try:
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
