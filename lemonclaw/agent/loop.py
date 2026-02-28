@@ -184,6 +184,8 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         turn_usage = TurnUsage()
+        _consecutive_errors: dict[str, int] = {}  # track repeated tool errors
+        _MAX_CONSECUTIVE_ERRORS = 3
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -244,9 +246,27 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # Detect repeated tool errors (e.g. LLM keeps calling read_file({}))
+                    if isinstance(result, str) and result.startswith("Error"):
+                        err_key = f"{tool_call.name}:{result[:80]}"
+                        _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
+                        if _consecutive_errors[err_key] >= _MAX_CONSECUTIVE_ERRORS:
+                            logger.warning("Tool {} failed {} times with same error, breaking loop",
+                                           tool_call.name, _MAX_CONSECUTIVE_ERRORS)
+                            final_content = (
+                                f"Tool '{tool_call.name}' failed repeatedly. "
+                                "Please try a different approach."
+                            )
+                    else:
+                        _consecutive_errors.clear()
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                if final_content is not None:
+                    break
             else:
                 clean = self._strip_think(response.content)
                 messages = self.context.add_assistant_message(
