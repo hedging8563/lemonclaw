@@ -78,24 +78,11 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+from lemonclaw.channels.utils import split_message as _split_message_impl
+
+
 def _split_message(content: str, max_len: int = 4000) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind('\n')
-        if pos == -1:
-            pos = cut.rfind(' ')
-        if pos == -1:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
+    return _split_message_impl(content, max_len)
 
 
 class TelegramChannel(BaseChannel):

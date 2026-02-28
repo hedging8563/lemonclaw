@@ -499,32 +499,10 @@ class FeishuChannel(BaseChannel):
             logger.error("Error uploading file {}: {}", file_path, e)
             return None
 
-    def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
-        """Download an image from Feishu message by message_id and image_key."""
-        try:
-            request = GetMessageResourceRequest.builder() \
-                .message_id(message_id) \
-                .file_key(image_key) \
-                .type("image") \
-                .build()
-            response = self._client.im.v1.message_resource.get(request)
-            if response.success():
-                file_data = response.file
-                # GetMessageResourceRequest returns BytesIO, need to read bytes
-                if hasattr(file_data, 'read'):
-                    file_data = file_data.read()
-                return file_data, response.file_name
-            else:
-                logger.error("Failed to download image: code={}, msg={}", response.code, response.msg)
-                return None, None
-        except Exception as e:
-            logger.error("Error downloading image {}: {}", image_key, e)
-            return None, None
-
-    def _download_file_sync(
-        self, message_id: str, file_key: str, resource_type: str = "file"
+    def _download_resource_sync(
+        self, message_id: str, file_key: str, resource_type: str = "image"
     ) -> tuple[bytes | None, str | None]:
-        """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        """Download a resource (image/file/audio) from a Feishu message."""
         try:
             request = (
                 GetMessageResourceRequest.builder()
@@ -568,7 +546,7 @@ class FeishuChannel(BaseChannel):
             image_key = content_json.get("image_key")
             if image_key and message_id:
                 data, filename = await loop.run_in_executor(
-                    None, self._download_image_sync, message_id, image_key
+                    None, self._download_resource_sync, message_id, image_key, "image"
                 )
                 if not filename:
                     filename = f"{image_key[:16]}.jpg"
@@ -577,7 +555,7 @@ class FeishuChannel(BaseChannel):
             file_key = content_json.get("file_key")
             if file_key and message_id:
                 data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, message_id, file_key, msg_type
+                    None, self._download_resource_sync, message_id, file_key, msg_type
                 )
                 if not filename:
                     ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")

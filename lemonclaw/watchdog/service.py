@@ -156,10 +156,12 @@ class WatchdogService:
 
     def record_error(self) -> None:
         """Record an error event for rate tracking."""
-        now = time.monotonic()
-        self._state.recent_errors.append(now)
-        # Trim old entries
-        cutoff = now - ERROR_RATE_WINDOW
+        self._state.recent_errors.append(time.monotonic())
+        self._trim_errors()
+
+    def _trim_errors(self) -> None:
+        """Remove error timestamps outside the sliding window."""
+        cutoff = time.monotonic() - ERROR_RATE_WINDOW
         self._state.recent_errors = [t for t in self._state.recent_errors if t > cutoff]
 
     # ------------------------------------------------------------------
@@ -279,12 +281,8 @@ class WatchdogService:
 
     def _check_error_rate(self) -> HealthCheck:
         """Check error rate in the sliding window."""
-        now = time.monotonic()
-        cutoff = now - ERROR_RATE_WINDOW
-        recent = [t for t in self._state.recent_errors if t > cutoff]
-        self._state.recent_errors = recent
-
-        count = len(recent)
+        self._trim_errors()
+        count = len(self._state.recent_errors)
         if count >= ERROR_RATE_THRESHOLD:
             return HealthCheck("error_rate", False, f"{count} errors in {ERROR_RATE_WINDOW}s")
         return HealthCheck("error_rate", True, f"{count} errors in window")

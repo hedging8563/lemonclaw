@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Callable
 
 from loguru import logger
 
@@ -32,6 +33,9 @@ from lemonclaw.config.defaults import (
     PROVIDER_LEMONDATA_MINIMAX,
 )
 from lemonclaw.config.schema import Config
+
+# Type alias for sync operation functions
+_SyncFn = Callable[[Config], bool]
 
 
 # ============================================================================
@@ -121,6 +125,20 @@ def run_config_sync(config: Config) -> SyncReport:
 
 
 # ============================================================================
+# Shared helper: LemonData provider list
+# ============================================================================
+
+
+def _lemondata_providers(config: Config):
+    """Return the 3 LemonData provider (name, config) tuples."""
+    return [
+        (PROVIDER_LEMONDATA, config.providers.lemondata),
+        (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude),
+        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax),
+    ]
+
+
+# ============================================================================
 # Operation 1: Sync API key across all 3 LemonData providers
 # ============================================================================
 
@@ -136,13 +154,7 @@ def _sync_api_key(config: Config) -> bool:
         return False
 
     changed = False
-    providers = [
-        (PROVIDER_LEMONDATA, config.providers.lemondata),
-        (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude),
-        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax),
-    ]
-
-    for name, prov in providers:
+    for name, prov in _lemondata_providers(config):
         if prov.api_key != api_key:
             prov.api_key = api_key
             changed = True
@@ -280,29 +292,25 @@ def _validate_providers(config: Config) -> bool:
     """
     changed = False
 
-    # lemondata: needs /v1
-    if config.providers.lemondata.api_base:
-        base = config.providers.lemondata.api_base
-        if not base.endswith("/v1"):
-            config.providers.lemondata.api_base = f"{base}/v1"
-            changed = True
-            logger.info(f"config-sync: fixed lemondata api_base (added /v1)")
+    # (provider_name, provider_config, needs_v1)
+    rules = [
+        (PROVIDER_LEMONDATA, config.providers.lemondata, True),
+        (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude, False),
+        (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, True),
+    ]
 
-    # lemondata_claude: must NOT have /v1
-    if config.providers.lemondata_claude.api_base:
-        base = config.providers.lemondata_claude.api_base
-        if base.endswith("/v1"):
-            config.providers.lemondata_claude.api_base = base.removesuffix("/v1")
+    for name, prov, needs_v1 in rules:
+        if not prov.api_base:
+            continue
+        base = prov.api_base
+        if needs_v1 and not base.endswith("/v1"):
+            prov.api_base = f"{base}/v1"
             changed = True
-            logger.info(f"config-sync: fixed lemondata_claude api_base (removed /v1)")
-
-    # lemondata_minimax: needs /v1
-    if config.providers.lemondata_minimax.api_base:
-        base = config.providers.lemondata_minimax.api_base
-        if not base.endswith("/v1"):
-            config.providers.lemondata_minimax.api_base = f"{base}/v1"
+            logger.info(f"config-sync: fixed {name} api_base (added /v1)")
+        elif not needs_v1 and base.endswith("/v1"):
+            prov.api_base = base.removesuffix("/v1")
             changed = True
-            logger.info(f"config-sync: fixed lemondata_minimax api_base (added /v1)")
+            logger.info(f"config-sync: fixed {name} api_base (removed /v1)")
 
     return changed
 

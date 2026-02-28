@@ -274,7 +274,13 @@ class AgentLoop:
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+
+                def _on_task_done(t: asyncio.Task, key: str = msg.session_key) -> None:
+                    tasks = self._active_tasks.get(key, [])
+                    if t in tasks:
+                        tasks.remove(t)
+
+                task.add_done_callback(_on_task_done)
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""

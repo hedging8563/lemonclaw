@@ -20,26 +20,11 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 
 
+from lemonclaw.channels.utils import split_message as _split_message_impl
+
+
 def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
-    if not content:
-        return []
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind('\n')
-        if pos <= 0:
-            pos = cut.rfind(' ')
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
+    return _split_message_impl(content, max_len)
 
 
 class DiscordChannel(BaseChannel):
