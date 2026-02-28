@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,6 +14,13 @@ from lemonclaw.utils.helpers import ensure_dir
 if TYPE_CHECKING:
     from lemonclaw.providers.base import LLMProvider
     from lemonclaw.session.manager import Session
+
+# Consolidation timeout — prevents Cloudflare 524 / slow API from blocking session.
+CONSOLIDATION_TIMEOUT = 30  # seconds
+
+# HISTORY.md rolling window — truncate when exceeding this many entries.
+HISTORY_MAX_ENTRIES = 200
+HISTORY_KEEP_ENTRIES = 150
 
 
 _SAVE_MEMORY_TOOL = [
@@ -59,8 +67,25 @@ class MemoryStore:
         self.memory_file.write_text(content, encoding="utf-8")
 
     def append_history(self, entry: str) -> None:
+        """Append a history entry, truncating old entries if file grows too large."""
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
+
+        # Rolling truncation: keep only the most recent entries
+        self._truncate_history_if_needed()
+
+    def _truncate_history_if_needed(self) -> None:
+        """Keep HISTORY.md under HISTORY_MAX_ENTRIES by dropping oldest entries."""
+        if not self.history_file.exists():
+            return
+        text = self.history_file.read_text(encoding="utf-8")
+        # Entries are separated by double newlines
+        entries = [e for e in text.split("\n\n") if e.strip()]
+        if len(entries) <= HISTORY_MAX_ENTRIES:
+            return
+        kept = entries[-HISTORY_KEEP_ENTRIES:]
+        self.history_file.write_text("\n\n".join(kept) + "\n\n", encoding="utf-8")
+        logger.info("HISTORY.md truncated: {} → {} entries", len(entries), len(kept))
 
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
@@ -74,10 +99,13 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
+        timeout: float = CONSOLIDATION_TIMEOUT,
     ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
+        The LLM call is wrapped in asyncio.wait_for to prevent slow APIs
+        from blocking the session indefinitely (Cloudflare 524 etc.).
         """
         if archive_all:
             old_messages = session.messages
@@ -114,13 +142,16 @@ These are model artifacts, not useful memories. Focus on actual tasks, preferenc
 {chr(10).join(lines)}"""
 
         try:
-            response = await provider.chat(
-                messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
-                    {"role": "user", "content": prompt},
-                ],
-                tools=_SAVE_MEMORY_TOOL,
-                model=model,
+            response = await asyncio.wait_for(
+                provider.chat(
+                    messages=[
+                        {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    tools=_SAVE_MEMORY_TOOL,
+                    model=model,
+                ),
+                timeout=timeout,
             )
 
             if not response.has_tool_calls:
@@ -145,9 +176,26 @@ These are model artifacts, not useful memories. Focus on actual tasks, preferenc
                 if update != current_memory:
                     self.write_long_term(update)
 
-            session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
+            new_consolidated = 0 if archive_all else len(session.messages) - keep_count
+            session.last_consolidated = new_consolidated
+
+            # Truncate already-consolidated messages to prevent JSONL bloat.
+            # Keep only messages from last_consolidated onward.
+            if not archive_all and new_consolidated > 0:
+                session.messages = session.messages[new_consolidated:]
+                session.last_consolidated = 0
+                logger.info(
+                    "Session truncated: dropped {} old messages, {} remaining",
+                    new_consolidated, len(session.messages),
+                )
+
+            logger.info("Memory consolidation done: {} messages remaining", len(session.messages))
             return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Memory consolidation timed out after {}s, skipping", timeout,
+            )
+            return False
         except Exception:
             logger.exception("Memory consolidation failed")
             return False

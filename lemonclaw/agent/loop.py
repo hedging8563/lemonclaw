@@ -501,7 +501,9 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        if await self._consolidate_memory(session):
+                            # Save after consolidation — messages may have been truncated
+                            self.sessions.save(session)
                 finally:
                     self._consolidating.discard(session.key)
                     if not lock.locked():
