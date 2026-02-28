@@ -267,11 +267,11 @@ class LiteLLMProvider(LLMProvider):
 
         # Restore original gateway
         self._gateway = saved_gw
-        
+
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
@@ -279,6 +279,12 @@ class LiteLLMProvider(LLMProvider):
         # Always use streaming to work around upstream gateways that drop
         # tool_use.input in non-streaming Anthropic responses (e.g. Packy).
         kwargs["stream"] = True
+
+        logger.debug(
+            "LLM request: model={}, api_base={}, override_gw={}",
+            kwargs.get("model"), kwargs.get("api_base", "-"),
+            override_gw.name if override_gw else None,
+        )
 
         return await self._chat_with_retry(kwargs, original_model)
 
@@ -331,8 +337,18 @@ class LiteLLMProvider(LLMProvider):
         entry = MODEL_MAP.get(original_model)
         if entry and entry.fallback and entry.fallback != original_model:
             logger.info("Falling back from {} → {}", original_model, entry.fallback)
-            fb_model = self._resolve_model(entry.fallback)
+            # Resolve fallback model with dynamic gateway (same logic as chat())
+            fb_original = entry.fallback
+            fb_override = self._resolve_gateway_for_model(fb_original)
+            saved_gw = self._gateway
+            if fb_override:
+                self._gateway = fb_override
+            fb_model = self._resolve_model(fb_original)
             fb_kwargs = {**kwargs, "model": fb_model}
+            # Override api_base for fallback if needed
+            if fb_override and fb_override.default_api_base:
+                fb_kwargs["api_base"] = fb_override.default_api_base
+            self._gateway = saved_gw
             try:
                 response = await acompletion(**fb_kwargs)
                 return await self._collect_stream(response)
