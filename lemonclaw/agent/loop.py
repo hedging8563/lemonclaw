@@ -208,8 +208,8 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 logger.error("LLM call timed out after {}s (iteration {})", self._LLM_CALL_TIMEOUT, iteration)
                 final_content = (
-                    f"The AI model did not respond within {self._LLM_CALL_TIMEOUT}s. "
-                    "This may indicate a network issue or an overloaded provider. Please try again."
+                    f"⚠️ AI 模型在 {self._LLM_CALL_TIMEOUT} 秒内未响应，可能是网络问题或服务过载，请重试。\n\n"
+                    f"The AI model did not respond within {self._LLM_CALL_TIMEOUT}s. Please try again."
                 )
                 break
 
@@ -259,8 +259,10 @@ class AgentLoop:
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
+                f"⚠️ 已达到最大工具调用次数 ({self.max_iterations})，任务未能完成。"
+                "可以尝试将任务拆分为更小的步骤。\n\n"
+                f"Max tool call iterations ({self.max_iterations}) reached. "
+                "Try breaking the task into smaller steps."
             )
 
         return final_content, tools_used, messages, turn_usage

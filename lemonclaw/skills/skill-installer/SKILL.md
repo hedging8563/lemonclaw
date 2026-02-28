@@ -21,52 +21,27 @@ Use this skill when the user asks any of:
 
 skills.sh URLs follow the format: `https://skills.sh/<owner>/<repo>/<skill-name>`
 
-To install, convert the URL to a GitHub clone:
+To install, convert the URL to a GitHub clone. Run this as a SINGLE command:
 
 ```bash
-# 1. Clone the repo to a temp directory
-REPO_DIR=$(mktemp -d)
-git clone --depth 1 https://github.com/<owner>/<repo>.git "$REPO_DIR"
-
-# 2. Copy the skill to workspace
-SKILL_DIR=~/.lemonclaw/workspace/skills/<skill-name>
-mkdir -p "$SKILL_DIR"
-cp -r "$REPO_DIR/skills/<skill-name>/"* "$SKILL_DIR/"
-
-# 3. Cleanup
-rm -rf "$REPO_DIR"
-
-# 4. Verify
-cat "$SKILL_DIR/SKILL.md" | head -10
+REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/<owner>/<repo>.git "$REPO_DIR" && mkdir -p ~/.lemonclaw/workspace/skills/<skill-name> && cp -r "$REPO_DIR/skills/<skill-name>/"* ~/.lemonclaw/workspace/skills/<skill-name>/ && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Installed <skill-name> successfully"
 ```
 
 ### Example
 
 For `https://skills.sh/lwmxiaobei/yt-dlp-skill/yt-dlp`:
-- owner = `lwmxiaobei`
-- repo = `yt-dlp-skill`
-- skill = `yt-dlp`
+- owner = `lwmxiaobei`, repo = `yt-dlp-skill`, skill = `yt-dlp`
 
 ```bash
-REPO_DIR=$(mktemp -d)
-git clone --depth 1 https://github.com/lwmxiaobei/yt-dlp-skill.git "$REPO_DIR"
-mkdir -p ~/.lemonclaw/workspace/skills/yt-dlp
-cp -r "$REPO_DIR/skills/yt-dlp/"* ~/.lemonclaw/workspace/skills/yt-dlp/
-rm -rf "$REPO_DIR"
+REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/lwmxiaobei/yt-dlp-skill.git "$REPO_DIR" && mkdir -p ~/.lemonclaw/workspace/skills/yt-dlp && cp -r "$REPO_DIR/skills/yt-dlp/"* ~/.lemonclaw/workspace/skills/yt-dlp/ && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Installed yt-dlp successfully"
 ```
 
 ## Install from GitHub URL
 
-For direct GitHub repo URLs:
+For direct GitHub repo URLs, run as a SINGLE command:
 
 ```bash
-REPO_DIR=$(mktemp -d)
-git clone --depth 1 <github-url> "$REPO_DIR"
-# Find all skills in the repo
-find "$REPO_DIR" -name "SKILL.md" -type f
-# Copy desired skill directory to workspace
-cp -r "$REPO_DIR/skills/<name>" ~/.lemonclaw/workspace/skills/<name>
-rm -rf "$REPO_DIR"
+REPO_DIR=$(mktemp -d) && git clone --depth 1 <github-url> "$REPO_DIR" && find "$REPO_DIR" -name "SKILL.md" -type f && cp -r "$REPO_DIR/skills/<name>" ~/.lemonclaw/workspace/skills/<name> && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Done"
 ```
 
 ## List installed skills
@@ -87,7 +62,7 @@ done
 ## Remove a skill
 
 ```bash
-rm -rf ~/.lemonclaw/workspace/skills/<skill-name>
+python3 -c "import shutil; shutil.rmtree('$HOME/.lemonclaw/workspace/skills/<skill-name>')"
 ```
 
 ## Notes
