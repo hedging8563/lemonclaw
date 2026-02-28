@@ -1,6 +1,6 @@
-# nanobot Skills
+# LemonClaw Skills
 
-This directory contains built-in skills that extend nanobot's capabilities.
+This directory contains built-in skills that extend LemonClaw's capabilities.
 
 ## Skill Format
 

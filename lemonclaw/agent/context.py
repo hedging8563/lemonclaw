@@ -58,9 +58,9 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
-        return f"""# lemonclaw 🐈
+        return f"""# LemonClaw 🐾
 
-You are lemonclaw, a helpful AI assistant.
+You are LemonClaw, a helpful AI assistant powered by LemonData.
 
 ## Runtime
 {runtime}
