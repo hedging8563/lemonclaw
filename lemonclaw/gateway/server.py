@@ -25,6 +25,7 @@ from starlette.routing import Route
 from lemonclaw.gateway.health import liveness, readiness, set_context
 
 if TYPE_CHECKING:
+    from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.telemetry.usage import UsageTracker
@@ -112,6 +113,53 @@ def _build_usage_handler(
     return usage_handler
 
 
+def _build_chat_handler(
+    auth_token: str | None,
+    agent_loop: AgentLoop | None,
+):
+    """Return a handler for POST /api/chat (token-protected, for testing)."""
+
+    async def chat_handler(request: Request) -> JSONResponse:
+        if auth_token:
+            header = request.headers.get("authorization", "")
+            if header != f"Bearer {auth_token}":
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+        if not agent_loop:
+            return JSONResponse({"error": "agent loop not available"}, status_code=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        message = body.get("message", "").strip()
+        if not message:
+            return JSONResponse({"error": "message is required"}, status_code=400)
+
+        session_key = body.get("session", "api:test")
+        timeout = min(body.get("timeout", 120), 300)
+
+        try:
+            response = await asyncio.wait_for(
+                agent_loop.process_direct(
+                    content=message,
+                    session_key=session_key,
+                    channel="api",
+                    chat_id="test",
+                ),
+                timeout=timeout,
+            )
+            return JSONResponse({"response": response, "session": session_key})
+        except asyncio.TimeoutError:
+            return JSONResponse({"error": f"timeout after {timeout}s"}, status_code=504)
+        except Exception as e:
+            logger.exception("Chat API error")
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    return chat_handler
+
+
 def create_app(
     *,
     auth_token: str | None = None,
@@ -121,6 +169,7 @@ def create_app(
     instance_id: str = "",
     usage_tracker: UsageTracker | None = None,
     session_manager: SessionManager | None = None,
+    agent_loop: AgentLoop | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -138,6 +187,7 @@ def create_app(
         Route("/readyz", readiness, methods=["GET"]),
         Route("/api/status", _build_status_handler(auth_token, channel_manager, extra), methods=["GET"]),
         Route("/api/usage", _build_usage_handler(auth_token, usage_tracker, session_manager), methods=["GET"]),
+        Route("/api/chat", _build_chat_handler(auth_token, agent_loop), methods=["POST"]),
     ]
     return Starlette(routes=routes)
 

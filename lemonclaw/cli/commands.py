@@ -433,6 +433,7 @@ def gateway(
         instance_id=getattr(config.lemondata, "instance_id", ""),
         usage_tracker=usage_tracker,
         session_manager=session_manager,
+        agent_loop=agent_loop,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     console.print(f"[green]✓[/green] HTTP server: {host}:{port}")
