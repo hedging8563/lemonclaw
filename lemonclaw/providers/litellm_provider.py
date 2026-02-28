@@ -196,14 +196,21 @@ class LiteLLMProvider(LLMProvider):
     
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]], *, keep_reasoning: bool = False) -> list[dict[str, Any]]:
-        """Strip non-standard keys and ensure assistant messages have a content key."""
+        """Strip non-standard keys and ensure assistant messages have a content key.
+
+        Many OpenAI-compatible gateways reject ``"content": null`` on assistant
+        messages (even though the OpenAI spec allows it when tool_calls are
+        present).  We normalise to ``""`` which is universally accepted.
+        """
         allowed = _ALLOWED_MSG_KEYS | {"reasoning_content"} if keep_reasoning else _ALLOWED_MSG_KEYS
         sanitized = []
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in allowed}
-            # Strict providers require "content" even when assistant only has tool_calls
-            if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
+            # Ensure assistant messages always have a content key.
+            # Use "" instead of None — many gateways reject null content.
+            if clean.get("role") == "assistant":
+                if "content" not in clean or clean["content"] is None:
+                    clean["content"] = ""
             sanitized.append(clean)
         return sanitized
 
@@ -354,9 +361,14 @@ class LiteLLMProvider(LLMProvider):
                 self._gateway = fb_override
             fb_model = self._resolve_model(fb_original)
             fb_kwargs = {**kwargs, "model": fb_model}
-            # Override api_base for fallback if needed
-            if fb_override and fb_override.default_api_base:
-                fb_kwargs["api_base"] = fb_override.default_api_base
+            # Always set correct api_base for fallback model's gateway.
+            # The original kwargs may carry a different gateway's api_base
+            # (e.g. /v1 for OpenAI-compat) which breaks Anthropic (/v1/v1/messages).
+            effective_gw = fb_override or self._gateway
+            if effective_gw and effective_gw.default_api_base:
+                fb_kwargs["api_base"] = effective_gw.default_api_base
+            elif effective_gw and not effective_gw.default_api_base:
+                fb_kwargs.pop("api_base", None)  # Let LiteLLM use its default
             self._gateway = saved_gw
             try:
                 response = await acompletion(**fb_kwargs)
