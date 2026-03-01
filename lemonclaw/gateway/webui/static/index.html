@@ -613,7 +613,7 @@ function App() {
       if (r.ok) {
         const d = await r.json();
         if (d.version) setAppVersion(d.version);
-        if (d.session_usage) setSessionUsage(d.session_usage);
+        setSessionUsage(d.session_usage || null);
       }
     } catch (_) {}
   }, []);

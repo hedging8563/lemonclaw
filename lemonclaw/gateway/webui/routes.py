@@ -327,7 +327,11 @@ def get_webui_routes(
         if not key.startswith("webui:"):
             return _json({"error": "Forbidden"}, 403)
 
-        session = session_manager.get_or_create(key)
+        session = session_manager._load(key)
+        if not session:
+            resp = _json({"messages": []})
+            _maybe_refresh_cookie(request, resp)
+            return resp
         # Return messages with role and content only (safe for frontend)
         messages = []
         for m in session.messages:
@@ -352,7 +356,6 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
-        import time as _time
         data: dict = {"version": version}
 
         # Instance uptime
@@ -364,8 +367,9 @@ def get_webui_routes(
         if session_key and usage_tracker:
             if not session_key.startswith("webui:"):
                 session_key = f"webui:{session_key}"
-            session = session_manager.get_or_create(session_key)
-            data["session_usage"] = usage_tracker.get_session_summary(session.metadata)
+            session = session_manager._load(session_key)
+            if session:
+                data["session_usage"] = usage_tracker.get_session_summary(session.metadata)
 
         resp = _json(data)
         _maybe_refresh_cookie(request, resp)
