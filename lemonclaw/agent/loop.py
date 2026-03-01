@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from lemonclaw.agent.context import ContextBuilder
+from lemonclaw.agent.locale import detect_lang, session_lang, t
 from lemonclaw.agent.memory import MemoryStore
 from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.cron import CronTool
@@ -181,8 +182,10 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         stop_event: asyncio.Event | None = None,
         session_model: str | None = None,
+        lang: str = "en",
     ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
+        _lang = lang
         effective_model = session_model or self.model
         messages = initial_messages
         iteration = 0
@@ -197,7 +200,7 @@ class AgentLoop:
 
             # Cooperative stop: check at the start of each iteration
             if stop_event and stop_event.is_set():
-                final_content = final_content or "⏹ Task stopped."
+                final_content = final_content or t("task_stopped", _lang)
                 break
 
             # Mid-loop compaction: tool calls can rapidly grow the context
@@ -219,9 +222,7 @@ class AgentLoop:
                 )
             except asyncio.TimeoutError:
                 logger.error("LLM call timed out after {}s (iteration {})", self._LLM_CALL_TIMEOUT, iteration)
-                final_content = (
-                    f"LLM call timed out after {self._LLM_CALL_TIMEOUT}s. Please try again."
-                )
+                final_content = t("llm_timeout", _lang, timeout=self._LLM_CALL_TIMEOUT)
                 break
 
             # Track token usage from this LLM call
@@ -254,7 +255,7 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     # Cooperative stop: check between tool executions
                     if stop_event and stop_event.is_set():
-                        final_content = "⏹ Task stopped."
+                        final_content = t("task_stopped", _lang)
                         break
 
                     tools_used.append(tool_call.name)
@@ -269,10 +270,7 @@ class AgentLoop:
                         if _consecutive_errors[err_key] >= _MAX_CONSECUTIVE_ERRORS:
                             logger.warning("Tool {} failed {} times with same error, breaking loop",
                                            tool_call.name, _MAX_CONSECUTIVE_ERRORS)
-                            final_content = (
-                                f"Tool '{tool_call.name}' failed repeatedly. "
-                                "Please try a different approach."
-                            )
+                            final_content = t("tool_repeated_fail", _lang, name=tool_call.name)
                     else:
                         _consecutive_errors.clear()
 
@@ -307,10 +305,7 @@ class AgentLoop:
 
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
-            final_content = (
-                f"Reached max tool call iterations ({self.max_iterations}). "
-                "Try breaking the task into smaller steps."
-            )
+            final_content = t("max_iterations", _lang, n=self.max_iterations)
 
         return final_content, tools_used, messages, turn_usage
 
@@ -355,7 +350,8 @@ class AgentLoop:
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
         total = cancelled + sub_cancelled
-        content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
+        lang = session_lang(self.sessions._load(msg.session_key))
+        content = t("stop_tasks", lang, n=total) if total else t("stop_none", lang)
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
@@ -386,9 +382,10 @@ class AgentLoop:
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
+                lang = session_lang(self.sessions._load(msg.session_key))
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
+                    content=t("error", lang),
                 ))
             finally:
                 self._stop_events.pop(msg.session_key, None)
@@ -435,6 +432,7 @@ class AgentLoop:
                 messages = await compact(messages, session_model or self.model, self.provider)
             final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
                 messages, stop_event=stop_event, session_model=session_model,
+                lang=session_lang(session),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             # Record usage for system messages
@@ -442,13 +440,19 @@ class AgentLoop:
                 self.usage_tracker.record_turn(key, turn_usage, session.metadata)
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+                                  content=final_content or t("bg_task_done", session_lang(session)))
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+
+        # Auto-detect language from first message if not set
+        if "lang" not in session.metadata:
+            session.metadata["lang"] = detect_lang(msg.content)
+
+        lang = session_lang(session)
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -464,13 +468,13 @@ class AgentLoop:
                         if not await self._consolidate_memory(temp, archive_all=True):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
+                                content=t("memory_archival_failed", lang),
                             )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
+                    content=t("memory_archival_failed", lang),
                 )
             finally:
                 self._consolidating.discard(session.key)
@@ -481,7 +485,7 @@ class AgentLoop:
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content=t("new_session", lang))
         if cmd == "/usage":
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id,
@@ -489,9 +493,9 @@ class AgentLoop:
             )
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐾 LemonClaw commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/model — List or switch models\n/usage — Show token usage\n/help — Show available commands")
+                                  content=t("help", lang))
         if cmd == "/model" or cmd.startswith("/model "):
-            return self._handle_model_command(msg, session)
+            return self._handle_model_command(msg, session, lang)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -548,11 +552,11 @@ class AgentLoop:
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
-            stop_event=stop_event, session_model=session_model,
+            stop_event=stop_event, session_model=session_model, lang=lang,
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            final_content = t("no_response", lang)
 
         self._save_turn(session, all_msgs, 1 + len(history))
 
@@ -578,7 +582,7 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    def _handle_model_command(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+    def _handle_model_command(self, msg: InboundMessage, session: Session, lang: str = "en") -> OutboundMessage:
         """Handle /model [name] — list models or switch the session model."""
         arg = msg.content.strip()[6:].strip()  # strip "/model" prefix
 
@@ -593,14 +597,14 @@ class AgentLoop:
         if not match:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id,
-                content=f"No model matching `{arg}`. Use `/model` to see available models.",
+                content=t("no_model_match", lang, arg=arg),
             )
 
         session.metadata["current_model"] = match.id
         self.sessions.save(session)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
-            content=f"Switched to **{match.label}** (`{match.id}`) — {match.description}",
+            content=t("model_switched", lang, label=match.label, id=match.id, desc=match.description),
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
