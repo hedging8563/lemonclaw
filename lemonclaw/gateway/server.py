@@ -19,7 +19,7 @@ import uvicorn
 from loguru import logger
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
@@ -160,6 +160,48 @@ def _build_chat_handler(
     return chat_handler
 
 
+def _build_wecom_webhook_handler(channel_manager: ChannelManager | None):
+    """Return handlers for GET+POST /webhook/wecom (WeCom callback)."""
+
+    def _get_wecom_channel():
+        if not channel_manager:
+            return None
+        ch = channel_manager.get_channel("wecom")
+        if ch is None:
+            return None
+        # Import here to avoid circular imports at module level
+        from lemonclaw.channels.wecom import WeComChannel
+
+        return ch if isinstance(ch, WeComChannel) else None
+
+    async def wecom_verify(request: Request) -> PlainTextResponse:
+        """GET /webhook/wecom — URL verification for WeCom admin console."""
+        wecom = _get_wecom_channel()
+        if not wecom:
+            return PlainTextResponse("wecom channel not enabled", status_code=404)
+
+        params = dict(request.query_params)
+        result = await wecom.handle_verify(params)
+        if result is None:
+            return PlainTextResponse("verification failed", status_code=403)
+        return PlainTextResponse(result)
+
+    async def wecom_callback(request: Request) -> PlainTextResponse:
+        """POST /webhook/wecom — incoming message callback."""
+        wecom = _get_wecom_channel()
+        if not wecom:
+            return PlainTextResponse("wecom channel not enabled", status_code=404)
+
+        body = (await request.body()).decode("utf-8")
+        params = dict(request.query_params)
+        result = await wecom.handle_callback(params, body)
+        if result is None:
+            return PlainTextResponse("callback error", status_code=400)
+        return PlainTextResponse(result)
+
+    return wecom_verify, wecom_callback
+
+
 def create_app(
     *,
     auth_token: str | None = None,
@@ -189,6 +231,12 @@ def create_app(
         Route("/api/usage", _build_usage_handler(auth_token, usage_tracker, session_manager), methods=["GET"]),
         Route("/api/chat", _build_chat_handler(auth_token, agent_loop), methods=["POST"]),
     ]
+
+    # WeCom webhook routes (no auth_token — WeCom uses its own signature verification)
+    wecom_verify, wecom_callback = _build_wecom_webhook_handler(channel_manager)
+    routes.append(Route("/webhook/wecom", wecom_verify, methods=["GET"]))
+    routes.append(Route("/webhook/wecom", wecom_callback, methods=["POST"]))
+
     return Starlette(routes=routes)
 
 

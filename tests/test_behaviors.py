@@ -244,3 +244,103 @@ class TestChatEndpoint:
             headers={"Authorization": "Bearer secret123"},
         )
         assert resp2.status_code == 200
+
+
+# ── 5. WeCom Channel (crypto, signature, webhook) ──
+
+
+class TestWeComCrypto:
+    """WeCom AES encryption/decryption and signature verification."""
+
+    CORP_ID = "wx1234567890abcdef"
+    # 43-char base64 key (decodes to 32 bytes)
+    ENCODING_AES_KEY = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+
+    def test_encrypt_decrypt_roundtrip(self):
+        from lemonclaw.channels.wecom import WeComCrypto
+
+        crypto = WeComCrypto(self.ENCODING_AES_KEY, self.CORP_ID)
+        original = "<xml><Content>hello world</Content></xml>"
+        encrypted = crypto.encrypt(original)
+        decrypted = crypto.decrypt(encrypted)
+        assert decrypted == original
+
+    def test_decrypt_wrong_corp_id_fails(self):
+        from lemonclaw.channels.wecom import WeComCrypto
+
+        crypto = WeComCrypto(self.ENCODING_AES_KEY, self.CORP_ID)
+        wrong_crypto = WeComCrypto(self.ENCODING_AES_KEY, "wx_wrong_corp")
+
+        encrypted = wrong_crypto.encrypt("test message")
+        with pytest.raises(ValueError, match="corp_id mismatch"):
+            crypto.decrypt(encrypted)
+
+    def test_verify_signature(self):
+        from lemonclaw.channels.wecom import verify_signature
+
+        token = "test_token"
+        timestamp = "1234567890"
+        nonce = "abc123"
+        encrypt = "encrypted_data"
+
+        sig = verify_signature(token, timestamp, nonce, encrypt)
+        assert len(sig) == 40  # SHA1 hex digest
+        # Same inputs → same output
+        assert sig == verify_signature(token, timestamp, nonce, encrypt)
+        # Different input → different output
+        assert sig != verify_signature(token, timestamp, nonce, "other_data")
+
+
+class TestWeComXML:
+    """WeCom XML parsing and building."""
+
+    def test_parse_xml(self):
+        from lemonclaw.channels.wecom import parse_xml
+
+        xml = (
+            "<xml>"
+            "<ToUserName><![CDATA[corp_id]]></ToUserName>"
+            "<FromUserName><![CDATA[user_id]]></FromUserName>"
+            "<MsgType><![CDATA[text]]></MsgType>"
+            "<Content><![CDATA[hello]]></Content>"
+            "<MsgId>12345</MsgId>"
+            "</xml>"
+        )
+        result = parse_xml(xml)
+        assert result["ToUserName"] == "corp_id"
+        assert result["FromUserName"] == "user_id"
+        assert result["MsgType"] == "text"
+        assert result["Content"] == "hello"
+        assert result["MsgId"] == "12345"
+
+    def test_build_reply_xml(self):
+        from lemonclaw.channels.wecom import build_reply_xml
+
+        xml = build_reply_xml("enc_data", "sig123", "1234567890", "nonce_abc")
+        assert "<Encrypt><![CDATA[enc_data]]></Encrypt>" in xml
+        assert "<MsgSignature><![CDATA[sig123]]></MsgSignature>" in xml
+        assert "<TimeStamp>1234567890</TimeStamp>" in xml
+
+
+class TestWeComWebhook:
+    """WeCom webhook endpoint integration tests."""
+
+    @pytest.mark.asyncio
+    async def test_webhook_get_returns_404_without_channel(self):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        app = create_app(auth_token=None, channel_manager=None)
+        client = TestClient(app)
+        resp = client.get("/webhook/wecom?msg_signature=x&timestamp=1&nonce=a&echostr=b")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_webhook_post_returns_404_without_channel(self):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        app = create_app(auth_token=None, channel_manager=None)
+        client = TestClient(app)
+        resp = client.post("/webhook/wecom?msg_signature=x&timestamp=1&nonce=a", content="<xml></xml>")
+        assert resp.status_code == 404

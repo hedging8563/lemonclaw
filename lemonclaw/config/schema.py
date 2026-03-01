@@ -185,6 +185,18 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class WeComConfig(Base):
+    """WeCom (企业微信) channel configuration using webhook callback."""
+
+    enabled: bool = False
+    corp_id: str = ""  # 企业 ID (CorpID)
+    secret: str = ""  # 应用 Secret (用于获取 access_token)
+    agent_id: int = 0  # 应用 AgentId (用于发送消息)
+    token: str = ""  # 回调 Token (用于消息签名校验)
+    encoding_aes_key: str = ""  # 回调 EncodingAESKey (用于消息加解密, 43 字符 base64)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed UserId list
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -201,6 +213,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
 
 
 class AgentDefaults(Base):
