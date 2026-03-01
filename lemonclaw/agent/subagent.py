@@ -105,7 +105,7 @@ class SubagentManager:
             tools.register(WebFetchTool())
             
             # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -204,8 +204,12 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
     
-    def _build_subagent_prompt(self, task: str) -> str:
-        """Build a focused system prompt for the subagent."""
+    def _build_subagent_prompt(self) -> str:
+        """Build a focused system prompt for the subagent.
+
+        Note: The task description is passed as a separate user message,
+        NOT embedded in the system prompt, to prevent prompt injection.
+        """
         from datetime import datetime
         import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")

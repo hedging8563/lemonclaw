@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from lemonclaw.agent.tools.base import Tool
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -34,6 +35,14 @@ class ExecTool(Tool):
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
         ]
+        # Dangerous base commands — checked after shell expansion/normalization
+        self._deny_commands = {
+            "rm", "rmdir", "del", "format", "mkfs", "diskpart",
+            "dd", "shutdown", "reboot", "poweroff",
+        }
+        self._deny_arg_combos = {
+            "rm": {"-r", "-rf", "-fr", "-f", "--recursive", "--force"},
+        }
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
@@ -128,10 +137,16 @@ class ExecTool(Tool):
             return f"Error executing command: {str(e)}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
+        """Best-effort safety guard for potentially destructive commands.
+
+        Two layers:
+        1. Regex patterns on raw command string (catches obvious cases)
+        2. Token-level analysis via shlex (catches evasion like extra spaces, quoting)
+        """
         cmd = command.strip()
         lower = cmd.lower()
 
+        # Layer 1: regex patterns on raw string
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
@@ -140,9 +155,32 @@ class ExecTool(Tool):
             if not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
+        # Layer 2: token-level analysis — catches "rm  -rf", "rm '-rf'", etc.
+        try:
+            tokens = shlex.split(cmd)
+        except ValueError:
+            # Malformed shell syntax (unclosed quotes, etc.) — block it
+            return "Error: Command blocked by safety guard (malformed shell syntax)"
+
+        if tokens:
+            base_cmd = os.path.basename(tokens[0]).lower()
+            # Check dangerous commands with dangerous args
+            if base_cmd in self._deny_arg_combos:
+                dangerous_args = self._deny_arg_combos[base_cmd]
+                cmd_args = {t.lower() for t in tokens[1:] if t.startswith("-")}
+                if cmd_args & dangerous_args:
+                    return "Error: Command blocked by safety guard (dangerous pattern detected)"
+            # Check unconditionally dangerous commands (dd, shutdown, etc.)
+            elif base_cmd in {"dd", "mkfs", "diskpart", "shutdown", "reboot", "poweroff", "format"}:
+                return "Error: Command blocked by safety guard (dangerous pattern detected)"
+
+        # Workspace restriction
         if self.restrict_to_workspace:
-            if "..\\" in cmd or "../" in cmd:
-                return "Error: Command blocked by safety guard (path traversal detected)"
+            # Normalize and check for path traversal in tokens
+            for token in (tokens if tokens else [cmd]):
+                normalized = os.path.normpath(token)
+                if ".." in normalized.split(os.sep):
+                    return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
 

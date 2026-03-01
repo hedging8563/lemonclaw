@@ -283,10 +283,13 @@ class AgentLoop:
             else:
                 clean = self._strip_think(response.content)
                 # Detect model refusal loops: very short responses that refuse to engage
-                if clean and len(clean) < 60 and any(p in clean.lower() for p in (
-                    "can't discuss", "cannot discuss", "i can't help",
-                    "i cannot help", "i'm not able to", "i am not able to",
-                )):
+                # Uses regex for case-insensitive + unicode-resilient matching
+                _REFUSAL_RE = re.compile(
+                    r"(?:can['\u2019]?t\s+discuss|cannot\s+discuss|can['\u2019]?t\s+help"
+                    r"|cannot\s+help|not\s+able\s+to\s+help|i\s+(?:can['\u2019]?t|cannot)\s+(?:assist|provide))",
+                    re.IGNORECASE,
+                )
+                if clean and len(clean) < 60 and _REFUSAL_RE.search(clean):
                     # Inject a system nudge to break the refusal loop
                     messages.append({"role": "assistant", "content": clean})
                     messages.append({"role": "user", "content": (

@@ -56,14 +56,18 @@ def load_config(config_path: Path | None = None) -> Config:
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
-    """Save configuration to file."""
+    """Save configuration to file (atomic: write tmp → fsync → rename)."""
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(by_alias=True)
 
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp_path.rename(path)
 
 
 def _apply_env_overrides(config: Config) -> None:
@@ -71,6 +75,11 @@ def _apply_env_overrides(config: Config) -> None:
 
     K8s scenario: Orchestrator sets these env vars on the Deployment.
     Self-hosted: Users can also set them in launchd/systemd env.
+
+    NOTE: These env vars are UNPREFIXED (e.g. GATEWAY_TOKEN, API_KEY).
+    Pydantic BaseSettings only reads LEMONCLAW_* prefixed vars (see schema.py),
+    so there is no conflict between the two env parsing paths.
+    Priority: _apply_env_overrides > Pydantic env > config file > defaults.
     """
     if token := os.environ.get("GATEWAY_TOKEN"):
         config.gateway.auth_token = token

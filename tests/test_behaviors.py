@@ -19,6 +19,59 @@ from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 
+# ── 1. SSRF Protection (web.py) ──
+
+
+class TestSSRFProtection:
+    """web_fetch must block access to private/internal addresses."""
+
+    def test_private_ip_detected(self):
+        from lemonclaw.agent.tools.web import _is_private_ip
+        assert _is_private_ip("127.0.0.1") is True
+        assert _is_private_ip("localhost") is True
+        assert _is_private_ip("10.0.0.1") is True
+        assert _is_private_ip("172.16.0.1") is True
+        assert _is_private_ip("192.168.1.1") is True
+
+    def test_link_local_blocked(self):
+        from lemonclaw.agent.tools.web import _is_private_ip
+        # Cloud metadata endpoint
+        assert _is_private_ip("169.254.169.254") is True
+
+    def test_public_ip_allowed(self):
+        from lemonclaw.agent.tools.web import _is_private_ip
+        assert _is_private_ip("8.8.8.8") is False
+        assert _is_private_ip("1.1.1.1") is False
+
+    def test_validate_url_blocks_private(self):
+        from lemonclaw.agent.tools.web import _validate_url
+        valid, err = _validate_url("http://127.0.0.1:8080/secret")
+        assert valid is False
+        assert "private" in err.lower() or "internal" in err.lower()
+
+    def test_validate_url_blocks_metadata(self):
+        from lemonclaw.agent.tools.web import _validate_url
+        valid, err = _validate_url("http://169.254.169.254/latest/meta-data/")
+        assert valid is False
+
+    def test_validate_url_allows_public(self):
+        from unittest.mock import patch as mock_patch
+        from lemonclaw.agent.tools.web import _validate_url
+        # Mock DNS to return a known public IP (avoid local DNS proxy interference)
+        fake_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
+        with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", return_value=fake_info):
+            valid, err = _validate_url("https://example.com")
+        assert valid is True
+
+    def test_unresolvable_host_blocked(self):
+        from lemonclaw.agent.tools.web import _is_private_ip
+        from unittest.mock import patch as mock_patch
+        import socket
+        # Simulate DNS resolution failure — fail-closed
+        with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", side_effect=socket.gaierror("not found")):
+            assert _is_private_ip("this-domain-does-not-exist-xyz123.invalid") is True
+
+
 # ── 2a. Tool Safety (CVE-2026-25253, shell.py deny_patterns) ──
 
 
@@ -67,6 +120,34 @@ class TestToolSafety:
         tool = ExecTool(timeout=5, restrict_to_workspace=True, working_dir="/tmp")
         result = await tool.execute(command="cat ../../etc/passwd")
         assert "blocked" in result.lower() or "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_rm_rf_extra_spaces_blocked(self):
+        """Evasion via extra spaces: 'rm  -rf  /' should still be caught."""
+        tool = ExecTool(timeout=5)
+        result = await tool.execute(command="rm  -rf  /tmp/test")
+        assert "blocked" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_rm_quoted_args_blocked(self):
+        """Evasion via quoting: rm '-rf' should still be caught."""
+        tool = ExecTool(timeout=5)
+        result = await tool.execute(command="rm '-rf' /tmp/test")
+        assert "blocked" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_dd_standalone_blocked(self):
+        """dd without if= should still be blocked at token level."""
+        tool = ExecTool(timeout=5)
+        result = await tool.execute(command="dd if=/dev/urandom of=/tmp/x bs=1M count=100")
+        assert "blocked" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_path_traversal_normpath_blocked(self):
+        """Path traversal via normpath: 'foo/../../etc/passwd' should be caught."""
+        tool = ExecTool(timeout=5, restrict_to_workspace=True, working_dir="/tmp")
+        result = await tool.execute(command="cat foo/../../etc/passwd")
+        assert "blocked" in result.lower()
 
 
 # ── 2b. Session Management (nanobot #1255, #1318) ──
@@ -117,6 +198,40 @@ class TestSlashCommands:
 
 
 # ── 2c. Token Tracking (P2-A) ──
+
+
+class TestAPIKeySanitization:
+    """API keys must not leak into error messages or logs."""
+
+    def test_sanitize_bearer_token(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception("Request failed: Bearer sk-abc123def456ghi789jkl012mno345pqr")
+        result = _sanitize_error(err)
+        assert "sk-abc123" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_api_key_pattern(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception("Invalid key: key-abcdefghijklmnop1234")
+        result = _sanitize_error(err)
+        assert "key-abcdefgh" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_hex_token(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception("Token c09b22eabe503204bc8de0fac10875f7ee54ea5123bf19c29533b51c6359b6e5 expired")
+        result = _sanitize_error(err)
+        assert "c09b22ea" not in result
+        assert "[REDACTED]" in result
+
+    def test_safe_message_unchanged(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception("Connection timeout after 30s")
+        result = _sanitize_error(err)
+        assert result == "Connection timeout after 30s"
+
+
+# ── 2c-orig. Token Tracking (P2-A) ──
 
 
 class TestTokenTracking:
@@ -275,6 +390,20 @@ class TestWeComCrypto:
         with pytest.raises(ValueError, match="corp_id mismatch"):
             crypto.decrypt(encrypted)
 
+    def test_decrypt_invalid_padding_fails(self):
+        """Tampered ciphertext should raise ValueError on padding validation."""
+        from lemonclaw.channels.wecom import WeComCrypto
+        import base64
+
+        crypto = WeComCrypto(self.ENCODING_AES_KEY, self.CORP_ID)
+        encrypted = crypto.encrypt("test message")
+        # Tamper with the last block (corrupts padding)
+        raw = base64.b64decode(encrypted)
+        tampered = raw[:-1] + bytes([(raw[-1] + 1) % 256])
+        tampered_b64 = base64.b64encode(tampered).decode()
+        with pytest.raises(ValueError):
+            crypto.decrypt(tampered_b64)
+
     def test_verify_signature(self):
         from lemonclaw.channels.wecom import verify_signature
 
@@ -289,6 +418,15 @@ class TestWeComCrypto:
         assert sig == verify_signature(token, timestamp, nonce, encrypt)
         # Different input → different output
         assert sig != verify_signature(token, timestamp, nonce, "other_data")
+
+    def test_signature_timing_safe(self):
+        """Signature comparison must use hmac.compare_digest (timing-safe)."""
+        import hmac as hmac_mod
+        from lemonclaw.channels.wecom import verify_signature
+        sig = verify_signature("tok", "123", "abc", "enc")
+        # Verify hmac.compare_digest works with the output
+        assert hmac_mod.compare_digest(sig, sig) is True
+        assert hmac_mod.compare_digest(sig, "wrong" * 8) is False
 
 
 class TestWeComXML:

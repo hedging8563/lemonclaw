@@ -86,10 +86,8 @@ class SessionManager:
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _get_lock(self, key: str) -> asyncio.Lock:
-        """Get or create an asyncio.Lock for a session key."""
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+        """Get or create an asyncio.Lock for a session key (atomic via setdefault)."""
+        return self._locks.setdefault(key, asyncio.Lock())
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -180,8 +178,8 @@ class SessionManager:
                 self._atomic_save(path, session)
 
             return session
-        except Exception as e:
-            logger.warning("Failed to load session {}: {}", key, e)
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            logger.warning("Failed to load session {}: {} ({})", key, type(e).__name__, e)
             return None
     
     def _atomic_save(self, path: Path, session: Session) -> None:

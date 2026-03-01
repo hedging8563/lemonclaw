@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac as hmac_mod
 import os
 import struct
 import time
@@ -48,6 +49,7 @@ class WeComCrypto:
 
     EncodingAESKey is a 43-char base64 string that decodes to a 32-byte AES key.
     Messages use AES-256-CBC with the first 16 bytes of the key as IV.
+    Note: The fixed IV is mandated by the WeCom protocol specification.
     """
 
     def __init__(self, encoding_aes_key: str, corp_id: str):
@@ -64,12 +66,23 @@ class WeComCrypto:
         cipher = AES.new(self.aes_key, AES.MODE_CBC, self.iv)
         decrypted = cipher.decrypt(base64.b64decode(encrypted))
 
-        # Remove PKCS#7 padding
+        # Validate and remove PKCS#7 padding
+        if len(decrypted) == 0:
+            raise ValueError("Decrypted message is empty")
         pad_len = decrypted[-1]
+        if pad_len < 1 or pad_len > 32:
+            raise ValueError(f"Invalid PKCS#7 padding length: {pad_len}")
+        # Verify all padding bytes are consistent
+        if decrypted[-pad_len:] != bytes([pad_len]) * pad_len:
+            raise ValueError("Invalid PKCS#7 padding bytes")
         content = decrypted[:-pad_len]
 
         # Format: 16 bytes random + 4 bytes msg_len (network order) + msg + corp_id
+        if len(content) < 20:
+            raise ValueError("Decrypted content too short")
         msg_len = struct.unpack("!I", content[16:20])[0]
+        if 20 + msg_len > len(content):
+            raise ValueError(f"Message length {msg_len} exceeds content size {len(content) - 20}")
         msg = content[20 : 20 + msg_len].decode("utf-8")
         from_corp_id = content[20 + msg_len :].decode("utf-8")
 
@@ -227,7 +240,7 @@ class WeComChannel(BaseChannel):
 
         # Verify signature
         expected = verify_signature(self.config.token, timestamp, nonce, echostr)
-        if expected != msg_signature:
+        if not hmac_mod.compare_digest(expected, msg_signature):
             logger.warning("WeCom verify: signature mismatch")
             return None
 
@@ -265,7 +278,7 @@ class WeComChannel(BaseChannel):
 
         # Verify signature
         expected = verify_signature(self.config.token, timestamp, nonce, encrypt)
-        if expected != msg_signature:
+        if not hmac_mod.compare_digest(expected, msg_signature):
             logger.warning("WeCom callback: signature mismatch")
             return None
 

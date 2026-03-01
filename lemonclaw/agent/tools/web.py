@@ -1,9 +1,11 @@
 """Web tools: web_search and web_fetch."""
 
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 from typing import Any
 from urllib.parse import urlparse
 
@@ -30,14 +32,37 @@ def _normalize(text: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
+def _is_private_ip(host: str) -> bool:
+    """Check if a hostname resolves to a private/reserved IP address (SSRF protection)."""
+    try:
+        # Resolve hostname to IP — catches tricks like 0x7f000001, decimal IPs, DNS rebinding
+        infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return True
+            # Block cloud metadata endpoints (169.254.169.254, fd00::, etc.)
+            if ip.is_multicast or ip.is_unspecified:
+                return True
+    except (socket.gaierror, ValueError, OSError):
+        # DNS resolution failed — block by default (fail-closed)
+        return True
+    return False
+
+
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL: must be http(s) with valid domain."""
+    """Validate URL: must be http(s) with valid public domain (SSRF-safe)."""
     try:
         p = urlparse(url)
         if p.scheme not in ('http', 'https'):
             return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
         if not p.netloc:
             return False, "Missing domain"
+        hostname = p.hostname or ""
+        if not hostname:
+            return False, "Missing hostname"
+        if _is_private_ip(hostname):
+            return False, "Access to private/internal addresses is blocked"
         return True, ""
     except Exception as e:
         return False, str(e)

@@ -56,10 +56,19 @@ _SAVE_MEMORY_TOOL = [
 class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
+    # Per-workspace write lock — prevents concurrent consolidation from corrupting files.
+    # Shared across all sessions that use the same workspace.
+    _write_locks: dict[str, asyncio.Lock] = {}
+
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        # Get or create a lock for this workspace
+        ws_key = str(workspace)
+        if ws_key not in MemoryStore._write_locks:
+            MemoryStore._write_locks[ws_key] = asyncio.Lock()
+        self._lock = MemoryStore._write_locks[ws_key]
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -69,6 +78,10 @@ class MemoryStore:
     def write_long_term(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
+    async def _async_write_long_term(self, content: str) -> None:
+        """Non-blocking write for use in async consolidation path."""
+        await asyncio.to_thread(self.write_long_term, content)
+
     def append_history(self, entry: str) -> None:
         """Append a history entry, truncating old entries if file grows too large."""
         with open(self.history_file, "a", encoding="utf-8") as f:
@@ -76,6 +89,10 @@ class MemoryStore:
 
         # Rolling truncation: keep only the most recent entries
         self._truncate_history_if_needed()
+
+    async def _async_append_history(self, entry: str) -> None:
+        """Non-blocking append for use in async consolidation path."""
+        await asyncio.to_thread(self.append_history, entry)
 
     def _truncate_history_if_needed(self) -> None:
         """Keep HISTORY.md under HISTORY_MAX_ENTRIES by dropping oldest entries."""
@@ -109,31 +126,34 @@ class MemoryStore:
         Returns True on success (including no-op), False on failure.
         If the model fails or doesn't call save_memory, walks the fallback
         chain from MODEL_MAP before giving up.
+
+        Uses a per-workspace lock to prevent concurrent writes to MEMORY.md/HISTORY.md.
         """
-        if archive_all:
-            old_messages = session.messages
-            keep_count = 0
-            logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
-        else:
-            keep_count = memory_window // 2
-            if len(session.messages) <= keep_count:
-                return True
-            if len(session.messages) - session.last_consolidated <= 0:
-                return True
-            old_messages = session.messages[session.last_consolidated:-keep_count]
-            if not old_messages:
-                return True
-            logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
+        async with self._lock:
+            if archive_all:
+                old_messages = session.messages
+                keep_count = 0
+                logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
+            else:
+                keep_count = memory_window // 2
+                if len(session.messages) <= keep_count:
+                    return True
+                if len(session.messages) - session.last_consolidated <= 0:
+                    return True
+                old_messages = session.messages[session.last_consolidated:-keep_count]
+                if not old_messages:
+                    return True
+                logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
 
-        lines = []
-        for m in old_messages:
-            if not m.get("content"):
-                continue
-            tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            lines = []
+            for m in old_messages:
+                if not m.get("content"):
+                    continue
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
+                lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
 
-        current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+            current_memory = self.read_long_term()
+            prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
 IMPORTANT: Do NOT save information about content refusals, safety warnings, or "I can't discuss that" interactions.
 These are model artifacts, not useful memories. Focus on actual tasks, preferences, and facts.
@@ -144,97 +164,97 @@ These are model artifacts, not useful memories. Focus on actual tasks, preferenc
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
-        messages = [
-            {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
-            {"role": "user", "content": prompt},
-        ]
+            messages = [
+                {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                {"role": "user", "content": prompt},
+            ]
 
-        # Walk fallback chain: try current model, then its fallbacks
-        from lemonclaw.providers.catalog import MODEL_MAP
-        current_model = model
-        visited: set[str] = set()
+            # Walk fallback chain: try current model, then its fallbacks
+            from lemonclaw.providers.catalog import MODEL_MAP
+            current_model = model
+            visited: set[str] = set()
 
-        while current_model and current_model not in visited and len(visited) <= _MAX_CONSOLIDATION_FALLBACKS:
-            visited.add(current_model)
-            try:
-                response = await asyncio.wait_for(
-                    provider.chat(
-                        messages=messages,
-                        tools=_SAVE_MEMORY_TOOL,
-                        model=current_model,
-                    ),
-                    timeout=timeout,
-                )
+            while current_model and current_model not in visited and len(visited) <= _MAX_CONSOLIDATION_FALLBACKS:
+                visited.add(current_model)
+                try:
+                    response = await asyncio.wait_for(
+                        provider.chat(
+                            messages=messages,
+                            tools=_SAVE_MEMORY_TOOL,
+                            model=current_model,
+                        ),
+                        timeout=timeout,
+                    )
 
-                if not response.has_tool_calls:
+                    if not response.has_tool_calls:
+                        entry = MODEL_MAP.get(current_model)
+                        next_model = entry.fallback if entry else None
+                        if next_model and next_model not in visited:
+                            logger.warning(
+                                "Memory consolidation: {} did not call save_memory, trying {}",
+                                current_model, next_model,
+                            )
+                            current_model = next_model
+                            continue
+                        logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
+                        return False
+
+                    args = response.tool_calls[0].arguments
+                    if isinstance(args, str):
+                        args = json.loads(args)
+                    if not isinstance(args, dict):
+                        logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
+                        return False
+
+                    if entry := args.get("history_entry"):
+                        if not isinstance(entry, str):
+                            entry = json.dumps(entry, ensure_ascii=False)
+                        await self._async_append_history(entry)
+                    if update := args.get("memory_update"):
+                        if not isinstance(update, str):
+                            update = json.dumps(update, ensure_ascii=False)
+                        if update != current_memory:
+                            await self._async_write_long_term(update)
+
+                    new_consolidated = 0 if archive_all else len(session.messages) - keep_count
+                    session.last_consolidated = new_consolidated
+
+                    if not archive_all and new_consolidated > 0:
+                        session.messages = session.messages[new_consolidated:]
+                        session.last_consolidated = 0
+                        logger.info(
+                            "Session truncated: dropped {} old messages, {} remaining",
+                            new_consolidated, len(session.messages),
+                        )
+
+                    logger.info("Memory consolidation done (model={}): {} messages remaining",
+                                current_model, len(session.messages))
+                    return True
+
+                except asyncio.TimeoutError:
                     entry = MODEL_MAP.get(current_model)
                     next_model = entry.fallback if entry else None
                     if next_model and next_model not in visited:
                         logger.warning(
-                            "Memory consolidation: {} did not call save_memory, trying {}",
-                            current_model, next_model,
+                            "Memory consolidation: {} timed out after {}s, trying {}",
+                            current_model, timeout, next_model,
                         )
                         current_model = next_model
                         continue
-                    logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
+                    logger.warning("Memory consolidation timed out after {}s, giving up", timeout)
+                    return False
+                except Exception:
+                    entry = MODEL_MAP.get(current_model)
+                    next_model = entry.fallback if entry else None
+                    if next_model and next_model not in visited:
+                        logger.warning(
+                            "Memory consolidation: {} failed, trying {}",
+                            current_model, next_model, exc_info=True,
+                        )
+                        current_model = next_model
+                        continue
+                    logger.exception("Memory consolidation failed")
                     return False
 
-                args = response.tool_calls[0].arguments
-                if isinstance(args, str):
-                    args = json.loads(args)
-                if not isinstance(args, dict):
-                    logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
-                    return False
-
-                if entry := args.get("history_entry"):
-                    if not isinstance(entry, str):
-                        entry = json.dumps(entry, ensure_ascii=False)
-                    self.append_history(entry)
-                if update := args.get("memory_update"):
-                    if not isinstance(update, str):
-                        update = json.dumps(update, ensure_ascii=False)
-                    if update != current_memory:
-                        self.write_long_term(update)
-
-                new_consolidated = 0 if archive_all else len(session.messages) - keep_count
-                session.last_consolidated = new_consolidated
-
-                if not archive_all and new_consolidated > 0:
-                    session.messages = session.messages[new_consolidated:]
-                    session.last_consolidated = 0
-                    logger.info(
-                        "Session truncated: dropped {} old messages, {} remaining",
-                        new_consolidated, len(session.messages),
-                    )
-
-                logger.info("Memory consolidation done (model={}): {} messages remaining",
-                            current_model, len(session.messages))
-                return True
-
-            except asyncio.TimeoutError:
-                entry = MODEL_MAP.get(current_model)
-                next_model = entry.fallback if entry else None
-                if next_model and next_model not in visited:
-                    logger.warning(
-                        "Memory consolidation: {} timed out after {}s, trying {}",
-                        current_model, timeout, next_model,
-                    )
-                    current_model = next_model
-                    continue
-                logger.warning("Memory consolidation timed out after {}s, giving up", timeout)
-                return False
-            except Exception:
-                entry = MODEL_MAP.get(current_model)
-                next_model = entry.fallback if entry else None
-                if next_model and next_model not in visited:
-                    logger.warning(
-                        "Memory consolidation: {} failed, trying {}",
-                        current_model, next_model, exc_info=True,
-                    )
-                    current_model = next_model
-                    continue
-                logger.exception("Memory consolidation failed")
-                return False
-
-        logger.warning("Memory consolidation: exhausted all fallbacks")
-        return False
+            logger.warning("Memory consolidation: exhausted all fallbacks")
+            return False

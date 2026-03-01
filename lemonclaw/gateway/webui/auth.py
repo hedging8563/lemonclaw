@@ -53,45 +53,39 @@ def verify_session_cookie(
     """
     try:
         raw = base64.urlsafe_b64decode(cookie.encode()).decode()
+
+        parts = raw.split(":")
+        if len(parts) != 4:
+            return False, None
+
+        created_ts, last_ts, nonce, sig = parts
+
+        # Verify HMAC integrity
+        payload = f"{created_ts}:{last_ts}:{nonce}"
+        expected_sig = _compute_hmac(payload, auth_token)
+        if not hmac.compare_digest(sig, expected_sig):
+            return False, None
+
+        now = int(time.time())
+
+        # Check absolute timeout
+        created = int(created_ts)
+        if now - created > ABSOLUTE_TIMEOUT:
+            return False, None
+
+        # Check idle timeout
+        last = int(last_ts)
+        if now - last > IDLE_TIMEOUT:
+            return False, None
+
+        # Refresh: update last_ts, keep created_ts and nonce
+        new_last = str(now)
+        new_payload = f"{created_ts}:{new_last}:{nonce}"
+        new_sig = _compute_hmac(new_payload, auth_token)
+        refreshed = base64.urlsafe_b64encode(
+            f"{new_payload}:{new_sig}".encode()
+        ).decode()
+
+        return True, refreshed
     except Exception:
         return False, None
-
-    parts = raw.split(":")
-    if len(parts) != 4:
-        return False, None
-
-    created_ts, last_ts, nonce, sig = parts
-
-    # Verify HMAC integrity
-    payload = f"{created_ts}:{last_ts}:{nonce}"
-    expected_sig = _compute_hmac(payload, auth_token)
-    if not hmac.compare_digest(sig, expected_sig):
-        return False, None
-
-    now = int(time.time())
-
-    # Check absolute timeout
-    try:
-        created = int(created_ts)
-    except ValueError:
-        return False, None
-    if now - created > ABSOLUTE_TIMEOUT:
-        return False, None
-
-    # Check idle timeout
-    try:
-        last = int(last_ts)
-    except ValueError:
-        return False, None
-    if now - last > IDLE_TIMEOUT:
-        return False, None
-
-    # Refresh: update last_ts, keep created_ts and nonce
-    new_last = str(now)
-    new_payload = f"{created_ts}:{new_last}:{nonce}"
-    new_sig = _compute_hmac(new_payload, auth_token)
-    refreshed = base64.urlsafe_b64encode(
-        f"{new_payload}:{new_sig}".encode()
-    ).decode()
-
-    return True, refreshed

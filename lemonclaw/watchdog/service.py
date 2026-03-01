@@ -310,6 +310,8 @@ class WatchdogService:
                         key = info.get("key", "")
                         if is_active and updated_at and (now - updated_at) > SESSION_STUCK_THRESHOLD:
                             logger.warning(f"watchdog: clearing stuck session {key}")
+                            # Invalidate from cache to force reload on next access
+                            self._session_manager.invalidate(key)
                 except Exception as e:
                     logger.error(f"watchdog: soft recovery error: {e}")
 
@@ -317,6 +319,7 @@ class WatchdogService:
         """Hard recovery: exit process (K8s/launchd/systemd will restart).
 
         Respects 10-minute cooldown to prevent restart storms.
+        Flushes all cached sessions before sending SIGTERM to minimize data loss.
         """
         now = time.monotonic()
         elapsed = now - self._state.last_hard_restart_time
@@ -330,6 +333,18 @@ class WatchdogService:
         self._state.last_hard_restart_time = now
         names = ", ".join(c.name for c in checks)
         logger.critical(f"watchdog: HARD RESTART — {self._state.consecutive_failures} consecutive failures ({names})")
+
+        # Flush all cached sessions to disk before killing the process
+        if self._session_manager is not None:
+            try:
+                for key, session in list(getattr(self._session_manager, '_cache', {}).items()):
+                    try:
+                        self._session_manager.save(session)
+                    except Exception:
+                        logger.error(f"watchdog: failed to flush session {key}")
+                logger.info("watchdog: flushed cached sessions before restart")
+            except Exception as e:
+                logger.error(f"watchdog: session flush failed: {e}")
 
         # Give a brief moment for logs to flush
         await asyncio.sleep(1)

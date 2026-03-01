@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from loguru import logger
+
 from lemonclaw.agent.tools.base import Tool
 
 
@@ -52,6 +54,7 @@ class ToolRegistry:
                 return result + _HINT
             return result
         except Exception as e:
+            logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, e)
             return f"Error executing {name}: {str(e)}" + _HINT
     
     @property

@@ -26,6 +26,23 @@ _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", 
 # Models that support reasoning_content field (thinking-enabled models).
 _REASONING_MODEL_KEYWORDS = ("deepseek-r1", "kimi-k2", "o1", "o3", "o4")
 
+# Keys to redact from error messages to prevent credential leakage in logs.
+_SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "password")
+
+
+def _sanitize_error(error: Exception) -> str:
+    """Return error message with sensitive values redacted."""
+    msg = str(error)
+    # Redact anything that looks like an API key (sk-xxx, key-xxx, long hex strings)
+    import re
+    # Redact Bearer tokens
+    msg = re.sub(r'Bearer\s+\S+', 'Bearer [REDACTED]', msg)
+    # Redact common API key patterns (sk-..., key-..., etc.)
+    msg = re.sub(r'\b(sk-|key-|api-)[A-Za-z0-9_-]{8,}\b', '[REDACTED]', msg)
+    # Redact long hex strings (32+ chars, likely tokens)
+    msg = re.sub(r'\b[0-9a-fA-F]{32,}\b', '[REDACTED]', msg)
+    return msg
+
 
 class LiteLLMProvider(LLMProvider):
     """
@@ -56,10 +73,11 @@ class LiteLLMProvider(LLMProvider):
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
-        
-        if api_base:
-            litellm.api_base = api_base
-        
+
+        # NOTE: Do NOT set litellm.api_base globally — it pollutes state across
+        # multiple provider instances (P3 multi-Agent). api_base is passed per-call
+        # via kwargs in chat() instead.
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
@@ -334,7 +352,7 @@ class LiteLLMProvider(LLMProvider):
                 response = await acompletion(**kwargs)
                 return await self._collect_stream(response)
             except AuthenticationError as e:
-                logger.error("Authentication failed: {}", e)
+                logger.error("Authentication failed: {}", _sanitize_error(e))
                 return LLMResponse(
                     content="API key 无效或已过期，请检查配置。",
                     finish_reason="error",
@@ -345,16 +363,16 @@ class LiteLLMProvider(LLMProvider):
                     delay = self._RETRY_DELAYS[min(attempt, len(self._RETRY_DELAYS) - 1)]
                     logger.warning(
                         "LLM error (attempt {}/{}), retrying in {:.0f}s: {}",
-                        attempt + 1, 1 + self._MAX_RETRIES, delay, e,
+                        attempt + 1, 1 + self._MAX_RETRIES, delay, _sanitize_error(e),
                     )
                     await asyncio.sleep(delay)
                 else:
                     logger.warning(
-                        "LLM error after {} attempts: {}", 1 + self._MAX_RETRIES, e,
+                        "LLM error after {} attempts: {}", 1 + self._MAX_RETRIES, _sanitize_error(e),
                     )
             except Exception as e:
                 last_error = e
-                logger.error("Unexpected LLM error: {}", e)
+                logger.error("Unexpected LLM error: {}", _sanitize_error(e))
                 break  # Don't retry unexpected errors
 
         # All retries exhausted — walk fallback chain
@@ -379,11 +397,11 @@ class LiteLLMProvider(LLMProvider):
                 response = await acompletion(**fb_kwargs)
                 return await self._collect_stream(response)
             except Exception as fb_err:
-                logger.warning("Fallback model {} failed: {}", fb_model_id, fb_err)
+                logger.warning("Fallback model {} failed: {}", fb_model_id, _sanitize_error(fb_err))
                 last_error = fb_err
 
         # Everything failed
-        error_msg = str(last_error) if last_error else "Unknown error"
+        error_msg = _sanitize_error(last_error) if last_error else "Unknown error"
         return LLMResponse(
             content=f"LLM 服务暂时不可用: {error_msg}",
             finish_reason="error",

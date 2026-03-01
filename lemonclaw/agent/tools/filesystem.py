@@ -8,16 +8,27 @@ from lemonclaw.agent.tools.base import Tool
 
 
 def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
+    """Resolve path against workspace (if relative) and enforce directory restriction.
+
+    Also rejects symlinks that point outside the allowed directory to mitigate TOCTOU.
+    """
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
     if allowed_dir:
+        allowed_resolved = allowed_dir.resolve()
         try:
-            resolved.relative_to(allowed_dir.resolve())
+            resolved.relative_to(allowed_resolved)
         except ValueError:
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+        # Reject symlinks whose target is outside the allowed directory
+        if p.is_symlink():
+            link_target = p.resolve(strict=False)
+            try:
+                link_target.relative_to(allowed_resolved)
+            except ValueError:
+                raise PermissionError(f"Symlink {path} points outside allowed directory {allowed_dir}")
     return resolved
 
 

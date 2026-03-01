@@ -71,11 +71,12 @@ async def connect_mcp_servers(
                 from mcp.client.streamable_http import streamable_http_client
                 # Always provide an explicit httpx client so MCP HTTP transport does not
                 # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
+                # Use a generous but finite timeout to prevent infinite hangs.
                 http_client = await stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
                     )
                 )
                 read, write, _ = await stack.enter_async_context(
