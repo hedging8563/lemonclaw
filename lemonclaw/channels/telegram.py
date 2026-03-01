@@ -37,39 +37,49 @@ def _markdown_to_telegram_html(text: str) -> str:
         return f"\x00IC{len(inline_codes) - 1}\x00"
     
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
-    
-    # 3. Headers # Title -> just the title text
+
+    # 3. Extract and protect markdown links (before HTML escaping)
+    links: list[tuple[str, str]] = []
+    def save_link(m: re.Match) -> str:
+        links.append((m.group(1), m.group(2)))
+        return f"\x00LK{len(links) - 1}\x00"
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', save_link, text)
+
+    # 4. Headers # Title -> just the title text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-    
-    # 4. Blockquotes > text -> just the text (before HTML escaping)
+
+    # 5. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
-    
-    # 5. Escape HTML special characters
+
+    # 6. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-    
-    # 7. Bold **text** or __text__
+
+    # 7. Restore links with HTML tags (URL stays unescaped)
+    for i, (link_text, url) in enumerate(links):
+        escaped_text = link_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = text.replace(f"\x00LK{i}\x00", f'<a href="{url}">{escaped_text}</a>')
+
+    # 8. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
-    
-    # 8. Italic _text_ (avoid matching inside words like some_var_name)
+
+    # 9. Italic _text_ (avoid matching inside words like some_var_name)
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
-    
-    # 9. Strikethrough ~~text~~
+
+    # 10. Strikethrough ~~text~~
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
-    
-    # 10. Bullet lists - item -> • item
+
+    # 11. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
-    
-    # 11. Restore inline code with HTML tags
+
+    # 12. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-    
-    # 12. Restore code blocks with HTML tags
+
+    # 13. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
