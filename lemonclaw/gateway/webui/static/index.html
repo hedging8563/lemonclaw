@@ -270,9 +270,15 @@ function LoginScreen({ onLogin }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    // Probe if auth is needed
-    api('/api/models').then(r => {
-      if (r.ok) { setNoAuth(true); onLogin(); }
+    // Probe auth state via dedicated check endpoint
+    api('/api/auth/check').then(r => {
+      if (r.ok) { return r.json(); }
+      return null;
+    }).then(data => {
+      if (data && data.ok) {
+        if (!data.auth_required) { setNoAuth(true); }
+        onLogin();
+      }
     }).catch(() => {});
     inputRef.current?.focus();
   }, []);
@@ -371,7 +377,7 @@ function ModelDropdown({ models, current, onSelect, onClose }) {
 }
 
 
-function TopBar({ model, models, streaming, onLogout }) {
+function TopBar({ model, models, streaming, onLogout, onModelSelect }) {
   const [showModels, setShowModels] = useState(false);
 
   return html`
@@ -381,7 +387,8 @@ function TopBar({ model, models, streaming, onLogout }) {
       </button>
       ${showModels && html`<${ModelDropdown}
         models=${models} current=${model}
-        onSelect=${() => {}} onClose=${() => setShowModels(false)} />`}
+        onSelect=${(id) => { onModelSelect(id); setShowModels(false); }}
+        onClose=${() => setShowModels(false)} />`}
       <span class="topbar-status">${streaming ? t('streaming') : t('connected')}</span>
       <div class="topbar-spacer" />
       <button class="topbar-btn" onClick=${onLogout}>${t('logout')}</button>
@@ -664,7 +671,8 @@ function App() {
       <div class="main">
         <${TopBar}
           model=${currentModel} models=${models}
-          streaming=${streaming} onLogout=${logout} />
+          streaming=${streaming} onLogout=${logout}
+          onModelSelect=${(id) => setCurrentModel(id)} />
         <${ChatArea} messages=${messages} streaming=${streaming} />
         <${InputArea} onSend=${sendMessage} disabled=${streaming} />
       </div>

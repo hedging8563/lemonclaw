@@ -37,19 +37,33 @@ def _check_webui_auth(
     return verify_session_cookie(cookie, auth_token)
 
 
-def _set_cookie(response: Response, cookie_value: str) -> None:
+_NO_CACHE = {"Cache-Control": "no-store, private", "Pragma": "no-cache"}
+
+
+def _json(data: dict, status_code: int = 200) -> JSONResponse:
+    """JSONResponse with no-cache headers (prevent CDN caching auth-protected content)."""
+    return JSONResponse(data, status_code=status_code, headers=_NO_CACHE)
+
+
+def _set_cookie(response: Response, cookie_value: str, *, secure: bool = False) -> None:
     response.set_cookie(
         COOKIE_NAME,
         cookie_value,
         httponly=True,
         samesite="strict",
-        secure=False,  # Allow HTTP for localhost dev
+        secure=secure,
         path="/",
     )
 
 
-def _clear_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, path="/")
+def _clear_cookie(response: Response, *, secure: bool = False) -> None:
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite="strict",
+        secure=secure,
+    )
 
 
 # ── Static file serving ─────────────────────────────────────────────────────
@@ -91,42 +105,60 @@ def get_webui_routes(
 ) -> list[Route]:
     """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
 
+    def _is_secure(request: Request) -> bool:
+        """Detect HTTPS from request scheme or X-Forwarded-Proto."""
+        if request.url.scheme == "https":
+            return True
+        return request.headers.get("x-forwarded-proto", "") == "https"
+
     # ── GET / — serve SPA ────────────────────────────────────────────────
 
     async def index(request: Request) -> Response:
         try:
             html = _load_index_html()
         except FileNotFoundError:
-            return JSONResponse({"error": "WebUI not available"}, status_code=404)
+            return _json({"error": "WebUI not available"}, 404)
         return HTMLResponse(html)
 
     # ── POST /api/auth — login ───────────────────────────────────────────
 
     async def auth_login(request: Request) -> Response:
         if not auth_token:
-            # No auth configured → localhost mode, auto-login
-            return JSONResponse({"ok": True})
+            return _json({"ok": True, "auth_required": False})
 
         try:
             body = await request.json()
         except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            return _json({"error": "Invalid JSON"}, 400)
 
         provided = body.get("token", "")
         if not provided or not verify_token(provided, auth_token):
-            return JSONResponse({"error": "Invalid token"}, status_code=401)
+            return _json({"error": "Invalid token"}, 401)
 
         cookie = create_session_cookie(auth_token)
-        resp = JSONResponse({"ok": True})
-        _set_cookie(resp, cookie)
+        resp = _json({"ok": True})
+        _set_cookie(resp, cookie, secure=_is_secure(request))
         return resp
 
     # ── DELETE /api/auth — logout ────────────────────────────────────────
 
     async def auth_logout(request: Request) -> Response:
-        resp = JSONResponse({"ok": True})
-        _clear_cookie(resp)
+        resp = _json({"ok": True})
+        _clear_cookie(resp, secure=_is_secure(request))
         return resp
+
+    # ── GET /api/auth/check — probe auth state ────────────────────────
+
+    async def auth_check(request: Request) -> Response:
+        if not auth_token:
+            return _json({"ok": True, "auth_required": False})
+        cookie = request.cookies.get(COOKIE_NAME)
+        if not cookie:
+            return _json({"ok": False, "auth_required": True}, 401)
+        valid, _ = verify_session_cookie(cookie, auth_token)
+        if valid:
+            return _json({"ok": True, "auth_required": True})
+        return _json({"ok": False, "auth_required": True}, 401)
 
     # ── Auth middleware helper ────────────────────────────────────────────
 
@@ -136,7 +168,7 @@ def get_webui_routes(
             return True, None
         valid, refreshed = _check_webui_auth(request, auth_token)
         if not valid:
-            return False, JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return False, _json({"error": "Unauthorized"}, 401)
         # Store refreshed cookie for the handler to set
         request.state.refreshed_cookie = refreshed
         return True, None
@@ -144,7 +176,7 @@ def get_webui_routes(
     def _maybe_refresh_cookie(request: Request, response: Response) -> None:
         cookie = getattr(request.state, "refreshed_cookie", None)
         if cookie:
-            _set_cookie(response, cookie)
+            _set_cookie(response, cookie, secure=_is_secure(request))
 
     # ── POST /api/chat/stream — SSE streaming ────────────────────────────
 
@@ -156,11 +188,11 @@ def get_webui_routes(
         try:
             body = await request.json()
         except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            return _json({"error": "Invalid JSON"}, 400)
 
         message = body.get("message", "").strip()
         if not message:
-            return JSONResponse({"error": "Empty message"}, status_code=400)
+            return _json({"error": "Empty message"}, 400)
 
         session_key = body.get("session_key", "webui:default")
         # Enforce webui: prefix — prevent accessing other channel sessions
@@ -199,13 +231,22 @@ def get_webui_routes(
         async def event_generator():
             try:
                 while True:
-                    item = await queue.get()
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        item = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
                     if item is None:
                         break
                     yield item
             finally:
                 if not task.done():
                     task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
         from starlette.responses import StreamingResponse
 
@@ -213,7 +254,7 @@ def get_webui_routes(
             event_generator(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-store, private",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -230,7 +271,7 @@ def get_webui_routes(
         sessions = session_manager.list_sessions()
         # Filter to webui sessions only
         webui_sessions = [s for s in sessions if s.get("key", "").startswith("webui:")]
-        resp = JSONResponse({"sessions": webui_sessions})
+        resp = _json({"sessions": webui_sessions})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -244,10 +285,10 @@ def get_webui_routes(
         key = request.path_params["key"]
         # Security: only allow deleting webui sessions
         if not key.startswith("webui:"):
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
+            return _json({"error": "Forbidden"}, 403)
 
         deleted = session_manager.delete_session(key)
-        resp = JSONResponse({"deleted": deleted})
+        resp = _json({"deleted": deleted})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -264,7 +305,7 @@ def get_webui_routes(
             if not m.hidden
         ]
         current = agent_loop.model if hasattr(agent_loop, "model") else ""
-        resp = JSONResponse({"models": models, "current": current})
+        resp = _json({"models": models, "current": current})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -274,6 +315,7 @@ def get_webui_routes(
         Route("/", index, methods=["GET"]),
         Route("/api/auth", auth_login, methods=["POST"]),
         Route("/api/auth", auth_logout, methods=["DELETE"]),
+        Route("/api/auth/check", auth_check, methods=["GET"]),
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
