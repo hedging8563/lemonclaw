@@ -199,8 +199,5 @@ async def _summarize(
         )
         return response.content or "(summary unavailable)"
     except Exception as e:
-        logger.error("compaction: summarization failed: {}", e)
-        # Fallback: truncate the text directly
-        if len(conversation_text) > 3000:
-            return conversation_text[:3000] + "\n... (truncated due to summarization error)"
-        return conversation_text
+        logger.warning("compaction: summarization failed: {}", e)
+        return "[Earlier conversation could not be summarized — context condensed]"

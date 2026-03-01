@@ -190,6 +190,10 @@ class DiscordChannel(BaseChannel):
         """Start or restart the heartbeat loop."""
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         async def heartbeat_loop() -> None:
             while self._running and self._ws:

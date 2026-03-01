@@ -99,7 +99,7 @@ class HeartbeatService:
             model=self.model,
         )
 
-        if not response.has_tool_calls:
+        if not response.has_tool_calls or not response.tool_calls:
             return "skip", ""
 
         args = response.tool_calls[0].arguments

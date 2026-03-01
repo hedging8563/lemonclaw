@@ -138,7 +138,8 @@ def _build_chat_handler(
             return JSONResponse({"error": "message is required"}, status_code=400)
 
         session_key = body.get("session", "api:test")
-        timeout = min(body.get("timeout", 120), 300)
+        raw_timeout = body.get("timeout", 120)
+        timeout = min(int(raw_timeout) if isinstance(raw_timeout, (int, float)) else 120, 300)
 
         try:
             response = await asyncio.wait_for(

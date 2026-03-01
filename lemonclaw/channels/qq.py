@@ -90,8 +90,8 @@ class QQChannel(BaseChannel):
         if self._client:
             try:
                 await self._client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("QQ bot close error: {}", e)
         logger.info("QQ bot stopped")
 
     async def send(self, msg: OutboundMessage) -> None:

@@ -3,6 +3,8 @@
 
 def split_message(content: str, max_len: int) -> list[str]:
     """Split content into chunks within max_len, preferring line breaks."""
+    if max_len <= 0:
+        raise ValueError(f"max_len must be positive, got {max_len}")
     if not content:
         return []
     if len(content) <= max_len:

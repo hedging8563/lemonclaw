@@ -83,12 +83,7 @@ class SessionManager:
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".lemonclaw" / "sessions"
         self._cache: dict[str, Session] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
 
-    def _get_lock(self, key: str) -> asyncio.Lock:
-        """Get or create an asyncio.Lock for a session key (atomic via setdefault)."""
-        return self._locks.setdefault(key, asyncio.Lock())
-    
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))
@@ -239,7 +234,8 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read session metadata from {}: {}", path, e)
                 continue
         
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
@@ -248,7 +244,6 @@ class SessionManager:
         """Delete a session by key. Returns True if deleted, False if not found."""
         path = self._get_session_path(key)
         self._cache.pop(key, None)
-        self._locks.pop(key, None)
         if path.exists():
             path.unlink()
             return True

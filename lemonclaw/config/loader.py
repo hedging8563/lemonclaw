@@ -46,7 +46,13 @@ def load_config(config_path: Path | None = None) -> Config:
             data = _migrate_config(data)
             config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to load config from {path}: {e}, using defaults")
+            logger.warning(f"Failed to load config from {path}: {e}, backing up and using defaults")
+            try:
+                bak = path.with_suffix(".json.bak")
+                path.rename(bak)
+                logger.info(f"Corrupt config backed up to {bak}")
+            except OSError:
+                pass
             config = Config()
     else:
         config = Config()
@@ -118,7 +124,7 @@ def _apply_env_overrides(config: Config) -> None:
         base_v1 = f"{base}/v1" if not base.endswith("/v1") else base
         base_no_v1 = base.removesuffix("/v1")
 
-        # Auto-populate the 3 LemonData providers
+        # Auto-populate the 4 LemonData providers
         config.providers.lemondata.api_key = api_key
         config.providers.lemondata.api_base = base_v1
 
@@ -127,6 +133,9 @@ def _apply_env_overrides(config: Config) -> None:
 
         config.providers.lemondata_minimax.api_key = api_key
         config.providers.lemondata_minimax.api_base = base_no_v1
+
+        config.providers.lemondata_gemini.api_key = api_key
+        config.providers.lemondata_gemini.api_base = base_no_v1
 
 
 def _migrate_config(data: dict) -> dict:

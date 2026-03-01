@@ -169,7 +169,7 @@ class SubagentManager:
             
         except Exception as e:
             error_msg = f"Error: {str(e)}"
-            logger.error("Subagent [{}] failed: {}", task_id, e)
+            logger.exception("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
     
     async def _announce_result(

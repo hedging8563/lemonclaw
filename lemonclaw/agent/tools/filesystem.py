@@ -60,6 +60,8 @@ class ReadFileTool(Tool):
             "required": ["path"]
         }
     
+    _MAX_READ_BYTES = 512 * 1024  # 512KB
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -68,6 +70,10 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
+            size = file_path.stat().st_size
+            if size > self._MAX_READ_BYTES:
+                content = file_path.read_bytes()[:self._MAX_READ_BYTES].decode("utf-8", errors="replace")
+                return content + f"\n... (file truncated at {self._MAX_READ_BYTES // 1024}KB, total {size // 1024}KB)"
             content = file_path.read_text(encoding="utf-8")
             return content
         except PermissionError as e:

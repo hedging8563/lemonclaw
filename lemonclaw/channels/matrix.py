@@ -435,6 +435,7 @@ class MatrixChannel(BaseChannel):
             except asyncio.CancelledError:
                 break
             except Exception:
+                logger.exception("Matrix sync_forever error, retrying in 2s")
                 await asyncio.sleep(2)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:

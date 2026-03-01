@@ -24,7 +24,8 @@ from lemonclaw.providers.registry import find_by_model, find_gateway
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
 
 # Models that support reasoning_content field (thinking-enabled models).
-_REASONING_MODEL_KEYWORDS = ("deepseek-r1", "kimi-k2", "o1", "o3", "o4")
+# Use boundary-safe keywords: "o1-", "o3-", "o4-" prevent matching "foo1", "veo3" etc.
+_REASONING_MODEL_KEYWORDS = ("deepseek-r1", "kimi-k2", "o1-", "o3-", "o4-")
 
 # Keys to redact from error messages to prevent credential leakage in logs.
 _SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "password")

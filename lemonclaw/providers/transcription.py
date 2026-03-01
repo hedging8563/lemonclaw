@@ -15,12 +15,13 @@ class TranscriptionProvider:
     no extra configuration needed.
     """
 
-    def __init__(self, api_key: str | None = None, api_base: str | None = None):
+    def __init__(self, api_key: str | None = None, api_base: str | None = None, model: str = "whisper-large-v3"):
         self.api_key = api_key or os.environ.get("API_KEY", "")
         base = api_base or os.environ.get("API_BASE_URL", "https://api.lemondata.cc")
         # Strip trailing /v1 if present — we add it ourselves
         base = base.rstrip("/").removesuffix("/v1")
         self.api_url = f"{base}/v1/audio/transcriptions"
+        self.model = model
 
     async def transcribe(self, file_path: str | Path) -> str:
         """Transcribe an audio file."""
@@ -40,7 +41,7 @@ class TranscriptionProvider:
                         self.api_url,
                         headers={"Authorization": f"Bearer {self.api_key}"},
                         files={"file": (path.name, f)},
-                        data={"model": "whisper-large-v3"},
+                        data={"model": self.model},
                         timeout=60.0,
                     )
                     response.raise_for_status()

@@ -92,7 +92,7 @@ class SyncReport:
 
 
 def run_config_sync(config: Config) -> SyncReport:
-    """Run all 7 sync operations. Called by gateway startup before serving.
+    """Run all 8 sync operations. Called by gateway startup before serving.
 
     Note: load_config() already calls _apply_env_overrides() which handles
     the basic GATEWAY_TOKEN, API_KEY, API_BASE_URL, DEFAULT_MODEL, INSTANCE_ID

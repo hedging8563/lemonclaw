@@ -6,6 +6,8 @@ from loguru import logger
 
 from lemonclaw.agent.tools.base import Tool
 
+_TOOL_ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
+
 
 class ToolRegistry:
     """
@@ -39,8 +41,6 @@ class ToolRegistry:
     
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """Execute a tool by name with given parameters."""
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
-
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
@@ -48,14 +48,14 @@ class ToolRegistry:
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _TOOL_ERROR_HINT
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
+                return result + _TOOL_ERROR_HINT
             return result
         except Exception as e:
             logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, e)
-            return f"Error executing {name}: {str(e)}" + _HINT
+            return f"Error executing {name}: {str(e)}" + _TOOL_ERROR_HINT
     
     @property
     def tool_names(self) -> list[str]:
