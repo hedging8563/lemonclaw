@@ -118,7 +118,7 @@ def get_webui_routes(
             html = _load_index_html()
         except FileNotFoundError:
             return _json({"error": "WebUI not available"}, 404)
-        return HTMLResponse(html)
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     # ── POST /api/auth — login ───────────────────────────────────────────
 
