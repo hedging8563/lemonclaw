@@ -247,6 +247,7 @@ def create_app(
             agent_loop=agent_loop,
             session_manager=session_manager,
             usage_tracker=usage_tracker,
+            version=version,
         ))
 
     return Starlette(routes=routes)

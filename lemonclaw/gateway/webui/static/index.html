@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LemonClaw</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 <script type="importmap">
 {
   "imports": {
@@ -211,6 +212,8 @@ const I18N = {
     error: 'Error',
     lang: '\u4E2D',
     connected: 'connected',
+    tokens: 'Tokens',
+    loading_history: 'Loading...',
   },
   zh: {
     title: 'LemonClaw',
@@ -233,6 +236,8 @@ const I18N = {
     error: '\u9519\u8BEF',
     lang: 'EN',
     connected: '\u5DF2\u8FDE\u63A5',
+    tokens: 'Tokens',
+    loading_history: '\u52A0\u8F7D\u4E2D...',
   }
 };
 
@@ -322,7 +327,7 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange }) {
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version }) {
   return html`
     <div class="sidebar">
       <div class="sidebar-header">
@@ -342,7 +347,12 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
         }
       </div>
       <div class="sidebar-footer">
-        <span>LemonClaw</span>
+        <div>
+          ${usage && usage.total_tokens > 0
+            ? html`<div style="margin-bottom:4px">${t('tokens')}: ${(usage.total_tokens / 1000).toFixed(1)}k</div>`
+            : ''}
+          <span>${version || 'LemonClaw'}</span>
+        </div>
         <button class="topbar-btn" onClick=${onLangChange}>${t('lang')}</button>
       </div>
     </div>
@@ -565,6 +575,8 @@ function App() {
   const [streaming, setStreaming] = useState(false);
   const [models, setModels] = useState([]);
   const [currentModel, setCurrentModel] = useState('');
+  const [sessionUsage, setSessionUsage] = useState(null);
+  const [appVersion, setAppVersion] = useState('');
 
   const toggleLang = useCallback(() => {
     const next = _lang === 'en' ? 'zh' : 'en';
@@ -594,10 +606,33 @@ function App() {
     } catch (_) {}
   }, []);
 
+  const loadInfo = useCallback(async (sessionKey) => {
+    try {
+      const url = sessionKey ? '/api/info?session=' + encodeURIComponent(sessionKey) : '/api/info';
+      const r = await api(url);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.version) setAppVersion(d.version);
+        if (d.session_usage) setSessionUsage(d.session_usage);
+      }
+    } catch (_) {}
+  }, []);
+
+  const loadSessionMessages = useCallback(async (key) => {
+    try {
+      const r = await api('/api/sessions/' + encodeURIComponent(key) + '/messages');
+      if (r.ok) {
+        const d = await r.json();
+        setMessages(d.messages || []);
+      }
+    } catch (_) { setMessages([]); }
+  }, []);
+
   useEffect(() => {
     if (authed) {
       loadSessions();
       loadModels();
+      loadInfo(activeKey);
     }
   }, [authed]);
 
@@ -632,17 +667,21 @@ function App() {
 
     setStreaming(false);
     loadSessions();
+    loadInfo(activeKey);
   }, [activeKey, currentModel]);
 
   const newChat = useCallback(() => {
     const id = Date.now().toString(36);
     setActiveKey('webui:' + id);
     setMessages([]);
+    setSessionUsage(null);
   }, []);
 
   const selectSession = useCallback((key) => {
     setActiveKey(key);
     setMessages([]);
+    loadSessionMessages(key);
+    loadInfo(key);
   }, []);
 
   const deleteSession = useCallback(async (key) => {
@@ -667,7 +706,8 @@ function App() {
       <${Sidebar}
         sessions=${sessions} activeKey=${activeKey}
         onSelect=${selectSession} onNew=${newChat} onDelete=${deleteSession}
-        lang=${lang} onLangChange=${toggleLang} />
+        lang=${lang} onLangChange=${toggleLang}
+        usage=${sessionUsage} version=${appVersion} />
       <div class="main">
         <${TopBar}
           model=${currentModel} models=${models}

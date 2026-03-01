@@ -102,6 +102,7 @@ def get_webui_routes(
     agent_loop: AgentLoop,
     session_manager: SessionManager,
     usage_tracker: UsageTracker | None = None,
+    version: str = "unknown",
 ) -> list[Route]:
     """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
 
@@ -198,7 +199,13 @@ def get_webui_routes(
         # Enforce webui: prefix — prevent accessing other channel sessions
         if not session_key.startswith("webui:"):
             session_key = f"webui:{session_key}"
+
+        # Write model override to session metadata before processing
         model = body.get("model")
+        if model:
+            session = session_manager.get_or_create(session_key)
+            session.metadata["current_model"] = model
+            session_manager.save(session)
 
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -309,6 +316,61 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/sessions/{key}/messages — session history ─────────────
+
+    async def get_session_messages(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        key = request.path_params["key"]
+        if not key.startswith("webui:"):
+            return _json({"error": "Forbidden"}, 403)
+
+        session = session_manager.get_or_create(key)
+        # Return messages with role and content only (safe for frontend)
+        messages = []
+        for m in session.messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content:
+                # Skip tool_calls-only assistant messages (content is empty/null)
+                if isinstance(content, list):
+                    # Multimodal content — extract text parts
+                    content = " ".join(p.get("text", "") for p in content if p.get("type") == "text")
+                if content:
+                    messages.append({"role": role, "content": content})
+
+        resp = _json({"messages": messages})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── GET /api/info — instance status + version + session usage ──────
+
+    async def get_info(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        import time as _time
+        data: dict = {"version": version}
+
+        # Instance uptime
+        if usage_tracker:
+            data.update(usage_tracker.get_instance_summary())
+
+        # Per-session usage if ?session=key
+        session_key = request.query_params.get("session")
+        if session_key and usage_tracker:
+            if not session_key.startswith("webui:"):
+                session_key = f"webui:{session_key}"
+            session = session_manager.get_or_create(session_key)
+            data["session_usage"] = usage_tracker.get_session_summary(session.metadata)
+
+        resp = _json(data)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── Assemble routes ──────────────────────────────────────────────────
 
     return [
@@ -318,6 +380,8 @@ def get_webui_routes(
         Route("/api/auth/check", auth_check, methods=["GET"]),
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
+        Route("/api/sessions/{key:path}/messages", get_session_messages, methods=["GET"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
         Route("/api/models", list_models, methods=["GET"]),
+        Route("/api/info", get_info, methods=["GET"]),
     ]
