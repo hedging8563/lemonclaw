@@ -245,3 +245,13 @@ class SessionManager:
                 continue
         
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def delete_session(self, key: str) -> bool:
+        """Delete a session by key. Returns True if deleted, False if not found."""
+        path = self._get_session_path(key)
+        self._cache.pop(key, None)
+        self._locks.pop(key, None)
+        if path.exists():
+            path.unlink()
+            return True
+        return False

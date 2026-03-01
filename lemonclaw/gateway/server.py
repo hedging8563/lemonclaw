@@ -212,6 +212,7 @@ def create_app(
     usage_tracker: UsageTracker | None = None,
     session_manager: SessionManager | None = None,
     agent_loop: AgentLoop | None = None,
+    webui_enabled: bool = True,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -236,6 +237,17 @@ def create_app(
     wecom_verify, wecom_callback = _build_wecom_webhook_handler(channel_manager)
     routes.append(Route("/webhook/wecom", wecom_verify, methods=["GET"]))
     routes.append(Route("/webhook/wecom", wecom_callback, methods=["POST"]))
+
+    # WebUI routes (appended last so /health, /api/*, /webhook/* take priority)
+    if webui_enabled and agent_loop and session_manager:
+        from lemonclaw.gateway.webui.routes import get_webui_routes
+
+        routes.extend(get_webui_routes(
+            auth_token=auth_token,
+            agent_loop=agent_loop,
+            session_manager=session_manager,
+            usage_tracker=usage_tracker,
+        ))
 
     return Starlette(routes=routes)
 

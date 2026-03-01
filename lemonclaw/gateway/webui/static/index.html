@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LemonClaw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css">
+<style>
+/* ── Reset + Base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-primary: #0D0D0D;
+  --bg-secondary: #1A1A1A;
+  --bg-tertiary: #252525;
+  --bg-hover: #2F2F2F;
+  --text-primary: #E8E8E8;
+  --text-secondary: #999;
+  --text-muted: #666;
+  --accent: #FF6B35;
+  --accent-hover: #FF8A5C;
+  --teal: #0ABAB5;
+  --teal-dim: rgba(10, 186, 181, 0.15);
+  --border: #333;
+  --error: #FF4444;
+  --success: #4CAF50;
+  --font-ui: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-w: 260px;
+  --topbar-h: 48px;
+}
+html, body { height: 100%; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-ui); font-size: 14px; line-height: 1.6; }
+a { color: var(--teal); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; font-size: inherit; }
+input { font-family: inherit; font-size: inherit; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Login ────────────────────────────────────────────────────────── */
+.login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 24px; }
+.login-logo { font-family: var(--font-mono); font-size: 28px; font-weight: 600; color: var(--accent); }
+.login-logo span { color: var(--teal); }
+.login-subtitle { color: var(--text-secondary); font-size: 13px; margin-top: -16px; }
+.login-form { display: flex; gap: 8px; }
+.login-input { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px 16px; color: var(--text-primary); width: 300px; outline: none; font-family: var(--font-mono); font-size: 13px; }
+.login-input:focus { border-color: var(--accent); }
+.login-input::placeholder { color: var(--text-muted); }
+.login-btn { background: var(--accent); color: #fff; padding: 10px 20px; border-radius: 6px; font-weight: 500; transition: background 0.2s; }
+.login-btn:hover { background: var(--accent-hover); }
+.login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.login-error { color: var(--error); font-size: 13px; }
+.login-noauth { color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono); }
+
+/* ── Layout ───────────────────────────────────────────────────────── */
+.app { display: flex; height: 100vh; }
+.sidebar { width: var(--sidebar-w); background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+.sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.sidebar-brand { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--accent); }
+.sidebar-brand span { color: var(--teal); }
+.sidebar-new { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; color: var(--text-secondary); transition: all 0.2s; }
+.sidebar-new:hover { border-color: var(--accent); color: var(--text-primary); }
+.sidebar-sessions { flex: 1; overflow-y: auto; padding: 8px; }
+.sidebar-session { display: flex; align-items: center; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: background 0.15s; gap: 8px; }
+.sidebar-session:hover { background: var(--bg-hover); }
+.sidebar-session.active { background: var(--bg-tertiary); border: 1px solid var(--border); }
+.sidebar-session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.sidebar-session-del { opacity: 0; color: var(--text-muted); font-size: 16px; padding: 0 4px; transition: opacity 0.15s; }
+.sidebar-session:hover .sidebar-session-del { opacity: 1; }
+.sidebar-session-del:hover { color: var(--error); }
+.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center; }
+
+/* ── Main area ────────────────────────────────────────────────────── */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar { height: var(--topbar-h); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0; }
+.topbar-model { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-family: var(--font-mono); font-size: 12px; color: var(--teal); cursor: pointer; }
+.topbar-model:hover { border-color: var(--teal); }
+.topbar-status { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+.topbar-spacer { flex: 1; }
+.topbar-btn { padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-secondary); transition: all 0.15s; }
+.topbar-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+/* ── Model selector dropdown ──────────────────────────────────────── */
+.model-dropdown { position: absolute; top: calc(var(--topbar-h) + 4px); left: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 4px; z-index: 100; min-width: 280px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.model-tier { padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+.model-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s; }
+.model-item:hover { background: var(--bg-hover); }
+.model-item.active { background: var(--teal-dim); }
+.model-item-name { font-family: var(--font-mono); font-size: 12px; }
+.model-item-desc { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+/* ── Chat area ────────────────────────────────────────────────────── */
+.chat-area { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; }
+.chat-empty-icon { font-size: 48px; opacity: 0.3; }
+.chat-empty-text { font-size: 15px; }
+.chat-empty-hint { font-size: 12px; font-family: var(--font-mono); }
+
+/* ── Messages ─────────────────────────────────────────────────────── */
+.msg { display: flex; gap: 12px; max-width: 800px; width: 100%; margin: 0 auto; }
+.msg-user { justify-content: flex-end; }
+.msg-avatar { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; margin-top: 2px; }
+.msg-user .msg-avatar { background: var(--accent); color: #fff; }
+.msg-assistant .msg-avatar { background: var(--teal); color: #fff; }
+.msg-body { max-width: 680px; min-width: 0; }
+.msg-user .msg-body { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 12px 12px 2px 12px; padding: 10px 14px; }
+.msg-assistant .msg-body { background: var(--bg-secondary); border-radius: 12px 12px 12px 2px; padding: 10px 14px; }
+
+/* ── Markdown content ─────────────────────────────────────────────── */
+.msg-content { word-break: break-word; }
+.msg-content p { margin: 0 0 8px; }
+.msg-content p:last-child { margin-bottom: 0; }
+.msg-content pre { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
+.msg-content code { font-family: var(--font-mono); font-size: 12.5px; background: var(--bg-primary); padding: 2px 5px; border-radius: 3px; }
+.msg-content pre code { background: none; padding: 0; }
+.msg-content ul, .msg-content ol { margin: 4px 0; padding-left: 20px; }
+.msg-content blockquote { border-left: 3px solid var(--teal); padding-left: 12px; color: var(--text-secondary); margin: 8px 0; }
+.msg-content table { border-collapse: collapse; margin: 8px 0; }
+.msg-content th, .msg-content td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13px; }
+.msg-content th { background: var(--bg-tertiary); }
+
+/* ── Tool hint ────────────────────────────────────────────────────── */
+.msg-tool-hint { font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); padding: 4px 0; display: flex; align-items: center; gap: 6px; }
+.msg-tool-hint::before { content: '\2699'; font-size: 11px; }
+
+/* ── Streaming cursor ─────────────────────────────────────────────── */
+.streaming-cursor::after { content: '\2588'; animation: blink 0.8s infinite; color: var(--accent); }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ── Input area ───────────────────────────────────────────────────── */
+.input-area { border-top: 1px solid var(--border); padding: 16px 24px; background: var(--bg-primary); }
+.input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+.input-field { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text-primary); font-family: var(--font-ui); font-size: 14px; resize: none; outline: none; max-height: 160px; min-height: 42px; line-height: 1.5; }
+.input-field:focus { border-color: var(--accent); }
+.input-field::placeholder { color: var(--text-muted); }
+.input-send { background: var(--accent); color: #fff; width: 42px; height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; transition: background 0.2s; flex-shrink: 0; }
+.input-send:hover { background: var(--accent-hover); }
+.input-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Mobile ───────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .chat-area { padding: 16px; }
+  .input-area { padding: 12px 16px; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.25.4';
+import { useState, useEffect, useRef, useCallback } from 'https://esm.sh/preact@10.25.4/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+import { marked } from 'https://esm.sh/marked@14.3.0';
+import DOMPurify from 'https://esm.sh/dompurify@3.2.4';
+import hljs from 'https://esm.sh/highlight.js@11.11.1/lib/core';
+import javascript from 'https://esm.sh/highlight.js@11.11.1/lib/languages/javascript';
+import python from 'https://esm.sh/highlight.js@11.11.1/lib/languages/python';
+import bash from 'https://esm.sh/highlight.js@11.11.1/lib/languages/bash';
+import json_lang from 'https://esm.sh/highlight.js@11.11.1/lib/languages/json';
+import typescript from 'https://esm.sh/highlight.js@11.11.1/lib/languages/typescript';
+
+const html = htm.bind(h);
+
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('js', javascript);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('py', python);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('sh', bash);
+hljs.registerLanguage('json', json_lang);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('ts', typescript);
+
+// ── i18n ────────────────────────────────────────────────────────────────
+const I18N = {
+  en: {
+    title: 'LemonClaw',
+    login_subtitle: 'AI Agent with 300+ Models',
+    login_placeholder: 'Enter auth token...',
+    login_btn: 'Connect',
+    login_noauth: 'No auth required (localhost)',
+    login_error: 'Invalid token',
+    new_chat: '+ New',
+    empty_title: 'Start a conversation',
+    empty_hint: 'Type a message below to begin',
+    input_placeholder: 'Send a message...',
+    send: '\u2191',
+    logout: 'Logout',
+    sessions: 'Sessions',
+    no_sessions: 'No conversations yet',
+    delete_confirm: 'Delete this conversation?',
+    model_select: 'Select model',
+    streaming: 'Thinking...',
+    error: 'Error',
+    lang: '\u4E2D',
+    connected: 'connected',
+  },
+  zh: {
+    title: 'LemonClaw',
+    login_subtitle: 'AI \u667A\u80FD\u4F53 \u00B7 300+ \u6A21\u578B',
+    login_placeholder: '\u8F93\u5165\u8BA4\u8BC1 Token...',
+    login_btn: '\u8FDE\u63A5',
+    login_noauth: '\u672C\u5730\u6A21\u5F0F\uFF0C\u65E0\u9700\u8BA4\u8BC1',
+    login_error: '\u65E0\u6548\u7684 Token',
+    new_chat: '+ \u65B0\u5BF9\u8BDD',
+    empty_title: '\u5F00\u59CB\u4E00\u6BB5\u5BF9\u8BDD',
+    empty_hint: '\u5728\u4E0B\u65B9\u8F93\u5165\u6D88\u606F\u5F00\u59CB',
+    input_placeholder: '\u53D1\u9001\u6D88\u606F...',
+    send: '\u2191',
+    logout: '\u9000\u51FA',
+    sessions: '\u4F1A\u8BDD',
+    no_sessions: '\u6682\u65E0\u5BF9\u8BDD',
+    delete_confirm: '\u786E\u8BA4\u5220\u9664\u6B64\u5BF9\u8BDD\uFF1F',
+    model_select: '\u9009\u62E9\u6A21\u578B',
+    streaming: '\u601D\u8003\u4E2D...',
+    error: '\u9519\u8BEF',
+    lang: 'EN',
+    connected: '\u5DF2\u8FDE\u63A5',
+  }
+};
+
+function getLang() {
+  const saved = localStorage.getItem('lc_lang');
+  if (saved && I18N[saved]) return saved;
+  return navigator.language.startsWith('zh') ? 'zh' : 'en';
+}
+
+let _lang = getLang();
+function t(key) { return (I18N[_lang] && I18N[_lang][key]) || key; }
+
+// ── Markdown renderer ───────────────────────────────────────────────────
+marked.setOptions({
+  highlight(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(code, { language: lang }).value; }
+      catch (_) { /* fall through */ }
+    }
+    return code;
+  },
+  breaks: true,
+});
+
+function renderMd(text) {
+  if (!text) return '';
+  const raw = marked.parse(text);
+  return DOMPurify.sanitize(raw);
+}
+
+// ── API helpers ─────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(path, { credentials: 'same-origin', ...opts });
+  return res;
+}
+
+// ── Components ──────────────────────────────────────────────────────────
+
+function LoginScreen({ onLogin }) {
+  const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [noAuth, setNoAuth] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    // Probe if auth is needed
+    api('/api/models').then(r => {
+      if (r.ok) { setNoAuth(true); onLogin(); }
+    }).catch(() => {});
+    inputRef.current?.focus();
+  }, []);
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    if (noAuth) { onLogin(); return; }
+    setLoading(true); setError('');
+    try {
+      const r = await api('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (r.ok) { onLogin(); }
+      else { setError(t('login_error')); }
+    } catch (_) { setError(t('error')); }
+    setLoading(false);
+  };
+
+  return html`
+    <div class="login-screen">
+      <div class="login-logo">Lemon<span>Claw</span></div>
+      <div class="login-subtitle">${t('login_subtitle')}</div>
+      ${noAuth
+        ? html`<div class="login-noauth">${t('login_noauth')}</div>`
+        : html`
+          <form class="login-form" onSubmit=${submit}>
+            <input ref=${inputRef} class="login-input" type="password"
+              placeholder=${t('login_placeholder')} value=${token}
+              onInput=${e => setToken(e.target.value)} />
+            <button class="login-btn" type="submit" disabled=${loading || !token}>
+              ${t('login_btn')}
+            </button>
+          </form>
+          ${error && html`<div class="login-error">${error}</div>`}
+        `
+      }
+    </div>
+  `;
+}
+
+
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange }) {
+  return html`
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">Lemon<span>Claw</span></div>
+        <button class="sidebar-new" onClick=${onNew}>${t('new_chat')}</button>
+      </div>
+      <div class="sidebar-sessions">
+        ${sessions.length === 0
+          ? html`<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">${t('no_sessions')}</div>`
+          : sessions.map(s => html`
+            <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
+              onClick=${() => onSelect(s.key)}>
+              <span class="sidebar-session-name">${s.key.replace('webui:', '')}</span>
+              <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>x</button>
+            </div>
+          `)
+        }
+      </div>
+      <div class="sidebar-footer">
+        <span>LemonClaw</span>
+        <button class="topbar-btn" onClick=${onLangChange}>${t('lang')}</button>
+      </div>
+    </div>
+  `;
+}
+
+
+function ModelDropdown({ models, current, onSelect, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
+  const tiers = {};
+  models.forEach(m => { (tiers[m.tier] = tiers[m.tier] || []).push(m); });
+
+  return html`
+    <div class="model-dropdown" ref=${ref}>
+      ${Object.entries(tiers).map(([tier, items]) => html`
+        <div class="model-tier">${tier}</div>
+        ${items.map(m => html`
+          <div class="model-item ${m.id === current ? 'active' : ''}" onClick=${() => { onSelect(m.id); onClose(); }}>
+            <span class="model-item-name">${m.id}</span>
+            <span class="model-item-desc">${m.description}</span>
+          </div>
+        `)}
+      `)}
+    </div>
+  `;
+}
+
+
+function TopBar({ model, models, streaming, onLogout }) {
+  const [showModels, setShowModels] = useState(false);
+
+  return html`
+    <div class="topbar">
+      <button class="topbar-model" onClick=${() => setShowModels(!showModels)}>
+        ${model || 'model'}
+      </button>
+      ${showModels && html`<${ModelDropdown}
+        models=${models} current=${model}
+        onSelect=${() => {}} onClose=${() => setShowModels(false)} />`}
+      <span class="topbar-status">${streaming ? t('streaming') : t('connected')}</span>
+      <div class="topbar-spacer" />
+      <button class="topbar-btn" onClick=${onLogout}>${t('logout')}</button>
+    </div>
+  `;
+}
+
+
+function Message({ role, content, toolHints, streaming }) {
+  const bodyRef = useRef(null);
+
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.querySelectorAll('pre code:not(.hljs)').forEach(el => {
+        hljs.highlightElement(el);
+      });
+    }
+  }, [content]);
+
+  if (role === 'user') {
+    return html`
+      <div class="msg msg-user">
+        <div class="msg-body">
+          <div class="msg-content">${content}</div>
+        </div>
+        <div class="msg-avatar">U</div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="msg msg-assistant">
+      <div class="msg-avatar">A</div>
+      <div class="msg-body">
+        ${toolHints && toolHints.map(hint => html`<div class="msg-tool-hint">${hint}</div>`)}
+        <div ref=${bodyRef} class="msg-content ${streaming ? 'streaming-cursor' : ''}"
+          dangerouslySetInnerHTML=${{ __html: renderMd(content) }} />
+      </div>
+    </div>
+  `;
+}
+
+
+function ChatArea({ messages, streaming }) {
+  const endRef = useRef(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streaming]);
+
+  if (messages.length === 0 && !streaming) {
+    return html`
+      <div class="chat-area">
+        <div class="chat-empty">
+          <div class="chat-empty-icon">\uD83C\uDF4B</div>
+          <div class="chat-empty-text">${t('empty_title')}</div>
+          <div class="chat-empty-hint">${t('empty_hint')}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="chat-area">
+      ${messages.map((m, i) => html`
+        <${Message} key=${i} role=${m.role} content=${m.content}
+          toolHints=${m.toolHints} streaming=${m.streaming} />
+      `)}
+      <div ref=${endRef} />
+    </div>
+  `;
+}
+
+
+function InputArea({ onSend, disabled }) {
+  const [text, setText] = useState('');
+  const ref = useRef(null);
+
+  const submit = () => {
+    const msg = text.trim();
+    if (!msg || disabled) return;
+    onSend(msg);
+    setText('');
+    if (ref.current) ref.current.style.height = 'auto';
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const onInput = (e) => {
+    setText(e.target.value);
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  };
+
+  return html`
+    <div class="input-area">
+      <div class="input-wrap">
+        <textarea ref=${ref} class="input-field" rows="1"
+          placeholder=${t('input_placeholder')}
+          value=${text} onInput=${onInput} onKeyDown=${onKeyDown}
+          disabled=${disabled} />
+        <button class="input-send" onClick=${submit} disabled=${disabled || !text.trim()}>
+          ${t('send')}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+
+// ── SSE Stream Reader ───────────────────────────────────────────────────
+
+async function streamChat(message, sessionKey, model, onEvent) {
+  const res = await fetch('/api/chat/stream', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_key: sessionKey, model }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }));
+    onEvent({ type: 'error', data: err.error || 'HTTP ' + res.status });
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6));
+        onEvent(event);
+      } catch (_) {
+        // Skip malformed SSE lines
+      }
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.startsWith('data: ')) {
+    try {
+      const event = JSON.parse(buffer.slice(6));
+      onEvent(event);
+    } catch (_) {}
+  }
+}
+
+
+// ── App ─────────────────────────────────────────────────────────────────
+
+function App() {
+  const [authed, setAuthed] = useState(false);
+  const [lang, setLang] = useState(_lang);
+  const [sessions, setSessions] = useState([]);
+  const [activeKey, setActiveKey] = useState('webui:default');
+  const [messages, setMessages] = useState([]);
+  const [streaming, setStreaming] = useState(false);
+  const [models, setModels] = useState([]);
+  const [currentModel, setCurrentModel] = useState('');
+
+  const toggleLang = useCallback(() => {
+    const next = _lang === 'en' ? 'zh' : 'en';
+    _lang = next;
+    localStorage.setItem('lc_lang', next);
+    setLang(next);
+  }, []);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const r = await api('/api/sessions');
+      if (r.ok) {
+        const d = await r.json();
+        setSessions(d.sessions || []);
+      }
+    } catch (_) {}
+  }, []);
+
+  const loadModels = useCallback(async () => {
+    try {
+      const r = await api('/api/models');
+      if (r.ok) {
+        const d = await r.json();
+        setModels(d.models || []);
+        setCurrentModel(d.current || '');
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (authed) {
+      loadSessions();
+      loadModels();
+    }
+  }, [authed]);
+
+  const sendMessage = useCallback(async (text) => {
+    const userMsg = { role: 'user', content: text };
+    const assistantMsg = { role: 'assistant', content: '', toolHints: [], streaming: true };
+
+    setMessages(prev => [...prev, userMsg, assistantMsg]);
+    setStreaming(true);
+
+    await streamChat(text, activeKey, currentModel, (event) => {
+      setMessages(prev => {
+        const msgs = [...prev];
+        const last = { ...msgs[msgs.length - 1] };
+
+        if (event.type === 'content') {
+          last.content += event.data;
+        } else if (event.type === 'tool_hint') {
+          last.toolHints = [...(last.toolHints || []), event.data];
+        } else if (event.type === 'done') {
+          last.content = event.data;
+          last.streaming = false;
+        } else if (event.type === 'error') {
+          last.content = '**' + t('error') + '**: ' + event.data;
+          last.streaming = false;
+        }
+
+        msgs[msgs.length - 1] = last;
+        return msgs;
+      });
+    });
+
+    setStreaming(false);
+    loadSessions();
+  }, [activeKey, currentModel]);
+
+  const newChat = useCallback(() => {
+    const id = Date.now().toString(36);
+    setActiveKey('webui:' + id);
+    setMessages([]);
+  }, []);
+
+  const selectSession = useCallback((key) => {
+    setActiveKey(key);
+    setMessages([]);
+  }, []);
+
+  const deleteSession = useCallback(async (key) => {
+    await api('/api/sessions/' + encodeURIComponent(key), { method: 'DELETE' });
+    if (key === activeKey) { newChat(); }
+    loadSessions();
+  }, [activeKey]);
+
+  const logout = useCallback(async () => {
+    await api('/api/auth', { method: 'DELETE' });
+    setAuthed(false);
+    setMessages([]);
+    setSessions([]);
+  }, []);
+
+  if (!authed) {
+    return html`<${LoginScreen} onLogin=${() => setAuthed(true)} />`;
+  }
+
+  return html`
+    <div class="app">
+      <${Sidebar}
+        sessions=${sessions} activeKey=${activeKey}
+        onSelect=${selectSession} onNew=${newChat} onDelete=${deleteSession}
+        lang=${lang} onLangChange=${toggleLang} />
+      <div class="main">
+        <${TopBar}
+          model=${currentModel} models=${models}
+          streaming=${streaming} onLogout=${logout} />
+        <${ChatArea} messages=${messages} streaming=${streaming} />
+        <${InputArea} onSend=${sendMessage} disabled=${streaming} />
+      </div>
+    </div>
+  `;
+}
+
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+</body>
+</html>

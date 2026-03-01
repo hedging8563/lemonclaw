@@ -79,6 +79,7 @@ include = [
     "lemonclaw/templates/**/*.md",
     "lemonclaw/skills/**/*.md",
     "lemonclaw/skills/**/*.sh",
+    "lemonclaw/gateway/webui/static/**",
 ]
 
 [tool.hatch.build.targets.sdist]

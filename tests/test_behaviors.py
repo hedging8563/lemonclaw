@@ -344,3 +344,166 @@ class TestWeComWebhook:
         client = TestClient(app)
         resp = client.post("/webhook/wecom?msg_signature=x&timestamp=1&nonce=a", content="<xml></xml>")
         assert resp.status_code == 404
+
+
+# ── 6a. WebUI Auth (HMAC cookie) ──
+
+
+class TestWebUIAuth:
+    """HMAC cookie authentication for WebUI."""
+
+    def test_verify_token_correct(self):
+        from lemonclaw.gateway.webui.auth import verify_token
+        assert verify_token("secret123", "secret123") is True
+
+    def test_verify_token_wrong(self):
+        from lemonclaw.gateway.webui.auth import verify_token
+        assert verify_token("wrong", "secret123") is False
+
+    def test_cookie_roundtrip(self):
+        from lemonclaw.gateway.webui.auth import create_session_cookie, verify_session_cookie
+        cookie = create_session_cookie("mytoken")
+        valid, refreshed = verify_session_cookie(cookie, "mytoken")
+        assert valid is True
+        assert refreshed is not None
+
+    def test_cookie_wrong_token(self):
+        from lemonclaw.gateway.webui.auth import create_session_cookie, verify_session_cookie
+        cookie = create_session_cookie("mytoken")
+        valid, refreshed = verify_session_cookie(cookie, "othertoken")
+        assert valid is False
+        assert refreshed is None
+
+    def test_cookie_expired_absolute(self):
+        from unittest.mock import patch as mock_patch
+        from lemonclaw.gateway.webui.auth import (
+            create_session_cookie, verify_session_cookie, ABSOLUTE_TIMEOUT,
+        )
+        import time as time_mod
+
+        cookie = create_session_cookie("tok")
+        # Advance time past absolute timeout
+        future = time_mod.time() + ABSOLUTE_TIMEOUT + 60
+        with mock_patch("lemonclaw.gateway.webui.auth.time.time", return_value=future):
+            valid, _ = verify_session_cookie(cookie, "tok")
+        assert valid is False
+
+    def test_cookie_expired_idle(self):
+        from unittest.mock import patch as mock_patch
+        from lemonclaw.gateway.webui.auth import (
+            create_session_cookie, verify_session_cookie, IDLE_TIMEOUT,
+        )
+        import time as time_mod
+
+        cookie = create_session_cookie("tok")
+        # Advance time past idle timeout but within absolute
+        future = time_mod.time() + IDLE_TIMEOUT + 60
+        with mock_patch("lemonclaw.gateway.webui.auth.time.time", return_value=future):
+            valid, _ = verify_session_cookie(cookie, "tok")
+        assert valid is False
+
+
+# ── 6b. WebUI Routes ──
+
+
+class TestWebUIRoutes:
+    """WebUI HTTP endpoint tests."""
+
+    @pytest.mark.asyncio
+    async def test_index_returns_html(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "LemonClaw" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_auth_correct_token(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token="test-secret", agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post("/api/auth", json={"token": "test-secret"})
+        assert resp.status_code == 200
+        assert "lc_session" in resp.cookies
+
+    @pytest.mark.asyncio
+    async def test_auth_wrong_token(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token="test-secret", agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post("/api/auth", json={"token": "wrong"})
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_sessions_requires_auth(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token="secret", agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get("/api/sessions")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_models_returns_list(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get("/api/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "models" in data
+        assert isinstance(data["models"], list)
+        assert len(data["models"]) > 0
+        # No hidden models
+        for m in data["models"]:
+            assert "id" in m
+            assert "label" in m
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_returns_sse(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post("/api/chat/stream", json={"message": "hello"})
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        # Should contain a done event
+        assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
+
+    @pytest.mark.asyncio
+    async def test_webui_disabled(self, make_agent_loop):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=False)
+        client = TestClient(app)
+        resp = client.get("/")
+        # When webui disabled, / is not registered → 404 from Starlette
+        assert resp.status_code in (404, 405)

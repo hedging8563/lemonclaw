@@ -434,9 +434,11 @@ def gateway(
         usage_tracker=usage_tracker,
         session_manager=session_manager,
         agent_loop=agent,
+        webui_enabled=config.gateway.webui_enabled,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
-    console.print(f"[green]✓[/green] HTTP server: {host}:{port}")
+    webui_status = "enabled" if config.gateway.webui_enabled else "disabled"
+    console.print(f"[green]✓[/green] HTTP server: {host}:{port} (WebUI {webui_status})")
 
     async def run():
         shutdown = GracefulShutdown()
