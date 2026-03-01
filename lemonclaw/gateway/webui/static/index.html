@@ -151,17 +151,17 @@ input { font-family: inherit; font-size: inherit; }
 <div id="app"></div>
 
 <script type="module">
-import { h, render } from 'https://esm.sh/preact@10.25.4';
-import { useState, useEffect, useRef, useCallback } from 'https://esm.sh/preact@10.25.4/hooks';
-import htm from 'https://esm.sh/htm@3.1.1';
-import { marked } from 'https://esm.sh/marked@14.3.0';
-import DOMPurify from 'https://esm.sh/dompurify@3.2.4';
-import hljs from 'https://esm.sh/highlight.js@11.11.1/lib/core';
-import javascript from 'https://esm.sh/highlight.js@11.11.1/lib/languages/javascript';
-import python from 'https://esm.sh/highlight.js@11.11.1/lib/languages/python';
-import bash from 'https://esm.sh/highlight.js@11.11.1/lib/languages/bash';
-import json_lang from 'https://esm.sh/highlight.js@11.11.1/lib/languages/json';
-import typescript from 'https://esm.sh/highlight.js@11.11.1/lib/languages/typescript';
+import { h, render } from 'https://cdn.jsdelivr.net/npm/preact@10.25.4/+esm';
+import { useState, useEffect, useRef, useCallback } from 'https://cdn.jsdelivr.net/npm/preact@10.25.4/hooks/+esm';
+import htm from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/+esm';
+import { marked } from 'https://cdn.jsdelivr.net/npm/marked@15.0.7/+esm';
+import DOMPurify from 'https://cdn.jsdelivr.net/npm/dompurify@3.2.4/+esm';
+import hljs from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/core.js/+esm';
+import javascript from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/javascript.js/+esm';
+import python from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/python.js/+esm';
+import bash from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/bash.js/+esm';
+import json_lang from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/json.js/+esm';
+import typescript from 'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/typescript.js/+esm';
 
 const html = htm.bind(h);
 
@@ -233,16 +233,7 @@ let _lang = getLang();
 function t(key) { return (I18N[_lang] && I18N[_lang][key]) || key; }
 
 // ── Markdown renderer ───────────────────────────────────────────────────
-marked.setOptions({
-  highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try { return hljs.highlight(code, { language: lang }).value; }
-      catch (_) { /* fall through */ }
-    }
-    return code;
-  },
-  breaks: true,
-});
+marked.setOptions({ breaks: true });
 
 function renderMd(text) {
   if (!text) return '';
