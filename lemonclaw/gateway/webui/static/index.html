@@ -298,8 +298,7 @@ function nextMsgId() { return 'msg-' + (++_msgIdCounter); }
 function renderMd(text) {
   if (!text) return '';
   const raw = marked.parse(text);
-  const withCopy = raw.replace(/<pre>/g, '<div class="code-block-wrap"><button class="code-copy-btn" onclick="copyCode(this)">Copy</button><pre>').replace(/<\/pre>/g, '</pre></div>');
-  return DOMPurify.sanitize(withCopy, { ADD_ATTR: ['onclick'] });
+  return DOMPurify.sanitize(raw);
 }
 
 // ── API helpers ─────────────────────────────────────────────────────────
@@ -488,6 +487,25 @@ function Message({ role, content, toolHints, streaming }) {
       bodyRef.current.querySelectorAll('pre code:not(.hljs)').forEach(el => {
         hljs.highlightElement(el);
       });
+      // Inject copy buttons into code blocks (safe, no onclick in HTML)
+      bodyRef.current.querySelectorAll('pre').forEach(pre => {
+        if (pre.parentElement.classList.contains('code-block-wrap')) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'code-block-wrap';
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', () => {
+          navigator.clipboard.writeText(pre.textContent).then(() => {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+          });
+        });
+        wrap.insertBefore(btn, pre);
+      });
     }
   }, [content]);
 
@@ -643,16 +661,7 @@ async function streamChat(message, sessionKey, model, onEvent) {
 }
 
 
-// Global copy handler for code blocks
-window.copyCode = function(btn) {
-  const pre = btn.parentElement.querySelector('pre');
-  if (!pre) return;
-  navigator.clipboard.writeText(pre.textContent).then(() => {
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
-  });
-};
+
 
 // ── App ─────────────────────────────────────────────────────────────────
 
@@ -733,13 +742,14 @@ function App() {
   }, [authed]);
 
   const sendMessage = useCallback(async (text) => {
+    const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
     const userMsg = { role: 'user', content: text, id: nextMsgId() };
     const assistantMsg = { role: 'assistant', content: '', toolHints: [], streaming: true, id: nextMsgId() };
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
 
-    await streamChat(text, activeKey, currentModel, (event) => {
+    await streamChat(text, sendKey, currentModel, (event) => {
       setMessages(prev => {
         const msgs = [...prev];
         const last = { ...msgs[msgs.length - 1] };
@@ -763,7 +773,7 @@ function App() {
 
     setStreaming(false);
     loadSessions();
-    loadInfo(activeKey);
+    loadInfo(sendKey);
     // Delayed refresh to pick up LLM-generated title (async, ~1-3s)
     setTimeout(() => loadSessions(), 3000);
   }, [activeKey, currentModel]);

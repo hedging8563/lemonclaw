@@ -183,8 +183,8 @@ def get_webui_routes(
 
     async def _generate_session_title(session_key: str, first_message: str) -> None:
         """Generate a short title for the session via Groq LLM, fallback to truncation."""
-        session = session_manager._load(session_key)
-        if not session or session.metadata.get("title"):
+        session = session_manager.get_or_create(session_key)
+        if session.metadata.get("title"):
             return  # Already has a title
 
         title = ""
@@ -267,9 +267,15 @@ def get_webui_routes(
                 event = {"type": "done", "data": final}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
                 # Generate title for new sessions (fire-and-forget)
-                s = session_manager._load(session_key)
-                if s and not s.metadata.get("title"):
-                    asyncio.create_task(_generate_session_title(session_key, message))
+                s = session_manager.get_or_create(session_key)
+                if not s.metadata.get("title"):
+                    _t = asyncio.create_task(
+                        _generate_session_title(session_key, message),
+                        name=f"title-gen-{session_key}",
+                    )
+                    _t.add_done_callback(
+                        lambda t: t.exception() and logger.warning("Title gen failed: {}", t.exception())
+                    )
             except Exception as exc:
                 logger.error("WebUI chat error: {}", exc)
                 event = {"type": "error", "data": str(exc)}

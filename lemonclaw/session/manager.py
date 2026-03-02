@@ -240,7 +240,7 @@ class SessionManager:
                 logger.debug("Failed to read session metadata from {}: {}", path, e)
                 continue
         
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        return sorted(sessions, key=lambda x: x.get("updated_at") or "", reverse=True)
 
     def delete_session(self, key: str) -> bool:
         """Delete a session by key. Returns True if deleted, False if not found."""
