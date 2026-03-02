@@ -316,6 +316,9 @@ class TelegramChannel(BaseChannel):
         # ── Final message: edit the stream message or send new ───────────
         self._stop_typing(msg.chat_id)
         stream = self._stream_states.pop(msg.chat_id, None)
+        logger.debug("Final message: stream={}, content={!r}",
+                     f"msg_id={stream.message_id} text_len={len(stream.last_sent_text)}" if stream else "None",
+                     (msg.content or "")[:60])
 
         # If stream already has meaningful content and final message is the
         # "no_response" fallback, keep the stream message as-is.
