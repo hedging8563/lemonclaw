@@ -71,20 +71,29 @@ input { font-family: inherit; font-size: inherit; }
 /* ── Layout ───────────────────────────────────────────────────────── */
 .app { display: flex; height: 100vh; }
 .sidebar { width: var(--sidebar-w); background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-.sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.sidebar-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .sidebar-brand { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--accent); }
 .sidebar-brand span { color: var(--teal); }
-.sidebar-new { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; color: var(--text-secondary); transition: all 0.2s; }
+.sidebar-new { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; color: var(--text-secondary); transition: all 0.2s; font-family: var(--font-mono); }
 .sidebar-new:hover { border-color: var(--accent); color: var(--text-primary); }
-.sidebar-sessions { flex: 1; overflow-y: auto; padding: 8px; }
-.sidebar-session { display: flex; align-items: center; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: background 0.15s; gap: 8px; }
-.sidebar-session:hover { background: var(--bg-hover); }
-.sidebar-session.active { background: var(--bg-tertiary); border: 1px solid var(--border); }
-.sidebar-session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.sidebar-session-del { opacity: 0; color: var(--text-muted); font-size: 16px; padding: 0 4px; transition: opacity 0.15s; }
+.sidebar-section-label { padding: 12px 16px 4px; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); }
+.sidebar-sessions { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.sidebar-session { display: flex; align-items: flex-start; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; gap: 8px; border: 1px solid transparent; margin-bottom: 4px; }
+.sidebar-session:hover { background: var(--bg-hover); border-color: var(--border); }
+.sidebar-session.active { background: var(--bg-tertiary); border-color: var(--border); border-left: 2px solid var(--accent); }
+.sidebar-session-info { flex: 1; min-width: 0; }
+.sidebar-session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.3; }
+.sidebar-session-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.sidebar-session-dot { color: var(--success); font-size: 8px; }
+.sidebar-session-del { opacity: 0; color: var(--text-muted); font-size: 14px; padding: 2px 4px; transition: opacity 0.15s; flex-shrink: 0; margin-top: 1px; font-family: var(--font-mono); }
 .sidebar-session:hover .sidebar-session-del { opacity: 1; }
 .sidebar-session-del:hover { color: var(--error); }
-.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; justify-content: space-between; align-items: center; }
+.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-family: var(--font-mono); }
+.sidebar-stats { display: flex; gap: 4px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px; }
+.sidebar-stats-key { color: var(--text-muted); }
+.sidebar-stats-val { color: var(--teal); }
+.sidebar-stats-sep { color: var(--text-muted); }
+.sidebar-footer-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); }
 
 /* ── Main area ────────────────────────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -98,7 +107,7 @@ input { font-family: inherit; font-size: inherit; }
 
 /* ── Model selector dropdown ──────────────────────────────────────── */
 .model-dropdown { position: absolute; top: calc(var(--topbar-h) + 4px); left: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 4px; z-index: 100; min-width: 280px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
-.model-tier { padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+.model-tier { padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); font-family: var(--font-mono); }
 .model-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s; }
 .model-item:hover { background: var(--bg-hover); }
 .model-item.active { background: var(--teal-dim); }
@@ -368,26 +377,40 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
         <div class="sidebar-brand">Lemon<span>Claw</span></div>
         <button class="sidebar-new" onClick=${onNew}>${t('new_chat')}</button>
       </div>
+      <div class="sidebar-section-label">// ${t('sessions')}</div>
       <div class="sidebar-sessions">
         ${sessions.length === 0
-          ? html`<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">${t('no_sessions')}</div>`
+          ? html`<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center;font-family:var(--font-mono)">${t('no_sessions')}</div>`
           : sessions.map(s => html`
             <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
               onClick=${() => onSelect(s.key)}>
-              <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
-              <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>x</button>
+              <div class="sidebar-session-info">
+                <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
+                <div class="sidebar-session-meta">
+                  <span class="sidebar-session-dot">${s.key === activeKey ? '\u25CF' : '\u25CB'}</span>
+                  <span>${s.key === activeKey ? 'ACTIVE' : 'IDLE'}</span>
+                  ${s.updated_at ? html`<span>\u00B7 ${new Date(s.updated_at).toLocaleDateString()}</span>` : ''}
+                </div>
+              </div>
+              <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>\u00D7</button>
             </div>
           `)
         }
       </div>
       <div class="sidebar-footer">
-        <div>
-          ${usage && usage.total_tokens > 0
-            ? html`<div style="margin-bottom:4px">${t('tokens')}: ${(usage.total_tokens / 1000).toFixed(1)}k</div>`
-            : ''}
-          <span>${version || 'LemonClaw'}</span>
+        <div class="sidebar-stats">
+          <span class="sidebar-stats-key">SESSIONS</span>
+          <span class="sidebar-stats-val">${sessions.length}</span>
+          ${usage && usage.total_tokens > 0 ? html`
+            <span class="sidebar-stats-sep">\u00B7</span>
+            <span class="sidebar-stats-key">TOKENS</span>
+            <span class="sidebar-stats-val">${(usage.total_tokens / 1000).toFixed(1)}k</span>
+          ` : ''}
         </div>
-        <button class="topbar-btn" onClick=${onLangChange}>${t('lang')}</button>
+        <div class="sidebar-footer-row">
+          <span>${version || 'LemonClaw'}</span>
+          <button class="topbar-btn" onClick=${onLangChange}>${t('lang')}</button>
+        </div>
       </div>
     </div>
   `;
@@ -408,7 +431,7 @@ function ModelDropdown({ models, current, onSelect, onClose }) {
   return html`
     <div class="model-dropdown" ref=${ref}>
       ${Object.entries(tiers).map(([tier, items]) => html`
-        <div class="model-tier">${tier}</div>
+        <div class="model-tier">// ${tier}</div>
         ${items.map(m => html`
           <div class="model-item ${m.id === current ? 'active' : ''}" tabindex="0" onClick=${() => { onSelect(m.id); onClose(); }} onKeyDown=${(e) => { if (e.key === 'Enter') { onSelect(m.id); onClose(); } }}>
             <span class="model-item-name">${m.id}</span>
