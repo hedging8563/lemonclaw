@@ -704,8 +704,14 @@ function App() {
       const r = await api('/api/models');
       if (r.ok) {
         const d = await r.json();
-        setModels(d.models || []);
-        setCurrentModel(d.current || '');
+        const list = d.models || [];
+        setModels(list);
+        const saved = localStorage.getItem('lc_model');
+        if (saved && list.some(m => m.id === saved)) {
+          setCurrentModel(saved);
+        } else {
+          setCurrentModel(d.current || '');
+        }
       }
     } catch (_) {}
   }, []);
@@ -835,7 +841,7 @@ function App() {
         <${TopBar}
           model=${currentModel} models=${models}
           streaming=${streaming} onLogout=${logout}
-          onModelSelect=${(id) => setCurrentModel(id)}
+          onModelSelect=${(id) => { localStorage.setItem('lc_model', id); setCurrentModel(id); }}
           onMenuToggle=${() => setSidebarOpen(s => !s)} />
         <${ChatArea} messages=${messages} streaming=${streaming} />
         <${InputArea} onSend=${sendMessage} disabled=${streaming} />
