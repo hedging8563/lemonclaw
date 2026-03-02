@@ -11,10 +11,14 @@ from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
+from lemonclaw.agent.locale import t as _t
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import TelegramConfig
+
+# Known fallback texts that should not overwrite a stream message
+_FALLBACK_TEXTS = frozenset({_t("no_response", "en"), _t("no_response", "zh")})
 
 
 @dataclass
@@ -312,6 +316,13 @@ class TelegramChannel(BaseChannel):
         # ── Final message: edit the stream message or send new ───────────
         self._stop_typing(msg.chat_id)
         stream = self._stream_states.pop(msg.chat_id, None)
+
+        # If stream already has meaningful content and final message is the
+        # "no_response" fallback, keep the stream message as-is.
+        if (stream and stream.message_id and stream.last_sent_text
+                and msg.content in _FALLBACK_TEXTS and not msg.media):
+            logger.debug("Keeping stream message (no_response fallback suppressed)")
+            return
 
         reply_params = None
         if self.config.reply_to_message:
