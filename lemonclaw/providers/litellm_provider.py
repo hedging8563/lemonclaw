@@ -256,6 +256,7 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        on_chunk: "OnChunkCallback | None" = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -329,7 +330,7 @@ class LiteLLMProvider(LLMProvider):
             effective_gw.name if effective_gw else None,
         )
 
-        return await self._chat_with_retry(kwargs, original_model)
+        return await self._chat_with_retry(kwargs, original_model, on_chunk=on_chunk)
 
     # ── Retry + fallback engine ──────────────────────────────────────────
 
@@ -338,6 +339,7 @@ class LiteLLMProvider(LLMProvider):
 
     async def _chat_with_retry(
         self, kwargs: dict[str, Any], original_model: str,
+        on_chunk: "OnChunkCallback | None" = None,
     ) -> LLMResponse:
         """Call LLM with exponential backoff retries and chained fallback.
 
@@ -351,7 +353,7 @@ class LiteLLMProvider(LLMProvider):
         for attempt in range(1 + self._MAX_RETRIES):
             try:
                 response = await acompletion(**kwargs)
-                return await self._collect_stream(response)
+                return await self._collect_stream(response, on_chunk=on_chunk)
             except AuthenticationError as e:
                 logger.error("Authentication failed: {}", _sanitize_error(e))
                 return LLMResponse(
@@ -396,7 +398,7 @@ class LiteLLMProvider(LLMProvider):
                 fb_kwargs.pop("api_base", None)
             try:
                 response = await acompletion(**fb_kwargs)
-                return await self._collect_stream(response)
+                return await self._collect_stream(response, on_chunk=on_chunk)
             except Exception as fb_err:
                 logger.warning("Fallback model {} failed: {}", fb_model_id, _sanitize_error(fb_err))
                 last_error = fb_err
@@ -408,7 +410,9 @@ class LiteLLMProvider(LLMProvider):
             finish_reason="error",
         )
     
-    async def _collect_stream(self, stream: Any) -> LLMResponse:
+    async def _collect_stream(
+        self, stream: Any, on_chunk: "OnChunkCallback | None" = None,
+    ) -> LLMResponse:
         """Collect streaming chunks into a complete LLMResponse."""
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -416,6 +420,7 @@ class LiteLLMProvider(LLMProvider):
         tc_accum: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
+        _first_chunk = True
 
         async for chunk in stream:
             if not chunk.choices:
@@ -435,6 +440,12 @@ class LiteLLMProvider(LLMProvider):
             # Text content
             if getattr(delta, "content", None):
                 content_parts.append(delta.content)
+                if on_chunk:
+                    try:
+                        await on_chunk(delta.content, first=_first_chunk)
+                        _first_chunk = False
+                    except Exception:
+                        pass  # Don't let callback errors break the stream
 
             # Reasoning / thinking content
             if getattr(delta, "reasoning_content", None):

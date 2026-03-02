@@ -1,8 +1,13 @@
 """Base LLM provider interface."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+# Callback type for streaming text chunks to the caller.
+# (delta_text, *, first: bool) — first=True on the first text chunk of a stream.
+OnChunkCallback = Callable[..., Awaitable[None]]
 
 
 @dataclass
@@ -88,17 +93,20 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        on_chunk: OnChunkCallback | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+            on_chunk: Optional callback for streaming text deltas.
+                      Signature: async (delta: str, *, first: bool) -> None
+
         Returns:
             LLMResponse with content and/or tool calls.
         """

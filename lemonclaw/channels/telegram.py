@@ -296,8 +296,16 @@ class TelegramChannel(BaseChannel):
                 return
             draft = self._get_or_create_draft(msg.chat_id)
 
-            # Append content
-            if msg.content:
+            is_chunk = msg.metadata.get("_chunk", False)
+
+            # First chunk of a new LLM call resets the draft (avoids
+            # accumulating text from previous tool-call iterations).
+            if is_chunk and msg.metadata.get("_chunk_first"):
+                draft.text = msg.content
+            elif is_chunk:
+                draft.text += msg.content
+            else:
+                # Status message (tool hints etc.) — append with newline
                 if draft.text and not draft.text.endswith("\n"):
                     draft.text += "\n"
                 draft.text += msg.content

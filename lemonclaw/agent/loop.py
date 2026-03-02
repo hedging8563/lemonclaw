@@ -186,6 +186,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_chunk: Callable[..., Awaitable[None]] | None = None,
         stop_event: asyncio.Event | None = None,
         session_model: str | None = None,
         lang: str = "en",
@@ -223,6 +224,7 @@ class AgentLoop:
                         model=effective_model,
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
+                        on_chunk=on_chunk,
                     ),
                     timeout=self._LLM_CALL_TIMEOUT,
                 )
@@ -562,8 +564,19 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        async def _bus_chunk(content: str, *, first: bool = False) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_progress"] = True
+            meta["_chunk"] = True
+            if first:
+                meta["_chunk_first"] = True
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
+            ))
+
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            on_chunk=_bus_chunk,
             stop_event=stop_event, session_model=session_model, lang=lang,
         )
 
