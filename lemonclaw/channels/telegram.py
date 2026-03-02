@@ -299,18 +299,13 @@ class TelegramChannel(BaseChannel):
             if draft.failed:
                 return  # API not supported, skip silently
 
-            # Each progress message is a complete snapshot (not incremental)
-            # tool_hint replaces text; regular progress appends to show full context
-            if msg.metadata.get("_tool_hint"):
-                draft.text = msg.content
-            else:
-                # Regular progress: this is the LLM's full text for this iteration
-                # Append to build up multi-iteration context
+            # Append content to draft text (both regular progress and tool hints)
+            if msg.content:
                 if draft.text and not draft.text.endswith("\n"):
                     draft.text += "\n"
                 draft.text += msg.content
 
-            # Throttle: skip if too soon or too little new content
+            # Throttle: skip if too soon and too little new content
             now = time.monotonic()
             new_chars = len(draft.text) - len(draft.last_sent_text)
             if (now - draft.last_sent_at < _DRAFT_MIN_INTERVAL
