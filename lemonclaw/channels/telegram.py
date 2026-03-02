@@ -7,7 +7,6 @@ import re
 import time
 from dataclasses import dataclass
 from loguru import logger
-import httpx
 from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
@@ -19,17 +18,16 @@ from lemonclaw.config.schema import TelegramConfig
 
 
 @dataclass
-class _DraftState:
-    """Per-chat streaming draft state."""
-    draft_id: int
+class _StreamState:
+    """Per-chat streaming state for editMessageText approach."""
+    message_id: int = 0  # 0 = not yet sent
     text: str = ""
     last_sent_at: float = 0.0
     last_sent_text: str = ""
-    failed: bool = False  # Disable drafts if API not supported
 
 
-_DRAFT_MIN_INTERVAL = 0.3  # seconds between draft updates
-_DRAFT_MIN_CHARS = 20  # minimum new chars before sending a draft update
+_STREAM_MIN_INTERVAL = 1.0  # seconds between edits (Telegram rate limit ~30/min)
+_STREAM_MIN_CHARS = 30  # minimum new chars before editing
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -148,9 +146,8 @@ class TelegramChannel(BaseChannel):
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._seen_update_ids: set[int] = set()  # Dedup Telegram updates
         self._seen_update_ids_max = 500
-        # Streaming draft state: chat_id -> DraftState
-        self._draft_states: dict[str, _DraftState] = {}
-        self._http: httpx.AsyncClient | None = None
+        # Streaming state: chat_id -> StreamState
+        self._stream_states: dict[str, _StreamState] = {}
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -159,8 +156,6 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
-        proxy_kwargs = {"proxy": self.config.proxy} if self.config.proxy else {}
-        self._http = httpx.AsyncClient(timeout=5.0, **proxy_kwargs)
         
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
@@ -223,11 +218,7 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
-        self._draft_states.clear()
-
-        if self._http:
-            await self._http.aclose()
-            self._http = None
+        self._stream_states.clear()
         
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -250,31 +241,17 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
-    # ── Streaming draft support (sendMessageDraft API) ───────────────────
+    # ── Streaming support (editMessageText approach) ───────────────────
 
-    async def _send_draft(self, chat_id: int, draft_id: int, text: str) -> bool:
-        """Send a streaming draft via Telegram HTTP API (plain text, no parse_mode)."""
-        if not self._http or not self.config.token:
-            return False
-        try:
-            resp = await self._http.post(
-                f"https://api.telegram.org/bot{self.config.token}/sendMessageDraft",
-                json={"chat_id": chat_id, "draft_id": draft_id, "text": text},
-            )
-            return resp.status_code == 200 and resp.json().get("ok", False)
-        except Exception as e:
-            logger.debug("sendMessageDraft failed: {}", e)
-            return False
+    def _get_or_create_stream(self, chat_id: str) -> _StreamState:
+        """Get or create a stream state for a chat."""
+        if chat_id not in self._stream_states:
+            self._stream_states[chat_id] = _StreamState()
+        return self._stream_states[chat_id]
 
-    def _get_or_create_draft(self, chat_id: str) -> _DraftState:
-        """Get or create a draft state for a chat, using timestamp as draft_id."""
-        if chat_id not in self._draft_states:
-            self._draft_states[chat_id] = _DraftState(draft_id=int(time.time()) % 2_000_000_000 or 1)
-        return self._draft_states[chat_id]
-
-    def _clear_draft(self, chat_id: str) -> None:
-        """Clear draft state for a chat."""
-        self._draft_states.pop(chat_id, None)
+    def _clear_stream(self, chat_id: str) -> None:
+        """Clear stream state for a chat."""
+        self._stream_states.pop(chat_id, None)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -291,42 +268,50 @@ class TelegramChannel(BaseChannel):
         is_progress = msg.metadata.get("_progress", False)
         is_group = msg.metadata.get("is_group", False)
 
-        # ── Progress messages: stream via sendMessageDraft (private chats only) ──
+        # ── Progress messages: stream via editMessageText (private chats only) ──
         if is_progress and not is_group:
             if not msg.content or msg.content == "[empty message]":
                 return
-            draft = self._get_or_create_draft(msg.chat_id)
-            if draft.failed:
-                return  # API not supported, skip silently
+            stream = self._get_or_create_stream(msg.chat_id)
 
-            # Append content to draft text (both regular progress and tool hints)
+            # Append content
             if msg.content:
-                if draft.text and not draft.text.endswith("\n"):
-                    draft.text += "\n"
-                draft.text += msg.content
+                if stream.text and not stream.text.endswith("\n"):
+                    stream.text += "\n"
+                stream.text += msg.content
 
             # Throttle: skip if too soon and too little new content
             now = time.monotonic()
-            new_chars = len(draft.text) - len(draft.last_sent_text)
-            if (now - draft.last_sent_at < _DRAFT_MIN_INTERVAL
-                    and new_chars < _DRAFT_MIN_CHARS):
+            new_chars = len(stream.text) - len(stream.last_sent_text)
+            if (now - stream.last_sent_at < _STREAM_MIN_INTERVAL
+                    and new_chars < _STREAM_MIN_CHARS):
                 return
 
-            # Truncate to 4096 chars (Telegram limit)
-            text = draft.text[:4096]
-            ok = await self._send_draft(chat_id, draft.draft_id, text)
-            if ok:
-                draft.last_sent_at = now
-                draft.last_sent_text = text
-            else:
-                # API might not be supported — disable drafts for this chat
-                logger.info("sendMessageDraft not available, disabling for chat {}", msg.chat_id)
-                draft.failed = True
+            text = stream.text[:4096]
+            try:
+                if stream.message_id == 0:
+                    # First progress: send a new message and record its ID
+                    sent = await self._app.bot.send_message(
+                        chat_id=chat_id, text=text,
+                    )
+                    stream.message_id = sent.message_id
+                else:
+                    # Subsequent progress: edit the existing message
+                    if text != stream.last_sent_text:
+                        await self._app.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=stream.message_id,
+                            text=text,
+                        )
+                stream.last_sent_at = now
+                stream.last_sent_text = text
+            except Exception as e:
+                logger.debug("Stream edit failed: {}", e)
             return
 
-        # ── Final message: send normally and clear draft state ───────────
+        # ── Final message: edit the stream message or send new ───────────
         self._stop_typing(msg.chat_id)
-        self._clear_draft(msg.chat_id)
+        stream = self._stream_states.pop(msg.chat_id, None)
 
         reply_params = None
         if self.config.reply_to_message:
@@ -365,22 +350,36 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            for chunk in _split_message(msg.content):
+            chunks = _split_message(msg.content)
+            for i, chunk in enumerate(chunks):
+                html = _markdown_to_telegram_html(chunk)
+                # First chunk: edit the stream message if one exists
+                if i == 0 and stream and stream.message_id:
+                    try:
+                        await self._app.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=stream.message_id,
+                            text=html,
+                            parse_mode="HTML",
+                        )
+                        continue
+                    except Exception as e:
+                        logger.debug("Final edit failed, sending new message: {}", e)
+                # Send as new message (or fallback if edit failed)
                 try:
-                    html = _markdown_to_telegram_html(chunk)
                     await self._app.bot.send_message(
-                        chat_id=chat_id, 
-                        text=html, 
+                        chat_id=chat_id,
+                        text=html,
                         parse_mode="HTML",
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
                     )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
                         await self._app.bot.send_message(
-                            chat_id=chat_id, 
+                            chat_id=chat_id,
                             text=chunk,
-                            reply_parameters=reply_params
+                            reply_parameters=reply_params,
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
