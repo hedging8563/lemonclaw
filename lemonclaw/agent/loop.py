@@ -309,6 +309,16 @@ class AgentLoop:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             final_content = t("max_iterations", _lang, n=self.max_iterations)
 
+        # Fallback: extract last assistant text from messages if loop ended
+        # without setting final_content (e.g. last iteration was tool_calls only)
+        if final_content is None:
+            for m in reversed(messages):
+                if m.get("role") == "assistant" and m.get("content"):
+                    candidate = self._strip_think(m["content"])
+                    if candidate:
+                        final_content = candidate
+                        break
+
         return final_content, tools_used, messages, turn_usage
 
     async def run(self) -> None:
