@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from loguru import logger
 import httpx
 from telegram import BotCommand, Update, ReplyParameters
@@ -159,7 +159,8 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
-        self._http = httpx.AsyncClient(timeout=5.0)
+        proxy_kwargs = {"proxy": self.config.proxy} if self.config.proxy else {}
+        self._http = httpx.AsyncClient(timeout=5.0, **proxy_kwargs)
         
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
