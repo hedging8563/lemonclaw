@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" id="html-root">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -154,8 +154,32 @@ input { font-family: inherit; font-size: inherit; }
 .input-send:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* ── Mobile ───────────────────────────────────────────────────────── */
+/* ── Copy button for code blocks ─────────────────────────────── */
+.code-block-wrap { position: relative; }
+.code-copy-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 11px; color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity 0.15s; font-family: var(--font-mono); }
+.code-block-wrap:hover .code-copy-btn { opacity: 1; }
+.code-copy-btn:hover { color: var(--text-primary); border-color: var(--teal); }
+.code-copy-btn.copied { color: var(--success); border-color: var(--success); }
+
+/* ── Confirm dialog ──────────────────────────────────────────── */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; display: flex; align-items: center; justify-content: center; }
+.confirm-box { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 24px; min-width: 280px; text-align: center; }
+.confirm-msg { margin-bottom: 16px; font-size: 14px; }
+.confirm-actions { display: flex; gap: 12px; justify-content: center; }
+.confirm-cancel { padding: 8px 20px; border-radius: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); }
+.confirm-cancel:hover { color: var(--text-primary); }
+.confirm-delete { padding: 8px 20px; border-radius: 6px; background: var(--error); color: #fff; }
+.confirm-delete:hover { opacity: 0.85; }
+
+/* ── Mobile ───────────────────────────────────────────────────── */
+.mobile-menu-btn { display: none; background: none; border: none; color: var(--text-primary); font-size: 22px; padding: 4px 8px; cursor: pointer; }
+.sidebar-overlay { display: none; }
 @media (max-width: 768px) {
-  .sidebar { display: none; }
+  .sidebar { position: fixed; left: -280px; top: 0; bottom: 0; width: 280px; z-index: 200; transition: left 0.25s ease; }
+  .sidebar.open { left: 0; }
+  .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
+  .mobile-menu-btn { display: block; }
   .chat-area { padding: 16px; }
   .input-area { padding: 12px 16px; }
 }
@@ -211,6 +235,8 @@ const I18N = {
     streaming: 'Thinking...',
     error: 'Error',
     lang: '\u4E2D',
+    cancel: 'Cancel',
+    confirm_delete: 'Delete',
     connected: 'connected',
     tokens: 'Tokens',
     loading_history: 'Loading...',
@@ -235,6 +261,8 @@ const I18N = {
     streaming: '\u601D\u8003\u4E2D...',
     error: '\u9519\u8BEF',
     lang: 'EN',
+    cancel: '\u53D6\u6D88',
+    confirm_delete: '\u5220\u9664',
     connected: '\u5DF2\u8FDE\u63A5',
     tokens: 'Tokens',
     loading_history: '\u52A0\u8F7D\u4E2D...',
@@ -249,14 +277,20 @@ function getLang() {
 
 let _lang = getLang();
 function t(key) { return (I18N[_lang] && I18N[_lang][key]) || key; }
+function updateHtmlLang() { const el = document.getElementById('html-root'); if (el) el.lang = _lang === 'zh' ? 'zh-CN' : 'en'; }
+updateHtmlLang();
 
 // ── Markdown renderer ───────────────────────────────────────────────────
 marked.setOptions({ breaks: true });
 
+let _msgIdCounter = 0;
+function nextMsgId() { return 'msg-' + (++_msgIdCounter); }
+
 function renderMd(text) {
   if (!text) return '';
   const raw = marked.parse(text);
-  return DOMPurify.sanitize(raw);
+  const withCopy = raw.replace(/<pre>/g, '<div class="code-block-wrap"><button class="code-copy-btn" onclick="copyCode(this)">Copy</button><pre>').replace(/<\/pre>/g, '</pre></div>');
+  return DOMPurify.sanitize(withCopy, { ADD_ATTR: ['onclick'] });
 }
 
 // ── API helpers ─────────────────────────────────────────────────────────
@@ -327,9 +361,9 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version }) {
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open }) {
   return html`
-    <div class="sidebar">
+    <div class="sidebar ${open ? 'open' : ''}">
       <div class="sidebar-header">
         <div class="sidebar-brand">Lemon<span>Claw</span></div>
         <button class="sidebar-new" onClick=${onNew}>${t('new_chat')}</button>
@@ -340,7 +374,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
           : sessions.map(s => html`
             <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
               onClick=${() => onSelect(s.key)}>
-              <span class="sidebar-session-name">${s.key.replace('webui:', '')}</span>
+              <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
               <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>x</button>
             </div>
           `)
@@ -376,7 +410,7 @@ function ModelDropdown({ models, current, onSelect, onClose }) {
       ${Object.entries(tiers).map(([tier, items]) => html`
         <div class="model-tier">${tier}</div>
         ${items.map(m => html`
-          <div class="model-item ${m.id === current ? 'active' : ''}" onClick=${() => { onSelect(m.id); onClose(); }}>
+          <div class="model-item ${m.id === current ? 'active' : ''}" tabindex="0" onClick=${() => { onSelect(m.id); onClose(); }} onKeyDown=${(e) => { if (e.key === 'Enter') { onSelect(m.id); onClose(); } }}>
             <span class="model-item-name">${m.id}</span>
             <span class="model-item-desc">${m.description}</span>
           </div>
@@ -387,11 +421,27 @@ function ModelDropdown({ models, current, onSelect, onClose }) {
 }
 
 
-function TopBar({ model, models, streaming, onLogout, onModelSelect }) {
+function ConfirmDialog({ message, onConfirm, onCancel }) {
+  return html`
+    <div class="confirm-overlay" onClick=${onCancel}>
+      <div class="confirm-box" onClick=${e => e.stopPropagation()}>
+        <div class="confirm-msg">${message}</div>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" onClick=${onCancel}>${t('cancel')}</button>
+          <button class="confirm-delete" onClick=${onConfirm}>${t('confirm_delete')}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggle }) {
   const [showModels, setShowModels] = useState(false);
 
   return html`
     <div class="topbar">
+      <button class="mobile-menu-btn" onClick=${onMenuToggle}>\u2630</button>
       <button class="topbar-model" onClick=${() => setShowModels(!showModels)}>
         ${model || 'model'}
       </button>
@@ -399,7 +449,7 @@ function TopBar({ model, models, streaming, onLogout, onModelSelect }) {
         models=${models} current=${model}
         onSelect=${(id) => { onModelSelect(id); setShowModels(false); }}
         onClose=${() => setShowModels(false)} />`}
-      <span class="topbar-status">${streaming ? t('streaming') : t('connected')}</span>
+      <span class="topbar-status">${streaming ? t('streaming') : ''}</span>
       <div class="topbar-spacer" />
       <button class="topbar-btn" onClick=${onLogout}>${t('logout')}</button>
     </div>
@@ -422,7 +472,7 @@ function Message({ role, content, toolHints, streaming }) {
     return html`
       <div class="msg msg-user">
         <div class="msg-body">
-          <div class="msg-content">${content}</div>
+          <div class="msg-content" dangerouslySetInnerHTML=${{ __html: renderMd(content) }} />
         </div>
         <div class="msg-avatar">U</div>
       </div>
@@ -464,7 +514,7 @@ function ChatArea({ messages, streaming }) {
   return html`
     <div class="chat-area">
       ${messages.map((m, i) => html`
-        <${Message} key=${i} role=${m.role} content=${m.content}
+        <${Message} key=${m.id || i} role=${m.role} content=${m.content}
           toolHints=${m.toolHints} streaming=${m.streaming} />
       `)}
       <div ref=${endRef} />
@@ -536,7 +586,13 @@ async function streamChat(message, sessionKey, model, onEvent) {
   let buffer = '';
 
   while (true) {
-    const { done, value } = await reader.read();
+    let done, value;
+    try {
+      ({ done, value } = await reader.read());
+    } catch (e) {
+      onEvent({ type: 'error', data: 'Connection lost. Please retry.' });
+      return;
+    }
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
@@ -564,6 +620,17 @@ async function streamChat(message, sessionKey, model, onEvent) {
 }
 
 
+// Global copy handler for code blocks
+window.copyCode = function(btn) {
+  const pre = btn.parentElement.querySelector('pre');
+  if (!pre) return;
+  navigator.clipboard.writeText(pre.textContent).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+};
+
 // ── App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -577,11 +644,15 @@ function App() {
   const [currentModel, setCurrentModel] = useState('');
   const [sessionUsage, setSessionUsage] = useState(null);
   const [appVersion, setAppVersion] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [connectionOk, setConnectionOk] = useState(true);
 
   const toggleLang = useCallback(() => {
     const next = _lang === 'en' ? 'zh' : 'en';
     _lang = next;
     localStorage.setItem('lc_lang', next);
+    updateHtmlLang();
     setLang(next);
   }, []);
 
@@ -591,8 +662,9 @@ function App() {
       if (r.ok) {
         const d = await r.json();
         setSessions(d.sessions || []);
+        setConnectionOk(true);
       }
-    } catch (_) {}
+    } catch (_) { setConnectionOk(false); }
   }, []);
 
   const loadModels = useCallback(async () => {
@@ -638,8 +710,8 @@ function App() {
   }, [authed]);
 
   const sendMessage = useCallback(async (text) => {
-    const userMsg = { role: 'user', content: text };
-    const assistantMsg = { role: 'assistant', content: '', toolHints: [], streaming: true };
+    const userMsg = { role: 'user', content: text, id: nextMsgId() };
+    const assistantMsg = { role: 'assistant', content: '', toolHints: [], streaming: true, id: nextMsgId() };
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
@@ -669,27 +741,42 @@ function App() {
     setStreaming(false);
     loadSessions();
     loadInfo(activeKey);
+    // Delayed refresh to pick up LLM-generated title (async, ~1-3s)
+    setTimeout(() => loadSessions(), 3000);
   }, [activeKey, currentModel]);
 
   const newChat = useCallback(() => {
     const id = Date.now().toString(36);
-    setActiveKey('webui:' + id);
+    const key = 'webui:' + id;
+    setActiveKey(key);
     setMessages([]);
     setSessionUsage(null);
+    // Optimistic insert — show immediately in sidebar
+    setSessions(prev => [{ key, title: t('empty_title'), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]);
+    setSidebarOpen(false);
+    setTimeout(() => document.querySelector('.input-field')?.focus(), 100);
   }, []);
 
   const selectSession = useCallback((key) => {
     setActiveKey(key);
     setMessages([]);
+    setSidebarOpen(false);
     loadSessionMessages(key);
     loadInfo(key);
+    setTimeout(() => document.querySelector('.input-field')?.focus(), 100);
   }, []);
 
-  const deleteSession = useCallback(async (key) => {
-    await api('/api/sessions/' + encodeURIComponent(key), { method: 'DELETE' });
-    if (key === activeKey) { newChat(); }
+  const deleteSession = useCallback((key) => {
+    setConfirmDelete(key);
+  }, []);
+
+  const confirmDeleteSession = useCallback(async () => {
+    if (!confirmDelete) return;
+    await api('/api/sessions/' + encodeURIComponent(confirmDelete), { method: 'DELETE' });
+    if (confirmDelete === activeKey) { newChat(); }
+    setConfirmDelete(null);
     loadSessions();
-  }, [activeKey]);
+  }, [confirmDelete, activeKey]);
 
   const logout = useCallback(async () => {
     await api('/api/auth', { method: 'DELETE' });
@@ -704,19 +791,26 @@ function App() {
 
   return html`
     <div class="app">
+      <div class="sidebar-overlay ${sidebarOpen ? 'open' : ''}" onClick=${() => setSidebarOpen(false)} />
       <${Sidebar}
         sessions=${sessions} activeKey=${activeKey}
         onSelect=${selectSession} onNew=${newChat} onDelete=${deleteSession}
         lang=${lang} onLangChange=${toggleLang}
-        usage=${sessionUsage} version=${appVersion} />
+        usage=${sessionUsage} version=${appVersion}
+        open=${sidebarOpen} />
       <div class="main">
         <${TopBar}
           model=${currentModel} models=${models}
           streaming=${streaming} onLogout=${logout}
-          onModelSelect=${(id) => setCurrentModel(id)} />
+          onModelSelect=${(id) => setCurrentModel(id)}
+          onMenuToggle=${() => setSidebarOpen(s => !s)} />
         <${ChatArea} messages=${messages} streaming=${streaming} />
         <${InputArea} onSend=${sendMessage} disabled=${streaming} />
       </div>
+      ${confirmDelete && html`<${ConfirmDialog}
+        message=${t('delete_confirm')}
+        onConfirm=${confirmDeleteSession}
+        onCancel=${() => setConfirmDelete(null)} />`}
     </div>
   `;
 }

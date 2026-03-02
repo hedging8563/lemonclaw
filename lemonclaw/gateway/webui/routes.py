@@ -179,6 +179,46 @@ def get_webui_routes(
         if cookie:
             _set_cookie(response, cookie, secure=_is_secure(request))
 
+    # ── Async session title generation ────────────────────────────────────
+
+    async def _generate_session_title(session_key: str, first_message: str) -> None:
+        """Generate a short title for the session via Groq LLM, fallback to truncation."""
+        session = session_manager._load(session_key)
+        if not session or session.metadata.get("title"):
+            return  # Already has a title
+
+        title = ""
+        try:
+            from lemonclaw.config.defaults import DEFAULT_CONSOLIDATION_MODEL
+            resp = await asyncio.wait_for(
+                agent_loop.provider.chat(
+                    model=DEFAULT_CONSOLIDATION_MODEL,
+                    messages=[
+                        {"role": "system", "content": (
+                            "Generate a short title (max 20 chars) for this conversation. "
+                            "Reply with ONLY the title, no quotes, no punctuation at the end. "
+                            "Use the same language as the user message."
+                        )},
+                        {"role": "user", "content": first_message[:500]},
+                    ],
+                    max_tokens=30,
+                    temperature=0.3,
+                ),
+                timeout=5.0,
+            )
+            title = (resp.content or "").strip().strip('"\'').strip()[:30]
+        except Exception as exc:
+            logger.debug("Title generation failed ({}), using fallback", exc)
+
+        # Fallback A: truncate first message
+        if not title:
+            title = first_message[:30].strip()
+            if len(first_message) > 30:
+                title += "…"
+
+        session.metadata["title"] = title
+        session_manager.save(session)
+
     # ── POST /api/chat/stream — SSE streaming ────────────────────────────
 
     async def chat_stream(request: Request) -> Response:
@@ -226,6 +266,10 @@ def get_webui_routes(
                 # Send final response
                 event = {"type": "done", "data": final}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
+                # Generate title for new sessions (fire-and-forget)
+                s = session_manager._load(session_key)
+                if s and not s.metadata.get("title"):
+                    asyncio.create_task(_generate_session_title(session_key, message))
             except Exception as exc:
                 logger.error("WebUI chat error: {}", exc)
                 event = {"type": "error", "data": str(exc)}
