@@ -448,8 +448,18 @@ class AgentLoop:
                 if request_id:
                     self.bus.resolve_response(request_id, "[cancelled]")
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception("Error processing message for session {}", msg.session_key)
+                # Procedural memory: reflect on failure to learn from it
+                try:
+                    await self.context.memory.procedural.reflect(
+                        self.provider,
+                        task_description=msg.content[:200],
+                        error=str(exc)[:200],
+                        model=self.model,
+                    )
+                except Exception:
+                    pass  # reflect is best-effort, never block error handling
                 if request_id:
                     self.bus.resolve_response(request_id, "[error]")
                 else:

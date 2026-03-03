@@ -69,6 +69,7 @@ class MemoryStore:
 
     def __init__(self, workspace: Path):
         from lemonclaw.memory.entities import EntityStore
+        from lemonclaw.memory.reflect import ProceduralMemory
         from lemonclaw.memory.today import TodayLog
         from lemonclaw.memory.trigger import MemoryTrigger
 
@@ -81,6 +82,7 @@ class MemoryStore:
         self.entities = EntityStore(self.memory_dir)
         self.today = TodayLog(self.memory_dir)
         self.trigger = MemoryTrigger(self.entities)
+        self.procedural = ProceduralMemory(self.memory_dir)
 
         # Get or create a lock for this workspace
         ws_key = str(workspace)

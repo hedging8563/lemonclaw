@@ -284,6 +284,105 @@ def test_context_builder_injects_matched_cards(tmp_path):
     assert "Python 3.13" in user_msg
 
 
+# ── Procedural Memory ────────────────────────────────────────────────────────
+
+
+def test_procedural_add_and_list(tmp_path):
+    from lemonclaw.memory.reflect import ProceduralMemory
+
+    pm = ProceduralMemory(tmp_path / "memory")
+    assert pm.list_rules() == []
+
+    rid = pm.add_rule("MiniMax 路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D 踩坑")
+    assert rid == 1
+    rules = pm.list_rules()
+    assert len(rules) == 1
+    assert rules[0]["trigger"] == "MiniMax 路由"
+    assert rules[0]["lesson"] == "原生格式是 Anthropic"
+
+    rid2 = pm.add_rule("Fastify body", "空 body 禁令", "检查一致性", "API 502")
+    assert rid2 == 2
+    assert len(pm.list_rules()) == 2
+
+
+def test_procedural_match_rules(tmp_path):
+    from lemonclaw.memory.reflect import ProceduralMemory
+
+    pm = ProceduralMemory(tmp_path / "memory")
+    pm.add_rule("MiniMax 模型路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D")
+    pm.add_rule("Fastify 空 body", "禁止空 body", "检查一致性", "API")
+    pm.add_rule("K8s 部署", "Recreate 策略", "不用 RollingUpdate", "Claw")
+
+    # Match MiniMax
+    matched = pm.match_rules("MiniMax 模型怎么路由")
+    assert len(matched) == 1
+    assert matched[0]["trigger"] == "MiniMax 模型路由"
+
+    # No match
+    assert pm.match_rules("hello world") == []
+
+
+def test_procedural_format_for_context(tmp_path):
+    from lemonclaw.memory.reflect import ProceduralMemory
+
+    pm = ProceduralMemory(tmp_path / "memory")
+    pm.add_rule("test trigger", "test lesson", "test action", "test source")
+
+    rules = pm.match_rules("test trigger")
+    text = ProceduralMemory.format_for_context(rules)
+    assert "Experience Rules" in text
+    assert "test lesson" in text
+
+    assert ProceduralMemory.format_for_context([]) == ""
+
+
+def test_procedural_reflect_fallback(tmp_path):
+    """Test reflect fallback when LLM is unavailable."""
+    import asyncio
+    from lemonclaw.memory.reflect import ProceduralMemory
+    from unittest.mock import AsyncMock
+
+    pm = ProceduralMemory(tmp_path / "memory")
+    mock_provider = AsyncMock()
+    mock_provider.chat.side_effect = Exception("LLM unavailable")
+
+    rid = asyncio.get_event_loop().run_until_complete(
+        pm.reflect(mock_provider, "deploy to K8s", "pod crash loop", model="test")
+    )
+    assert rid is not None
+    rules = pm.list_rules()
+    assert len(rules) == 1
+    assert "deploy to K8s" in rules[0]["trigger"]
+
+
+def test_memory_store_has_procedural(tmp_path):
+    from lemonclaw.agent.memory import MemoryStore
+
+    store = MemoryStore(tmp_path)
+    assert store.procedural is not None
+
+
+def test_context_builder_injects_matched_rules(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
+
+    messages = ctx.build_messages(
+        history=[],
+        current_message="python 部署到服务器",
+        channel="cli",
+        chat_id="test",
+    )
+    user_msg = messages[-1]["content"]
+    assert "Experience Rules" in user_msg
+    assert "需要 venv" in user_msg
+
+
 def test_context_builder_no_match_no_injection(tmp_path):
     from lemonclaw.agent.context import ContextBuilder
 

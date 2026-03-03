@@ -145,8 +145,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         # Keyword trigger: match LTM entity cards against user message
         from lemonclaw.memory.trigger import MemoryTrigger
+        from lemonclaw.memory.reflect import ProceduralMemory
         matched_cards = self.memory.trigger.match(current_message)
         memory_ctx = MemoryTrigger.format_for_context(matched_cards)
+
+        # Procedural memory: match experience rules against user message
+        matched_rules = self.memory.procedural.match_rules(current_message)
+        rules_ctx = ProceduralMemory.format_for_context(matched_rules)
 
         user_content = self._build_user_content(current_message, media)
         # For text-only messages, merge runtime context + memory context into user message.
@@ -154,12 +159,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             prefix = runtime_ctx
             if memory_ctx:
                 prefix += "\n\n" + memory_ctx
+            if rules_ctx:
+                prefix += "\n\n" + rules_ctx
             user_content = prefix + "\n\n" + user_content
         else:
             # Multimodal (images): prepend runtime context as first text block.
             text_prefix = runtime_ctx
             if memory_ctx:
                 text_prefix += "\n\n" + memory_ctx
+            if rules_ctx:
+                text_prefix += "\n\n" + rules_ctx
             user_content = [{"type": "text", "text": text_prefix}, *user_content]
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
