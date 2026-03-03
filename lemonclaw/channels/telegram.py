@@ -463,7 +463,14 @@ class TelegramChannel(BaseChannel):
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
         str_chat_id = str(message.chat_id)
         session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
-        metadata = {"is_group": is_group}
+        user = update.effective_user
+        metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group,
+        }
         if thread_id:
             metadata["message_thread_id"] = thread_id
         await self._handle_message(
