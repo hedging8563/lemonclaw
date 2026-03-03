@@ -70,10 +70,10 @@ TIER_LABELS: dict[str, str] = {
 
 
 def fuzzy_match(query: str) -> ModelEntry | None:
-    """Find a model by exact ID, partial ID, or label substring (case-insensitive).
+    """Find a model by exact ID, partial ID, label substring, or semantic alias.
 
     Only searches visible (non-hidden) models.
-    Priority: exact id > id prefix > id substring > label substring.
+    Priority: exact id > semantic alias > id prefix > id substring > label substring.
     """
     q = query.lower().strip()
     if not q:
@@ -85,6 +85,12 @@ def fuzzy_match(query: str) -> ModelEntry | None:
     for m in visible:
         if m.id == q:
             return m
+
+    # Semantic alias (e.g. "best-for-code" → claude-opus-4-6)
+    from lemonclaw.providers.aliases import resolve_alias
+    alias_hit = resolve_alias(q)
+    if alias_hit:
+        return alias_hit
 
     # Prefix match (e.g. "claude-sonnet" → "claude-sonnet-4-6")
     prefix_hits = [m for m in visible if m.id.startswith(q)]
@@ -126,4 +132,8 @@ def format_model_list(current_model: str | None = None) -> str:
             lines.append(f"  `{m.id}` — {m.description}{marker}")
 
     header = "Available models (use `/model <name>` to switch):\n"
-    return header + "\n".join(lines)
+    footer = "\n\n**Aliases** (use `/model <alias>` to switch):"
+    from lemonclaw.providers.aliases import list_aliases
+    for alias, model_id in list_aliases().items():
+        footer += f"\n  `{alias}` → {model_id}"
+    return header + "\n".join(lines) + footer
