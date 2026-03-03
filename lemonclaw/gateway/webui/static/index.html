@@ -162,6 +162,56 @@ input { font-family: inherit; font-size: inherit; }
 .input-send:hover { background: var(--accent-hover); }
 .input-send:disabled { opacity: 0.3; cursor: not-allowed; }
 
+/* ── Activity Feed ────────────────────────────────────────────────── */
+.activity-area { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+.activity-header { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); padding: 8px 0; }
+.activity-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; }
+.activity-empty-icon { font-size: 48px; opacity: 0.3; }
+.activity-empty-text { font-size: 15px; }
+.activity-empty-hint { font-size: 12px; font-family: var(--font-mono); }
+
+.activity-event { display: flex; gap: 10px; max-width: 800px; width: 100%; margin: 0 auto; padding: 8px 12px; border-radius: 8px; border-left: 3px solid transparent; }
+.activity-event-user { background: var(--bg-tertiary); border-left-color: var(--accent); }
+.activity-event-assistant { background: var(--bg-secondary); border-left-color: var(--teal); }
+.activity-event-tool { background: var(--bg-primary); border: 1px solid var(--border); border-left: 3px solid var(--teal-dim); }
+.activity-event-progress { background: transparent; border-left-color: var(--border); opacity: 0.7; }
+.activity-event-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; min-width: 42px; padding-top: 1px; }
+.activity-event-body { flex: 1; min-width: 0; }
+.activity-event-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.activity-event-role { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.activity-event-user .activity-event-role { color: var(--accent); }
+.activity-event-assistant .activity-event-role { color: var(--teal); }
+.activity-event-tool .activity-event-role { color: var(--teal); opacity: 0.7; }
+.activity-event-channel { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); }
+.activity-event-content { font-size: 13px; word-break: break-word; line-height: 1.5; }
+.activity-event-tool .activity-event-content { font-family: var(--font-mono); font-size: 12px; color: var(--teal); }
+.activity-event-content p { margin: 0 0 4px; }
+.activity-event-content p:last-child { margin-bottom: 0; }
+
+.activity-streaming { font-family: var(--font-mono); font-size: 10px; color: var(--teal); text-transform: uppercase; letter-spacing: 1px; padding: 4px 0; max-width: 800px; margin: 0 auto; width: 100%; }
+.activity-streaming::before { content: '\25CF'; margin-right: 6px; animation: blink 0.8s infinite; }
+
+/* ── Sidebar tabs ────────────────────────────────────────────────── */
+.sidebar-tabs { display: flex; border-top: 1px solid var(--border); }
+.sidebar-tab { flex: 1; padding: 8px 0; text-align: center; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); transition: all 0.15s; border-top: 2px solid transparent; }
+.sidebar-tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.sidebar-tab.active { color: var(--accent); border-top-color: var(--accent); }
+
+/* ── Activity session list ───────────────────────────────────────── */
+.activity-session { display: flex; align-items: flex-start; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; gap: 8px; border: 1px solid transparent; margin-bottom: 4px; }
+.activity-session:hover { background: var(--bg-hover); border-color: var(--border); }
+.activity-session.active { background: var(--bg-tertiary); border-color: var(--border); border-left: 2px solid var(--teal); }
+.activity-session-info { flex: 1; min-width: 0; }
+.activity-session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.3; }
+.activity-session-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.activity-session-channel { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--teal); flex-shrink: 0; }
+
+/* ── WS status ───────────────────────────────────────────────────── */
+.ws-status { font-family: var(--font-mono); font-size: 10px; padding: 4px 12px; }
+.ws-status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+.ws-status-dot.connected { background: var(--success); }
+.ws-status-dot.disconnected { background: var(--error); }
+
 /* ── Mobile ───────────────────────────────────────────────────────── */
 /* ── Copy button for code blocks ─────────────────────────────── */
 .code-block-wrap { position: relative; }
@@ -249,6 +299,13 @@ const I18N = {
     connected: 'connected',
     tokens: 'Tokens',
     loading_history: 'Loading...',
+    tab_chat: 'Chat',
+    tab_activity: 'Activity',
+    activity_empty: 'No IM activity yet',
+    activity_hint: 'Messages from Telegram, Discord, etc. will appear here',
+    activity_all: 'All Channels',
+    ws_connected: 'LIVE',
+    ws_disconnected: 'OFFLINE',
   },
   zh: {
     title: 'LemonClaw',
@@ -275,6 +332,13 @@ const I18N = {
     connected: '\u5DF2\u8FDE\u63A5',
     tokens: 'Tokens',
     loading_history: '\u52A0\u8F7D\u4E2D...',
+    tab_chat: '\u804A\u5929',
+    tab_activity: '\u52A8\u6001',
+    activity_empty: '\u6682\u65E0 IM \u6D3B\u52A8',
+    activity_hint: 'Telegram\u3001Discord \u7B49\u6E20\u9053\u7684\u6D88\u606F\u5C06\u663E\u793A\u5728\u8FD9\u91CC',
+    activity_all: '\u5168\u90E8\u6E20\u9053',
+    ws_connected: '\u5B9E\u65F6',
+    ws_disconnected: '\u79BB\u7EBF',
   }
 };
 
@@ -369,33 +433,69 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open }) {
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open, activeTab, onTabChange, activitySessions, selectedActivitySession, onSelectActivitySession, wsConnected }) {
   return html`
     <div class="sidebar ${open ? 'open' : ''}">
       <div class="sidebar-header">
         <div class="sidebar-brand">Lemon<span>Claw</span></div>
-        <button class="sidebar-new" onClick=${onNew}>${t('new_chat')}</button>
+        ${activeTab === 'chat' ? html`
+          <button class="sidebar-new" onClick=${onNew}>${t('new_chat')}</button>
+        ` : html`
+          <div class="ws-status">
+            <span class="ws-status-dot ${wsConnected ? 'connected' : 'disconnected'}"></span>
+            ${wsConnected ? t('ws_connected') : t('ws_disconnected')}
+          </div>
+        `}
       </div>
-      <div class="sidebar-section-label">// ${t('sessions')}</div>
-      <div class="sidebar-sessions">
-        ${sessions.length === 0
-          ? html`<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center;font-family:var(--font-mono)">${t('no_sessions')}</div>`
-          : sessions.map(s => html`
-            <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
-              onClick=${() => onSelect(s.key)}>
-              <div class="sidebar-session-info">
-                <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
-                <div class="sidebar-session-meta">
-                  <span class="sidebar-session-dot">${s.key === activeKey ? '\u25CF' : '\u25CB'}</span>
-                  <span>${s.key === activeKey ? 'ACTIVE' : 'IDLE'}</span>
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab ${activeTab === 'chat' ? 'active' : ''}" onClick=${() => onTabChange('chat')}>${t('tab_chat')}</button>
+        <button class="sidebar-tab ${activeTab === 'activity' ? 'active' : ''}" onClick=${() => onTabChange('activity')}>${t('tab_activity')}</button>
+      </div>
+      ${activeTab === 'chat' ? html`
+        <div class="sidebar-section-label">// ${t('sessions')}</div>
+        <div class="sidebar-sessions">
+          ${sessions.length === 0
+            ? html`<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center;font-family:var(--font-mono)">${t('no_sessions')}</div>`
+            : sessions.map(s => html`
+              <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
+                onClick=${() => onSelect(s.key)}>
+                <div class="sidebar-session-info">
+                  <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
+                  <div class="sidebar-session-meta">
+                    <span class="sidebar-session-dot">${s.key === activeKey ? '\u25CF' : '\u25CB'}</span>
+                    <span>${s.key === activeKey ? 'ACTIVE' : 'IDLE'}</span>
+                    ${s.updated_at ? html`<span>\u00B7 ${new Date(s.updated_at).toLocaleDateString()}</span>` : ''}
+                  </div>
+                </div>
+                <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>\u00D7</button>
+              </div>
+            `)
+          }
+        </div>
+      ` : html`
+        <div class="sidebar-section-label">// IM ${t('sessions')}</div>
+        <div class="sidebar-sessions">
+          <div class="activity-session ${!selectedActivitySession ? 'active' : ''}"
+            onClick=${() => onSelectActivitySession(null)}>
+            <div class="activity-session-info">
+              <span class="activity-session-name">${t('activity_all')}</span>
+            </div>
+          </div>
+          ${activitySessions.map(s => html`
+            <div class="activity-session ${s.key === selectedActivitySession ? 'active' : ''}"
+              onClick=${() => onSelectActivitySession(s.key)}>
+              <span class="activity-session-channel">${channelAbbr(s.channel)}</span>
+              <div class="activity-session-info">
+                <span class="activity-session-name">${s.title || s.key.split(':').slice(1).join(':')}</span>
+                <div class="activity-session-meta">
+                  <span>${s.message_count} msgs</span>
                   ${s.updated_at ? html`<span>\u00B7 ${new Date(s.updated_at).toLocaleDateString()}</span>` : ''}
                 </div>
               </div>
-              <button class="sidebar-session-del" onClick=${(e) => { e.stopPropagation(); onDelete(s.key); }}>\u00D7</button>
             </div>
-          `)
-        }
-      </div>
+          `)}
+        </div>
+      `}
       <div class="sidebar-footer">
         <div class="sidebar-stats">
           <span class="sidebar-stats-key">SESSIONS</span>
@@ -663,6 +763,141 @@ async function streamChat(message, sessionKey, model, onEvent) {
 
 
 
+// ── Channel abbreviations ────────────────────────────────────────────────
+const CHANNEL_ABBR = { telegram: 'TG', discord: 'DC', whatsapp: 'WA', feishu: 'FS', dingtalk: 'DT', email: 'EM', wecom: 'WC', qq: 'QQ', matrix: 'MX', mochat: 'MC' };
+function channelAbbr(ch) { return CHANNEL_ABBR[ch] || ch.toUpperCase().slice(0, 2); }
+
+// ── Activity WebSocket hook ──────────────────────────────────────────────
+function useActivityWS(active) {
+  const [connected, setConnected] = useState(false);
+  const [events, setEvents] = useState([]);
+  const wsRef = useRef(null);
+  const reconnectRef = useRef(null);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
+
+  useEffect(() => {
+    if (!active) {
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (reconnectRef.current) { clearTimeout(reconnectRef.current); reconnectRef.current = null; }
+      setConnected(false);
+      return;
+    }
+
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws/activity`);
+      wsRef.current = ws;
+
+      ws.onopen = () => { setConnected(true); };
+      ws.onclose = () => {
+        setConnected(false);
+        wsRef.current = null;
+        reconnectRef.current = setTimeout(connect, 3000);
+      };
+      ws.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+          if (evt.type === 'ping') return;
+          setEvents(prev => {
+            const next = [...prev, evt];
+            return next.length > 500 ? next.slice(-300) : next;
+          });
+        } catch (_) {}
+      };
+    }
+
+    connect();
+    return () => {
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (reconnectRef.current) { clearTimeout(reconnectRef.current); reconnectRef.current = null; }
+    };
+  }, [active]);
+
+  return { connected, events, clearEvents: () => setEvents([]) };
+}
+
+// ── Activity Event component ─────────────────────────────────────────────
+function ActivityEvent({ evt, showChannel }) {
+  const time = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const roleClass = evt.role === 'user' ? 'user' : (evt.type === 'tool_call' ? 'tool' : (evt.type === 'progress' ? 'progress' : 'assistant'));
+
+  return html`
+    <div class="activity-event activity-event-${roleClass}">
+      <span class="activity-event-time">${time}</span>
+      <div class="activity-event-body">
+        <div class="activity-event-meta">
+          <span class="activity-event-role">${evt.type === 'tool_call' ? 'tool' : (evt.role || 'bot')}</span>
+          ${showChannel && evt.channel ? html`<span class="activity-event-channel">${channelAbbr(evt.channel)}</span>` : ''}
+        </div>
+        <div class="activity-event-content" dangerouslySetInnerHTML=${{ __html: renderMd(evt.content || '') }} />
+      </div>
+    </div>
+  `;
+}
+
+// ── Activity Panel ───────────────────────────────────────────────────────
+function ActivityPanel({ connected, events, activitySessions, selectedSession, onSelectSession }) {
+  const endRef = useRef(null);
+  const areaRef = useRef(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  // Track scroll position to decide auto-scroll
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      setAutoScroll(atBottom);
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [events]);
+
+  // Filter events by selected session
+  const filtered = selectedSession
+    ? events.filter(e => e.session_key === selectedSession)
+    : events;
+
+  // Detect streaming state
+  const streamingSessions = new Set();
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const e = filtered[i];
+    if (e.type === 'done') break;
+    if (e.type === 'chunk' || e.type === 'tool_call' || e.type === 'progress') {
+      streamingSessions.add(e.session_key);
+      break;
+    }
+  }
+
+  if (filtered.length === 0) {
+    return html`
+      <div class="activity-area">
+        <div class="activity-empty">
+          <div class="activity-empty-icon">\uD83D\uDCE1</div>
+          <div class="activity-empty-text">${t('activity_empty')}</div>
+          <div class="activity-empty-hint">${t('activity_hint')}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="activity-area" ref=${areaRef}>
+      <div class="activity-header">// activity ${selectedSession ? '\u00B7 ' + selectedSession.split(':')[0].toUpperCase() : ''}</div>
+      ${filtered.map((evt, i) => html`
+        <${ActivityEvent} key=${i} evt=${evt} showChannel=${!selectedSession} />
+      `)}
+      ${streamingSessions.size > 0 ? html`<div class="activity-streaming">STREAMING</div>` : ''}
+      <div ref=${endRef} />
+    </div>
+  `;
+}
+
 // ── App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -679,6 +914,11 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [connectionOk, setConnectionOk] = useState(true);
+  const [activeTab, setActiveTab] = useState('chat');
+  const [activitySessions, setActivitySessions] = useState([]);
+  const [selectedActivitySession, setSelectedActivitySession] = useState(null);
+
+  const { connected: wsConnected, events: wsEvents } = useActivityWS(authed && activeTab === 'activity');
 
   const toggleLang = useCallback(() => {
     const next = _lang === 'en' ? 'zh' : 'en';
@@ -738,6 +978,16 @@ function App() {
     } catch (_) { setMessages([]); }
   }, []);
 
+  const loadActivitySessions = useCallback(async () => {
+    try {
+      const r = await api('/api/activity/sessions');
+      if (r.ok) {
+        const d = await r.json();
+        setActivitySessions(d.sessions || []);
+      }
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     if (authed) {
       loadSessions();
@@ -746,6 +996,12 @@ function App() {
       loadSessionMessages(activeKey);
     }
   }, [authed]);
+
+  useEffect(() => {
+    if (authed && activeTab === 'activity') {
+      loadActivitySessions();
+    }
+  }, [authed, activeTab]);
 
   const sendMessage = useCallback(async (text) => {
     const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
@@ -836,15 +1092,29 @@ function App() {
         onSelect=${selectSession} onNew=${newChat} onDelete=${deleteSession}
         lang=${lang} onLangChange=${toggleLang}
         usage=${sessionUsage} version=${appVersion}
-        open=${sidebarOpen} />
+        open=${sidebarOpen}
+        activeTab=${activeTab} onTabChange=${setActiveTab}
+        activitySessions=${activitySessions}
+        selectedActivitySession=${selectedActivitySession}
+        onSelectActivitySession=${setSelectedActivitySession}
+        wsConnected=${wsConnected} />
       <div class="main">
         <${TopBar}
           model=${currentModel} models=${models}
           streaming=${streaming} onLogout=${logout}
           onModelSelect=${(id) => { localStorage.setItem('lc_model', id); setCurrentModel(id); }}
           onMenuToggle=${() => setSidebarOpen(s => !s)} />
-        <${ChatArea} messages=${messages} streaming=${streaming} />
-        <${InputArea} onSend=${sendMessage} disabled=${streaming} />
+        ${activeTab === 'chat' ? html`
+          <${ChatArea} messages=${messages} streaming=${streaming} />
+          <${InputArea} onSend=${sendMessage} disabled=${streaming} />
+        ` : html`
+          <${ActivityPanel}
+            connected=${wsConnected}
+            events=${wsEvents}
+            activitySessions=${activitySessions}
+            selectedSession=${selectedActivitySession}
+            onSelectSession=${setSelectedActivitySession} />
+        `}
       </div>
       ${confirmDelete && html`<${ConfirmDialog}
         message=${t('delete_confirm')}
