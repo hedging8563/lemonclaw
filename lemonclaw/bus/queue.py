@@ -17,6 +17,10 @@ class MessageBus:
     queue based on ``target_agent_id``.  Outbound remains a single shared queue
     consumed by the channel dispatcher.
 
+    Supports request-response via ``request_id``: callers register a Future
+    with ``expect_response(request_id)`` and the agent resolves it with
+    ``resolve_response(request_id, content)``.
+
     Backward-compatible: when no agents are registered, behaves like the
     original dual-queue bus (everything goes to the "default" agent).
     """
@@ -25,6 +29,7 @@ class MessageBus:
         self._maxsize = maxsize
         self._agent_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue(maxsize=maxsize)
+        self._pending_responses: dict[str, asyncio.Future[str]] = {}
         # Always register the default agent
         self.register_agent(DEFAULT_AGENT_ID)
 
@@ -73,6 +78,29 @@ class MessageBus:
     async def consume_outbound(self) -> OutboundMessage:
         """Consume the next outbound message (blocks until available)."""
         return await self.outbound.get()
+
+    # ── Request-response (Conductor ↔ Agent) ──────────────────────────────
+
+    def expect_response(self, request_id: str) -> asyncio.Future[str]:
+        """Register a Future that will be resolved when an agent responds."""
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str] = loop.create_future()
+        self._pending_responses[request_id] = fut
+        return fut
+
+    def resolve_response(self, request_id: str, content: str) -> bool:
+        """Resolve a pending request-response Future. Returns True if matched."""
+        fut = self._pending_responses.pop(request_id, None)
+        if fut and not fut.done():
+            fut.set_result(content)
+            return True
+        return False
+
+    def cancel_response(self, request_id: str) -> None:
+        """Cancel a pending request-response Future."""
+        fut = self._pending_responses.pop(request_id, None)
+        if fut and not fut.done():
+            fut.cancel()
 
     # ── Diagnostics ──────────────────────────────────────────────────────
 

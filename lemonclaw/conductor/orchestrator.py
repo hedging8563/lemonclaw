@@ -236,7 +236,12 @@ class Orchestrator:
     async def _execute_subtask(
         self, plan: OrchestrationPlan, subtask: SubTask,
     ) -> str | None:
-        """Execute a single subtask by sending it to the assigned agent."""
+        """Execute a single subtask.
+
+        If the assigned agent has a registered bus queue, route through the
+        bus with request-response.  Otherwise fall back to a direct LLM call.
+        """
+        import uuid as _uuid
         from lemonclaw.bus.events import InboundMessage
         from lemonclaw.agent.types import AgentStatus
 
@@ -246,29 +251,55 @@ class Orchestrator:
         self._registry.update_status(agent_id, AgentStatus.THINKING)
 
         try:
-            # For now, use the provider directly (single-turn LLM call).
-            # In the future, this will route through the agent's own loop.
-            async with self._llm_semaphore:
-                response = await self._provider.chat(
-                    messages=[
-                        {"role": "system", "content": (
-                            "You are a specialist agent. Complete the assigned task "
-                            "thoroughly and concisely. Focus only on this specific task."
-                        )},
-                        {"role": "user", "content": (
-                            f"Context: {plan.original_message}\n\n"
-                            f"Your specific task: {subtask.description}"
-                        )},
-                    ],
-                    model=self._model,
-                    temperature=0.3,
-                    max_tokens=4096,
+            # Try bus route if agent has a queue (and is not "default" — the
+            # default agent handles user-facing messages, not internal tasks).
+            if agent_id != "default" and agent_id in self._bus.registered_agents:
+                request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
+                fut = self._bus.expect_response(request_id)
+
+                msg = InboundMessage(
+                    channel="internal",
+                    sender_id="conductor",
+                    chat_id=agent_id,
+                    content=(
+                        f"Context: {plan.original_message}\n\n"
+                        f"Your specific task: {subtask.description}"
+                    ),
+                    target_agent_id=agent_id,
+                    metadata={"_request_id": request_id},
                 )
-            subtask.result = response.content
+                await self._bus.publish_inbound(msg)
+
+                try:
+                    result = await asyncio.wait_for(fut, timeout=300)
+                except asyncio.TimeoutError:
+                    self._bus.cancel_response(request_id)
+                    raise TimeoutError(f"Agent '{agent_id}' did not respond within 300s")
+            else:
+                # Fallback: direct LLM call (no active agent loop for this agent)
+                async with self._llm_semaphore:
+                    response = await self._provider.chat(
+                        messages=[
+                            {"role": "system", "content": (
+                                "You are a specialist agent. Complete the assigned task "
+                                "thoroughly and concisely. Focus only on this specific task."
+                            )},
+                            {"role": "user", "content": (
+                                f"Context: {plan.original_message}\n\n"
+                                f"Your specific task: {subtask.description}"
+                            )},
+                        ],
+                        model=self._model,
+                        temperature=0.3,
+                        max_tokens=4096,
+                    )
+                result = response.content
+
+            subtask.result = result
             subtask.status = SubTaskStatus.COMPLETED
             self._registry.record_task_result(agent_id, success=True)
             self._registry.update_status(agent_id, AgentStatus.IDLE)
-            return response.content
+            return result
 
         except Exception as e:
             logger.error("Orchestrator: subtask '{}' failed: {}", subtask.id, e)

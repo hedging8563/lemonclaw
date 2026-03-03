@@ -395,6 +395,9 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under a per-session lock."""
+        is_internal = msg.channel == "internal"
+        request_id = (msg.metadata or {}).get("_request_id") if is_internal else None
+
         # Per-session lock: different sessions can run concurrently
         if msg.session_key not in self._session_locks:
             self._session_locks[msg.session_key] = asyncio.Lock()
@@ -407,6 +410,13 @@ class AgentLoop:
         async with lock:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
+
+                # Internal request-response: resolve Future instead of outbound
+                if request_id:
+                    content = response.content if response else ""
+                    self.bus.resolve_response(request_id, content)
+                    return
+
                 if response is not None:
                     # Ensure routing metadata (e.g. message_thread_id) propagates to outbound
                     if not response.metadata:
@@ -433,14 +443,19 @@ class AgentLoop:
                         ))
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
+                if request_id:
+                    self.bus.resolve_response(request_id, "[cancelled]")
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
-                lang = session_lang(self.sessions._load(msg.session_key))
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content=t("error", lang),
-                ))
+                if request_id:
+                    self.bus.resolve_response(request_id, "[error]")
+                else:
+                    lang = session_lang(self.sessions._load(msg.session_key))
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content=t("error", lang),
+                    ))
             finally:
                 self._stop_events.pop(msg.session_key, None)
 

@@ -241,3 +241,56 @@ async def test_get_agent_status_tool(tmp_path):
 
     result = await tool.execute(agent_id="nope")
     assert "not found" in result.lower()
+
+
+# ── Bus request-response mechanism ────────────────────────────────────────
+
+
+async def test_bus_request_response():
+    bus = MessageBus()
+    request_id = "req-001"
+    fut = bus.expect_response(request_id)
+    assert not fut.done()
+
+    # Simulate agent resolving the response
+    assert bus.resolve_response(request_id, "hello from agent")
+    assert fut.done()
+    assert await fut == "hello from agent"
+
+
+async def test_bus_resolve_unknown_request():
+    bus = MessageBus()
+    assert not bus.resolve_response("nonexistent", "data")
+
+
+async def test_bus_cancel_response():
+    bus = MessageBus()
+    fut = bus.expect_response("req-002")
+    bus.cancel_response("req-002")
+    assert fut.cancelled()
+
+
+async def test_bus_request_response_roundtrip():
+    """Simulate Conductor → Bus → Agent → resolve pattern."""
+    bus = MessageBus()
+    bus.register_agent("player-1")
+
+    request_id = "orch-abc-t1"
+    fut = bus.expect_response(request_id)
+
+    # Conductor sends message to player
+    msg = InboundMessage(
+        channel="internal", sender_id="conductor", chat_id="player-1",
+        content="do research", target_agent_id="player-1",
+        metadata={"_request_id": request_id},
+    )
+    await bus.publish_inbound(msg)
+
+    # Agent consumes and processes
+    received = await asyncio.wait_for(bus.consume_inbound("player-1"), timeout=1.0)
+    assert received.metadata["_request_id"] == request_id
+
+    # Agent resolves
+    bus.resolve_response(request_id, "research complete")
+    result = await asyncio.wait_for(fut, timeout=1.0)
+    assert result == "research complete"
