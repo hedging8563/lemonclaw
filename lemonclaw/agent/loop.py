@@ -63,6 +63,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        agent_id: str = "default",
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
@@ -80,6 +81,7 @@ class AgentLoop:
         default_timezone: str = "",
     ):
         from lemonclaw.config.schema import ExecToolConfig
+        self.agent_id = agent_id
         self.bus = bus
         self.channels_config = channels_config
         self.default_timezone = default_timezone
@@ -351,7 +353,7 @@ class AgentLoop:
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                msg = await asyncio.wait_for(self.bus.consume_inbound(self.agent_id), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
 
@@ -376,10 +378,10 @@ class AgentLoop:
             stop_event.set()
 
         tasks = self._active_tasks.pop(msg.session_key, [])
-        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
-        for t in tasks:
+        cancelled = sum(1 for tk in tasks if not tk.done() and tk.cancel())
+        for tk in tasks:
             try:
-                await t
+                await tk
             except (asyncio.CancelledError, Exception):
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
