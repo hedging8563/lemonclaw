@@ -325,6 +325,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         usage_tracker=usage_tracker,
+        coding_config=config.tools.coding,
     )
     
     # Set cron callback (needs agent)
@@ -530,8 +531,9 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        coding_config=config.tools.coding,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -1020,6 +1022,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        coding_config=config.tools.coding,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"

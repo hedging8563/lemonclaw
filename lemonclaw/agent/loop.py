@@ -20,6 +20,7 @@ from lemonclaw.agent.tools.cron import CronTool
 from lemonclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.registry import ToolRegistry
+from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.shell import ExecTool
 from lemonclaw.agent.tools.spawn import SpawnTool
 from lemonclaw.agent.tools.web import WebFetchTool, WebSearchTool
@@ -31,7 +32,7 @@ from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 if TYPE_CHECKING:
-    from lemonclaw.config.schema import ChannelsConfig, ExecToolConfig
+    from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig
     from lemonclaw.cron.service import CronService
 
 
@@ -73,6 +74,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         usage_tracker: UsageTracker | None = None,
+        coding_config: CodingToolConfig | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.bus = bus
@@ -86,6 +88,7 @@ class AgentLoop:
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.coding_config = coding_config
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -135,6 +138,14 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if self.coding_config and self.coding_config.enabled:
+            self.tools.register(CodingTool(
+                working_dir=str(self.workspace),
+                timeout=self.coding_config.timeout,
+                api_key=self.coding_config.api_key,
+                api_base=self.coding_config.api_base,
+                restrict_to_workspace=self.restrict_to_workspace,
+            ))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

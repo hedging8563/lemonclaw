@@ -319,6 +319,15 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class CodingToolConfig(Base):
+    """Claude Code CLI tool configuration."""
+
+    enabled: bool = False
+    timeout: int = 300
+    api_key: str = ""   # Anthropic API key (or LemonData key with api_base)
+    api_base: str = ""  # Custom API endpoint (e.g. https://api.lemondata.cc)
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -342,6 +351,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    coding: CodingToolConfig = Field(default_factory=CodingToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
