@@ -381,9 +381,12 @@ function LoginScreen({ onLogin }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    // Restore saved token so users don't have to re-enter it.
-    const saved = localStorage.getItem('lc_token');
+    // Read token from URL ?token= param or localStorage.
+    const urlToken = new URLSearchParams(location.search).get('token');
+    const saved = urlToken || localStorage.getItem('lc_token');
     if (saved) setToken(saved);
+    // Clean token from URL to avoid leaking in referrer/history.
+    if (urlToken) history.replaceState(null, '', location.pathname);
     // Probe auth state via dedicated check endpoint
     api('/api/auth/check').then(r => {
       if (r.ok) { return r.json(); }
@@ -392,6 +395,15 @@ function LoginScreen({ onLogin }) {
       if (data && data.ok) {
         if (!data.auth_required) { setNoAuth(true); }
         onLogin();
+      } else if (saved) {
+        // Auto-login with saved/URL token — use value directly since setState is async.
+        api('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: saved }),
+        }).then(r => {
+          if (r.ok) { localStorage.setItem('lc_token', saved); onLogin(); }
+        }).catch(() => {});
       }
     }).catch(() => {});
     inputRef.current?.focus();
