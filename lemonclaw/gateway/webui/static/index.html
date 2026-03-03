@@ -381,6 +381,9 @@ function LoginScreen({ onLogin }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
+    // Restore saved token so users don't have to re-enter it.
+    const saved = localStorage.getItem('lc_token');
+    if (saved) setToken(saved);
     // Probe auth state via dedicated check endpoint
     api('/api/auth/check').then(r => {
       if (r.ok) { return r.json(); }
@@ -404,7 +407,7 @@ function LoginScreen({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
       });
-      if (r.ok) { onLogin(); }
+      if (r.ok) { localStorage.setItem('lc_token', token); onLogin(); }
       else { setError(t('login_error')); }
     } catch (_) { setError(t('error')); }
     setLoading(false);
