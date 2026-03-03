@@ -63,19 +63,27 @@ class BaseChannel(ABC):
     def is_allowed(self, sender_id: str) -> bool:
         """
         Check if a sender is allowed to use this bot.
-        
+
+        Deny-by-default: if allow_from is empty, reject all messages.
+        This prevents accidental exposure when the whitelist is not configured.
+
         Args:
             sender_id: The sender's identifier.
-        
+
         Returns:
             True if allowed, False otherwise.
         """
         allow_list = getattr(self.config, "allow_from", [])
-        
-        # If no allow list, allow everyone
+
+        # Deny-by-default: empty allow_from means no one is allowed
         if not allow_list:
-            return True
-        
+            logger.warning(
+                "Channel {} has empty allow_from — all messages denied. "
+                "Configure allow_from in config to grant access.",
+                self.name,
+            )
+            return False
+
         sender_str = str(sender_id)
         if sender_str in allow_list:
             return True

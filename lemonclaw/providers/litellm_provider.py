@@ -231,14 +231,17 @@ class LiteLLMProvider(LLMProvider):
     
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]], *, keep_reasoning: bool = False) -> list[dict[str, Any]]:
-        """Strip non-standard keys and ensure assistant messages have a content key.
+        """Strip non-standard keys, fix null content, and merge consecutive same-role messages.
 
         Many OpenAI-compatible gateways reject ``"content": null`` on assistant
         messages (even though the OpenAI spec allows it when tool_calls are
         present).  We normalise to ``""`` which is universally accepted.
+
+        Anthropic requires strict user/assistant alternation — consecutive user
+        messages (e.g. runtime context + user input) are merged with ``\\n\\n``.
         """
         allowed = _ALLOWED_MSG_KEYS | {"reasoning_content"} if keep_reasoning else _ALLOWED_MSG_KEYS
-        sanitized = []
+        sanitized: list[dict[str, Any]] = []
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in allowed}
             # Ensure assistant messages always have a content key.
@@ -246,6 +249,16 @@ class LiteLLMProvider(LLMProvider):
             if clean.get("role") == "assistant":
                 if "content" not in clean or clean["content"] is None:
                     clean["content"] = ""
+            # Merge consecutive user messages to satisfy Anthropic alternation requirement.
+            if (
+                sanitized
+                and clean.get("role") == "user"
+                and sanitized[-1].get("role") == "user"
+                and isinstance(clean.get("content"), str)
+                and isinstance(sanitized[-1].get("content"), str)
+            ):
+                sanitized[-1] = {**sanitized[-1], "content": sanitized[-1]["content"] + "\n\n" + clean["content"]}
+                continue
             sanitized.append(clean)
         return sanitized
 
