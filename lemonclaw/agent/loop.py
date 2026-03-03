@@ -388,6 +388,7 @@ class AgentLoop:
         content = t("stop_tasks", lang, n=total) if total else t("stop_none", lang)
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
+            metadata=msg.metadata or {},
         ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
@@ -405,6 +406,9 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
                 if response is not None:
+                    # Ensure routing metadata (e.g. message_thread_id) propagates to outbound
+                    if not response.metadata:
+                        response.metadata = dict(msg.metadata or {})
                     # Use a copy for _final so we don't pollute the original metadata
                     if response.channel != "webui":
                         response.metadata = {**(response.metadata or {}), "_final": True}

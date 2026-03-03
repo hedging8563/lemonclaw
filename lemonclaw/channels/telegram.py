@@ -262,10 +262,10 @@ class TelegramChannel(BaseChannel):
             return
 
         is_progress = msg.metadata.get("_progress", False)
-        is_group = msg.metadata.get("is_group", False)
+        thread_id = msg.metadata.get("message_thread_id")
 
-        # ── Progress/chunk messages: stream via editMessageText (private chats only) ──
-        if is_progress and not is_group:
+        # ── Progress/chunk messages: stream via editMessageText ──
+        if is_progress:
             if not msg.content or msg.content == "[empty message]":
                 return
             stream = self._get_or_create_stream(msg.chat_id)
@@ -297,9 +297,10 @@ class TelegramChannel(BaseChannel):
             try:
                 if stream.message_id == 0:
                     # First update: send a new message
-                    sent = await self._app.bot.send_message(
-                        chat_id=chat_id, text=display + " ▍",
-                    )
+                    send_kwargs = {"chat_id": chat_id, "text": display + " ▍"}
+                    if thread_id:
+                        send_kwargs["message_thread_id"] = thread_id
+                    sent = await self._app.bot.send_message(**send_kwargs)
                     stream.message_id = sent.message_id
                 else:
                     # Subsequent updates: edit the existing message
@@ -314,10 +315,6 @@ class TelegramChannel(BaseChannel):
                 logger.debug("Stream edit failed: {}", e)
             return
 
-        # ── Final message: edit the stream message with formatted content ──
-        self._stop_typing(msg.chat_id)
-        stream = self._stream_states.pop(msg.chat_id, None)
-
         # ── Final message: edit stream message or send new ──────────────
         self._stop_typing(msg.chat_id)
         stream = self._stream_states.pop(msg.chat_id, None)
@@ -330,6 +327,9 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+
+        # Common kwargs for forum topic routing
+        topic_kwargs = {"message_thread_id": thread_id} if thread_id else {}
 
         # Send media files
         for media_path in (msg.media or []):
@@ -346,7 +346,8 @@ class TelegramChannel(BaseChannel):
                     await sender(
                         chat_id=chat_id,
                         **{param: f},
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
+                        **topic_kwargs,
                     )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
@@ -354,7 +355,8 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params
+                    reply_parameters=reply_params,
+                    **topic_kwargs,
                 )
 
         # Send text content
@@ -394,6 +396,7 @@ class TelegramChannel(BaseChannel):
                         text=html,
                         parse_mode="HTML",
                         reply_parameters=reply_params,
+                        **topic_kwargs,
                     )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
@@ -402,6 +405,7 @@ class TelegramChannel(BaseChannel):
                             chat_id=chat_id,
                             text=chunk,
                             reply_parameters=reply_params,
+                            **topic_kwargs,
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
@@ -454,10 +458,20 @@ class TelegramChannel(BaseChannel):
             return
         if not self._dedup_update(update):
             return
+        message = update.message
+        is_group = message.chat.type != "private"
+        thread_id = getattr(message, "message_thread_id", None) if is_group else None
+        str_chat_id = str(message.chat_id)
+        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
+        metadata = {"is_group": is_group}
+        if thread_id:
+            metadata["message_thread_id"] = thread_id
         await self._handle_message(
             sender_id=self._sender_id(update.effective_user),
-            chat_id=str(update.message.chat_id),
-            content=update.message.text,
+            chat_id=str_chat_id,
+            content=message.text,
+            metadata=metadata,
+            session_key=session_key,
         )
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -466,19 +480,23 @@ class TelegramChannel(BaseChannel):
             return
         if not self._dedup_update(update):
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
-        
+        is_group = message.chat.type != "private"
+
+        # Forum topic support: use message_thread_id for topic-scoped sessions
+        thread_id = getattr(message, "message_thread_id", None) if is_group else None
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
-        
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
-        
+
         # Text content
         if message.text:
             content_parts.append(message.text)
@@ -537,10 +555,22 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-        
+
         str_chat_id = str(chat_id)
+
+        # Forum topic support: build topic-scoped session key and metadata
+        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
+        base_metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group,
+        }
+        if thread_id:
+            base_metadata["message_thread_id"] = thread_id
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -549,11 +579,8 @@ class TelegramChannel(BaseChannel):
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
-                    "metadata": {
-                        "message_id": message.message_id, "user_id": user.id,
-                        "username": user.username, "first_name": user.first_name,
-                        "is_group": message.chat.type != "private",
-                    },
+                    "metadata": base_metadata,
+                    "session_key": session_key,
                 }
                 self._start_typing(str_chat_id)
             buf = self._media_group_buffers[key]
@@ -563,23 +590,18 @@ class TelegramChannel(BaseChannel):
             if key not in self._media_group_tasks:
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
-        
+
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
-        
+
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=base_metadata,
+            session_key=session_key,
         )
     
     async def _flush_media_group(self, key: str) -> None:
@@ -593,6 +615,7 @@ class TelegramChannel(BaseChannel):
                 sender_id=buf["sender_id"], chat_id=buf["chat_id"],
                 content=content, media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
+                session_key=buf.get("session_key"),
             )
         finally:
             self._media_group_tasks.pop(key, None)
