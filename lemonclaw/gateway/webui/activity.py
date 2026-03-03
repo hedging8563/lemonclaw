@@ -46,12 +46,15 @@ def get_activity_routes(
             key = info.get("key", "")
             if not key or key.startswith("webui:") or key.startswith("api:") or key.startswith("cron:"):
                 continue
+            msg_count = info.get("message_count", 0)
+            if msg_count == 0:
+                continue  # Hide empty sessions
             sessions.append({
                 "key": key,
                 "channel": key.split(":")[0] if ":" in key else "unknown",
                 "title": info.get("title", ""),
                 "updated_at": info.get("updated_at", ""),
-                "message_count": info.get("message_count", 0),
+                "message_count": msg_count,
             })
         return JSONResponse({"sessions": sessions})
 

@@ -780,7 +780,7 @@ async function streamChat(message, sessionKey, model, onEvent) {
 
 
 // ── Channel abbreviations ────────────────────────────────────────────────
-const CHANNEL_ABBR = { telegram: 'TG', discord: 'DC', whatsapp: 'WA', feishu: 'FS', dingtalk: 'DT', email: 'EM', wecom: 'WC', qq: 'QQ', matrix: 'MX', mochat: 'MC' };
+const CHANNEL_ABBR = { telegram: 'TG', discord: 'DC', whatsapp: 'WA', feishu: 'FS', dingtalk: 'DT', email: 'EM', wecom: 'WC', qq: 'QQ', matrix: 'MX', mochat: 'MC', slack: 'SK', webui: 'WEB' };
 function channelAbbr(ch) { return CHANNEL_ABBR[ch] || ch.toUpperCase().slice(0, 2); }
 
 // ── Activity WebSocket hook ──────────────────────────────────────────────
