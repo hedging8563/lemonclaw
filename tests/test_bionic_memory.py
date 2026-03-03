@@ -383,6 +383,110 @@ def test_context_builder_injects_matched_rules(tmp_path):
     assert "需要 venv" in user_msg
 
 
+# ── Core Promotion / Demotion ────────────────────────────────────────────────
+
+
+def test_core_promoter_add_and_remove(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter
+
+    store = EntityStore(tmp_path / "memory")
+    promoter = CorePromoter(tmp_path / "memory", store)
+
+    assert promoter.read_core() == ""
+    assert promoter.add_to_core("- User prefers Chinese")
+    assert "User prefers Chinese" in promoter.read_core()
+
+    assert promoter.remove_from_core("Chinese")
+    assert "Chinese" not in promoter.read_core()
+
+    assert not promoter.remove_from_core("nonexistent")
+
+
+def test_core_promoter_size_limit(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter, CORE_MAX_CHARS
+
+    store = EntityStore(tmp_path / "memory")
+    promoter = CorePromoter(tmp_path / "memory", store)
+
+    # Fill core to near limit
+    promoter.write_core("x" * (CORE_MAX_CHARS - 10))
+    assert not promoter.add_to_core("This is way too long to fit")
+
+
+def test_core_promoter_run_promotion(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter, PROMOTE_ACCESS_THRESHOLD
+
+    store = EntityStore(tmp_path / "memory")
+    card = store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    # Simulate high access
+    card.meta["access_count"] = PROMOTE_ACCESS_THRESHOLD
+    card.save()
+
+    promoter = CorePromoter(tmp_path / "memory", store)
+    promoted = promoter.run_promotion()
+    assert "tech" in promoted
+    assert "Python 3.13" in promoter.read_core()
+
+    # Access count should be reset
+    store.invalidate_cache()
+    assert store.get_card("tech").access_count == 0
+
+
+def test_core_promoter_run_promotion_below_threshold(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter
+
+    store = EntityStore(tmp_path / "memory")
+    store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+
+    promoter = CorePromoter(tmp_path / "memory", store)
+    promoted = promoter.run_promotion()
+    assert promoted == []
+
+
+def test_core_promoter_run_demotion(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter
+
+    store = EntityStore(tmp_path / "memory")
+    card = store.create_card("old-card", "test", ["old"], body="# Old\nStale info\n")
+    # Set last_accessed to 60 days ago
+    card.meta["last_accessed"] = "2026-01-01"
+    card.save()
+
+    promoter = CorePromoter(tmp_path / "memory", store)
+    promoter.write_core("- [old-card] Stale info\n- Some other fact\n")
+
+    demoted = promoter.run_demotion()
+    assert len(demoted) == 1
+    assert "old-card" in demoted[0]
+    # Non-card lines should remain
+    assert "Some other fact" in promoter.read_core()
+
+
+def test_core_promoter_no_demotion_recent(tmp_path):
+    from datetime import date
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.promote import CorePromoter
+
+    store = EntityStore(tmp_path / "memory")
+    card = store.create_card("active", "test", ["active"], body="# Active\n")
+    card.meta["last_accessed"] = str(date.today())
+    card.save()
+
+    promoter = CorePromoter(tmp_path / "memory", store)
+    promoter.write_core("- [active] Recent info\n")
+
+    demoted = promoter.run_demotion()
+    assert demoted == []
+
+
+# ── ContextBuilder integration ───────────────────────────────────────────────
+
+
 def test_context_builder_no_match_no_injection(tmp_path):
     from lemonclaw.agent.context import ContextBuilder
 
