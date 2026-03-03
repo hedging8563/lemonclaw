@@ -4,7 +4,8 @@ import base64
 import mimetypes
 import platform
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -85,10 +86,15 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 - When asked "who are you", always say you are LemonClaw, a personal AI assistant powered by LemonData."""
 
     @staticmethod
-    def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
+    def _build_runtime_context(channel: str | None, chat_id: str | None, tz_name: str | None = None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = time.strftime("%Z") or "UTC"
+        try:
+            zi = ZoneInfo(tz_name) if tz_name else None
+        except (KeyError, ValueError):
+            zi = None
+        now_dt = datetime.now(zi or timezone.utc)
+        now = now_dt.strftime("%Y-%m-%d %H:%M (%A)")
+        tz = tz_name or (time.strftime("%Z") or "UTC")
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
@@ -114,12 +120,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        timezone: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
-            {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
+            {"role": "user", "content": self._build_runtime_context(channel, chat_id, timezone)},
             {"role": "user", "content": self._build_user_content(current_message, media)},
         ]
 

@@ -235,6 +235,8 @@ def get_webui_routes(
         if not message:
             return _json({"error": "Empty message"}, 400)
 
+        user_timezone = body.get("timezone", "")
+
         session_key = body.get("session_key", "webui:default")
         # Enforce webui: prefix — prevent accessing other channel sessions
         if not session_key.startswith("webui:"):
@@ -262,6 +264,7 @@ def get_webui_routes(
                     channel="webui",
                     chat_id="webui",
                     on_progress=on_progress,
+                    metadata={"timezone": user_timezone} if user_timezone else None,
                 )
                 # Send final response
                 event = {"type": "done", "data": final}

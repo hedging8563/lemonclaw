@@ -724,11 +724,12 @@ function InputArea({ onSend, disabled }) {
 // ── SSE Stream Reader ───────────────────────────────────────────────────
 
 async function streamChat(message, sessionKey, model, onEvent) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_key: sessionKey, model }),
+    body: JSON.stringify({ message, session_key: sessionKey, model, timezone: tz }),
   });
 
   if (!res.ok) {

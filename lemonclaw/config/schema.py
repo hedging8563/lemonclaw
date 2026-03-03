@@ -222,6 +222,7 @@ class AgentDefaults(Base):
     workspace: str = "~/.lemonclaw/workspace"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    timezone: str = ""  # IANA timezone (e.g. "Asia/Shanghai"), empty = UTC
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40

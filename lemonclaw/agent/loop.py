@@ -77,10 +77,12 @@ class AgentLoop:
         usage_tracker: UsageTracker | None = None,
         coding_config: CodingToolConfig | None = None,
         activity_bus: ActivityBus | None = None,
+        default_timezone: str = "",
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
+        self.default_timezone = default_timezone
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -471,6 +473,7 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                timezone=msg.metadata.get("timezone") or self.default_timezone,
             )
             # Token-level compaction for system messages too
             from lemonclaw.session.compaction import compact, needs_compaction
@@ -590,6 +593,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            timezone=msg.metadata.get("timezone") or self.default_timezone,
         )
 
         # Token-level compaction: summarize middle messages if over threshold
@@ -723,9 +727,11 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
+                             metadata=metadata or {})
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""

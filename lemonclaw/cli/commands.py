@@ -331,6 +331,7 @@ def gateway(
         usage_tracker=usage_tracker,
         coding_config=config.tools.coding,
         activity_bus=activity_bus,
+        default_timezone=config.agents.defaults.timezone,
     )
 
     # Set cron callback (needs agent)
@@ -538,6 +539,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         coding_config=config.tools.coding,
+        default_timezone=config.agents.defaults.timezone,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1029,6 +1031,7 @@ def cron_run(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         coding_config=config.tools.coding,
+        default_timezone=config.agents.defaults.timezone,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
