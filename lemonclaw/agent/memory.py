@@ -54,16 +54,34 @@ _SAVE_MEMORY_TOOL = [
 
 
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+    """Bionic memory: STM (session + today.md + HISTORY.md) + LTM (entity cards) + Core (core.md).
+
+    Layers:
+    - STM: session.messages (in-memory) + today.md (daily hot data) + HISTORY.md (timeline log)
+    - LTM: memory/entities/*.md (structured Frontmatter + Markdown cards)
+    - Core: memory/core.md (high-frequency facts, always in system prompt)
+    - Procedural: memory/rules.md (experience rules from reflect, Step 2)
+    """
 
     # Per-workspace write lock — prevents concurrent consolidation from corrupting files.
     # Shared across all sessions that use the same workspace.
     _write_locks: dict[str, asyncio.Lock] = {}
 
     def __init__(self, workspace: Path):
+        from lemonclaw.memory.entities import EntityStore
+        from lemonclaw.memory.today import TodayLog
+        from lemonclaw.memory.trigger import MemoryTrigger
+
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self.core_file = self.memory_dir / "core.md"
+
+        # Bionic memory layers
+        self.entities = EntityStore(self.memory_dir)
+        self.today = TodayLog(self.memory_dir)
+        self.trigger = MemoryTrigger(self.entities)
+
         # Get or create a lock for this workspace
         ws_key = str(workspace)
         if ws_key not in MemoryStore._write_locks:
@@ -110,6 +128,15 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    def read_core(self) -> str:
+        """Read core.md — high-frequency facts that are always in system prompt."""
+        if self.core_file.exists():
+            return self.core_file.read_text(encoding="utf-8")
+        return ""
+
+    def write_core(self, content: str) -> None:
+        self.core_file.write_text(content, encoding="utf-8")
 
     async def consolidate(
         self,

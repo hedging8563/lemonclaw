@@ -32,9 +32,19 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
+        # Core memory — high-frequency facts, always loaded
+        core = self.memory.read_core()
+        if core:
+            parts.append(f"# Core Memory\n\n{core}")
+
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # Today's activity summary
+        today = self.memory.today.read()
+        if today:
+            parts.append(f"# Today\n\n{today}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -127,15 +137,30 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         Runtime context (time, channel) is prepended to the user message
         rather than sent as a separate message, so that [system] + [history]
         form a stable prefix for Anthropic prompt caching.
+
+        LTM entity cards matched by keyword trigger are injected before the
+        user message for relevant context.
         """
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
+
+        # Keyword trigger: match LTM entity cards against user message
+        from lemonclaw.memory.trigger import MemoryTrigger
+        matched_cards = self.memory.trigger.match(current_message)
+        memory_ctx = MemoryTrigger.format_for_context(matched_cards)
+
         user_content = self._build_user_content(current_message, media)
-        # For text-only messages, merge runtime context into user message.
+        # For text-only messages, merge runtime context + memory context into user message.
         if isinstance(user_content, str):
-            user_content = runtime_ctx + "\n\n" + user_content
+            prefix = runtime_ctx
+            if memory_ctx:
+                prefix += "\n\n" + memory_ctx
+            user_content = prefix + "\n\n" + user_content
         else:
             # Multimodal (images): prepend runtime context as first text block.
-            user_content = [{"type": "text", "text": runtime_ctx}, *user_content]
+            text_prefix = runtime_ctx
+            if memory_ctx:
+                text_prefix += "\n\n" + memory_ctx
+            user_content = [{"type": "text", "text": text_prefix}, *user_content]
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
