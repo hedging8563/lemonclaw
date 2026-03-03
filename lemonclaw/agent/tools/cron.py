@@ -1,10 +1,14 @@
 """Cron tool for scheduling reminders and tasks."""
 
+import contextvars
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.cron.service import CronService
 from lemonclaw.cron.types import CronSchedule
+
+# Context variable to detect cron execution context and prevent recursive scheduling.
+_IN_CRON_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar("_in_cron_context", default=False)
 
 
 class CronTool(Tool):
@@ -78,6 +82,8 @@ class CronTool(Tool):
         **kwargs: Any
     ) -> str:
         if action == "add":
+            if _IN_CRON_CONTEXT.get():
+                return "Error: cannot schedule new jobs from within a cron job (prevents recursive loops)"
             return self._add_job(message, every_seconds, cron_expr, tz, at)
         elif action == "list":
             return self._list_jobs()

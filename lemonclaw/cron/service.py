@@ -1,6 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
+import contextvars
 import json
 import time
 import uuid
@@ -237,23 +238,28 @@ class CronService:
     
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
+        from lemonclaw.agent.tools.cron import _IN_CRON_CONTEXT
+
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
-        
+
+        token = _IN_CRON_CONTEXT.set(True)
         try:
             response = None
             if self.on_job:
                 response = await self.on_job(job)
-            
+
             job.state.last_status = "ok"
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)
-            
+
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
             logger.error("Cron: job '{}' failed: {}", job.name, e)
-        
+        finally:
+            _IN_CRON_CONTEXT.reset(token)
+
         job.state.last_run_at_ms = start_ms
         job.updated_at_ms = _now_ms()
         
