@@ -122,12 +122,24 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         chat_id: str | None = None,
         timezone: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
+        """Build the complete message list for an LLM call.
+
+        Runtime context (time, channel) is prepended to the user message
+        rather than sent as a separate message, so that [system] + [history]
+        form a stable prefix for Anthropic prompt caching.
+        """
+        runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
+        user_content = self._build_user_content(current_message, media)
+        # For text-only messages, merge runtime context into user message.
+        if isinstance(user_content, str):
+            user_content = runtime_ctx + "\n\n" + user_content
+        else:
+            # Multimodal (images): prepend runtime context as first text block.
+            user_content = [{"type": "text", "text": runtime_ctx}, *user_content]
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
-            {"role": "user", "content": self._build_runtime_context(channel, chat_id, timezone)},
-            {"role": "user", "content": self._build_user_content(current_message, media)},
+            {"role": "user", "content": user_content},
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
