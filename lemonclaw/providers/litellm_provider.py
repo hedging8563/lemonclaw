@@ -544,6 +544,15 @@ class LiteLLMProvider(LLMProvider):
             reasoning_content="".join(reasoning_parts) or None,
         )
 
+    def update_credentials(self, api_key: str, api_base: str | None = None) -> None:
+        """Hot-reload API credentials without restarting."""
+        self.api_key = api_key
+        if api_base is not None:
+            self.api_base = api_base
+        if api_key:
+            self._setup_env(api_key, api_base, self.default_model)
+        logger.info("Provider credentials updated")
+
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model

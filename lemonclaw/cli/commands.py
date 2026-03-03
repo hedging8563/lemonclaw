@@ -456,6 +456,12 @@ def gateway(
         await heartbeat.start()
         await watchdog.start()
 
+        # Start config file watcher for API key hot-reload
+        from lemonclaw.config.watcher import ConfigWatcher
+        from lemonclaw.config.loader import get_config_path
+        config_watcher = ConfigWatcher(get_config_path(), provider)
+        config_watcher.start()
+
         # Start incremental memory backup
         from lemonclaw.watchdog.memory_backup import MemoryBackup
         mem_backup = MemoryBackup(config.workspace_path)
@@ -466,6 +472,7 @@ def gateway(
             await shutdown.wait()
             watchdog.stop()
             mem_backup.stop()
+            config_watcher.stop()
             await shutdown.execute(
                 channels=channels,
                 agent=agent,
