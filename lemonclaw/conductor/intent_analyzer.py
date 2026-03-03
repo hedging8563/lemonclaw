@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -24,6 +25,14 @@ Respond with ONLY a JSON object, no markdown fences:
 
 Most messages are "simple". Only classify as "moderate" or "complex" when the task genuinely requires multiple independent work streams that benefit from parallel execution."""
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences from LLM output."""
+    m = _FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
 
 async def analyze_intent(
     provider: LLMProvider,
@@ -44,7 +53,7 @@ async def analyze_intent(
             temperature=0.0,
             max_tokens=256,
         )
-        data = json.loads(response.content)
+        data = json.loads(_strip_fences(response.content))
         return IntentAnalysis(
             complexity=TaskComplexity(data.get("complexity", "simple")),
             summary=data.get("summary", message[:80]),

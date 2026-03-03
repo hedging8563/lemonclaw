@@ -8,10 +8,13 @@ Simple tasks bypass the pipeline entirely (fast path).
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import TYPE_CHECKING
 
 from loguru import logger
+
+from lemonclaw.conductor.intent_analyzer import _strip_fences
 
 from lemonclaw.conductor.types import (
     IntentAnalysis,
@@ -104,8 +107,6 @@ class Orchestrator:
         self, message: str, intent: IntentAnalysis,
     ) -> OrchestrationPlan:
         """Split a complex task into subtasks via LLM."""
-        import json
-
         logger.info("Orchestrator: SPLITTING (complexity={})", intent.complexity.value)
 
         plan = OrchestrationPlan(
@@ -137,7 +138,7 @@ class Orchestrator:
                     temperature=0.1,
                     max_tokens=1024,
                 )
-            tasks_data = json.loads(response.content)
+            tasks_data = json.loads(_strip_fences(response.content))
             for td in tasks_data:
                 plan.subtasks.append(SubTask(
                     id=td["id"],
@@ -188,14 +189,27 @@ class Orchestrator:
     async def _monitor(self, plan: OrchestrationPlan) -> None:
         """Execute subtasks respecting dependency order, monitor completion."""
         from lemonclaw.conductor.task_splitter import get_runnable
-        from lemonclaw.bus.events import InboundMessage
 
         plan.phase = OrchestratorPhase.MONITORING
         logger.info("Orchestrator: MONITORING")
 
         pending_futures: dict[str, asyncio.Task[str | None]] = {}
+        monitor_timeout = 600  # 10 min hard ceiling for entire monitoring phase
+        deadline = asyncio.get_event_loop().time() + monitor_timeout
 
         while not plan.is_complete:
+            # Hard timeout guard
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                logger.error("Orchestrator: MONITORING timeout ({}s), aborting", monitor_timeout)
+                for tid, t in pending_futures.items():
+                    t.cancel()
+                for st in plan.subtasks:
+                    if st.status in (SubTaskStatus.PENDING, SubTaskStatus.RUNNING):
+                        st.status = SubTaskStatus.FAILED
+                        st.result = st.result or "Monitoring timeout"
+                break
+
             # Launch runnable tasks
             for subtask in get_runnable(plan.subtasks):
                 if subtask.id in pending_futures:
@@ -211,21 +225,19 @@ class Orchestrator:
                 logger.warning("Orchestrator: no runnable tasks, breaking")
                 break
 
-            # Wait for at least one to finish
+            # Wait for at least one to finish (with timeout guard)
             done, _ = await asyncio.wait(
                 pending_futures.values(),
+                timeout=min(remaining, 300),
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            for future in done:
-                # Find which subtask this was
-                finished_id = None
-                for tid, t in pending_futures.items():
-                    if t is future:
-                        finished_id = tid
-                        break
-                if finished_id:
-                    pending_futures.pop(finished_id)
+            # Remove finished futures
+            finished_ids = [
+                tid for tid, t in pending_futures.items() if t in done
+            ]
+            for tid in finished_ids:
+                pending_futures.pop(tid)
 
         logger.info(
             "Orchestrator: MONITORING complete — {}/{} succeeded",
@@ -267,6 +279,9 @@ class Orchestrator:
                     ),
                     target_agent_id=agent_id,
                     metadata={"_request_id": request_id},
+                    # Unique session key per subtask so multiple subtasks on the
+                    # same agent don't serialize behind a single session lock.
+                    session_key_override=f"internal:{agent_id}:{subtask.id}",
                 )
                 await self._bus.publish_inbound(msg)
 
