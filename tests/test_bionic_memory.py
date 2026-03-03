@@ -484,6 +484,105 @@ def test_core_promoter_no_demotion_recent(tmp_path):
     assert demoted == []
 
 
+# ── MEMORY.md Migration ──────────────────────────────────────────────────────
+
+
+def test_migrate_no_memory_file(tmp_path):
+    """No MEMORY.md → just init defaults."""
+    import asyncio
+    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    store = EntityStore(tmp_path / "memory")
+    result = asyncio.get_event_loop().run_until_complete(
+        migrate_memory_to_entities(tmp_path / "memory", store)
+    )
+    assert result is True
+    assert len(store.list_cards()) == len(DEFAULT_CARDS)
+
+
+def test_migrate_empty_memory_file(tmp_path):
+    """Empty MEMORY.md → init defaults."""
+    import asyncio
+    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "MEMORY.md").write_text("", encoding="utf-8")
+
+    store = EntityStore(memory_dir)
+    result = asyncio.get_event_loop().run_until_complete(
+        migrate_memory_to_entities(memory_dir, store)
+    )
+    assert result is True
+    assert len(store.list_cards()) == len(DEFAULT_CARDS)
+
+
+def test_migrate_fallback_no_llm(tmp_path):
+    """MEMORY.md with content but no LLM → fallback to preferences card."""
+    import asyncio
+    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "MEMORY.md").write_text(
+        "# User Facts\n- Prefers Chinese\n- Uses Python 3.13\n", encoding="utf-8"
+    )
+
+    store = EntityStore(memory_dir)
+    result = asyncio.get_event_loop().run_until_complete(
+        migrate_memory_to_entities(memory_dir, store)
+    )
+    assert result is True
+    assert len(store.list_cards()) == len(DEFAULT_CARDS)
+    prefs = store.get_card("preferences")
+    assert prefs is not None
+    assert "Prefers Chinese" in prefs.body
+    assert "Python 3.13" in prefs.body
+
+
+def test_migrate_fallback_llm_fails(tmp_path):
+    """LLM available but fails → fallback to preferences card."""
+    import asyncio
+    from unittest.mock import AsyncMock
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "MEMORY.md").write_text("# Facts\n- Test data\n", encoding="utf-8")
+
+    mock_provider = AsyncMock()
+    mock_provider.chat.side_effect = Exception("LLM down")
+
+    store = EntityStore(memory_dir)
+    result = asyncio.get_event_loop().run_until_complete(
+        migrate_memory_to_entities(memory_dir, store, provider=mock_provider, model="test")
+    )
+    assert result is True
+    prefs = store.get_card("preferences")
+    assert "Test data" in prefs.body
+
+
+def test_migrate_idempotent(tmp_path):
+    """Already migrated → skip."""
+    import asyncio
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    memory_dir = tmp_path / "memory"
+    store = EntityStore(memory_dir)
+    store.create_card("existing", "test", ["test"], body="# Existing\n")
+
+    result = asyncio.get_event_loop().run_until_complete(
+        migrate_memory_to_entities(memory_dir, store)
+    )
+    assert result is False  # No migration needed
+    assert len(store.list_cards()) == 1  # Only the existing card
+
+
 # ── ContextBuilder integration ───────────────────────────────────────────────
 
 
