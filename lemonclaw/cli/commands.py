@@ -326,8 +326,9 @@ def gateway(
         channels_config=config.channels,
         usage_tracker=usage_tracker,
         coding_config=config.tools.coding,
+        activity_bus=activity_bus,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -348,7 +349,9 @@ def gateway(
     cron.on_job = on_cron_job
     
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    from lemonclaw.bus.activity import ActivityBus
+    activity_bus = ActivityBus()
+    channels = ChannelManager(config, bus, activity_bus=activity_bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -436,6 +439,7 @@ def gateway(
         session_manager=session_manager,
         agent_loop=agent,
         webui_enabled=config.gateway.webui_enabled,
+        activity_bus=activity_bus,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     webui_status = "enabled" if config.gateway.webui_enabled else "disabled"

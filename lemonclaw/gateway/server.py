@@ -20,12 +20,13 @@ from loguru import logger
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
+    from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.telemetry.usage import UsageTracker
@@ -214,6 +215,7 @@ def create_app(
     session_manager: SessionManager | None = None,
     agent_loop: AgentLoop | None = None,
     webui_enabled: bool = True,
+    activity_bus: ActivityBus | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -238,6 +240,16 @@ def create_app(
     wecom_verify, wecom_callback = _build_wecom_webhook_handler(channel_manager)
     routes.append(Route("/webhook/wecom", wecom_verify, methods=["GET"]))
     routes.append(Route("/webhook/wecom", wecom_callback, methods=["POST"]))
+
+    # Activity Feed routes (REST + WebSocket)
+    if activity_bus and session_manager:
+        from lemonclaw.gateway.webui.activity import get_activity_routes
+
+        routes.extend(get_activity_routes(
+            activity_bus=activity_bus,
+            session_manager=session_manager,
+            auth_token=auth_token,
+        ))
 
     # WebUI routes (appended last so /health, /api/*, /webhook/* take priority)
     if webui_enabled and agent_loop and session_manager:

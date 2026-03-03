@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -11,6 +12,9 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import Config
+
+if TYPE_CHECKING:
+    from lemonclaw.bus.activity import ActivityBus
 
 
 class ChannelManager:
@@ -23,9 +27,10 @@ class ChannelManager:
     - Route outbound messages
     """
     
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus, activity_bus: ActivityBus | None = None):
         self.config = config
         self.bus = bus
+        self.activity_bus = activity_bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -217,20 +222,43 @@ class ChannelManager:
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
-        
+
         while True:
             try:
                 msg = await asyncio.wait_for(
                     self.bus.consume_outbound(),
                     timeout=1.0
                 )
-                
+
+                # ActivityBus broadcast — before progress filter so all IM events are visible
+                if msg.channel != "webui" and self.activity_bus:
+                    meta = msg.metadata or {}
+                    if meta.get("_final"):
+                        event_type = "done"
+                    elif meta.get("_chunk"):
+                        event_type = "chunk"
+                    elif meta.get("_progress"):
+                        event_type = "progress"
+                    else:
+                        event_type = "message"
+                    event: dict[str, Any] = {
+                        "type": event_type,
+                        "session_key": f"{msg.channel}:{msg.chat_id}",
+                        "channel": msg.channel,
+                        "role": "assistant",
+                        "content": msg.content,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if meta.get("_chunk_first"):
+                        event["first"] = True
+                    await self.activity_bus.broadcast(event)
+
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
-                
+
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
@@ -239,7 +267,7 @@ class ChannelManager:
                         logger.error("Error sending to {}: {}", msg.channel, e)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
-                    
+
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:

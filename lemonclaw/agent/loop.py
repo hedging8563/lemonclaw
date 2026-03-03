@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from contextlib import AsyncExitStack
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -32,6 +32,7 @@ from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 if TYPE_CHECKING:
+    from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig
     from lemonclaw.cron.service import CronService
 
@@ -75,6 +76,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         usage_tracker: UsageTracker | None = None,
         coding_config: CodingToolConfig | None = None,
+        activity_bus: ActivityBus | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.bus = bus
@@ -89,6 +91,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.coding_config = coding_config
+        self.activity_bus = activity_bus
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -198,6 +201,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_chunk: Callable[..., Awaitable[None]] | None = None,
+        on_tool_call: Callable[..., Awaitable[None]] | None = None,
         stop_event: asyncio.Event | None = None,
         session_model: str | None = None,
         lang: str = "en",
@@ -254,6 +258,9 @@ class AgentLoop:
                     if clean:
                         await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+
+                if on_tool_call:
+                    await on_tool_call(response.tool_calls)
 
                 tool_call_dicts = [
                     {
@@ -396,6 +403,8 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
                 if response is not None:
+                    if response.channel != "webui":
+                        response.metadata = {**(response.metadata or {}), "_final": True}
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
@@ -469,6 +478,17 @@ class AgentLoop:
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        # Broadcast inbound user message to Activity Feed
+        if msg.channel != "webui" and self.activity_bus:
+            await self.activity_bus.broadcast({
+                "type": "message",
+                "session_key": msg.session_key,
+                "channel": msg.channel,
+                "role": "user",
+                "content": msg.content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -585,9 +605,21 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        async def _activity_tool_call(tool_calls: list) -> None:
+            if msg.channel != "webui" and self.activity_bus:
+                await self.activity_bus.broadcast({
+                    "type": "tool_call",
+                    "session_key": msg.session_key,
+                    "channel": msg.channel,
+                    "role": "assistant",
+                    "content": self._tool_hint(tool_calls),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
             on_chunk=_bus_chunk,
+            on_tool_call=_activity_tool_call,
             stop_event=stop_event, session_model=session_model, lang=lang,
         )
 
