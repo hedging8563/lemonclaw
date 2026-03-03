@@ -361,6 +361,15 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        # Enable adaptive thinking for Claude models.
+        # Claude auto-decides thinking depth per request — saves tokens on simple
+        # queries while still doing deep reasoning on complex ones.
+        # Note: Anthropic requires temperature=1 when thinking is enabled.
+        spec = self._resolve_reasoning_spec(original_model, effective_gw)
+        if spec and spec.name == "anthropic":
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["temperature"] = 1.0
+
         # Always use streaming to work around upstream gateways that drop
         # tool_use.input in non-streaming Anthropic responses (e.g. Packy).
         kwargs["stream"] = True
