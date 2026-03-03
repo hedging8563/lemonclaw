@@ -33,6 +33,7 @@ from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
     from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig
     from lemonclaw.cron.service import CronService
 
@@ -96,6 +97,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.coding_config = coding_config
         self.activity_bus = activity_bus
+        self.orchestrator: Orchestrator | None = None
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -577,6 +579,29 @@ class AgentLoop:
                                   content=t("help", lang))
         if cmd == "/model" or cmd.startswith("/model "):
             return self._handle_model_command(msg, session, lang)
+
+        # Orchestrator intercept: complex tasks get split & delegated
+        if self.orchestrator and not msg.channel == "internal":
+            try:
+                orchestrated = await self.orchestrator.handle_message(msg)
+                if orchestrated is not None:
+                    # Complex task handled by Conductor — save result to session
+                    session.messages.append({
+                        "role": "user", "content": msg.content,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    session.messages.append({
+                        "role": "assistant", "content": orchestrated,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    session.updated_at = datetime.now()
+                    self.sessions.save(session)
+                    return OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content=orchestrated, metadata=msg.metadata or {},
+                    )
+            except Exception as e:
+                logger.warning("Orchestrator failed, falling back to single agent: {}", e)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
