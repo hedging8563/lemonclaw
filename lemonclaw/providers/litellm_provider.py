@@ -23,10 +23,6 @@ from lemonclaw.providers.registry import find_by_model, find_gateway
 # Standard OpenAI chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
 
-# Models that support reasoning_content field (thinking-enabled models).
-# Use boundary-safe keywords: "o1-", "o3-", "o4-" prevent matching "foo1", "veo3" etc.
-_REASONING_MODEL_KEYWORDS = ("deepseek-r1", "kimi-k2", "o1-", "o3-", "o4-")
-
 # Keys to redact from error messages to prevent credential leakage in logs.
 _SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "password")
 
@@ -193,6 +189,37 @@ class LiteLLMProvider(LLMProvider):
         spec = find_by_model(model)
         return spec is not None and spec.supports_prompt_caching
 
+    def _should_keep_reasoning(self, model: str, gateway: "ProviderSpec | None" = None) -> bool:
+        """Provider-aware check: should reasoning_content be preserved for this model?
+
+        Two-layer logic:
+          1. Provider level — does the provider support reasoning at all?
+          2. Model level — if reasoning_keywords are set, does this model match?
+
+        For gateways (which route any model), we resolve the underlying provider
+        via find_by_model() to get accurate capability info.
+        """
+        spec = self._resolve_reasoning_spec(model, gateway)
+        if spec is None or not spec.supports_reasoning:
+            return False
+        # Provider supports reasoning — check model-level keywords
+        if not spec.reasoning_keywords:
+            return True  # all models under this provider support it (e.g. Anthropic)
+        model_lower = model.lower()
+        return any(kw in model_lower for kw in spec.reasoning_keywords)
+
+    def _resolve_reasoning_spec(self, model: str, gateway: "ProviderSpec | None" = None) -> "ProviderSpec | None":
+        """Find the most specific ProviderSpec for reasoning capability check.
+
+        For gateways, fall through to find_by_model() which matches by model name
+        keywords to the actual provider (e.g. 'claude-sonnet' → Anthropic spec).
+        """
+        gw = gateway if gateway is not None else self._gateway
+        if gw is not None and not gw.is_gateway:
+            return gw  # direct provider — use its spec
+        # Gateway or no gateway — resolve by model name
+        return find_by_model(model)
+
     def _apply_cache_control(
         self,
         messages: list[dict[str, Any]],
@@ -300,9 +327,10 @@ class LiteLLMProvider(LLMProvider):
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
 
-        # Only keep reasoning_content for models that support it
-        model_lower = original_model.lower()
-        keep_reasoning = any(kw in model_lower for kw in _REASONING_MODEL_KEYWORDS)
+        # Provider-aware reasoning_content filtering.
+        # Determine whether to keep reasoning_content based on the provider's
+        # capabilities and model-specific keywords, not a hardcoded global list.
+        keep_reasoning = self._should_keep_reasoning(original_model, effective_gw)
 
         kwargs: dict[str, Any] = {
             "model": model,

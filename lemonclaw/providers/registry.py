@@ -60,6 +60,15 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Provider supports reasoning_content in messages (thinking-enabled models).
+    # When True, reasoning_content is preserved for models matching reasoning_keywords.
+    # When False, reasoning_content is always stripped regardless of model name.
+    supports_reasoning: bool = False
+
+    # Model-name keywords that identify reasoning-capable models within this provider.
+    # Only checked when supports_reasoning=True. Empty tuple means ALL models support it.
+    reasoning_keywords: tuple[str, ...] = ()
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -249,6 +258,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
+    # All Claude models support extended thinking (reasoning_content).
     ProviderSpec(
         name="anthropic",
         keywords=("anthropic", "claude"),
@@ -265,9 +275,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         supports_prompt_caching=True,
+        supports_reasoning=True,
+        reasoning_keywords=(),  # all Claude models support it
     ),
 
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
+    # Only o1/o3/o4 series support reasoning_content.
     ProviderSpec(
         name="openai",
         keywords=("openai", "gpt"),
@@ -283,6 +296,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_reasoning=True,
+        reasoning_keywords=("o1-", "o3-", "o4-"),
     ),
 
     # OpenAI Codex: uses OAuth, not API key.
@@ -324,6 +339,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
 
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
+    # Only deepseek-r1 (and variants) support reasoning_content.
     ProviderSpec(
         name="deepseek",
         keywords=("deepseek",),
@@ -339,9 +355,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_reasoning=True,
+        reasoning_keywords=("deepseek-r1",),
     ),
 
     # Gemini: needs "gemini/" prefix for LiteLLM.
+    # Gemini thinking models support reasoning_content.
     ProviderSpec(
         name="gemini",
         keywords=("gemini",),
@@ -357,6 +376,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_reasoning=True,
+        reasoning_keywords=("thinking",),
     ),
 
     # Zhipu: LiteLLM uses "zai/" prefix.
@@ -402,6 +423,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # Moonshot: Kimi models, needs "moonshot/" prefix.
     # LiteLLM requires MOONSHOT_API_BASE env var to find the endpoint.
     # Kimi K2.5 API enforces temperature >= 1.0.
+    # Kimi K2+ models support reasoning_content.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -421,6 +443,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
         ),
+        supports_reasoning=True,
+        reasoning_keywords=("kimi-k2",),
     ),
 
     # MiniMax: needs "minimax/" prefix for LiteLLM routing.
