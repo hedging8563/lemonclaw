@@ -307,6 +307,10 @@ def gateway(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    # Create ActivityBus before AgentLoop and ChannelManager (both need it)
+    from lemonclaw.bus.activity import ActivityBus
+    activity_bus = ActivityBus()
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -347,10 +351,8 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
-    
+
     # Create channel manager
-    from lemonclaw.bus.activity import ActivityBus
-    activity_bus = ActivityBus()
     channels = ChannelManager(config, bus, activity_bus=activity_bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:

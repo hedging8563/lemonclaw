@@ -403,14 +403,26 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
                 if response is not None:
+                    # Use a copy for _final so we don't pollute the original metadata
                     if response.channel != "webui":
                         response.metadata = {**(response.metadata or {}), "_final": True}
                     await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
-                    ))
+                else:
+                    # MessageTool sent the reply directly — broadcast done to Activity Feed
+                    if msg.channel != "webui" and self.activity_bus:
+                        await self.activity_bus.broadcast({
+                            "type": "done",
+                            "session_key": msg.session_key,
+                            "channel": msg.channel,
+                            "role": "assistant",
+                            "content": "",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                    if msg.channel == "cli":
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="", metadata=msg.metadata or {},
+                        ))
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise

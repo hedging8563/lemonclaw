@@ -68,7 +68,8 @@ class CodingTool(Tool):
         if self._restrict_to_workspace:
             from pathlib import Path
             ws = Path(self._working_dir).resolve()
-            target = Path(cwd).resolve()
+            # Resolve relative paths against workspace, not process cwd
+            target = (ws / cwd).resolve() if not Path(cwd).is_absolute() else Path(cwd).resolve()
             if ws not in target.parents and target != ws:
                 return "Error: working_dir is outside the workspace"
 

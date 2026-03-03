@@ -773,8 +773,6 @@ function useActivityWS(active) {
   const [events, setEvents] = useState([]);
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
-  const eventsRef = useRef(events);
-  eventsRef.current = events;
 
   useEffect(() => {
     if (!active) {
@@ -799,7 +797,34 @@ function useActivityWS(active) {
         try {
           const evt = JSON.parse(e.data);
           if (evt.type === 'ping') return;
+
           setEvents(prev => {
+            // Merge chunks: append content to existing streaming entry
+            if (evt.type === 'chunk') {
+              const last = prev.length > 0 ? prev[prev.length - 1] : null;
+              if (last && last._streaming && last.session_key === evt.session_key) {
+                const merged = [...prev];
+                merged[merged.length - 1] = { ...last, content: (last.content || '') + (evt.content || ''), timestamp: evt.timestamp };
+                return merged;
+              }
+              // First chunk — create a streaming entry
+              const next = [...prev, { ...evt, type: 'assistant', role: 'assistant', _streaming: true }];
+              return next.length > 500 ? next.slice(-300) : next;
+            }
+
+            // Done: replace the streaming entry with final content
+            if (evt.type === 'done') {
+              const merged = [...prev];
+              for (let i = merged.length - 1; i >= 0; i--) {
+                if (merged[i]._streaming && merged[i].session_key === evt.session_key) {
+                  merged[i] = { ...merged[i], content: evt.content || merged[i].content, _streaming: false };
+                  return merged;
+                }
+              }
+              // No streaming entry found — just append done as message
+              return [...prev, { ...evt, type: 'message' }];
+            }
+
             const next = [...prev, evt];
             return next.length > 500 ? next.slice(-300) : next;
           });
@@ -863,16 +888,8 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
     ? events.filter(e => e.session_key === selectedSession)
     : events;
 
-  // Detect streaming state
-  const streamingSessions = new Set();
-  for (let i = filtered.length - 1; i >= 0; i--) {
-    const e = filtered[i];
-    if (e.type === 'done') break;
-    if (e.type === 'chunk' || e.type === 'tool_call' || e.type === 'progress') {
-      streamingSessions.add(e.session_key);
-      break;
-    }
-  }
+  // Detect streaming state from merged entries
+  const isStreaming = filtered.some(e => e._streaming);
 
   if (filtered.length === 0) {
     return html`
@@ -892,7 +909,7 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
       ${filtered.map((evt, i) => html`
         <${ActivityEvent} key=${i} evt=${evt} showChannel=${!selectedSession} />
       `)}
-      ${streamingSessions.size > 0 ? html`<div class="activity-streaming">STREAMING</div>` : ''}
+      ${isStreaming ? html`<div class="activity-streaming">STREAMING</div>` : ''}
       <div ref=${endRef} />
     </div>
   `;

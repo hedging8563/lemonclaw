@@ -65,7 +65,10 @@ def get_activity_routes(
         if not session_key:
             return JSONResponse({"error": "session_key is required"}, 400)
 
-        limit = min(int(request.query_params.get("limit", "50")), 200)
+        try:
+            limit = min(int(request.query_params.get("limit", "50")), 200)
+        except (ValueError, TypeError):
+            limit = 50
 
         session = session_manager._load(session_key)
         if not session:
@@ -125,17 +128,29 @@ def get_activity_routes(
         queue = activity_bus.subscribe()
         logger.info("Activity WebSocket connected (clients: {})", activity_bus.client_count)
 
-        try:
+        async def _send_loop():
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
                     await websocket.send_json(event)
                 except asyncio.TimeoutError:
-                    # Send ping to keep connection alive
                     try:
                         await websocket.send_json({"type": "ping"})
                     except Exception:
                         break
+                except Exception:
+                    break
+
+        async def _recv_loop():
+            """Consume client messages to prevent buffer buildup."""
+            try:
+                while True:
+                    await websocket.receive_text()
+            except Exception:
+                pass
+
+        try:
+            await asyncio.gather(_send_loop(), _recv_loop())
         except Exception:
             pass
         finally:
