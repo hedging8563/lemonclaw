@@ -301,6 +301,9 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
+                    # 6.1: Send thinking content before tool calls
+                    if response.reasoning_content:
+                        await on_progress(response.reasoning_content, thinking=True)
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
@@ -334,7 +337,25 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+
+                    # 6.2: Send tool_start event with arguments
+                    if on_progress:
+                        await on_progress(json.dumps({
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                        }, ensure_ascii=False), tool_start=True)
+
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # 6.2: Send tool_result event
+                    if on_progress:
+                        result_preview = str(result)[:500] if result else ""
+                        is_error = isinstance(result, str) and result.startswith("Error")
+                        await on_progress(json.dumps({
+                            "name": tool_call.name,
+                            "result": result_preview,
+                            "error": is_error,
+                        }, ensure_ascii=False), tool_result=True)
 
                     # Detect repeated tool errors (e.g. LLM keeps calling read_file({}))
                     if isinstance(result, str) and result.startswith("Error"):
@@ -354,6 +375,10 @@ class AgentLoop:
                 if final_content is not None:
                     break
             else:
+                # 6.1: Send thinking content for final response
+                if on_progress and response.reasoning_content:
+                    await on_progress(response.reasoning_content, thinking=True)
+
                 clean = self._strip_think(response.content)
                 # Detect model refusal loops: very short responses that refuse to engage
                 if clean and len(clean) < 60 and self._REFUSAL_RE.search(clean):
@@ -710,6 +735,13 @@ class AgentLoop:
             timezone=msg.metadata.get("timezone") or self.default_timezone,
         )
 
+        # 6.3: Per-session system prompt override — append to system message
+        session_system_prompt = session.metadata.get("system_prompt_override")
+        if session_system_prompt and initial_messages and initial_messages[0].get("role") == "system":
+            initial_messages[0]["content"] += (
+                f"\n\n# Session Instructions\n\n{session_system_prompt}"
+            )
+
         # Token-level compaction: summarize middle messages if over threshold
         from lemonclaw.session.compaction import compact, needs_compaction
         if needs_compaction(initial_messages, session_model or self.model):
@@ -717,10 +749,15 @@ class AgentLoop:
                 initial_messages, session_model or self.model, self.provider,
             )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False,
+                                thinking: bool = False, tool_start: bool = False,
+                                tool_result: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            meta["_thinking"] = thinking
+            meta["_tool_start"] = tool_start
+            meta["_tool_result"] = tool_result
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))

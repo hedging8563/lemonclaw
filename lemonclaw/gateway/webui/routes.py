@@ -251,8 +251,20 @@ def get_webui_routes(
 
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-        async def on_progress(content: str, *, tool_hint: bool = False) -> None:
-            event = {"type": "tool_hint" if tool_hint else "content", "data": content}
+        async def on_progress(content: str, *, tool_hint: bool = False,
+                              thinking: bool = False, tool_start: bool = False,
+                              tool_result: bool = False) -> None:
+            if thinking:
+                etype = "thinking"
+            elif tool_hint:
+                etype = "tool_hint"
+            elif tool_start:
+                etype = "tool_start"
+            elif tool_result:
+                etype = "tool_result"
+            else:
+                etype = "content"
+            event = {"type": etype, "data": content}
             await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
         async def run_agent() -> None:
@@ -375,6 +387,13 @@ def get_webui_routes(
             title = str(body["title"]).strip()[:60]
             if title:
                 session.metadata["title"] = title
+        # 6.3: Per-session system prompt override
+        if "system_prompt_override" in body:
+            sp = str(body["system_prompt_override"]).strip()[:4000]
+            if sp:
+                session.metadata["system_prompt_override"] = sp
+            else:
+                session.metadata.pop("system_prompt_override", None)
         session_manager.save(session)
         resp = _json({"ok": True})
         _maybe_refresh_cookie(request, resp)
@@ -426,7 +445,10 @@ def get_webui_routes(
                 if content:
                     messages.append({"role": role, "content": content})
 
-        resp = _json({"messages": messages})
+        resp = _json({
+            "messages": messages,
+            "system_prompt_override": session.metadata.get("system_prompt_override", ""),
+        })
         _maybe_refresh_cookie(request, resp)
         return resp
 

@@ -147,6 +147,33 @@ input { font-family: inherit; font-size: inherit; }
 /* ── Tool hint ────────────────────────────────────────────────────── */
 .msg-tool-hint { font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); padding: 4px 0; display: flex; align-items: center; gap: 6px; }
 .msg-tool-hint::before { content: '\2699'; font-size: 11px; }
+
+/* ── Thinking block ──────────────────────────────────────────────── */
+.msg-thinking { margin: 4px 0 8px; border-left: 2px solid var(--teal-dim, #0a8a86); border-radius: 4px; overflow: hidden; }
+.msg-thinking-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; background: none; border: none; width: 100%; text-align: left; transition: color 0.15s; }
+.msg-thinking-toggle:hover { color: var(--text-secondary); }
+.msg-thinking-toggle .arrow { display: inline-block; transition: transform 0.15s; font-size: 10px; }
+.msg-thinking-toggle .arrow.open { transform: rotate(90deg); }
+.msg-thinking-body { padding: 6px 10px; font-size: 12px; line-height: 1.6; color: var(--text-muted); white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
+.msg-thinking-body::-webkit-scrollbar { width: 4px; }
+.msg-thinking-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Tool detail card ────────────────────────────────────────────── */
+.msg-tool-card { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 12px; }
+.msg-tool-card-header { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-family: var(--font-mono); color: var(--text-secondary); cursor: pointer; background: var(--bg-tertiary); border: none; width: 100%; text-align: left; transition: background 0.15s; }
+.msg-tool-card-header:hover { background: var(--bg-hover, var(--bg-tertiary)); }
+.msg-tool-card-header .arrow { display: inline-block; transition: transform 0.15s; font-size: 10px; color: var(--text-muted); }
+.msg-tool-card-header .arrow.open { transform: rotate(90deg); }
+.msg-tool-card-icon { font-size: 11px; }
+.msg-tool-card-name { font-weight: 600; }
+.msg-tool-card-status { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.msg-tool-card-status.running { color: var(--teal); }
+.msg-tool-card-status.done { color: var(--text-muted); }
+.msg-tool-card-status.error { color: var(--error, #e74c3c); }
+.msg-tool-card-body { padding: 6px 10px; border-top: 1px solid var(--border); }
+.msg-tool-card-section { margin: 2px 0; }
+.msg-tool-card-label { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.msg-tool-card-pre { background: var(--bg-primary); border-radius: 4px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; margin: 0; }
 .msg-actions { display: flex; gap: 4px; margin-top: 4px; opacity: 0.8; }
 .msg-action-btn { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
 .msg-action-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
@@ -156,6 +183,22 @@ input { font-family: inherit; font-size: inherit; }
 /* ── Streaming cursor ─────────────────────────────────────────────── */
 .streaming-cursor::after { content: '\2588'; animation: blink 0.8s infinite; color: var(--accent); }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ── Session system prompt bar ───────────────────────────────────── */
+.session-sp-bar { border-bottom: 1px solid var(--border); padding: 0; }
+.session-sp-toggle { display: flex; align-items: center; gap: 6px; padding: 6px 24px; font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; background: none; border: none; width: 100%; text-align: left; }
+.session-sp-toggle:hover { color: var(--text-secondary); }
+.session-sp-toggle .arrow { display: inline-block; transition: transform 0.15s; font-size: 9px; }
+.session-sp-toggle .arrow.open { transform: rotate(90deg); }
+.session-sp-toggle .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); display: inline-block; }
+.session-sp-body { padding: 4px 24px 8px; }
+.session-sp-textarea { width: 100%; min-height: 48px; max-height: 120px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 12px; font-family: inherit; resize: vertical; outline: none; }
+.session-sp-textarea:focus { border-color: var(--teal); }
+.session-sp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.session-sp-btn { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 10px; font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; }
+.session-sp-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.session-sp-btn.save { color: var(--teal); border-color: var(--teal); }
+.session-sp-btn.save:hover { background: var(--teal); color: #fff; }
 
 /* ── Input area ───────────────────────────────────────────────────── */
 .input-area { border-top: 1px solid var(--border); padding: 16px 24px; background: var(--bg-primary); }
@@ -898,6 +941,52 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
 }
 
 
+// 6.3: Per-session system prompt editor bar
+function SessionSystemPromptBar({ value, sessionKey, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setDraft(value || ''); setSaved(false); }, [value, sessionKey]);
+
+  const handleSave = async (text) => {
+    const val = text != null ? text : draft;
+    try {
+      await fetch('/api/sessions/' + encodeURIComponent(sessionKey), {
+        method: 'PATCH', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system_prompt_override: val }),
+      });
+      if (onSave) onSave(val);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (_) {}
+  };
+
+  const hasValue = !!(value || '').trim();
+  return html`
+    <div class="session-sp-bar">
+      <button class="session-sp-toggle" onClick=${() => setOpen(!open)}>
+        <span class="arrow ${open ? 'open' : ''}">▶</span>
+        <span>// ${t('settings_system_prompt')}</span>
+        ${hasValue && !open ? html`<span class="dot" />` : ''}
+      </button>
+      ${open && html`
+        <div class="session-sp-body">
+          <textarea class="session-sp-textarea" value=${draft}
+            onInput=${e => setDraft(e.target.value)}
+            placeholder=${t('settings_system_prompt') + '...'} />
+          <div class="session-sp-actions">
+            ${saved ? html`<span style="font-size:11px;color:var(--teal)">✓</span>` : ''}
+            <button class="session-sp-btn" onClick=${() => { setDraft(''); handleSave(''); }}>Clear</button>
+            <button class="session-sp-btn save" onClick=${() => handleSave(draft)}>Save</button>
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
 function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggle }) {
   const [showModels, setShowModels] = useState(false);
 
@@ -919,7 +1008,55 @@ function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggl
 }
 
 
-function Message({ role, content, toolHints, streaming, isLast, onCopy, onRegenerate, onEdit }) {
+// 6.1: Collapsible thinking block
+function ThinkingBlock({ content }) {
+  const [open, setOpen] = useState(false);
+  return html`
+    <div class="msg-thinking">
+      <button class="msg-thinking-toggle" onClick=${() => setOpen(!open)}>
+        <span class="arrow ${open ? 'open' : ''}">▶</span>
+        <span>Thinking${!open ? '...' : ''}</span>
+      </button>
+      ${open && html`<div class="msg-thinking-body">${content}</div>`}
+    </div>
+  `;
+}
+
+// 6.2: Tool detail card (expandable)
+function ToolDetailCard({ detail }) {
+  const [open, setOpen] = useState(false);
+  const statusClass = detail.error ? 'error' : (detail.result != null ? 'done' : 'running');
+  const statusText = detail.error ? 'error' : (detail.result != null ? 'done' : 'running');
+  const argsStr = detail.arguments ? (typeof detail.arguments === 'string' ? detail.arguments : JSON.stringify(detail.arguments, null, 2)) : '';
+  return html`
+    <div class="msg-tool-card">
+      <button class="msg-tool-card-header" onClick=${() => setOpen(!open)}>
+        <span class="arrow ${open ? 'open' : ''}">▶</span>
+        <span class="msg-tool-card-icon">⚙</span>
+        <span class="msg-tool-card-name">${detail.name}</span>
+        <span class="msg-tool-card-status ${statusClass}">${statusText}</span>
+      </button>
+      ${open && html`
+        <div class="msg-tool-card-body">
+          ${argsStr && html`
+            <div class="msg-tool-card-section">
+              <div class="msg-tool-card-label">arguments</div>
+              <pre class="msg-tool-card-pre">${argsStr}</pre>
+            </div>
+          `}
+          ${detail.result != null && html`
+            <div class="msg-tool-card-section">
+              <div class="msg-tool-card-label">result</div>
+              <pre class="msg-tool-card-pre">${detail.result}</pre>
+            </div>
+          `}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function Message({ role, content, toolHints, thinkingBlocks, toolDetails, streaming, isLast, onCopy, onRegenerate, onEdit, showThinking, showTools }) {
   const bodyRef = useRef(null);
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -996,7 +1133,11 @@ function Message({ role, content, toolHints, streaming, isLast, onCopy, onRegene
     <div class="msg msg-assistant" onMouseEnter=${() => setHovered(true)} onMouseLeave=${() => setHovered(false)}>
       <div class="msg-avatar">A</div>
       <div class="msg-body">
-        ${toolHints && toolHints.map(hint => html`<div class="msg-tool-hint">${hint}</div>`)}
+        ${showThinking && thinkingBlocks && thinkingBlocks.map((tb, i) => html`<${ThinkingBlock} key=${i} content=${tb} />`)}
+        ${showTools && toolDetails && toolDetails.length > 0
+          ? toolDetails.map((td, i) => html`<${ToolDetailCard} key=${i} detail=${td} />`)
+          : toolHints && toolHints.map(hint => html`<div class="msg-tool-hint">${hint}</div>`)
+        }
         <div ref=${bodyRef} class="msg-content ${streaming ? 'streaming-cursor' : ''}"
           dangerouslySetInnerHTML=${{ __html: renderMd(content) }} />
         ${hovered && !streaming ? html`
@@ -1015,7 +1156,7 @@ function Message({ role, content, toolHints, streaming, isLast, onCopy, onRegene
 }
 
 
-function ChatArea({ messages, streaming, onRegenerate, onEditResend }) {
+function ChatArea({ messages, streaming, onRegenerate, onEditResend, showThinking, showTools }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -1041,8 +1182,9 @@ function ChatArea({ messages, streaming, onRegenerate, onEditResend }) {
         const isUserBeforeLast = m.role === 'user' && i === messages.length - 2;
         return html`
           <${Message} key=${m.id || i} role=${m.role} content=${m.content}
-            toolHints=${m.toolHints} streaming=${m.streaming}
-            isLast=${isLastAssistant}
+            toolHints=${m.toolHints} thinkingBlocks=${m.thinkingBlocks}
+            toolDetails=${m.toolDetails} streaming=${m.streaming}
+            isLast=${isLastAssistant} showThinking=${showThinking} showTools=${showTools}
             onRegenerate=${isLastAssistant && !streaming ? onRegenerate : null}
             onEdit=${isUserBeforeLast && !streaming ? onEditResend : null} />
         `;
@@ -2038,6 +2180,7 @@ function App() {
   const [models, setModels] = useState([]);
   const [currentModel, setCurrentModel] = useState('');
   const [sessionUsage, setSessionUsage] = useState(null);
+  const [sessionSystemPrompt, setSessionSystemPrompt] = useState('');
   const [appVersion, setAppVersion] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -2111,8 +2254,9 @@ function App() {
       if (r.ok) {
         const d = await r.json();
         setMessages(d.messages || []);
+        setSessionSystemPrompt(d.system_prompt_override || '');
       }
-    } catch (_) { setMessages([]); }
+    } catch (_) { setMessages([]); setSessionSystemPrompt(''); }
   }, []);
 
   const loadActivitySessions = useCallback(async () => {
@@ -2186,7 +2330,7 @@ function App() {
   const sendMessage = useCallback(async (text) => {
     const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
     const userMsg = { role: 'user', content: text, id: nextMsgId() };
-    const assistantMsg = { role: 'assistant', content: '', toolHints: [], streaming: true, id: nextMsgId() };
+    const assistantMsg = { role: 'assistant', content: '', toolHints: [], thinkingBlocks: [], toolDetails: [], streaming: true, id: nextMsgId() };
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
@@ -2198,8 +2342,28 @@ function App() {
 
         if (event.type === 'content') {
           last.content += event.data;
+        } else if (event.type === 'thinking') {
+          last.thinkingBlocks = [...(last.thinkingBlocks || []), event.data];
         } else if (event.type === 'tool_hint') {
           last.toolHints = [...(last.toolHints || []), event.data];
+        } else if (event.type === 'tool_start') {
+          try {
+            const detail = JSON.parse(event.data);
+            last.toolDetails = [...(last.toolDetails || []), detail];
+          } catch (_) {}
+        } else if (event.type === 'tool_result') {
+          try {
+            const result = JSON.parse(event.data);
+            const details = [...(last.toolDetails || [])];
+            // Match by name (last unfinished card for this tool)
+            for (let i = details.length - 1; i >= 0; i--) {
+              if (details[i].name === result.name && details[i].result == null) {
+                details[i] = { ...details[i], result: result.result, error: result.error };
+                break;
+              }
+            }
+            last.toolDetails = details;
+          } catch (_) {}
         } else if (event.type === 'done') {
           last.content = event.data;
           last.streaming = false;
@@ -2261,6 +2425,7 @@ function App() {
     setActiveKey(key);
     setMessages([]);
     setSessionUsage(null);
+    setSessionSystemPrompt('');
     // Optimistic insert — show immediately in sidebar
     setSessions(prev => [{ key, title: t('empty_title'), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]);
     setSidebarOpen(false);
@@ -2270,6 +2435,7 @@ function App() {
   const selectSession = useCallback((key) => {
     setActiveKey(key);
     setMessages([]);
+    setSessionSystemPrompt('');
     setSidebarOpen(false);
     loadSessionMessages(key);
     loadInfo(key);
@@ -2296,6 +2462,7 @@ function App() {
     setAuthed(false);
     setMessages([]);
     setSessions([]);
+    setSessionSystemPrompt('');
   }, []);
 
   if (!authed) {
@@ -2325,8 +2492,12 @@ function App() {
           onModelSelect=${(id) => { setCurrentModel(id); }}
           onMenuToggle=${() => setSidebarOpen(s => !s)} />
         ${activeTab === 'chat' ? html`
+          <${SessionSystemPromptBar} value=${sessionSystemPrompt}
+            sessionKey=${activeKey}
+            onSave=${(v) => setSessionSystemPrompt(v)} />
           <${ChatArea} messages=${messages} streaming=${streaming}
-            onRegenerate=${regenerate} onEditResend=${editResend} />
+            onRegenerate=${regenerate} onEditResend=${editResend}
+            showThinking=${showThinking} showTools=${showTools} />
           <${InputArea} onSend=${sendMessage} disabled=${streaming} />
         ` : activeTab === 'activity' ? html`
           <${ActivityPanel}
