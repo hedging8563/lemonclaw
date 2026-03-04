@@ -329,16 +329,8 @@ def get_webui_routes(
             return err  # type: ignore[return-value]
 
         sessions = session_manager.list_sessions()
-        # Filter to webui sessions only, include per-session model
-        webui_sessions = []
-        for s in sessions:
-            if not s.get("key", "").startswith("webui:"):
-                continue
-            # Attach per-session model if set
-            sess = session_manager._load(s["key"])
-            if sess and sess.metadata.get("current_model"):
-                s["model"] = sess.metadata["current_model"]
-            webui_sessions.append(s)
+        # Filter to webui sessions only (model already included from list_sessions)
+        webui_sessions = [s for s in sessions if s.get("key", "").startswith("webui:")]
         resp = _json({"sessions": webui_sessions})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -376,7 +368,9 @@ def get_webui_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
 
-        session = session_manager.get_or_create(key)
+        session = session_manager._load(key)
+        if not session:
+            return _json({"error": "Session not found"}, 404)
         if "title" in body:
             title = str(body["title"]).strip()[:60]
             if title:

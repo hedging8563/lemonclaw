@@ -788,7 +788,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, onRename, lan
                         e.stopPropagation();
                       }}
                       onClick=${e => e.stopPropagation()}
-                      ref=${el => el && setTimeout(() => el.focus(), 0)} />
+                      ref=${el => { if (el && !el._focused) { el._focused = true; el.focus(); el.select(); } }} />
                   ` : html`
                     <span class="sidebar-session-name" onDblClick=${(e) => {
                       e.stopPropagation();
@@ -2162,22 +2162,21 @@ function App() {
     if (!authed) return;
     const handler = (e) => {
       const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
-      // Ctrl+N / Cmd+N: new chat
-      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+      // Ctrl+N / Cmd+N: new chat (skip if in input to allow browser default)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !isInput) {
         e.preventDefault(); newChat();
       }
-      // Ctrl+K / Cmd+K: focus session search (toggle sidebar on mobile)
+      // Ctrl+K / Cmd+K: toggle sidebar (always, even in input — standard shortcut)
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault(); setSidebarOpen(s => !s);
       }
-      // Ctrl+, / Cmd+,: open settings
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+      // Ctrl+, / Cmd+,: open settings (skip if in input)
+      if ((e.ctrlKey || e.metaKey) && e.key === ',' && !isInput) {
         e.preventDefault(); setActiveTab('settings');
       }
-      // Escape: stop streaming or close sidebar
+      // Escape: close sidebar (skip if in input)
       if (e.key === 'Escape' && !isInput) {
-        if (streaming) { /* streaming abort handled by SSE reader */ }
-        else if (sidebarOpen) setSidebarOpen(false);
+        if (sidebarOpen) setSidebarOpen(false);
       }
     };
     window.addEventListener('keydown', handler);
@@ -2223,31 +2222,26 @@ function App() {
 
   // 5.2: Regenerate last assistant response
   const regenerate = useCallback(() => {
+    // Extract last user message text before modifying state
+    let userText = null;
     setMessages(prev => {
       if (prev.length < 2) return prev;
-      // Find last user message
       let lastUserIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === 'user') { lastUserIdx = i; break; }
       }
       if (lastUserIdx < 0) return prev;
-      const userText = prev[lastUserIdx].content;
-      // Remove last assistant message, re-send
-      const trimmed = prev.slice(0, lastUserIdx + 1);
-      // Trigger send after state update
-      setTimeout(() => sendMessage(userText), 0);
-      return trimmed;
+      userText = prev[lastUserIdx].content;
+      return prev.slice(0, lastUserIdx + 1);
     });
+    // Send outside of setState to avoid side effects in updater
+    if (userText) requestAnimationFrame(() => sendMessage(userText));
   }, [sendMessage]);
 
   // 5.2: Edit user message and resend (truncate messages after it)
   const editResend = useCallback((newText) => {
-    setMessages(prev => {
-      // Remove last user + assistant pair
-      const trimmed = prev.length >= 2 ? prev.slice(0, -2) : [];
-      setTimeout(() => sendMessage(newText), 0);
-      return trimmed;
-    });
+    setMessages(prev => prev.length >= 2 ? prev.slice(0, -2) : []);
+    requestAnimationFrame(() => sendMessage(newText));
   }, [sendMessage]);
 
   // 5.3: Rename session title

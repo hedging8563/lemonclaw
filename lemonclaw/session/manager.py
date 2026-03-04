@@ -233,6 +233,7 @@ class SessionManager:
                             sessions.append({
                                 "key": key,
                                 "title": metadata.get("title", ""),
+                                "model": metadata.get("current_model", ""),
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "message_count": msg_count,
