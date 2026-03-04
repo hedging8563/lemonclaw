@@ -329,8 +329,16 @@ def get_webui_routes(
             return err  # type: ignore[return-value]
 
         sessions = session_manager.list_sessions()
-        # Filter to webui sessions only
-        webui_sessions = [s for s in sessions if s.get("key", "").startswith("webui:")]
+        # Filter to webui sessions only, include per-session model
+        webui_sessions = []
+        for s in sessions:
+            if not s.get("key", "").startswith("webui:"):
+                continue
+            # Attach per-session model if set
+            sess = session_manager._load(s["key"])
+            if sess and sess.metadata.get("current_model"):
+                s["model"] = sess.metadata["current_model"]
+            webui_sessions.append(s)
         resp = _json({"sessions": webui_sessions})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -349,6 +357,32 @@ def get_webui_routes(
 
         deleted = session_manager.delete_session(key)
         resp = _json({"deleted": deleted})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── PATCH /api/sessions/{key} — update session metadata ────────────
+
+    async def update_session(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        key = request.path_params["key"]
+        if not key.startswith("webui:"):
+            return _json({"error": "Forbidden"}, 403)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+
+        session = session_manager.get_or_create(key)
+        if "title" in body:
+            title = str(body["title"]).strip()[:60]
+            if title:
+                session.metadata["title"] = title
+        session_manager.save(session)
+        resp = _json({"ok": True})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -438,6 +472,7 @@ def get_webui_routes(
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/sessions/{key:path}/messages", get_session_messages, methods=["GET"]),
+        Route("/api/sessions/{key:path}", update_session, methods=["PATCH"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
         Route("/api/models", list_models, methods=["GET"]),
         Route("/api/info", get_info, methods=["GET"]),

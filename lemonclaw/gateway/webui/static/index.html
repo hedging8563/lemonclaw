@@ -147,6 +147,11 @@ input { font-family: inherit; font-size: inherit; }
 /* ── Tool hint ────────────────────────────────────────────────────── */
 .msg-tool-hint { font-size: 12px; font-family: var(--font-mono); color: var(--text-muted); padding: 4px 0; display: flex; align-items: center; gap: 6px; }
 .msg-tool-hint::before { content: '\2699'; font-size: 11px; }
+.msg-actions { display: flex; gap: 4px; margin-top: 4px; opacity: 0.8; }
+.msg-action-btn { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+.msg-action-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.msg-edit-textarea { width: 100%; min-height: 60px; max-height: 200px; background: var(--bg-primary); border: 1px solid var(--teal); border-radius: 6px; padding: 8px 10px; color: var(--text-primary); font-size: 13px; font-family: inherit; resize: vertical; outline: none; }
+.session-title-input { background: transparent; border: 1px solid var(--teal); border-radius: 4px; padding: 2px 6px; color: var(--text-primary); font-size: 13px; width: 100%; outline: none; font-family: inherit; }
 
 /* ── Streaming cursor ─────────────────────────────────────────────── */
 .streaming-cursor::after { content: '\2588'; animation: blink 0.8s infinite; color: var(--accent); }
@@ -485,6 +490,15 @@ const I18N = {
     settings_tools_coding_api_base: 'API Base',
     settings_tools_exec_timeout: 'Timeout (s)',
     settings_tools_exec_path: 'PATH Append',
+    msg_copy: 'Copy',
+    msg_copied: 'Copied',
+    msg_regenerate: 'Regenerate',
+    msg_edit: 'Edit & Resend',
+    msg_edit_placeholder: 'Edit message...',
+    msg_edit_send: 'Send',
+    msg_edit_cancel: 'Cancel',
+    rename_placeholder: 'Session title...',
+    shortcut_hint: 'Ctrl+N new \u00B7 Ctrl+K switch \u00B7 Ctrl+, settings \u00B7 Esc stop',
     theme_dark: 'Dark',
     theme_light: 'Light',
     theme_system: 'System',
@@ -594,6 +608,15 @@ const I18N = {
     settings_tools_coding_api_base: 'API Base',
     settings_tools_exec_timeout: '\u8D85\u65F6 (s)',
     settings_tools_exec_path: 'PATH \u8FFD\u52A0',
+    msg_copy: '\u590D\u5236',
+    msg_copied: '\u5DF2\u590D\u5236',
+    msg_regenerate: '\u91CD\u65B0\u751F\u6210',
+    msg_edit: '\u7F16\u8F91\u91CD\u53D1',
+    msg_edit_placeholder: '\u7F16\u8F91\u6D88\u606F...',
+    msg_edit_send: '\u53D1\u9001',
+    msg_edit_cancel: '\u53D6\u6D88',
+    rename_placeholder: '\u4F1A\u8BDD\u6807\u9898...',
+    shortcut_hint: 'Ctrl+N \u65B0\u5EFA \u00B7 Ctrl+K \u5207\u6362 \u00B7 Ctrl+, \u8BBE\u7F6E \u00B7 Esc \u505C\u6B62',
     theme_dark: '\u6DF1\u8272',
     theme_light: '\u6D45\u8272',
     theme_system: '\u8DDF\u968F\u7CFB\u7EDF',
@@ -722,7 +745,9 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open, activeTab, onTabChange, activitySessions, selectedActivitySession, onSelectActivitySession, wsConnected, unreadCount }) {
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, onRename, lang, onLangChange, usage, version, open, activeTab, onTabChange, activitySessions, selectedActivitySession, onSelectActivitySession, wsConnected, unreadCount }) {
+  const [editingKey, setEditingKey] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
   return html`
     <div class="sidebar ${open ? 'open' : ''}">
       <div class="sidebar-header">
@@ -753,7 +778,24 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
               <div class="sidebar-session ${s.key === activeKey ? 'active' : ''}"
                 onClick=${() => onSelect(s.key)}>
                 <div class="sidebar-session-info">
-                  <span class="sidebar-session-name">${s.title || s.key.replace('webui:', '')}</span>
+                  ${editingKey === s.key ? html`
+                    <input class="session-title-input" value=${editTitle}
+                      onInput=${e => setEditTitle(e.target.value)}
+                      onBlur=${() => { if (editTitle.trim()) onRename(s.key, editTitle.trim()); setEditingKey(null); }}
+                      onKeyDown=${e => {
+                        if (e.key === 'Enter') { e.target.blur(); }
+                        if (e.key === 'Escape') { setEditingKey(null); }
+                        e.stopPropagation();
+                      }}
+                      onClick=${e => e.stopPropagation()}
+                      ref=${el => el && setTimeout(() => el.focus(), 0)} />
+                  ` : html`
+                    <span class="sidebar-session-name" onDblClick=${(e) => {
+                      e.stopPropagation();
+                      setEditingKey(s.key);
+                      setEditTitle(s.title || s.key.replace('webui:', ''));
+                    }}>${s.title || s.key.replace('webui:', '')}</span>
+                  `}
                   <div class="sidebar-session-meta">
                     <span class="sidebar-session-dot">${s.key === activeKey ? '\u25CF' : '\u25CB'}</span>
                     <span>${s.key === activeKey ? 'ACTIVE' : 'IDLE'}</span>
@@ -877,8 +919,12 @@ function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggl
 }
 
 
-function Message({ role, content, toolHints, streaming }) {
+function Message({ role, content, toolHints, streaming, isLast, onCopy, onRegenerate, onEdit }) {
   const bodyRef = useRef(null);
+  const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [copyLabel, setCopyLabel] = useState(null);
 
   useEffect(() => {
     if (bodyRef.current) {
@@ -908,10 +954,38 @@ function Message({ role, content, toolHints, streaming }) {
   }, [content]);
 
   if (role === 'user') {
+    if (editing) {
+      return html`
+        <div class="msg msg-user">
+          <div class="msg-body" style="width:100%">
+            <textarea class="msg-edit-textarea" value=${editText}
+              onInput=${e => setEditText(e.target.value)}
+              placeholder=${t('msg_edit_placeholder')} />
+            <div class="msg-actions" style="justify-content:flex-end;opacity:1">
+              <button class="msg-action-btn" onClick=${() => setEditing(false)}>${t('msg_edit_cancel')}</button>
+              <button class="msg-action-btn" style="color:var(--teal)" onClick=${() => {
+                if (editText.trim() && onEdit) { onEdit(editText.trim()); setEditing(false); }
+              }}>${t('msg_edit_send')}</button>
+            </div>
+          </div>
+          <div class="msg-avatar">U</div>
+        </div>
+      `;
+    }
     return html`
-      <div class="msg msg-user">
+      <div class="msg msg-user" onMouseEnter=${() => setHovered(true)} onMouseLeave=${() => setHovered(false)}>
         <div class="msg-body">
           <div class="msg-content" dangerouslySetInnerHTML=${{ __html: renderMd(content) }} />
+          ${hovered && !streaming ? html`
+            <div class="msg-actions">
+              <button class="msg-action-btn" onClick=${() => {
+                navigator.clipboard.writeText(content);
+                setCopyLabel(t('msg_copied'));
+                setTimeout(() => setCopyLabel(null), 1200);
+              }}>${copyLabel || t('msg_copy')}</button>
+              ${onEdit ? html`<button class="msg-action-btn" onClick=${() => { setEditText(content); setEditing(true); }}>${t('msg_edit')}</button>` : ''}
+            </div>
+          ` : ''}
         </div>
         <div class="msg-avatar">U</div>
       </div>
@@ -919,19 +993,29 @@ function Message({ role, content, toolHints, streaming }) {
   }
 
   return html`
-    <div class="msg msg-assistant">
+    <div class="msg msg-assistant" onMouseEnter=${() => setHovered(true)} onMouseLeave=${() => setHovered(false)}>
       <div class="msg-avatar">A</div>
       <div class="msg-body">
         ${toolHints && toolHints.map(hint => html`<div class="msg-tool-hint">${hint}</div>`)}
         <div ref=${bodyRef} class="msg-content ${streaming ? 'streaming-cursor' : ''}"
           dangerouslySetInnerHTML=${{ __html: renderMd(content) }} />
+        ${hovered && !streaming ? html`
+          <div class="msg-actions">
+            <button class="msg-action-btn" onClick=${() => {
+              navigator.clipboard.writeText(content);
+              setCopyLabel(t('msg_copied'));
+              setTimeout(() => setCopyLabel(null), 1200);
+            }}>${copyLabel || t('msg_copy')}</button>
+            ${isLast && onRegenerate ? html`<button class="msg-action-btn" onClick=${onRegenerate}>${t('msg_regenerate')}</button>` : ''}
+          </div>
+        ` : ''}
       </div>
     </div>
   `;
 }
 
 
-function ChatArea({ messages, streaming }) {
+function ChatArea({ messages, streaming, onRegenerate, onEditResend }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -952,10 +1036,17 @@ function ChatArea({ messages, streaming }) {
 
   return html`
     <div class="chat-area">
-      ${messages.map((m, i) => html`
-        <${Message} key=${m.id || i} role=${m.role} content=${m.content}
-          toolHints=${m.toolHints} streaming=${m.streaming} />
-      `)}
+      ${messages.map((m, i) => {
+        const isLastAssistant = m.role === 'assistant' && i === messages.length - 1;
+        const isUserBeforeLast = m.role === 'user' && i === messages.length - 2;
+        return html`
+          <${Message} key=${m.id || i} role=${m.role} content=${m.content}
+            toolHints=${m.toolHints} streaming=${m.streaming}
+            isLast=${isLastAssistant}
+            onRegenerate=${isLastAssistant && !streaming ? onRegenerate : null}
+            onEdit=${isUserBeforeLast && !streaming ? onEditResend : null} />
+        `;
+      })}
       <div ref=${endRef} />
     </div>
   `;
@@ -1996,12 +2087,8 @@ function App() {
         const d = await r.json();
         const list = d.models || [];
         setModels(list);
-        const saved = localStorage.getItem('lc_model');
-        if (saved && list.some(m => m.id === saved)) {
-          setCurrentModel(saved);
-        } else {
-          setCurrentModel(d.current || '');
-        }
+        // 5.1: Use server-reported current model (global default), no localStorage
+        setCurrentModel(d.current || '');
       }
     } catch (_) {}
   }, []);
@@ -2070,6 +2157,33 @@ function App() {
     }
   }, [authed, activeTab]);
 
+  // 5.4: Keyboard shortcuts
+  useEffect(() => {
+    if (!authed) return;
+    const handler = (e) => {
+      const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+      // Ctrl+N / Cmd+N: new chat
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault(); newChat();
+      }
+      // Ctrl+K / Cmd+K: focus session search (toggle sidebar on mobile)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault(); setSidebarOpen(s => !s);
+      }
+      // Ctrl+, / Cmd+,: open settings
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault(); setActiveTab('settings');
+      }
+      // Escape: stop streaming or close sidebar
+      if (e.key === 'Escape' && !isInput) {
+        if (streaming) { /* streaming abort handled by SSE reader */ }
+        else if (sidebarOpen) setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [authed, streaming, sidebarOpen]);
+
   const sendMessage = useCallback(async (text) => {
     const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
     const userMsg = { role: 'user', content: text, id: nextMsgId() };
@@ -2107,6 +2221,46 @@ function App() {
     setTimeout(() => loadSessions(), 3000);
   }, [activeKey, currentModel]);
 
+  // 5.2: Regenerate last assistant response
+  const regenerate = useCallback(() => {
+    setMessages(prev => {
+      if (prev.length < 2) return prev;
+      // Find last user message
+      let lastUserIdx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].role === 'user') { lastUserIdx = i; break; }
+      }
+      if (lastUserIdx < 0) return prev;
+      const userText = prev[lastUserIdx].content;
+      // Remove last assistant message, re-send
+      const trimmed = prev.slice(0, lastUserIdx + 1);
+      // Trigger send after state update
+      setTimeout(() => sendMessage(userText), 0);
+      return trimmed;
+    });
+  }, [sendMessage]);
+
+  // 5.2: Edit user message and resend (truncate messages after it)
+  const editResend = useCallback((newText) => {
+    setMessages(prev => {
+      // Remove last user + assistant pair
+      const trimmed = prev.length >= 2 ? prev.slice(0, -2) : [];
+      setTimeout(() => sendMessage(newText), 0);
+      return trimmed;
+    });
+  }, [sendMessage]);
+
+  // 5.3: Rename session title
+  const renameSession = useCallback(async (key, title) => {
+    try {
+      await api('/api/sessions/' + encodeURIComponent(key), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      loadSessions();
+    } catch (_) {}
+  }, []);
+
   const newChat = useCallback(() => {
     const id = Date.now().toString(36);
     const key = 'webui:' + id;
@@ -2125,8 +2279,11 @@ function App() {
     setSidebarOpen(false);
     loadSessionMessages(key);
     loadInfo(key);
+    // 5.1: Restore per-session model from session list metadata
+    const sess = sessions.find(s => s.key === key);
+    if (sess?.model) setCurrentModel(sess.model);
     setTimeout(() => document.querySelector('.input-field')?.focus(), 100);
-  }, []);
+  }, [sessions]);
 
   const deleteSession = useCallback((key) => {
     setConfirmDelete(key);
@@ -2157,6 +2314,7 @@ function App() {
       <${Sidebar}
         sessions=${sessions} activeKey=${activeKey}
         onSelect=${selectSession} onNew=${newChat} onDelete=${deleteSession}
+        onRename=${renameSession}
         lang=${lang} onLangChange=${toggleLang}
         usage=${sessionUsage} version=${appVersion}
         open=${sidebarOpen}
@@ -2170,10 +2328,11 @@ function App() {
         <${TopBar}
           model=${currentModel} models=${models}
           streaming=${streaming} onLogout=${logout}
-          onModelSelect=${(id) => { localStorage.setItem('lc_model', id); setCurrentModel(id); }}
+          onModelSelect=${(id) => { setCurrentModel(id); }}
           onMenuToggle=${() => setSidebarOpen(s => !s)} />
         ${activeTab === 'chat' ? html`
-          <${ChatArea} messages=${messages} streaming=${streaming} />
+          <${ChatArea} messages=${messages} streaming=${streaming}
+            onRegenerate=${regenerate} onEditResend=${editResend} />
           <${InputArea} onSend=${sendMessage} disabled=${streaming} />
         ` : activeTab === 'activity' ? html`
           <${ActivityPanel}
