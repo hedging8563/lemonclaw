@@ -22,11 +22,17 @@ class TodayLog:
         self._dir = memory_dir
         self._file = memory_dir / "today.md"
 
-    def read(self) -> str:
-        """Read today.md content. Returns empty string if file doesn't exist or is stale."""
+    def _read_raw(self) -> str:
+        """Read today.md raw content regardless of staleness."""
         if not self._file.exists():
             return ""
-        text = self._file.read_text(encoding="utf-8")
+        return self._file.read_text(encoding="utf-8")
+
+    def read(self) -> str:
+        """Read today.md content. Returns empty string if file doesn't exist or is stale."""
+        text = self._read_raw()
+        if not text:
+            return ""
         # Check if the file is from today
         first_line = text.split("\n", 1)[0].strip()
         today_header = f"# {date.today()}"
@@ -57,9 +63,10 @@ class TodayLog:
 
         Called by Daily Reflection cron job.
         Returns True if there was content to archive.
+        Uses _read_raw() to avoid staleness check — stale files ARE what we want to archive.
         """
-        content = self.read()
-        if not content:
+        content = self._read_raw()
+        if not content.strip():
             return False
 
         # Append to HISTORY.md

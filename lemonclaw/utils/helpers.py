@@ -27,6 +27,17 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+
+
+def strip_fences(text: str) -> str:
+    """Strip markdown code fences from LLM output."""
+    if not text:
+        return ""
+    m = _FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
+
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
 def safe_filename(name: str) -> str:

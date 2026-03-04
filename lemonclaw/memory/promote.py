@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
@@ -65,12 +65,19 @@ class CorePromoter:
         Returns list of promoted card names.
         """
         promoted: list[str] = []
+        current_core = self.read_core()
         for card in self._entities.list_cards():
             if card.access_count >= PROMOTE_ACCESS_THRESHOLD:
+                # Skip if already in core
+                if f"[{card.name}]" in current_core:
+                    card.meta["access_count"] = 0
+                    card.save()
+                    continue
                 # Extract first meaningful line as summary
                 summary = self._extract_summary(card)
                 if summary and self.add_to_core(f"- [{card.name}] {summary}"):
                     promoted.append(card.name)
+                    current_core = self.read_core()  # Refresh after add
                     # Reset access count after promotion
                     card.meta["access_count"] = 0
                     card.save()

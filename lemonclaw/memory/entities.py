@@ -22,7 +22,7 @@ DEFAULT_CARDS: dict[str, dict[str, Any]] = {
     "goals": {"type": "goal", "keywords": ["目标", "计划", "下一步", "TODO"]},
 }
 
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:

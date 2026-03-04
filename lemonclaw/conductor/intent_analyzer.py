@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lemonclaw.conductor.types import IntentAnalysis, TaskComplexity
+from lemonclaw.utils.helpers import strip_fences
 
 if TYPE_CHECKING:
     from lemonclaw.providers.base import LLMProvider
@@ -24,14 +24,6 @@ Respond with ONLY a JSON object, no markdown fences:
 {"complexity": "simple|moderate|complex", "summary": "...", "required_skills": ["..."], "reasoning": "..."}
 
 Most messages are "simple". Only classify as "moderate" or "complex" when the task genuinely requires multiple independent work streams that benefit from parallel execution."""
-
-_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
-
-
-def _strip_fences(text: str) -> str:
-    """Strip markdown code fences from LLM output."""
-    m = _FENCE_RE.search(text)
-    return m.group(1).strip() if m else text.strip()
 
 
 async def analyze_intent(
@@ -53,7 +45,7 @@ async def analyze_intent(
             temperature=0.0,
             max_tokens=256,
         )
-        data = json.loads(_strip_fences(response.content))
+        data = json.loads(strip_fences(response.content or ""))
         return IntentAnalysis(
             complexity=TaskComplexity(data.get("complexity", "simple")),
             summary=data.get("summary", message[:80]),

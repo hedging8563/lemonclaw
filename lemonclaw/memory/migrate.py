@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
+
+if TYPE_CHECKING:
+    from lemonclaw.providers.base import LLMProvider
 
 # LLM prompt for splitting MEMORY.md into entity cards
 _MIGRATE_SYSTEM = """You are a memory migration assistant. Split the user's MEMORY.md content into structured entity cards.
@@ -31,7 +35,7 @@ _MIGRATE_USER = """Split this MEMORY.md into entity cards:
 async def migrate_memory_to_entities(
     memory_dir: Path,
     entity_store: EntityStore,
-    provider: object | None = None,
+    provider: LLMProvider | None = None,
     model: str = "",
 ) -> bool:
     """Migrate MEMORY.md to entity cards. Returns True if migration happened.
@@ -76,11 +80,12 @@ async def migrate_memory_to_entities(
 async def _llm_migrate(
     content: str,
     entity_store: EntityStore,
-    provider: object,
+    provider: LLMProvider,
     model: str,
 ) -> bool:
     """Use LLM to split MEMORY.md into entity cards. Returns True on success."""
     import json
+    from lemonclaw.utils.helpers import strip_fences
 
     card_names = ", ".join(DEFAULT_CARDS.keys())
     messages = [
@@ -89,17 +94,13 @@ async def _llm_migrate(
     ]
 
     response = await asyncio.wait_for(
-        provider.chat(messages=messages, model=model),  # type: ignore[union-attr]
+        provider.chat(messages=messages, model=model),
         timeout=30,
     )
 
-    text = response.text.strip()
-    # Strip markdown fences if present
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
+    text = strip_fences(response.content or "")
+    if not text:
+        return False
 
     cards_data = json.loads(text)
     if not isinstance(cards_data, dict):

@@ -124,7 +124,7 @@ class ProceduralMemory:
     ) -> int | None:
         """Analyze a failure and generate a rule. Returns rule ID or None on failure."""
         import json
-        from lemonclaw.conductor.intent_analyzer import _strip_fences
+        from lemonclaw.utils.helpers import strip_fences
 
         user_content = (
             f"Task: {task_description}\n"
@@ -143,7 +143,7 @@ class ProceduralMemory:
                 temperature=0.1,
                 max_tokens=256,
             )
-            data = json.loads(_strip_fences(response.content))
+            data = json.loads(strip_fences(response.content or ""))
             return self.add_rule(
                 trigger=data.get("trigger", task_description[:50]),
                 lesson=data.get("lesson", error[:100]),
