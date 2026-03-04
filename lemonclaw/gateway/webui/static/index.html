@@ -630,6 +630,8 @@ const I18N = {
     sp_save: 'Save',
     activity_streaming: 'STREAMING',
     conductor_desc: 'Multi-agent orchestration',
+    conductor_empty: 'No agents or plans',
+    settings_tools_coding_inherit: 'Inherited from provider',
     settings_reset: 'Reset',
     settings_model: 'Default Model',
     settings_provider: 'Provider',
@@ -658,7 +660,7 @@ const I18N = {
     settings_not_configured: 'Not configured',
     settings_channel_enabled: 'Enabled',
     settings_skills_install: 'Install from URL',
-    settings_skills_install_placeholder: 'https://github.com/user/skill-repo',
+    settings_skills_install_placeholder: 'user/skill-repo or full URL',
     settings_skills_install_btn: 'Install',
     settings_skills_delete_confirm: 'Delete skill "{name}"?',
     settings_skills_builtin: 'Built-in',
@@ -787,6 +789,8 @@ const I18N = {
     sp_save: '\u4FDD\u5B58',
     activity_streaming: '\u6D41\u5F0F\u8F93\u51FA',
     conductor_desc: '\u591A\u667A\u80FD\u4F53\u534F\u4F5C',
+    conductor_empty: '\u6682\u65E0 Agent \u6216\u8BA1\u5212',
+    settings_tools_coding_inherit: '\u7EE7\u627F\u81EA Provider \u914D\u7F6E',
     settings_reset: '\u91CD\u7F6E',
     settings_model: '\u9ED8\u8BA4\u6A21\u578B',
     settings_provider: '\u63D0\u4F9B\u5546',
@@ -815,7 +819,7 @@ const I18N = {
     settings_not_configured: '\u672A\u914D\u7F6E',
     settings_channel_enabled: '\u542F\u7528',
     settings_skills_install: '\u4ECE URL \u5B89\u88C5',
-    settings_skills_install_placeholder: 'https://github.com/user/skill-repo',
+    settings_skills_install_placeholder: 'user/skill-repo \u6216\u5B8C\u6574 URL',
     settings_skills_install_btn: '\u5B89\u88C5',
     settings_skills_delete_confirm: '\u5220\u9664 Skill "{name}"\uFF1F',
     settings_skills_builtin: '\u5185\u7F6E',
@@ -1737,6 +1741,34 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
   const areaRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyMessages, setHistoryMessages] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Load history messages when selectedSession changes
+  useEffect(() => {
+    if (!selectedSession) {
+      setHistoryMessages([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingHistory(true);
+    api('/api/activity/messages?session_key=' + encodeURIComponent(selectedSession) + '&limit=50')
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => {
+        if (cancelled) return;
+        const msgs = (data.messages || []).map(msg => ({
+          type: msg.role,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          session_key: selectedSession,
+        }));
+        setHistoryMessages(msgs);
+      })
+      .catch(() => { if (!cancelled) setHistoryMessages([]); })
+      .finally(() => { if (!cancelled) setLoadingHistory(false); });
+    return () => { cancelled = true; };
+  }, [selectedSession]);
 
   // Track scroll position to decide auto-scroll
   useEffect(() => {
@@ -1752,12 +1784,19 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
 
   useEffect(() => {
     if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [events]);
+  }, [events, historyMessages]);
 
-  // Filter events by selected session and search query
-  let filtered = selectedSession
-    ? events.filter(e => e.session_key === selectedSession)
-    : events;
+  // Build display list: history + realtime WS events
+  let filtered;
+  if (selectedSession) {
+    const realtimeFiltered = events.filter(e => e.session_key === selectedSession);
+    // Deduplicate: exclude WS events already in history by timestamp
+    const historyTs = new Set(historyMessages.map(m => m.timestamp));
+    const newRealtime = realtimeFiltered.filter(e => !historyTs.has(e.timestamp));
+    filtered = [...historyMessages, ...newRealtime];
+  } else {
+    filtered = events;
+  }
 
   if (searchQuery.trim()) {
     const q = searchQuery.toLowerCase();
@@ -1766,6 +1805,16 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
 
   // Detect streaming state from merged entries
   const isStreaming = filtered.some(e => e._streaming);
+
+  if (loadingHistory) {
+    return html`
+      <div class="activity-area">
+        <div class="activity-empty">
+          <div class="activity-empty-text">${t('loading_history')}</div>
+        </div>
+      </div>
+    `;
+  }
 
   if (filtered.length === 0) {
     return html`
@@ -1883,7 +1932,7 @@ function ConductorPanel({ agents, plans, streaming }) {
         <${YesterdayMemo} />
         <div class="conductor-empty">
           <div class="conductor-empty-icon">\uD83C\uDFAD</div>
-          <div style="font-size:15px">No agents or plans</div>
+          <div style="font-size:15px">${t('conductor_empty')}</div>
           <div style="font-size:12px;font-family:var(--font-mono)">${t('conductor_desc')}</div>
         </div>
       </div>
@@ -2593,7 +2642,12 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                   onClick=${async () => {
                     setInstalling(true);
                     try {
-                      const r = await api('/api/settings/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: installUrl.trim() }) });
+                      let url = installUrl.trim();
+                      url = url.replace(/^npx\s+add-skill\s+/i, '');
+                      if (!url.startsWith('http://') && !url.startsWith('https://') && url.includes('/') && !url.includes(' ')) {
+                        url = 'https://github.com/' + url;
+                      }
+                      const r = await api('/api/settings/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
                       if (r.ok) { setInstallUrl(''); loadSkills(); }
                       else { const d = await r.json().catch(() => ({})); setStatus(d.error || 'Install failed'); }
                     } catch { setStatus(t('settings_network_error')); }
@@ -2640,13 +2694,14 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
               <div class="settings-label">${t('settings_tools_coding_api_key')}</div>
               <input class="settings-input" style="width:220px" type="password"
                 value=${getVal('tools.coding.api_key') ?? ''}
+                placeholder=${t('settings_tools_coding_inherit')}
                 onInput=${e => setVal('tools.coding.api_key', e.target.value)} />
             </div>
             <div class="settings-row">
               <div class="settings-label">${t('settings_tools_coding_api_base')}</div>
               <input class="settings-input" style="width:220px"
                 value=${getVal('tools.coding.api_base') ?? ''}
-                placeholder="https://..."
+                placeholder="https://api.lemondata.cc/v1"
                 onInput=${e => setVal('tools.coding.api_base', e.target.value)} />
             </div>
             <div class="settings-subtitle" style="margin-top:16px;font-size:11px">// ${t('settings_tools_exec')}</div>
