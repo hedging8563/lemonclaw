@@ -97,7 +97,7 @@ class ConfigWatcher:
             logger.exception("Config watcher: failed to reload provider")
 
     def _reload_agent_defaults(self, config) -> None:
-        """Hot-reload agent defaults (model, temperature, max_tokens)."""
+        """Hot-reload agent defaults (model, temperature, max_tokens, and more)."""
         if not self._agent_loop:
             return
         try:
@@ -106,6 +106,10 @@ class ConfigWatcher:
                 model=defaults.model,
                 temperature=defaults.temperature,
                 max_tokens=defaults.max_tokens,
+                memory_window=defaults.memory_window,
+                max_tool_iterations=defaults.max_tool_iterations,
+                system_prompt=defaults.system_prompt,
+                disabled_skills=defaults.disabled_skills,
             )
         except Exception:
             logger.exception("Config watcher: failed to reload agent defaults")

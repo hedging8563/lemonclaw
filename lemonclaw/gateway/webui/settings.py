@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -81,6 +81,8 @@ _RESTART_FIELDS = re.compile(
 _SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key",
                    "bridge_token", "bot_token", "app_token", "access_token"}
 
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+
 
 def _mask(value: str) -> str:
     if not value or len(value) < 8:
@@ -112,6 +114,32 @@ def _set_nested(data: dict, path: str, value: Any) -> None:
     obj[keys[-1]] = value
 
 
+def _get_nested(data: dict, path: str) -> Any:
+    """Get a nested dict value by dot-separated path."""
+    for key in path.split("."):
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+def _is_masked(value: str) -> bool:
+    """Check if a string looks like a masked sensitive value (contains ****)."""
+    return isinstance(value, str) and "****" in value
+
+
+def _unmark_sensitive(new_obj: dict, path: str, original_data: dict) -> dict:
+    """For provider/channel objects, replace masked sensitive values with originals."""
+    original = _get_nested(original_data, path)
+    if not isinstance(original, dict):
+        return new_obj
+    out = dict(new_obj)
+    for key in _SENSITIVE_KEYS:
+        if key in out and _is_masked(out[key]) and key in original:
+            out[key] = original[key]  # Preserve original un-masked value
+    return out
+
+
 def _json(data: dict, status_code: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status_code, headers=_NO_CACHE)
 
@@ -125,16 +153,32 @@ def get_settings_routes(
 ) -> list[Route]:
     """Build Settings API routes."""
 
+    # Serialize load→modify→save to prevent lost updates
+    _config_lock = asyncio.Lock()
+
     def _require_auth(request: Request) -> tuple[bool, Response | None]:
         if not auth_token:
             return True, None
         cookie = request.cookies.get(COOKIE_NAME)
         if not cookie:
             return False, _json({"error": "Unauthorized"}, 401)
-        valid, _ = verify_session_cookie(cookie, auth_token)
+        valid, refreshed = verify_session_cookie(cookie, auth_token)
         if not valid:
             return False, _json({"error": "Unauthorized"}, 401)
+        # Store refreshed cookie for _maybe_refresh to set on response
+        request.state.refreshed_cookie = refreshed
         return True, None
+
+    def _maybe_refresh(request: Request, response: Response) -> Response:
+        """Set refreshed session cookie on response if available."""
+        cookie = getattr(request.state, "refreshed_cookie", None)
+        if cookie:
+            secure = request.url.scheme == "https"
+            response.set_cookie(
+                COOKIE_NAME, cookie,
+                httponly=True, samesite="strict", secure=secure, path="/",
+            )
+        return response
 
     # ── GET /api/settings ─────────────────────────────────────────────
 
@@ -150,12 +194,12 @@ def get_settings_routes(
             logger.error("Failed to load config: {}", exc)
             return _json({"error": "Failed to load config"}, 500)
 
-        data = config.model_dump(by_alias=True)
+        data = config.model_dump(by_alias=False)
         # Remove platform-level fields that users shouldn't see/edit
         data.pop("lemondata", None)
         data.pop("gateway", None)
 
-        return _json({"settings": _mask_dict(data)})
+        return _maybe_refresh(request, _json({"settings": _mask_dict(data)}))
 
     # ── PATCH /api/settings ───────────────────────────────────────────
 
@@ -177,32 +221,43 @@ def get_settings_routes(
         if rejected:
             return _json({"error": f"Forbidden paths: {', '.join(rejected)}"}, 403)
 
-        # Load current config, apply changes, save
-        from lemonclaw.config.loader import load_config, save_config
-        try:
-            config = load_config(config_path)
-        except Exception as exc:
-            logger.error("Failed to load config for patch: {}", exc)
-            return _json({"error": "Failed to load config"}, 500)
+        # Field-specific validation
+        sys_prompt = body.get("agents.defaults.system_prompt")
+        if sys_prompt is not None and isinstance(sys_prompt, str) and len(sys_prompt) > 4000:
+            return _json({"error": "system_prompt exceeds 4000 character limit"}, 400)
 
-        data = config.model_dump(by_alias=True)
-        for path, value in body.items():
-            _set_nested(data, path, value)
+        # Load current config, apply changes, save (serialized to prevent lost updates)
+        async with _config_lock:
+            from lemonclaw.config.loader import load_config, save_config
+            try:
+                config = load_config(config_path)
+            except Exception as exc:
+                logger.error("Failed to load config for patch: {}", exc)
+                return _json({"error": "Failed to load config"}, 500)
 
-        # Re-validate through Pydantic
-        from lemonclaw.config.schema import Config
-        try:
-            updated = Config.model_validate(data)
-        except Exception as exc:
-            return _json({"error": f"Validation failed: {exc}"}, 422)
+            data = config.model_dump(by_alias=False)
+            # Preserve original sensitive values when masked placeholder is sent back
+            original_data = dict(data)  # shallow copy before mutation
+            for path, value in body.items():
+                if isinstance(value, dict):
+                    # For provider/channel objects: preserve original sensitive fields if masked
+                    value = _unmark_sensitive(value, path, original_data)
+                _set_nested(data, path, value)
 
-        try:
-            save_config(updated, config_path)
-        except Exception as exc:
-            logger.error("Failed to save config: {}", exc)
-            return _json({"error": "Failed to save config"}, 500)
+            # Re-validate through Pydantic
+            from lemonclaw.config.schema import Config
+            try:
+                updated = Config.model_validate(data)
+            except Exception as exc:
+                return _json({"error": f"Validation failed: {exc}"}, 422)
 
-        return _json({"saved": True})
+            try:
+                save_config(updated, config_path)
+            except Exception as exc:
+                logger.error("Failed to save config: {}", exc)
+                return _json({"error": "Failed to save config"}, 500)
+
+        return _maybe_refresh(request, _json({"saved": True}))
 
     # ── POST /api/settings/apply ──────────────────────────────────────
 
@@ -238,12 +293,13 @@ def get_settings_routes(
                 "restart_required": True,
                 "restart_fields": restart_fields,
             })
-            # Schedule exit after response is sent
-            import asyncio
-            asyncio.get_event_loop().call_later(0.5, lambda: sys.exit(0))
+            # Schedule graceful shutdown after response is sent (SIGTERM triggers drain sequence)
+            import os
+            import signal
+            asyncio.get_event_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
             return resp
 
-        return _json({"reloaded": True, "restart_required": False})
+        return _maybe_refresh(request, _json({"reloaded": True, "restart_required": False}))
 
     # ── GET /api/settings/skills ──────────────────────────────────────
 
@@ -273,7 +329,7 @@ def get_settings_routes(
                 ),
             })
 
-        return _json({"skills": skills})
+        return _maybe_refresh(request, _json({"skills": skills}))
 
     # ── PATCH /api/settings/skills/{name} — enable/disable ───────────
 
@@ -283,6 +339,8 @@ def get_settings_routes(
             return err  # type: ignore[return-value]
 
         name = request.path_params["name"]
+        if not _SAFE_NAME_RE.match(name):
+            return _json({"error": "Invalid skill name"}, 400)
 
         try:
             body = await request.json()
@@ -293,30 +351,31 @@ def get_settings_routes(
         if not isinstance(enabled, bool):
             return _json({"error": "Expected {\"enabled\": true|false}"}, 400)
 
-        # Update disabled_skills in config
-        from lemonclaw.config.loader import load_config, save_config
-        try:
-            config = load_config(config_path)
-        except Exception:
-            return _json({"error": "Failed to load config"}, 500)
+        # Update disabled_skills in config (serialized)
+        async with _config_lock:
+            from lemonclaw.config.loader import load_config, save_config
+            try:
+                config = load_config(config_path)
+            except Exception:
+                return _json({"error": "Failed to load config"}, 500)
 
-        disabled = set(config.agents.defaults.disabled_skills)
-        if enabled:
-            disabled.discard(name)
-        else:
-            disabled.add(name)
-        config.agents.defaults.disabled_skills = sorted(disabled)
+            disabled = set(config.agents.defaults.disabled_skills)
+            if enabled:
+                disabled.discard(name)
+            else:
+                disabled.add(name)
+            config.agents.defaults.disabled_skills = sorted(disabled)
 
-        try:
-            save_config(config, config_path)
-        except Exception:
-            return _json({"error": "Failed to save config"}, 500)
+            try:
+                save_config(config, config_path)
+            except Exception:
+                return _json({"error": "Failed to save config"}, 500)
 
         # Update in-memory disabled set
         if agent_loop:
             agent_loop.context.skills._disabled = disabled
 
-        return _json({"name": name, "enabled": enabled})
+        return _maybe_refresh(request, _json({"name": name, "enabled": enabled}))
 
     # ── POST /api/settings/skills — install from URL ─────────────────
 
@@ -344,11 +403,16 @@ def get_settings_routes(
         workspace_skills = agent_loop.context.skills.workspace_skills
         workspace_skills.mkdir(parents=True, exist_ok=True)
 
-        # Extract skill name from URL (last path segment)
+        # Extract skill name from URL (last path segment) with strict validation
         skill_name = url.rstrip("/").split("/")[-1]
         if skill_name.endswith(".git"):
             skill_name = skill_name[:-4]
+        if not _SAFE_NAME_RE.match(skill_name):
+            return _json({"error": f"Invalid skill name: '{skill_name}' (only alphanumeric, hyphens, dots, underscores)"}, 400)
         target = workspace_skills / skill_name
+        # Defense-in-depth: ensure resolved path stays within workspace_skills
+        if not target.resolve().parent == workspace_skills.resolve():
+            return _json({"error": "Invalid skill path"}, 400)
 
         if target.exists():
             return _json({"error": f"Skill '{skill_name}' already exists"}, 409)
@@ -377,7 +441,7 @@ def get_settings_routes(
             shutil.rmtree(target)
             return _json({"error": "No SKILL.md found in repository"}, 422)
 
-        return _json({"installed": skill_name}, 201)
+        return _maybe_refresh(request, _json({"installed": skill_name}, 201))
 
     # ── DELETE /api/settings/skills/{name} ────────────────────────────
 
@@ -387,6 +451,8 @@ def get_settings_routes(
             return err  # type: ignore[return-value]
 
         name = request.path_params["name"]
+        if not _SAFE_NAME_RE.match(name):
+            return _json({"error": "Invalid skill name"}, 400)
 
         if not agent_loop:
             return _json({"error": "Agent not available"}, 503)
@@ -407,17 +473,18 @@ def get_settings_routes(
             import shutil
             shutil.rmtree(target)
 
-        # Also remove from disabled list if present
-        from lemonclaw.config.loader import load_config, save_config
-        try:
-            config = load_config(config_path)
-            if name in config.agents.defaults.disabled_skills:
-                config.agents.defaults.disabled_skills.remove(name)
-                save_config(config, config_path)
-        except Exception:
-            pass  # Non-critical cleanup
+        # Also remove from disabled list if present (serialized)
+        async with _config_lock:
+            from lemonclaw.config.loader import load_config, save_config
+            try:
+                config = load_config(config_path)
+                if name in config.agents.defaults.disabled_skills:
+                    config.agents.defaults.disabled_skills.remove(name)
+                    save_config(config, config_path)
+            except Exception:
+                pass  # Non-critical cleanup
 
-        return _json({"deleted": name})
+        return _maybe_refresh(request, _json({"deleted": name}))
 
     # ── Assemble routes ───────────────────────────────────────────────
 
@@ -427,6 +494,6 @@ def get_settings_routes(
         Route("/api/settings/apply", apply_settings, methods=["POST"]),
         Route("/api/settings/skills", list_skills, methods=["GET"]),
         Route("/api/settings/skills", install_skill, methods=["POST"]),
-        Route("/api/settings/skills/{name:path}", toggle_skill, methods=["PATCH"]),
-        Route("/api/settings/skills/{name:path}", delete_skill, methods=["DELETE"]),
+        Route("/api/settings/skills/{name}", toggle_skill, methods=["PATCH"]),
+        Route("/api/settings/skills/{name}", delete_skill, methods=["DELETE"]),
     ]

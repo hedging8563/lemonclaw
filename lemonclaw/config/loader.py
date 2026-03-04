@@ -62,11 +62,27 @@ def load_config(config_path: Path | None = None) -> Config:
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
-    """Save configuration to file (atomic: write tmp → fsync → rename)."""
+    """Save configuration to file (atomic: write tmp → fsync → rename).
+
+    Strips env-injected values to prevent leaking API keys to disk.
+    """
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(by_alias=True)
+
+    # Load original file data to detect env-injected values
+    original: dict = {}
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                original = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Strip env-injected provider keys: if original file had empty/missing key,
+    # don't persist the env-injected value
+    _strip_env_injected(data, original)
 
     tmp_path = path.with_suffix(".tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -74,6 +90,29 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         f.flush()
         os.fsync(f.fileno())
     tmp_path.rename(path)
+
+
+# Provider fields that _apply_env_overrides auto-populates from API_KEY env var
+_ENV_INJECTED_PROVIDERS = ("lemondata", "lemondataClaude", "lemondataMinimax", "lemondataGemini")
+
+
+def _strip_env_injected(data: dict, original: dict) -> None:
+    """Remove env-injected provider credentials that weren't in the original file."""
+    if not os.environ.get("API_KEY"):
+        return  # No env injection active
+    providers = data.get("providers", {})
+    orig_providers = original.get("providers", {})
+    for name in _ENV_INJECTED_PROVIDERS:
+        if name not in providers:
+            continue
+        orig_prov = orig_providers.get(name, {})
+        # If original file had no api_key for this provider, clear the injected one
+        if not orig_prov.get("apiKey", orig_prov.get("api_key", "")):
+            providers[name]["apiKey"] = ""
+            providers[name].pop("api_key", None)
+        if not orig_prov.get("apiBase", orig_prov.get("api_base")):
+            providers[name]["apiBase"] = None
+            providers[name].pop("api_base", None)
 
 
 def _apply_env_overrides(config: Config) -> None:

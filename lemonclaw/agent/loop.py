@@ -137,6 +137,10 @@ class AgentLoop:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        memory_window: int | None = None,
+        max_tool_iterations: int | None = None,
+        system_prompt: str | None = None,
+        disabled_skills: list[str] | None = None,
     ) -> None:
         """Hot-reload agent defaults. Only affects new sessions; existing sessions keep their overrides."""
         changed: list[str] = []
@@ -150,6 +154,18 @@ class AgentLoop:
         if max_tokens is not None and max_tokens != self.max_tokens:
             self.max_tokens = max_tokens
             changed.append(f"max_tokens={max_tokens}")
+        if memory_window is not None and memory_window != self.memory_window:
+            self.memory_window = memory_window
+            changed.append(f"memory_window={memory_window}")
+        if max_tool_iterations is not None and max_tool_iterations != self.max_tool_iterations:
+            self.max_tool_iterations = max_tool_iterations
+            changed.append(f"max_tool_iterations={max_tool_iterations}")
+        if system_prompt is not None and system_prompt != self.context.system_prompt:
+            self.context.system_prompt = system_prompt
+            changed.append("system_prompt updated")
+        if disabled_skills is not None and set(disabled_skills) != self.context.skills._disabled:
+            self.context.skills._disabled = set(disabled_skills)
+            changed.append(f"disabled_skills={disabled_skills}")
         if changed:
             logger.info("Agent defaults updated: {}", ", ".join(changed))
 
@@ -787,11 +803,27 @@ class AgentLoop:
 
         # Also update global default (D5/R7: /model = same as Settings tab)
         self.update_defaults(model=match.id)
+        # Persist to config.json so it survives restart
+        self._persist_model_default(match.id)
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
             content=t("model_switched", lang, label=match.label, id=match.id, desc=match.description),
         )
+
+    def _persist_model_default(self, model: str) -> None:
+        """Persist model change to config.json (D5: /model = same as Settings tab)."""
+        try:
+            from lemonclaw.config import load_config, get_config_path
+            from lemonclaw.config.loader import save_config
+            path = get_config_path()
+            config = load_config(path)
+            if config.agents.defaults.model != model:
+                config.agents.defaults.model = model
+                save_config(config, path)
+                logger.info("/model: persisted default model to config.json: {}", model)
+        except Exception:
+            logger.warning("/model: failed to persist to config.json (ephemeral only)")
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

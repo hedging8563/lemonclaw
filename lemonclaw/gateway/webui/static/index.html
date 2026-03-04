@@ -343,6 +343,14 @@ input { font-family: inherit; font-size: inherit; }
 .settings-card-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
 .settings-card-title { font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .settings-card-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.settings-range { display: flex; align-items: center; gap: 8px; min-width: 180px; }
+.settings-range input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
+.settings-range-val { font-family: var(--font-mono); font-size: 11px; color: var(--teal); min-width: 36px; text-align: right; }
+.settings-provider-badge { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+.settings-provider-badge.on { color: var(--success); background: rgba(76,175,80,0.15); }
+.settings-provider-badge.off { color: var(--text-muted); background: var(--bg-hover); }
+.settings-card-chevron { color: var(--text-muted); font-size: 12px; transition: transform 0.15s; font-family: var(--font-mono); }
+.settings-card-chevron.open { transform: rotate(90deg); }
 </style>
 </head>
 <body>
@@ -427,6 +435,29 @@ const I18N = {
     settings_save: 'Save',
     settings_apply: 'Apply & Reload',
     settings_reset: 'Reset',
+    settings_model: 'Default Model',
+    settings_provider: 'Provider',
+    settings_temperature: 'Temperature',
+    settings_max_tokens: 'Max Output Tokens',
+    settings_timezone: 'Timezone',
+    settings_memory_window: 'Memory Window',
+    settings_max_tool_iter: 'Max Tool Iterations',
+    settings_token_budget: 'Token Budget / Session',
+    settings_cost_budget: 'Cost Budget / Day (USD)',
+    settings_system_prompt: 'System Prompt',
+    settings_send_progress: 'Send Progress to IM',
+    settings_send_tool_hints: 'Send Tool Hints to IM',
+    settings_auto_pairing: 'Auto Pairing',
+    settings_api_key: 'API Key',
+    settings_api_base: 'API Base URL',
+    settings_unlimited: 'Unlimited',
+    settings_version: 'Version',
+    settings_uptime: 'Uptime',
+    settings_model_current: 'Current Model',
+    settings_total_tokens: 'Total Tokens',
+    settings_llm_calls: 'LLM Calls',
+    settings_provider_configured: 'Configured',
+    settings_provider_not_configured: 'Not configured',
     theme_dark: 'Dark',
     theme_light: 'Light',
     theme_system: 'System',
@@ -486,6 +517,29 @@ const I18N = {
     settings_save: '\u4FDD\u5B58',
     settings_apply: '\u5E94\u7528\u5E76\u91CD\u8F7D',
     settings_reset: '\u91CD\u7F6E',
+    settings_model: '\u9ED8\u8BA4\u6A21\u578B',
+    settings_provider: '\u63D0\u4F9B\u5546',
+    settings_temperature: '\u6E29\u5EA6',
+    settings_max_tokens: '\u6700\u5927\u8F93\u51FA Token',
+    settings_timezone: '\u65F6\u533A',
+    settings_memory_window: '\u8BB0\u5FC6\u7A97\u53E3',
+    settings_max_tool_iter: '\u5DE5\u5177\u6700\u5927\u8FED\u4EE3',
+    settings_token_budget: 'Token \u9884\u7B97 / \u4F1A\u8BDD',
+    settings_cost_budget: '\u6210\u672C\u9884\u7B97 / \u5929 (USD)',
+    settings_system_prompt: '\u7CFB\u7EDF\u63D0\u793A\u8BCD',
+    settings_send_progress: '\u53D1\u9001\u8FDB\u5EA6\u5230 IM',
+    settings_send_tool_hints: '\u53D1\u9001\u5DE5\u5177\u63D0\u793A\u5230 IM',
+    settings_auto_pairing: '\u81EA\u52A8\u914D\u5BF9',
+    settings_api_key: 'API Key',
+    settings_api_base: 'API \u57FA\u5740',
+    settings_unlimited: '\u65E0\u9650\u5236',
+    settings_version: '\u7248\u672C',
+    settings_uptime: '\u8FD0\u884C\u65F6\u95F4',
+    settings_model_current: '\u5F53\u524D\u6A21\u578B',
+    settings_total_tokens: '\u603B Token',
+    settings_llm_calls: 'LLM \u8C03\u7528',
+    settings_provider_configured: '\u5DF2\u914D\u7F6E',
+    settings_provider_not_configured: '\u672A\u914D\u7F6E',
     theme_dark: '\u6DF1\u8272',
     theme_light: '\u6D45\u8272',
     theme_system: '\u8DDF\u968F\u7CFB\u7EDF',
@@ -1209,13 +1263,26 @@ function SettingsPanel() {
 
   // Backend settings (loaded from API)
   const [serverSettings, setServerSettings] = useState(null);
+  const [editBuf, setEditBuf] = useState({});
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [expandedProviders, setExpandedProviders] = useState({});
+  const [aboutInfo, setAboutInfo] = useState(null);
 
   // Load server settings when switching to non-display tabs
+  const loadSettings = useCallback(() => {
+    api('/api/settings').then(r => r.json()).then(d => {
+      setServerSettings(d.settings);
+      setEditBuf({});
+      setDirty(false);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
-    if (subTab !== 'display' && !serverSettings) {
-      api('/api/settings').then(r => r.json()).then(d => setServerSettings(d.settings)).catch(() => {});
+    if (subTab !== 'display' && !serverSettings) loadSettings();
+    if (subTab === 'about' && !aboutInfo) {
+      api('/api/info').then(r => r.json()).then(d => setAboutInfo(d)).catch(() => {});
     }
   }, [subTab]);
 
@@ -1237,6 +1304,58 @@ function SettingsPanel() {
     const sizes = { sm: '13px', md: '14px', lg: '15px' };
     document.body.style.fontSize = sizes[val] || '14px';
   }, []);
+
+  // Edit buffer helpers
+  const getVal = (path) => path in editBuf ? editBuf[path] : path.split('.').reduce((o, k) => o?.[k], serverSettings);
+  const setVal = (path, val) => { setEditBuf(b => ({ ...b, [path]: val })); setDirty(true); setStatus(''); };
+
+  const handleSave = useCallback(async () => {
+    if (!Object.keys(editBuf).length) return;
+    setSaving(true); setStatus('');
+    try {
+      const r = await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editBuf) });
+      if (r.ok) {
+        setStatus(t('settings_saved'));
+        setDirty(false);
+        loadSettings();
+      } else {
+        const d = await r.json().catch(() => ({}));
+        setStatus(d.error || 'Save failed');
+      }
+    } catch { setStatus('Network error'); }
+    setSaving(false);
+  }, [editBuf, loadSettings]);
+
+  const handleApply = useCallback(async () => {
+    if (Object.keys(editBuf).length) await handleSave();
+    try {
+      const r = await api('/api/settings/apply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changed_paths: Object.keys(editBuf) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.restart_required) setStatus('Restarting...');
+      else setStatus('Applied');
+    } catch { setStatus('Apply failed'); }
+  }, [editBuf, handleSave]);
+
+  const handleReset = useCallback(() => { setEditBuf({}); setDirty(false); setStatus(''); }, []);
+
+  const toggleProvider = useCallback((name) => {
+    setExpandedProviders(p => ({ ...p, [name]: !p[name] }));
+  }, []);
+
+  const providerGroups = [
+    { label: 'LemonData Gateways', items: ['lemondata', 'lemondata_claude', 'lemondata_minimax', 'lemondata_gemini'] },
+    { label: 'Standard Providers', items: ['anthropic', 'openai', 'deepseek', 'groq', 'gemini', 'openrouter', 'zhipu', 'dashscope', 'moonshot', 'minimax', 'siliconflow', 'volcengine', 'aihubmix', 'vllm', 'custom'] },
+    { label: 'Code Tools', items: ['openai_codex', 'github_copilot'] },
+  ];
+
+  const formatUptime = (s) => {
+    if (!s) return '—';
+    const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60);
+    return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+  };
 
   const Toggle = ({ on, onToggle }) => html`
     <div class="settings-toggle ${on ? 'on' : ''}" onClick=${() => onToggle(!on)} />
@@ -1293,13 +1412,182 @@ function SettingsPanel() {
             <div><div class="settings-label">${t('settings_auto_scroll')}</div></div>
             <${Toggle} on=${autoScroll} onToggle=${v => { setAutoScroll(v); localStorage.setItem('lc_auto_scroll', v); }} />
           </div>
+        ` : subTab === 'agent' ? html`
+          <div class="settings-subtitle">// ${t('settings_agent')}</div>
+          ${!serverSettings ? html`<div class="settings-status">Loading...</div>` : html`
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_model')}</div></div>
+              <input class="settings-input" style="width:220px" value=${getVal('agents.defaults.model') || ''}
+                onInput=${e => setVal('agents.defaults.model', e.target.value)} placeholder="anthropic/claude-opus-4-5" />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_provider')}</div></div>
+              <select class="settings-select" style="min-width:140px" value=${getVal('agents.defaults.provider') || 'auto'}
+                onChange=${e => setVal('agents.defaults.provider', e.target.value)}>
+                <option value="auto">auto</option>
+                ${['lemondata','lemondata_claude','lemondata_minimax','lemondata_gemini','anthropic','openai','deepseek','groq','gemini','openrouter','zhipu','dashscope','moonshot','minimax','siliconflow','volcengine','aihubmix','vllm','custom','openai_codex','github_copilot'].map(p => html`
+                  <option value=${p}>${p}</option>
+                `)}
+              </select>
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_temperature')}</div></div>
+              <div class="settings-range">
+                <input type="range" min="0" max="1" step="0.05" value=${getVal('agents.defaults.temperature') ?? 0.1}
+                  onInput=${e => setVal('agents.defaults.temperature', parseFloat(e.target.value))} />
+                <span class="settings-range-val">${(getVal('agents.defaults.temperature') ?? 0.1).toFixed(2)}</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_max_tokens')}</div></div>
+              <input class="settings-input" type="number" min="1024" max="65536" step="1024"
+                value=${getVal('agents.defaults.max_tokens') ?? 8192}
+                onInput=${e => setVal('agents.defaults.max_tokens', parseInt(e.target.value) || 8192)} />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_timezone')}</div></div>
+              <input class="settings-input" style="width:180px" value=${getVal('agents.defaults.timezone') || ''}
+                onInput=${e => setVal('agents.defaults.timezone', e.target.value)} placeholder="Asia/Shanghai" />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_memory_window')}</div></div>
+              <input class="settings-input" type="number" min="20" max="200"
+                value=${getVal('agents.defaults.memory_window') ?? 100}
+                onInput=${e => setVal('agents.defaults.memory_window', parseInt(e.target.value) || 100)} />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_max_tool_iter')}</div></div>
+              <input class="settings-input" type="number" min="1" max="100"
+                value=${getVal('agents.defaults.max_tool_iterations') ?? 40}
+                onInput=${e => setVal('agents.defaults.max_tool_iterations', parseInt(e.target.value) || 40)} />
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">${t('settings_token_budget')}</div>
+                <div class="settings-hint">${t('settings_unlimited')}: 0</div>
+              </div>
+              <input class="settings-input" type="number" min="0" step="10000"
+                value=${getVal('agents.defaults.token_budget_per_session') ?? ''}
+                onInput=${e => { const v = parseInt(e.target.value); setVal('agents.defaults.token_budget_per_session', isNaN(v) || v <= 0 ? null : v); }} />
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">${t('settings_cost_budget')}</div>
+                <div class="settings-hint">${t('settings_unlimited')}: 0</div>
+              </div>
+              <input class="settings-input" type="number" min="0" step="0.5"
+                value=${getVal('agents.defaults.cost_budget_per_day') ?? ''}
+                onInput=${e => { const v = parseFloat(e.target.value); setVal('agents.defaults.cost_budget_per_day', isNaN(v) || v <= 0 ? null : v); }} />
+            </div>
+            <div class="settings-subtitle" style="margin-top:16px">// ${t('settings_system_prompt')}</div>
+            <textarea class="settings-textarea" style="min-height:100px" placeholder="Custom instructions..." maxlength="4000"
+              value=${getVal('agents.defaults.system_prompt') || ''}
+              onInput=${e => setVal('agents.defaults.system_prompt', e.target.value)} />
+            <div class="settings-subtitle" style="margin-top:16px">// IM Channels</div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_send_progress')}</div></div>
+              <${Toggle} on=${getVal('channels.send_progress') ?? true}
+                onToggle=${v => setVal('channels.send_progress', v)} />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_send_tool_hints')}</div></div>
+              <${Toggle} on=${getVal('channels.send_tool_hints') ?? false}
+                onToggle=${v => setVal('channels.send_tool_hints', v)} />
+            </div>
+            <div class="settings-row">
+              <div><div class="settings-label">${t('settings_auto_pairing')}</div></div>
+              <${Toggle} on=${getVal('channels.auto_pairing') ?? true}
+                onToggle=${v => setVal('channels.auto_pairing', v)} />
+            </div>
+          `}
+          ${dirty ? html`
+            <div class="settings-actions">
+              <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
+              <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
+              <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+            </div>
+          ` : ''}
+          ${status ? html`<div class="settings-status">${status}</div>` : ''}
+        ` : subTab === 'providers' ? html`
+          <div class="settings-subtitle">// ${t('settings_providers')}</div>
+          ${!serverSettings ? html`<div class="settings-status">Loading...</div>` : html`
+            ${providerGroups.map(g => html`
+              <div class="settings-subtitle" style="font-size:9px;margin-top:14px">// ${g.label}</div>
+              ${g.items.map(name => {
+                const prov = serverSettings.providers?.[name] || {};
+                const hasKey = !!(prov.api_key);
+                const isOpen = expandedProviders[name];
+                return html`
+                  <div class="settings-card">
+                    <div class="settings-card-header" onClick=${() => toggleProvider(name)}>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <span class="settings-card-chevron ${isOpen ? 'open' : ''}">▸</span>
+                        <span class="settings-card-title">${name}</span>
+                      </div>
+                      <span class="settings-provider-badge ${hasKey ? 'on' : 'off'}">
+                        ${hasKey ? t('settings_provider_configured') : t('settings_provider_not_configured')}
+                      </span>
+                    </div>
+                    ${isOpen ? html`
+                      <div class="settings-card-body">
+                        <div class="settings-row">
+                          <div class="settings-label">${t('settings_api_key')}</div>
+                          <input class="settings-input" style="width:220px" type="password"
+                            value=${(getVal('providers.' + name)?.api_key ?? prov.api_key) || ''}
+                            placeholder=${prov.api_key || 'sk-...'}
+                            onInput=${e => setVal('providers.' + name, { ...(getVal('providers.' + name) || prov), api_key: e.target.value })} />
+                        </div>
+                        <div class="settings-row">
+                          <div class="settings-label">${t('settings_api_base')}</div>
+                          <input class="settings-input" style="width:220px"
+                            value=${(getVal('providers.' + name)?.api_base ?? prov.api_base) || ''}
+                            placeholder="https://..."
+                            onInput=${e => setVal('providers.' + name, { ...(getVal('providers.' + name) || prov), api_base: e.target.value || null })} />
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              })}
+            `)}
+          `}
+          ${dirty ? html`
+            <div class="settings-actions">
+              <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
+              <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
+              <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+            </div>
+          ` : ''}
+          ${status ? html`<div class="settings-status">${status}</div>` : ''}
         ` : subTab === 'about' ? html`
           <div class="settings-subtitle">// ${t('settings_about')}</div>
-          ${serverSettings ? html`
+          ${aboutInfo ? html`
             <div class="settings-row">
-              <div class="settings-label">Version</div>
-              <span style="font-family:var(--font-mono);font-size:12px;color:var(--teal)">${serverSettings.agents?.defaults?.model || '—'}</span>
+              <div class="settings-label">${t('settings_version')}</div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--teal)">${aboutInfo.version || '—'}</span>
             </div>
+            <div class="settings-row">
+              <div class="settings-label">${t('settings_uptime')}</div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)">${formatUptime(aboutInfo.uptime_s)}</span>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">${t('settings_model_current')}</div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-primary)">${serverSettings?.agents?.defaults?.model || '—'}</span>
+            </div>
+            ${aboutInfo.total_tokens != null ? html`
+              <div class="settings-row">
+                <div class="settings-label">${t('settings_total_tokens')}</div>
+                <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)">${aboutInfo.total_tokens?.toLocaleString() || '0'}</span>
+              </div>
+            ` : ''}
+            ${aboutInfo.llm_calls != null ? html`
+              <div class="settings-row">
+                <div class="settings-label">${t('settings_llm_calls')}</div>
+                <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)">${aboutInfo.llm_calls || 0}</span>
+              </div>
+            ` : ''}
           ` : html`<div class="settings-status">Loading...</div>`}
         ` : html`
           <div class="settings-subtitle">// ${t('settings_' + subTab)}</div>
