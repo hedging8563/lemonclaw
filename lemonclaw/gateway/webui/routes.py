@@ -7,6 +7,7 @@ import base64
 import json
 import importlib.resources
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -227,8 +228,22 @@ def get_webui_routes(
     # 7.1: Temp directory for uploaded files
     _upload_dir = Path(tempfile.mkdtemp(prefix="lemonclaw_uploads_"))
 
+    def _cleanup_uploads():
+        """Remove uploaded files older than 1 hour."""
+        if not _upload_dir.exists():
+            return
+        cutoff = time.time() - 3600
+        for f in _upload_dir.iterdir():
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
     async def upload_file(request: Request) -> Response:
         """7.1: Accept base64-encoded file, save to temp dir, return path."""
+        _cleanup_uploads()
+
         ok, err = _require_auth(request)
         if not ok:
             return err  # type: ignore[return-value]
@@ -249,6 +264,10 @@ def get_webui_routes(
             header, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
         else:
             b64 = data_url
+
+        # 10MB file ≈ 13.4MB base64
+        if len(b64) > 14 * 1024 * 1024:
+            return _json({"error": "File too large (max 10MB)"}, 400)
 
         try:
             raw = base64.b64decode(b64)
@@ -436,7 +455,7 @@ def get_webui_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
 
-        session = session_manager._load(key)
+        session = session_manager.get_or_create(key)
         if not session:
             return _json({"error": "Session not found"}, 404)
         if "title" in body:

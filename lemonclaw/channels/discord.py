@@ -220,9 +220,6 @@ class DiscordChannel(BaseChannel):
         if not sender_id or not channel_id:
             return
 
-        if not self.is_allowed(sender_id):
-            return
-
         content_parts = [content] if content else []
         media_paths: list[str] = []
         media_dir = Path.home() / ".lemonclaw" / "media"

@@ -157,9 +157,9 @@ class AgentLoop:
         if memory_window is not None and memory_window != self.memory_window:
             self.memory_window = memory_window
             changed.append(f"memory_window={memory_window}")
-        if max_tool_iterations is not None and max_tool_iterations != self.max_tool_iterations:
-            self.max_tool_iterations = max_tool_iterations
-            changed.append(f"max_tool_iterations={max_tool_iterations}")
+        if max_tool_iterations is not None and max_tool_iterations != self.max_iterations:
+            self.max_iterations = max_tool_iterations
+            changed.append(f"max_iterations={max_tool_iterations}")
         if system_prompt is not None and system_prompt != self.context.system_prompt:
             self.context.system_prompt = system_prompt
             changed.append("system_prompt updated")
@@ -903,7 +903,10 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
-                             metadata=metadata or {}, media=media or [])
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        if session_key not in self._session_locks:
+            self._session_locks[session_key] = asyncio.Lock()
+        async with self._session_locks[session_key]:
+            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
+                                 metadata=metadata or {}, media=media or [])
+            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""

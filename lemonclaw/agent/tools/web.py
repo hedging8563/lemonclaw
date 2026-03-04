@@ -32,40 +32,64 @@ def _normalize(text: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
-def _is_private_ip(host: str) -> bool:
-    """Check if a hostname resolves to a private/reserved IP address (SSRF protection)."""
+def _is_private_ip_addr(ip_str: str) -> bool:
+    """Check if a resolved IP string is private/reserved."""
     try:
-        # Resolve hostname to IP — catches tricks like 0x7f000001, decimal IPs, DNS rebinding
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private or ip.is_loopback or ip.is_reserved
+            or ip.is_link_local or ip.is_multicast or ip.is_unspecified
+        )
+    except ValueError:
+        return True  # fail-closed
+
+
+def _resolve_to_safe_ip(host: str) -> tuple[str | None, str]:
+    """Resolve hostname to IP and verify it's not private/reserved.
+
+    Returns (ip_str, "") on success, (None, error_msg) on failure.
+
+    DNS rebinding mitigation: we resolve once here and reuse the IP for the
+    actual connection (via httpx transport), so a second DNS lookup cannot
+    return a different (private) address mid-flight.
+    """
+    try:
         infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        for family, _, _, _, sockaddr in infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                return True
-            # Block cloud metadata endpoints (169.254.169.254, fd00::, etc.)
-            if ip.is_multicast or ip.is_unspecified:
-                return True
-    except (socket.gaierror, ValueError, OSError):
-        # DNS resolution failed — block by default (fail-closed)
-        return True
-    return False
+    except (socket.gaierror, OSError):
+        return None, "DNS resolution failed"
+
+    for _family, _, _, _, sockaddr in infos:
+        ip_str = sockaddr[0]
+        if _is_private_ip_addr(ip_str):
+            return None, "Access to private/internal addresses is blocked"
+        # Return the first safe IP (prefer IPv4 for compatibility)
+        return ip_str, ""
+
+    return None, "No addresses returned by DNS"
 
 
-def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL: must be http(s) with valid public domain (SSRF-safe)."""
+def _validate_url(url: str) -> tuple[bool, str, str]:
+    """Validate URL: must be http(s) with valid public domain (SSRF-safe).
+
+    Returns (is_valid, error_msg, resolved_ip).
+    resolved_ip is the pre-resolved safe IP to use for the actual connection,
+    preventing DNS rebinding between the check and the request.
+    """
     try:
         p = urlparse(url)
         if p.scheme not in ('http', 'https'):
-            return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+            return False, f"Only http/https allowed, got '{p.scheme or 'none'}'", ""
         if not p.netloc:
-            return False, "Missing domain"
+            return False, "Missing domain", ""
         hostname = p.hostname or ""
         if not hostname:
-            return False, "Missing hostname"
-        if _is_private_ip(hostname):
-            return False, "Access to private/internal addresses is blocked"
-        return True, ""
+            return False, "Missing hostname", ""
+        ip, err = _resolve_to_safe_ip(hostname)
+        if ip is None:
+            return False, err, ""
+        return True, "", ip
     except Exception as e:
-        return False, str(e)
+        return False, str(e), ""
 
 
 class WebSearchTool(Tool):
@@ -188,18 +212,65 @@ class WebFetchTool(Tool):
 
         max_chars = maxChars or self.max_chars
 
-        # Validate URL before fetching
-        is_valid, error_msg = _validate_url(url)
+        # Validate URL and pre-resolve DNS to prevent rebinding attacks.
+        # The resolved IP is used to build the transport so httpx connects
+        # directly to the IP we already verified, not a second DNS lookup.
+        is_valid, error_msg, resolved_ip = _validate_url(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        # Build a transport that connects to the pre-resolved IP directly,
+        # bypassing any further DNS lookups (DNS rebinding mitigation).
+        transport = httpx.AsyncHTTPTransport(
+            uds=None,
+            local_address=None,
+        )
+
+        # Override the URL to use the resolved IP, keeping Host header for SNI/vhost.
+        # Replace hostname with IP in the URL so httpx never re-resolves.
+        ip_url = url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
+
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True,
-                max_redirects=MAX_REDIRECTS,
-                timeout=30.0
+                follow_redirects=False,  # handle redirects manually to re-validate each hop
+                transport=transport,
+                timeout=30.0,
+                verify=True,
             ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                # Follow redirects manually, re-validating each destination
+                current_url = url
+                current_ip_url = ip_url
+                for _ in range(MAX_REDIRECTS):
+                    r = await client.get(
+                        current_ip_url,
+                        headers={"User-Agent": USER_AGENT, "Host": urlparse(current_url).netloc},
+                    )
+                    if r.status_code in (301, 302, 303, 307, 308):
+                        location = r.headers.get("location", "")
+                        if not location:
+                            break
+                        # Make absolute if relative
+                        if location.startswith("/"):
+                            p = urlparse(current_url)
+                            location = f"{p.scheme}://{p.netloc}{location}"
+                        # Re-validate redirect target
+                        redir_valid, redir_err, redir_ip = _validate_url(location)
+                        if not redir_valid:
+                            return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
+                        redir_parsed = urlparse(location)
+                        redir_port = redir_parsed.port or (443 if redir_parsed.scheme == "https" else 80)
+                        current_url = location
+                        current_ip_url = location.replace(
+                            f"{redir_parsed.scheme}://{redir_parsed.netloc}",
+                            f"{redir_parsed.scheme}://{redir_ip}:{redir_port}",
+                            1,
+                        )
+                        continue
+                    break
                 r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")

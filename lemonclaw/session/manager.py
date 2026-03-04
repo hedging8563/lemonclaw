@@ -54,6 +54,8 @@ class Session:
             if m.get("role") == "user":
                 sliced = sliced[i:]
                 break
+        else:
+            sliced = []  # No user message found — return empty to avoid orphaned tool/assistant turns
 
         out: list[dict[str, Any]] = []
         for m in sliced:
@@ -182,7 +184,7 @@ class SessionManager:
 
         This prevents data loss if the process crashes mid-write.
         """
-        tmp_path = path.with_suffix(".jsonl.tmp")
+        tmp_path = path.with_suffix(f".jsonl.{os.getpid()}.tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 from pathlib import Path
@@ -253,7 +254,7 @@ def get_settings_routes(
 
             data = config.model_dump(by_alias=False)
             # Preserve original sensitive values when masked placeholder is sent back
-            original_data = dict(data)  # shallow copy before mutation
+            original_data = copy.deepcopy(data)  # deep copy before mutation
             for path, value in body.items():
                 if isinstance(value, dict):
                     # For provider/channel objects: preserve original sensitive fields if masked

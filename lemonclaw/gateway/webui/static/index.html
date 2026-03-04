@@ -1125,12 +1125,19 @@ function ModelDropdown({ models, current, onSelect, onClose }) {
 
 
 function ConfirmDialog({ message, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const handler = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
   return html`
-    <div class="confirm-overlay" onClick=${onCancel}>
+    <div class="confirm-overlay" role="dialog" aria-modal="true" onClick=${onCancel}>
       <div class="confirm-box" onClick=${e => e.stopPropagation()}>
         <div class="confirm-msg">${message}</div>
         <div class="confirm-actions">
-          <button class="confirm-cancel" onClick=${onCancel}>${t('cancel')}</button>
+          <button ref=${cancelRef} class="confirm-cancel" onClick=${onCancel}>${t('cancel')}</button>
           <button class="confirm-delete" onClick=${onConfirm}>${t('confirm_delete')}</button>
         </div>
       </div>
@@ -1289,6 +1296,7 @@ function Message({ role, content, toolHints, thinkingBlocks, toolDetails, stream
   const [copyLabel, setCopyLabel] = useState(null);
 
   useEffect(() => {
+    if (streaming) return;
     if (bodyRef.current) {
       bodyRef.current.querySelectorAll('pre code:not(.hljs)').forEach(el => {
         hljs.highlightElement(el);
@@ -1385,7 +1393,8 @@ function ChatArea({ messages, streaming, onRegenerate, onEditResend, showThinkin
   const endRef = useRef(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const shouldAutoScroll = localStorage.getItem('lc_auto_scroll') !== 'false';
+    if (shouldAutoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streaming]);
 
   if (messages.length === 0 && !streaming) {
@@ -1475,7 +1484,12 @@ function InputArea({ onSend, disabled }) {
   };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    const sk = localStorage.getItem('lc_send_key') || 'enter';
+    if (sk === 'ctrl+enter') {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); }
+    } else {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    }
   };
 
   const onInput = (e) => {
@@ -2098,6 +2112,12 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!status) return;
+    const timer = setTimeout(() => setStatus(''), 3000);
+    return () => clearTimeout(timer);
+  }, [status]);
   const [expandedProviders, setExpandedProviders] = useState({});
   const [expandedChannels, setExpandedChannels] = useState({});
   const [aboutInfo, setAboutInfo] = useState(null);
@@ -2138,6 +2158,14 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
       root.setAttribute('data-theme', val);
     }
   }, []);
+
+  useEffect(() => {
+    if (theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e) => document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [theme]);
 
   const applyFontSize = useCallback((val) => {
     setFontSize(val);
@@ -2229,7 +2257,9 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
   };
 
   const Toggle = ({ on, onToggle }) => html`
-    <div class="settings-toggle ${on ? 'on' : ''}" onClick=${() => onToggle(!on)} />
+    <div class="settings-toggle ${on ? 'on' : ''}" role="switch" aria-checked=${on} tabindex="0"
+      onClick=${() => onToggle(!on)}
+      onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(!on); } }} />
   `;
 
   const subTabs = ['display', 'agent', 'providers', 'channels', 'skills', 'tools', 'about'];
@@ -2739,6 +2769,11 @@ function App() {
 
   const { connected: wsConnected, events: wsEvents, unreadCount, clearUnread, onNewEventRef } = useActivityWS(authed);
 
+  const activeKeyRef = useRef(activeKey);
+  activeKeyRef.current = activeKey;
+  const currentModelRef = useRef(currentModel);
+  currentModelRef.current = currentModel;
+
   // Clear unread when switching to activity tab
   useEffect(() => {
     if (activeTab === 'activity') clearUnread();
@@ -2874,14 +2909,15 @@ function App() {
   }, [authed, streaming, sidebarOpen]);
 
   const sendMessage = useCallback(async (text, media) => {
-    const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
+    const sendKey = activeKeyRef.current;
+    const sendModel = currentModelRef.current;
     const userMsg = { role: 'user', content: text, id: nextMsgId() };
     const assistantMsg = { role: 'assistant', content: '', toolHints: [], thinkingBlocks: [], toolDetails: [], streaming: true, id: nextMsgId() };
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
 
-    await streamChat(text, sendKey, currentModel, (event) => {
+    await streamChat(text, sendKey, sendModel, (event) => {
       setMessages(prev => {
         const msgs = [...prev];
         const last = { ...msgs[msgs.length - 1] };
@@ -2928,30 +2964,30 @@ function App() {
     loadInfo(sendKey);
     // Delayed refresh to pick up LLM-generated title (async, ~1-3s)
     setTimeout(() => loadSessions(), 3000);
-  }, [activeKey, currentModel]);
+  }, []);
 
   // 5.2: Regenerate last assistant response
   const regenerate = useCallback(() => {
-    // Extract last user message text before modifying state
-    let userText = null;
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx < 0) return;
+    const userText = typeof messages[lastUserIdx].content === 'string' ? messages[lastUserIdx].content : '';
+    setMessages(messages.slice(0, lastUserIdx + 1));
+    requestAnimationFrame(() => sendMessage(userText));
+  }, [messages, sendMessage]);
+
+  // 5.2: Edit user message and resend (truncate messages after it)
+  const editResend = useCallback((text) => {
     setMessages(prev => {
-      if (prev.length < 2) return prev;
       let lastUserIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === 'user') { lastUserIdx = i; break; }
       }
-      if (lastUserIdx < 0) return prev;
-      userText = prev[lastUserIdx].content;
-      return prev.slice(0, lastUserIdx + 1);
+      return lastUserIdx >= 0 ? prev.slice(0, lastUserIdx) : prev;
     });
-    // Send outside of setState to avoid side effects in updater
-    if (userText) requestAnimationFrame(() => sendMessage(userText));
-  }, [sendMessage]);
-
-  // 5.2: Edit user message and resend (truncate messages after it)
-  const editResend = useCallback((newText) => {
-    setMessages(prev => prev.length >= 2 ? prev.slice(0, -2) : []);
-    requestAnimationFrame(() => sendMessage(newText));
+    requestAnimationFrame(() => sendMessage(text));
   }, [sendMessage]);
 
   // 5.3: Rename session title
@@ -2997,7 +3033,10 @@ function App() {
 
   const confirmDeleteSession = useCallback(async () => {
     if (!confirmDelete) return;
-    await api('/api/sessions/' + encodeURIComponent(confirmDelete), { method: 'DELETE' });
+    try {
+      const r = await api('/api/sessions/' + encodeURIComponent(confirmDelete), { method: 'DELETE' });
+      if (!r.ok) return;
+    } catch (_) { return; }
     if (confirmDelete === activeKey) { newChat(); }
     setConfirmDelete(null);
     loadSessions();

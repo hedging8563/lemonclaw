@@ -170,9 +170,14 @@ class ExecTool(Tool):
                 cmd_args = {t.lower() for t in tokens[1:] if t.startswith("-")}
                 if cmd_args & dangerous_args:
                     return "Error: Command blocked by safety guard (dangerous pattern detected)"
-            # Check unconditionally dangerous commands (dd, shutdown, etc.)
-            elif base_cmd in {"dd", "mkfs", "diskpart", "shutdown", "reboot", "poweroff", "format"}:
+            # Check unconditionally dangerous commands (dd, shutdown, rm, rmdir, etc.)
+            elif base_cmd in {"dd", "mkfs", "diskpart", "shutdown", "reboot", "poweroff", "format", "rm", "rmdir"}:
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
+            # Block indirect execution via shell -c, eval, exec
+            elif base_cmd in {"bash", "sh", "zsh"} and "-c" in tokens[1:]:
+                return "Error: Command blocked by safety guard (indirect shell execution)"
+            elif base_cmd in {"eval", "exec"}:
+                return "Error: Command blocked by safety guard (indirect shell execution)"
 
         # Workspace restriction
         if self.restrict_to_workspace:

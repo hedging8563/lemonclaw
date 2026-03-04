@@ -10,8 +10,8 @@ Each skill is a directory containing a `SKILL.md` file with:
 
 ## Attribution
 
-These skills are adapted from [OpenClaw](https://github.com/openclaw/openclaw)'s skill system.
-The skill format and metadata structure follow OpenClaw's conventions to maintain compatibility.
+These skills are adapted from [nanobot](https://github.com/HKUDS/nanobot)'s skill system.
+The skill format and metadata structure follow nanobot's conventions to maintain compatibility.
 
 ## Available Skills
 

@@ -46,17 +46,18 @@ class TodayLog:
         now = datetime.now().strftime("%H:%M")
         today_header = f"# {date.today()}\n"
 
-        existing = self.read()
-        if not existing:
-            # Start fresh for today
-            existing = today_header + "\n"
-
         entry = f"## {now} — {title}\n"
         if details:
             entry += "\n".join(f"- {d}" for d in details) + "\n"
         entry += "\n"
 
-        self._file.write_text(existing + entry, encoding="utf-8")
+        # If the file is from today, append directly (avoids read-modify-write race).
+        # Otherwise, write a fresh header + entry (handles date rollover).
+        if self.read():
+            with open(self._file, "a", encoding="utf-8") as f:
+                f.write(entry)
+        else:
+            self._file.write_text(today_header + "\n" + entry, encoding="utf-8")
 
     def archive_to_history(self, history_file: Path) -> bool:
         """Move today's content to HISTORY.md and clear today.md.

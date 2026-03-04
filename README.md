@@ -57,7 +57,7 @@ User Message → Channel (Telegram/Discord/...) → Message Bus → Agent Loop �
 
 ## Supported Channels
 
-Telegram, Discord, WhatsApp, Feishu, Slack, DingTalk, Email, QQ, Matrix, Mochat
+Telegram, Discord, WhatsApp, Feishu, Slack, DingTalk, Email, QQ, Matrix, Mochat, WeCom (企业微信)
 
 ## Project Structure
 
@@ -75,7 +75,11 @@ lemonclaw/
 ├── session/      # Session manager, token-level compaction
 ├── skills/       # Built-in skills
 ├── utils/        # Helpers
-└── watchdog/     # Health monitoring, memory backup
+├── watchdog/     # Health monitoring, memory backup
+├── conductor/    # Multi-agent orchestration
+├── cloud/        # Cloud integration interface
+├── telemetry/    # Usage tracking
+└── memory/       # Memory system (entities, triggers, search)
 ```
 
 ## Configuration
@@ -85,7 +89,8 @@ Config file: `~/.lemonclaw/config.json`
 LemonData providers are pre-configured by `lemonclaw init`. The 3 provider names:
 - `lemondata` — OpenAI-compatible (needs `/v1`)
 - `lemondata-claude` — Anthropic-compatible (no `/v1`)
-- `lemondata-minimax` — MiniMax-compatible (needs `/v1`)
+- `lemondata-minimax` — MiniMax native format, Anthropic-compatible (no `/v1`)
+- `lemondata-gemini` — Gemini native format (no `/v1`)
 
 ## Self-Hosted Deployment
 
@@ -99,7 +104,7 @@ systemctl --user start lemonclaw
 
 ## K8s Deployment
 
-See `deploy/k8s/` for Kubernetes manifests. Multi-stage Dockerfile at `deploy/Dockerfile`.
+See `deploy/k8s/` for Kubernetes manifests. Multi-stage Dockerfile at `deploy/k8s/Dockerfile`.
 
 ## License
 
