@@ -71,6 +71,7 @@ class MemoryStore:
         from lemonclaw.memory.entities import EntityStore
         from lemonclaw.memory.promote import CorePromoter
         from lemonclaw.memory.reflect import ProceduralMemory
+        from lemonclaw.memory.search import MemorySearchIndex
         from lemonclaw.memory.today import TodayLog
         from lemonclaw.memory.trigger import MemoryTrigger
 
@@ -82,7 +83,8 @@ class MemoryStore:
         # Bionic memory layers
         self.entities = EntityStore(self.memory_dir)
         self.today = TodayLog(self.memory_dir)
-        self.trigger = MemoryTrigger(self.entities)
+        self.search_index = MemorySearchIndex(self.memory_dir)
+        self.trigger = MemoryTrigger(self.entities, search_index=self.search_index)
         self.procedural = ProceduralMemory(self.memory_dir)
         self.promoter = CorePromoter(self.memory_dir, self.entities)
 
