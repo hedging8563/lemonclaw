@@ -104,6 +104,8 @@ input { font-family: inherit; font-size: inherit; }
 .topbar-spacer { flex: 1; }
 .topbar-btn { padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-secondary); transition: all 0.15s; }
 .topbar-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.topbar-dropdown-item { display: block; width: 100%; padding: 8px 14px; font-size: 12px; color: var(--text-secondary); text-align: left; border: none; background: none; cursor: pointer; font-family: inherit; }
+.topbar-dropdown-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
 /* ── Model selector dropdown ──────────────────────────────────────── */
 .model-dropdown { position: absolute; top: calc(var(--topbar-h) + 4px); left: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 4px; z-index: 100; min-width: 280px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
@@ -209,6 +211,44 @@ input { font-family: inherit; font-size: inherit; }
 .input-send { background: var(--accent); color: #fff; width: 42px; height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; transition: background 0.2s; flex-shrink: 0; }
 .input-send:hover { background: var(--accent-hover); }
 .input-send:disabled { opacity: 0.3; cursor: not-allowed; }
+.input-attach { background: none; border: 1px solid var(--border); color: var(--text-muted); width: 42px; height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; flex-shrink: 0; transition: color 0.15s, border-color 0.15s; }
+.input-attach:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.input-previews { max-width: 800px; margin: 0 auto 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.input-preview { position: relative; width: 56px; height: 56px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+.input-preview img { width: 100%; height: 100%; object-fit: cover; }
+.input-preview-remove { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; }
+.input-dragover .input-field { border-color: var(--teal); background: var(--bg-tertiary); }
+
+/* ── Memory Panel ─────────────────────────────────────────────────── */
+.memory-panel { flex: 1; overflow-y: auto; padding: 24px; }
+.memory-section { margin-bottom: 20px; }
+.memory-section-title { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.memory-section-hint { font-size: 11px; color: var(--text-muted); margin-left: 8px; font-style: italic; text-transform: none; letter-spacing: 0; }
+.memory-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.memory-tab { padding: 4px 10px; border-radius: 4px; font-size: 12px; color: var(--text-secondary); background: none; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
+.memory-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.memory-editor { width: 100%; min-height: 120px; max-height: 300px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; resize: vertical; outline: none; line-height: 1.5; }
+.memory-editor:focus { border-color: var(--accent); }
+.memory-save-row { display: flex; justify-content: flex-end; margin-top: 6px; }
+.memory-save-btn { padding: 4px 14px; border-radius: 4px; font-size: 12px; background: var(--accent); color: #fff; border: none; cursor: pointer; }
+.memory-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.memory-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+.memory-card-header { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.memory-card-name { font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); }
+.memory-card-type { font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary); padding: 1px 6px; border-radius: 3px; }
+.memory-card-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+.memory-card-body { margin-top: 8px; font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.5; }
+.memory-history-entry { font-size: 13px; color: var(--text-secondary); padding: 6px 0; border-bottom: 1px solid var(--border); line-height: 1.5; font-family: var(--font-mono); }
+.memory-empty { color: var(--text-muted); font-size: 13px; font-style: italic; }
+.mcp-server { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+.mcp-server-header { display: flex; align-items: center; gap: 8px; }
+.mcp-server-name { font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); }
+.mcp-server-type { font-size: 11px; color: var(--text-muted); }
+.mcp-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.mcp-status-dot.on { background: var(--teal); }
+.mcp-status-dot.off { background: var(--text-muted); }
+.mcp-tool-list { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.mcp-tool-tag { font-size: 11px; color: var(--text-secondary); background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; font-family: var(--font-mono); }
 
 /* ── Activity Feed ────────────────────────────────────────────────── */
 .activity-area { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
@@ -459,6 +499,7 @@ const I18N = {
     tab_chat: 'Chat',
     tab_activity: 'Activity',
     tab_conductor: 'Conductor',
+    tab_memory: 'Memory',
     activity_empty: 'No IM activity yet',
     activity_hint: 'Messages from Telegram, Discord, etc. will appear here',
     activity_all: 'All Channels',
@@ -540,6 +581,26 @@ const I18N = {
     msg_edit_placeholder: 'Edit message...',
     msg_edit_send: 'Send',
     msg_edit_cancel: 'Cancel',
+    msg_export: 'Export',
+    export_md: 'Markdown',
+    export_json: 'JSON',
+    upload_hint: 'Drop files or paste images',
+    mem_core: 'Core Memory',
+    mem_core_hint: 'Always in system prompt',
+    mem_entities: 'Entity Cards',
+    mem_history: 'History',
+    mem_today: 'Today',
+    mem_rules: 'Rules',
+    mem_long_term: 'Long-term',
+    mem_save: 'Save',
+    mem_edit: 'Edit',
+    mem_editing: 'Editing...',
+    mem_empty: 'No content yet',
+    mcp_title: 'MCP Servers',
+    mcp_connected: 'Connected',
+    mcp_disconnected: 'Not connected',
+    mcp_tools: 'Tools',
+    mcp_no_servers: 'No MCP servers configured',
     rename_placeholder: 'Session title...',
     shortcut_hint: 'Ctrl+N new \u00B7 Ctrl+K switch \u00B7 Ctrl+, settings \u00B7 Esc stop',
     theme_dark: 'Dark',
@@ -577,6 +638,7 @@ const I18N = {
     tab_chat: '\u804A\u5929',
     tab_activity: '\u52A8\u6001',
     tab_conductor: '\u7F16\u6392',
+    tab_memory: '\u8BB0\u5FC6',
     activity_empty: '\u6682\u65E0 IM \u6D3B\u52A8',
     activity_hint: 'Telegram\u3001Discord \u7B49\u6E20\u9053\u7684\u6D88\u606F\u5C06\u663E\u793A\u5728\u8FD9\u91CC',
     activity_all: '\u5168\u90E8\u6E20\u9053',
@@ -658,6 +720,26 @@ const I18N = {
     msg_edit_placeholder: '\u7F16\u8F91\u6D88\u606F...',
     msg_edit_send: '\u53D1\u9001',
     msg_edit_cancel: '\u53D6\u6D88',
+    msg_export: '\u5BFC\u51FA',
+    export_md: 'Markdown',
+    export_json: 'JSON',
+    upload_hint: '\u62D6\u62FD\u6587\u4EF6\u6216\u7C98\u8D34\u56FE\u7247',
+    mem_core: '\u6838\u5FC3\u8BB0\u5FC6',
+    mem_core_hint: '\u59CB\u7EC8\u6CE8\u5165 system prompt',
+    mem_entities: '\u5B9E\u4F53\u5361\u7247',
+    mem_history: '\u5386\u53F2',
+    mem_today: '\u4ECA\u65E5',
+    mem_rules: '\u89C4\u5219',
+    mem_long_term: '\u957F\u671F',
+    mem_save: '\u4FDD\u5B58',
+    mem_edit: '\u7F16\u8F91',
+    mem_editing: '\u7F16\u8F91\u4E2D...',
+    mem_empty: '\u6682\u65E0\u5185\u5BB9',
+    mcp_title: 'MCP \u670D\u52A1\u5668',
+    mcp_connected: '\u5DF2\u8FDE\u63A5',
+    mcp_disconnected: '\u672A\u8FDE\u63A5',
+    mcp_tools: '\u5DE5\u5177',
+    mcp_no_servers: '\u672A\u914D\u7F6E MCP \u670D\u52A1\u5668',
     rename_placeholder: '\u4F1A\u8BDD\u6807\u9898...',
     shortcut_hint: 'Ctrl+N \u65B0\u5EFA \u00B7 Ctrl+K \u5207\u6362 \u00B7 Ctrl+, \u8BBE\u7F6E \u00B7 Esc \u505C\u6B62',
     theme_dark: '\u6DF1\u8272',
@@ -810,6 +892,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, onRename, lan
           ${t('tab_activity')}${unreadCount > 0 && activeTab !== 'activity' ? html`<span class="activity-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` : ''}
         </button>
         <button class="sidebar-tab ${activeTab === 'conductor' ? 'active' : ''}" onClick=${() => onTabChange('conductor')}>${t('tab_conductor')}</button>
+        <button class="sidebar-tab ${activeTab === 'memory' ? 'active' : ''}" onClick=${() => onTabChange('memory')}>${t('tab_memory')}</button>
         <button class="sidebar-tab ${activeTab === 'settings' ? 'active' : ''}" onClick=${() => onTabChange('settings')}>${t('tab_settings')}</button>
       </div>
       ${activeTab === 'chat' ? html`
@@ -987,8 +1070,24 @@ function SessionSystemPromptBar({ value, sessionKey, onSave }) {
   `;
 }
 
-function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggle }) {
+function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggle, sessionKey, hasMessages }) {
   const [showModels, setShowModels] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const exportRef = useRef(null);
+
+  const doExport = (fmt) => {
+    setShowExport(false);
+    if (!sessionKey) return;
+    window.open('/api/sessions/' + encodeURIComponent(sessionKey) + '/export?format=' + fmt, '_blank');
+  };
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!showExport) return;
+    const handler = (e) => { if (exportRef.current && !exportRef.current.contains(e.target)) setShowExport(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExport]);
 
   return html`
     <div class="topbar">
@@ -1002,6 +1101,17 @@ function TopBar({ model, models, streaming, onLogout, onModelSelect, onMenuToggl
         onClose=${() => setShowModels(false)} />`}
       <span class="topbar-status">${streaming ? t('streaming') : ''}</span>
       <div class="topbar-spacer" />
+      ${hasMessages && html`
+        <div ref=${exportRef} style="position:relative">
+          <button class="topbar-btn" onClick=${() => setShowExport(!showExport)}>${t('msg_export')}</button>
+          ${showExport && html`
+            <div class="topbar-dropdown" style="position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;overflow:hidden;z-index:50;min-width:120px;">
+              <button class="topbar-dropdown-item" onClick=${() => doExport('md')}>${t('export_md')}</button>
+              <button class="topbar-dropdown-item" onClick=${() => doExport('json')}>${t('export_json')}</button>
+            </div>
+          `}
+        </div>
+      `}
       <button class="topbar-btn" onClick=${onLogout}>${t('logout')}</button>
     </div>
   `;
@@ -1197,21 +1307,60 @@ function ChatArea({ messages, streaming, onRegenerate, onEditResend, showThinkin
 
 function InputArea({ onSend, disabled }) {
   const [text, setText] = useState('');
+  const [files, setFiles] = useState([]);   // { file, preview, uploading }
+  const [dragging, setDragging] = useState(false);
   const ref = useRef(null);
+  const fileRef = useRef(null);
+  const dragCounter = useRef(0);
 
-  const submit = () => {
+  const addFiles = (fileList) => {
+    const imgs = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    const newFiles = imgs.map(f => ({ file: f, preview: URL.createObjectURL(f), uploading: false }));
+    setFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const removeFile = (idx) => {
+    setFiles(prev => { URL.revokeObjectURL(prev[idx].preview); return prev.filter((_, i) => i !== idx); });
+  };
+
+  const uploadFile = async (f) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await fetch('/api/chat/upload', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: f.name, data: reader.result }),
+          });
+          if (!res.ok) throw new Error('Upload failed');
+          const j = await res.json();
+          resolve(j.path);
+        } catch (e) { reject(e); }
+      };
+      reader.readAsDataURL(f);
+    });
+  };
+
+  const submit = async () => {
     const msg = text.trim();
-    if (!msg || disabled) return;
-    onSend(msg);
+    if ((!msg && !files.length) || disabled) return;
+    let media = [];
+    if (files.length) {
+      try {
+        media = await Promise.all(files.map(f => uploadFile(f.file)));
+      } catch (e) { alert(e.message || 'Upload failed'); return; }
+    }
+    onSend(msg || ' ', media.length ? media : undefined);
     setText('');
+    files.forEach(f => URL.revokeObjectURL(f.preview));
+    setFiles([]);
     if (ref.current) ref.current.style.height = 'auto';
   };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   };
 
   const onInput = (e) => {
@@ -1221,14 +1370,43 @@ function InputArea({ onSend, disabled }) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   };
 
+  const onPaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imgs = [];
+    for (const item of items) { if (item.type.startsWith('image/')) imgs.push(item.getAsFile()); }
+    if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+  };
+
+  const onDragEnter = (e) => { e.preventDefault(); dragCounter.current++; setDragging(true); };
+  const onDragLeave = (e) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setDragging(false); } };
+  const onDragOver = (e) => { e.preventDefault(); };
+  const onDrop = (e) => { e.preventDefault(); dragCounter.current = 0; setDragging(false); if (e.dataTransfer?.files) addFiles(e.dataTransfer.files); };
+
   return html`
     <div class="input-area">
-      <div class="input-wrap">
+      ${files.length > 0 && html`
+        <div class="input-previews">
+          ${files.map((f, i) => html`
+            <div class="input-preview" key=${i}>
+              <img src=${f.preview} alt="" />
+              <button class="input-preview-remove" onClick=${() => removeFile(i)}>\u00d7</button>
+            </div>
+          `)}
+        </div>
+      `}
+      <div class=${'input-wrap' + (dragging ? ' input-dragover' : '')}
+        onDragEnter=${onDragEnter} onDragLeave=${onDragLeave}
+        onDragOver=${onDragOver} onDrop=${onDrop}>
+        <button class="input-attach" onClick=${() => fileRef.current?.click()}
+          disabled=${disabled} title=${t('upload_hint')}>📎</button>
+        <input type="file" ref=${fileRef} accept="image/*" multiple
+          style="display:none" onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         <textarea ref=${ref} class="input-field" rows="1"
           placeholder=${t('input_placeholder')}
           value=${text} onInput=${onInput} onKeyDown=${onKeyDown}
-          disabled=${disabled} />
-        <button class="input-send" onClick=${submit} disabled=${disabled || !text.trim()}>
+          onPaste=${onPaste} disabled=${disabled} />
+        <button class="input-send" onClick=${submit} disabled=${disabled || (!text.trim() && !files.length)}>
           ${t('send')}
         </button>
       </div>
@@ -1239,13 +1417,15 @@ function InputArea({ onSend, disabled }) {
 
 // ── SSE Stream Reader ───────────────────────────────────────────────────
 
-async function streamChat(message, sessionKey, model, onEvent) {
+async function streamChat(message, sessionKey, model, onEvent, media) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const payload = { message, session_key: sessionKey, model, timezone: tz };
+  if (media && media.length) payload.media = media;
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_key: sessionKey, model, timezone: tz }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -1529,6 +1709,178 @@ function ConductorPanel({ agents, plans }) {
               `)}
             </div>
           `)}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ── 9.1 + 9.3: Memory + MCP Panel ─────────────────────────────────────
+
+function MemoryPanel() {
+  const [data, setData] = useState(null);
+  const [mcpData, setMcpData] = useState(null);
+  const [subTab, setSubTab] = useState('core');
+  const [coreEdit, setCoreEdit] = useState('');
+  const [coreDirty, setCoreDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingEntity, setEditingEntity] = useState(null);  // { name, body }
+  const [expandedEntities, setExpandedEntities] = useState({});
+
+  const load = async () => {
+    try {
+      const [mem, mcp] = await Promise.all([
+        api('/api/memory').then(r => r.json()),
+        api('/api/mcp/status').then(r => r.json()),
+      ]);
+      setData(mem);
+      setMcpData(mcp);
+      setCoreEdit(mem.core || '');
+      setCoreDirty(false);
+    } catch (_) {}
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const saveCore = async () => {
+    setSaving(true);
+    try {
+      await api('/api/memory/core', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: coreEdit }) });
+      setCoreDirty(false);
+    } catch (_) {}
+    setSaving(false);
+  };
+
+  const saveEntity = async (name, body) => {
+    try {
+      await api('/api/memory/entities/' + encodeURIComponent(name), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+      setEditingEntity(null);
+      load();
+    } catch (_) {}
+  };
+
+  const toggleEntity = (name) => {
+    setExpandedEntities(prev => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  if (!data) return html`<div class="memory-panel"><div class="memory-empty">${t('loading_history')}</div></div>`;
+
+  return html`
+    <div class="memory-panel">
+      <div class="memory-tabs">
+        ${['core', 'entities', 'history', 'today', 'rules', 'long_term', 'mcp'].map(tab => html`
+          <button key=${tab} class="memory-tab ${subTab === tab ? 'active' : ''}"
+            onClick=${() => setSubTab(tab)}>${tab === 'mcp' ? t('mcp_title') : t('mem_' + tab)}</button>
+        `)}
+      </div>
+
+      ${subTab === 'core' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_core')} <span class="memory-section-hint">${t('mem_core_hint')}</span></div>
+          <textarea class="memory-editor" value=${coreEdit}
+            onInput=${(e) => { setCoreEdit(e.target.value); setCoreDirty(true); }} />
+          <div class="memory-save-row">
+            <button class="memory-save-btn" onClick=${saveCore} disabled=${!coreDirty || saving}>${t('mem_save')}</button>
+          </div>
+        </div>
+      `}
+
+      ${subTab === 'entities' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_entities')} (${data.entities.length})</div>
+          ${data.entities.map(e => html`
+            <div class="memory-card" key=${e.name}>
+              <div class="memory-card-header" onClick=${() => toggleEntity(e.name)}>
+                <span class="arrow ${expandedEntities[e.name] ? 'open' : ''}">▶</span>
+                <span class="memory-card-name">${e.name}</span>
+                <span class="memory-card-type">${e.type}</span>
+                <span class="memory-card-count">×${e.access_count}</span>
+              </div>
+              ${expandedEntities[e.name] && html`
+                ${editingEntity?.name === e.name ? html`
+                  <textarea class="memory-editor" style="margin-top:8px" value=${editingEntity.body}
+                    onInput=${(ev) => setEditingEntity({ ...editingEntity, body: ev.target.value })} />
+                  <div class="memory-save-row">
+                    <button class="memory-save-btn" style="margin-right:4px;background:var(--bg-tertiary);color:var(--text-secondary)"
+                      onClick=${() => setEditingEntity(null)}>${t('msg_edit_cancel')}</button>
+                    <button class="memory-save-btn" onClick=${() => saveEntity(e.name, editingEntity.body)}>${t('mem_save')}</button>
+                  </div>
+                ` : html`
+                  <div class="memory-card-body">${e.body || t('mem_empty')}</div>
+                  <div class="memory-save-row">
+                    <button class="memory-save-btn" style="background:var(--bg-tertiary);color:var(--text-secondary)"
+                      onClick=${() => setEditingEntity({ name: e.name, body: e.body })}>${t('mem_edit')}</button>
+                  </div>
+                `}
+              `}
+            </div>
+          `)}
+        </div>
+      `}
+
+      ${subTab === 'history' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_history')} (${data.history.length})</div>
+          ${data.history.length ? data.history.map((entry, i) => html`
+            <div class="memory-history-entry" key=${i}>${entry}</div>
+          `) : html`<div class="memory-empty">${t('mem_empty')}</div>`}
+        </div>
+      `}
+
+      ${subTab === 'today' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_today')}</div>
+          ${data.today ? html`<pre class="memory-editor" style="white-space:pre-wrap;cursor:default" readonly>${data.today}</pre>`
+            : html`<div class="memory-empty">${t('mem_empty')}</div>`}
+        </div>
+      `}
+
+      ${subTab === 'rules' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_rules')} (${data.rules.length})</div>
+          ${data.rules.length ? data.rules.map((r, i) => html`
+            <div class="memory-card" key=${i}>
+              <div class="memory-card-header">
+                <span class="memory-card-name">${r.trigger}</span>
+              </div>
+              <div class="memory-card-body">${r.lesson}${r.action ? '\n→ ' + r.action : ''}</div>
+            </div>
+          `) : html`<div class="memory-empty">${t('mem_empty')}</div>`}
+        </div>
+      `}
+
+      ${subTab === 'long_term' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mem_long_term')}</div>
+          ${data.long_term ? html`<pre class="memory-editor" style="white-space:pre-wrap;cursor:default" readonly>${data.long_term}</pre>`
+            : html`<div class="memory-empty">${t('mem_empty')}</div>`}
+        </div>
+      `}
+
+      ${subTab === 'mcp' && html`
+        <div class="memory-section">
+          <div class="memory-section-title">${t('mcp_title')}
+            <span class="mcp-status-dot ${mcpData?.connected ? 'on' : 'off'}" style="margin-left:8px"></span>
+            <span class="memory-section-hint">${mcpData?.connected ? t('mcp_connected') : t('mcp_disconnected')}</span>
+          </div>
+          ${mcpData?.servers?.length ? mcpData.servers.map(s => html`
+            <div class="mcp-server" key=${s.name}>
+              <div class="mcp-server-header">
+                <span class="mcp-server-name">${s.name}</span>
+                <span class="mcp-server-type">${s.type}</span>
+              </div>
+              ${mcpData.tools.filter(mt => mt.server === s.name).length > 0 && html`
+                <div class="mcp-tool-list">
+                  ${mcpData.tools.filter(tl => tl.server === s.name).map(tl => html`
+                    <span class="mcp-tool-tag" key=${tl.name}>${tl.tool}</span>
+                  `)}
+                </div>
+              `}
+            </div>
+          `) : html`<div class="memory-empty">${t('mcp_no_servers')}</div>`}
+          ${mcpData?.tools?.length > 0 && html`
+            <div style="margin-top:12px;font-size:12px;color:var(--text-muted)">${t('mcp_tools')}: ${mcpData.tools.length}</div>
+          `}
         </div>
       `}
     </div>
@@ -2327,7 +2679,7 @@ function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [authed, streaming, sidebarOpen]);
 
-  const sendMessage = useCallback(async (text) => {
+  const sendMessage = useCallback(async (text, media) => {
     const sendKey = activeKey;  // Snapshot to avoid closure stale ref on session switch
     const userMsg = { role: 'user', content: text, id: nextMsgId() };
     const assistantMsg = { role: 'assistant', content: '', toolHints: [], thinkingBlocks: [], toolDetails: [], streaming: true, id: nextMsgId() };
@@ -2375,7 +2727,7 @@ function App() {
         msgs[msgs.length - 1] = last;
         return msgs;
       });
-    });
+    }, media);
 
     setStreaming(false);
     loadSessions();
@@ -2490,7 +2842,8 @@ function App() {
           model=${currentModel} models=${models}
           streaming=${streaming} onLogout=${logout}
           onModelSelect=${(id) => { setCurrentModel(id); }}
-          onMenuToggle=${() => setSidebarOpen(s => !s)} />
+          onMenuToggle=${() => setSidebarOpen(s => !s)}
+          sessionKey=${activeKey} hasMessages=${messages.length > 0} />
         ${activeTab === 'chat' ? html`
           <${SessionSystemPromptBar} value=${sessionSystemPrompt}
             sessionKey=${activeKey}
@@ -2508,6 +2861,8 @@ function App() {
             onSelectSession=${setSelectedActivitySession} />
         ` : activeTab === 'conductor' ? html`
           <${ConductorPanel} agents=${conductorAgents} plans=${conductorPlans} />
+        ` : activeTab === 'memory' ? html`
+          <${MemoryPanel} />
         ` : activeTab === 'settings' ? html`
           <${SettingsPanel} />
         ` : ''}

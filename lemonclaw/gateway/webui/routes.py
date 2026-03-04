@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import importlib.resources
+import tempfile
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -221,6 +224,51 @@ def get_webui_routes(
 
     # ── POST /api/chat/stream — SSE streaming ────────────────────────────
 
+    # 7.1: Temp directory for uploaded files
+    _upload_dir = Path(tempfile.mkdtemp(prefix="lemonclaw_uploads_"))
+
+    async def upload_file(request: Request) -> Response:
+        """7.1: Accept base64-encoded file, save to temp dir, return path."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+
+        data_url = body.get("data", "")
+        filename = body.get("filename", "upload")
+
+        if not data_url:
+            return _json({"error": "No data"}, 400)
+
+        # Parse data URL: data:image/png;base64,xxxxx
+        if data_url.startswith("data:"):
+            header, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
+        else:
+            b64 = data_url
+
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            return _json({"error": "Invalid base64"}, 400)
+
+        # Limit: 10MB
+        if len(raw) > 10 * 1024 * 1024:
+            return _json({"error": "File too large (max 10MB)"}, 400)
+
+        # Save with unique name
+        safe_name = "".join(c for c in filename if c.isalnum() or c in "._-")[:60] or "file"
+        unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+        path = _upload_dir / unique_name
+        path.write_bytes(raw)
+
+        resp = _json({"path": str(path), "size": len(raw)})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def chat_stream(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -232,7 +280,14 @@ def get_webui_routes(
             return _json({"error": "Invalid JSON"}, 400)
 
         message = body.get("message", "").strip()
-        if not message:
+        media_files: list[str] = body.get("media", [])  # 7.1: list of temp file paths
+        # Validate media paths are within upload dir (prevent path traversal)
+        if media_files:
+            media_files = [
+                p for p in media_files
+                if Path(p).resolve().parent == _upload_dir.resolve() and Path(p).is_file()
+            ]
+        if not message and not media_files:
             return _json({"error": "Empty message"}, 400)
 
         user_timezone = body.get("timezone", "")
@@ -277,6 +332,7 @@ def get_webui_routes(
                     chat_id="webui",
                     on_progress=on_progress,
                     metadata={"timezone": user_timezone} if user_timezone else None,
+                    media=media_files or None,
                 )
                 # Send final response
                 event = {"type": "done", "data": final}
@@ -452,6 +508,183 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/sessions/{key}/export — export session as md or json ──
+
+    async def export_session(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        key = request.path_params["key"]
+        if not key.startswith("webui:"):
+            return _json({"error": "Forbidden"}, 403)
+
+        session = session_manager._load(key)
+        if not session:
+            return _json({"error": "Session not found"}, 404)
+
+        fmt = request.query_params.get("format", "md")
+        title = session.metadata.get("title", key)
+
+        # Collect user/assistant messages
+        turns = []
+        for m in session.messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content:
+                if isinstance(content, list):
+                    content = " ".join(p.get("text", "") for p in content if p.get("type") == "text")
+                if content:
+                    turns.append({"role": role, "content": content})
+
+        if fmt == "json":
+            body = json.dumps({"title": title, "messages": turns}, ensure_ascii=False, indent=2)
+            media = "application/json"
+            ext = "json"
+        else:
+            lines = [f"# {title}\n"]
+            for t in turns:
+                label = "**User**" if t["role"] == "user" else "**Assistant**"
+                lines.append(f"{label}:\n\n{t['content']}\n\n---\n")
+            body = "\n".join(lines)
+            media = "text/markdown"
+            ext = "md"
+
+        safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "chat"
+        resp = Response(
+            content=body.encode("utf-8"),
+            media_type=media,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_title}.{ext}"',
+            },
+        )
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── 9.2: Memory REST API ─────────────────────────────────────────────
+
+    from lemonclaw.agent.memory import MemoryStore
+    _memory = MemoryStore(agent_loop.workspace)
+
+    async def get_memory(request: Request) -> Response:
+        """9.2: Return all memory layers."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        core = _memory.read_core()
+        long_term = _memory.read_long_term()
+        today = _memory.today.read()
+
+        # Parse history entries
+        history_entries = []
+        if _memory.history_file.exists():
+            text = _memory.history_file.read_text(encoding="utf-8")
+            history_entries = [e.strip() for e in text.split("\n\n") if e.strip()]
+            history_entries.reverse()  # newest first
+
+        # Entity cards
+        entities = []
+        for card in _memory.entities.list_cards():
+            entities.append({
+                "name": card.name,
+                "type": card.meta.get("type", ""),
+                "keywords": card.keywords,
+                "access_count": card.access_count,
+                "body": card.body.strip(),
+            })
+
+        # Procedural rules
+        rules = []
+        for r in _memory.procedural.list_rules():
+            rules.append({"trigger": r.get("trigger", ""), "lesson": r.get("lesson", ""), "action": r.get("action", "")})
+
+        resp = _json({
+            "core": core,
+            "long_term": long_term,
+            "today": today,
+            "history": history_entries[:50],  # cap at 50 for UI
+            "entities": entities,
+            "rules": rules,
+        })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def update_memory_core(request: Request) -> Response:
+        """9.2: Update core.md."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        content = body.get("content", "")
+        _memory.write_core(content)
+        resp = _json({"ok": True})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def update_entity(request: Request) -> Response:
+        """9.2: Update entity card body."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        name = request.path_params["name"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        content = body.get("body", "")
+        card = _memory.entities.get_card(name)
+        if not card:
+            return _json({"error": "Entity not found"}, 404)
+        _memory.entities.update_card(name, content)
+        resp = _json({"ok": True})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── 9.3: MCP status API ──────────────────────────────────────────────
+
+    async def get_mcp_status(request: Request) -> Response:
+        """9.3: Return MCP connection state and tool list."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        connected = getattr(agent_loop, "_mcp_connected", False)
+        servers_cfg = getattr(agent_loop, "_mcp_servers", {})
+
+        servers = []
+        for name, cfg in servers_cfg.items():
+            stype = "stdio" if "command" in cfg else "http"
+            servers.append({"name": name, "type": stype})
+
+        # Enumerate MCP tools from tool registry
+        mcp_tools = []
+        server_names = list(servers_cfg.keys())
+        all_tool_names = sorted(agent_loop.tools.tool_names)
+        for tool_name in all_tool_names:
+            if not tool_name.startswith("mcp_"):
+                continue
+            # Match against known server names to split correctly
+            matched_server = ""
+            for sn in server_names:
+                prefix = f"mcp_{sn}_"
+                if tool_name.startswith(prefix):
+                    matched_server = sn
+                    break
+            tool = tool_name[len(f"mcp_{matched_server}_"):] if matched_server else tool_name
+            mcp_tools.append({"name": tool_name, "server": matched_server, "tool": tool})
+
+        resp = _json({
+            "connected": connected,
+            "servers": servers,
+            "tools": mcp_tools,
+        })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/info — instance status + version + session usage ──────
 
     async def get_info(request: Request) -> Response:
@@ -485,8 +718,14 @@ def get_webui_routes(
         Route("/api/auth", auth_login, methods=["POST"]),
         Route("/api/auth", auth_logout, methods=["DELETE"]),
         Route("/api/auth/check", auth_check, methods=["GET"]),
+        Route("/api/chat/upload", upload_file, methods=["POST"]),
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
+        Route("/api/memory", get_memory, methods=["GET"]),
+        Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
+        Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
+        Route("/api/mcp/status", get_mcp_status, methods=["GET"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
+        Route("/api/sessions/{key:path}/export", export_session, methods=["GET"]),
         Route("/api/sessions/{key:path}/messages", get_session_messages, methods=["GET"]),
         Route("/api/sessions/{key:path}", update_session, methods=["PATCH"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
