@@ -54,7 +54,7 @@ class ConfigWatcher:
 
         try:
             config = load_config(self._path)
-            p = config.providers.get_provider_config(config.agents.defaults.model)
+            p = config.get_provider(config.agents.defaults.model)
             api_key = p.api_key if p else None
             api_base = config.get_api_base(config.agents.defaults.model)
 

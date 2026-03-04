@@ -68,6 +68,11 @@ def get_activity_routes(
         if not session_key:
             return JSONResponse({"error": "session_key is required"}, 400)
 
+        # Security: only allow reading IM channel sessions (same filter as list_sessions)
+        _BLOCKED_PREFIXES = ("webui:", "api:", "cron:")
+        if session_key.startswith(_BLOCKED_PREFIXES):
+            return JSONResponse({"error": "access denied"}, 403)
+
         try:
             limit = min(int(request.query_params.get("limit", "50")), 200)
         except (ValueError, TypeError):

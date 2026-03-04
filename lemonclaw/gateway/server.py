@@ -11,6 +11,7 @@ Runs alongside the agent loop and channel manager inside the
 from __future__ import annotations
 
 import asyncio
+import hmac
 import signal
 import time
 from typing import TYPE_CHECKING, Any
@@ -42,7 +43,7 @@ def _build_status_handler(
     async def status_handler(request: Request) -> JSONResponse:
         if auth_token:
             header = request.headers.get("authorization", "")
-            if header != f"Bearer {auth_token}":
+            if not hmac.compare_digest(header, f"Bearer {auth_token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         data: dict[str, Any] = {
@@ -69,7 +70,7 @@ def _build_usage_handler(
     async def usage_handler(request: Request) -> JSONResponse:
         if auth_token:
             header = request.headers.get("authorization", "")
-            if header != f"Bearer {auth_token}":
+            if not hmac.compare_digest(header, f"Bearer {auth_token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         if not usage_tracker:
@@ -81,6 +82,9 @@ def _build_usage_handler(
         # Optional: per-session detail
         session_key = request.query_params.get("session")
         if session_key and session_manager:
+            # Security: force api: prefix to prevent cross-channel session enumeration
+            if not session_key.startswith("api:"):
+                session_key = f"api:{session_key}"
             # Use _load to avoid creating empty sessions from arbitrary query params
             session = session_manager._load(session_key)
             if session:
@@ -123,7 +127,7 @@ def _build_chat_handler(
     async def chat_handler(request: Request) -> JSONResponse:
         if auth_token:
             header = request.headers.get("authorization", "")
-            if header != f"Bearer {auth_token}":
+            if not hmac.compare_digest(header, f"Bearer {auth_token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         if not agent_loop:
@@ -139,6 +143,9 @@ def _build_chat_handler(
             return JSONResponse({"error": "message is required"}, status_code=400)
 
         session_key = body.get("session", "api:test")
+        # Security: force api: prefix to prevent cross-channel session injection
+        if not session_key.startswith("api:"):
+            session_key = f"api:{session_key}"
         raw_timeout = body.get("timeout", 120)
         timeout = min(int(raw_timeout) if isinstance(raw_timeout, (int, float)) else 120, 300)
 

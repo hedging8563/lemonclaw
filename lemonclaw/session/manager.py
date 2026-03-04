@@ -221,7 +221,7 @@ class SessionManager:
         
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
-                # Read just the metadata line
+                # Read metadata line + count message lines
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
@@ -229,11 +229,13 @@ class SessionManager:
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
                             metadata = data.get("metadata", {})
+                            msg_count = sum(1 for _ in f)  # remaining lines = messages
                             sessions.append({
                                 "key": key,
                                 "title": metadata.get("title", ""),
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
+                                "message_count": msg_count,
                                 "path": str(path)
                             })
             except Exception as e:

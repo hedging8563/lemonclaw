@@ -245,7 +245,7 @@ def _step_generate_config(api_key: str) -> str:
     config.providers.lemondata_claude.api_base = LEMONDATA_API_BASE  # No /v1 for Anthropic
 
     config.providers.lemondata_minimax.api_key = api_key
-    config.providers.lemondata_minimax.api_base = LEMONDATA_API_BASE_V1
+    config.providers.lemondata_minimax.api_base = LEMONDATA_API_BASE  # No /v1 — MiniMax native = Anthropic format
 
     # Set default model from SSOT
     config.agents.defaults.model = DEFAULT_MODEL
