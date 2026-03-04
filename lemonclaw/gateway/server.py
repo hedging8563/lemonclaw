@@ -225,6 +225,8 @@ def create_app(
     activity_bus: ActivityBus | None = None,
     orchestrator: Any | None = None,
     registry: Any | None = None,
+    config_path: Any | None = None,
+    config_watcher: Any | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -267,6 +269,16 @@ def create_app(
         registry=registry,
         auth_token=auth_token,
     ))
+
+    # Settings API routes (before WebUI catch-all)
+    if config_path:
+        from lemonclaw.gateway.webui.settings import get_settings_routes
+        routes.extend(get_settings_routes(
+            auth_token=auth_token,
+            config_path=config_path,
+            config_watcher=config_watcher,
+            agent_loop=agent_loop,
+        ))
 
     # WebUI routes (appended last so /health, /api/*, /webhook/* take priority)
     if webui_enabled and agent_loop and session_manager:

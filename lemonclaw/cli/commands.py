@@ -443,6 +443,11 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
     console.print(f"[green]✓[/green] Watchdog: in-process health monitor")
 
+    # Create config watcher (started later in run())
+    from lemonclaw.config.watcher import ConfigWatcher
+    from lemonclaw.config.loader import get_config_path
+    config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
+
     # Build HTTP server
     from lemonclaw import __version__
     asgi_app = create_app(
@@ -456,6 +461,8 @@ def gateway(
         agent_loop=agent,
         webui_enabled=config.gateway.webui_enabled,
         activity_bus=activity_bus,
+        config_path=get_config_path(),
+        config_watcher=config_watcher,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     webui_status = "enabled" if config.gateway.webui_enabled else "disabled"
@@ -470,9 +477,6 @@ def gateway(
         await watchdog.start()
 
         # Start config file watcher for API key + agent defaults hot-reload
-        from lemonclaw.config.watcher import ConfigWatcher
-        from lemonclaw.config.loader import get_config_path
-        config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
         config_watcher.start()
 
         # Start incremental memory backup
