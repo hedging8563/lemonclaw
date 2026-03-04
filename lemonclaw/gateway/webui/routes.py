@@ -685,6 +685,35 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── 8.3: Yesterday Memo API ──────────────────────────────────────────
+
+    async def get_yesterday_memo(request: Request) -> Response:
+        """8.3: Extract yesterday's summary from HISTORY.md."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        entries = []
+        if _memory.history_file.exists():
+            text = _memory.history_file.read_text(encoding="utf-8")
+            for entry in text.split("\n\n"):
+                entry = entry.strip()
+                if entry and yesterday in entry:
+                    entries.append(entry)
+
+        # Also include today's log
+        today_log = _memory.today.read() or ""
+
+        resp = _json({
+            "yesterday": entries,
+            "today": today_log,
+            "date": yesterday,
+        })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/info — instance status + version + session usage ──────
 
     async def get_info(request: Request) -> Response:
@@ -724,6 +753,7 @@ def get_webui_routes(
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
         Route("/api/mcp/status", get_mcp_status, methods=["GET"]),
+        Route("/api/memo/yesterday", get_yesterday_memo, methods=["GET"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/sessions/{key:path}/export", export_session, methods=["GET"]),
         Route("/api/sessions/{key:path}/messages", get_session_messages, methods=["GET"]),
