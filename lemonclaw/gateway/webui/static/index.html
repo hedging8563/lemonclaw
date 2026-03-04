@@ -290,6 +290,59 @@ input { font-family: inherit; font-size: inherit; }
   .chat-area { padding: 16px; }
   .input-area { padding: 12px 16px; }
 }
+
+/* ── Light theme ────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary: #FAFAFA;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F0F0F0;
+  --bg-hover: #E8E8E8;
+  --text-primary: #1A1A1A;
+  --text-secondary: #666;
+  --text-muted: #999;
+  --border: #E0E0E0;
+}
+[data-theme="light"] .msg-content pre { background: #F5F5F5; border-color: #E0E0E0; }
+[data-theme="light"] .msg-content code { background: #F0F0F0; }
+[data-theme="light"] .sidebar-overlay.open { background: rgba(0,0,0,0.2); }
+
+/* ── Settings panel ─────────────────────────────────────────────── */
+.settings-panel { flex: 1; overflow-y: auto; padding: 24px; }
+.settings-inner { max-width: 640px; margin: 0 auto; }
+.settings-title { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 16px; }
+.settings-subtitle { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-muted); margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.settings-tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.settings-tab { padding: 6px 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); transition: all 0.15s; background: var(--bg-secondary); border: 1px solid var(--border); }
+.settings-tab:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.settings-tab.active { color: var(--accent); border-color: var(--accent); background: var(--bg-tertiary); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+.settings-row:last-child { border-bottom: none; }
+.settings-label { font-size: 13px; color: var(--text-primary); min-width: 120px; }
+.settings-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.settings-select { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; outline: none; min-width: 120px; }
+.settings-select:focus { border-color: var(--accent); }
+.settings-input { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; outline: none; width: 120px; }
+.settings-input:focus { border-color: var(--accent); }
+.settings-textarea { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; outline: none; width: 100%; min-height: 80px; resize: vertical; }
+.settings-textarea:focus { border-color: var(--accent); }
+.settings-toggle { position: relative; width: 36px; height: 20px; background: var(--bg-hover); border-radius: 10px; cursor: pointer; transition: background 0.2s; flex-shrink: 0; }
+.settings-toggle.on { background: var(--teal); }
+.settings-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+.settings-toggle.on::after { transform: translateX(16px); }
+.settings-actions { display: flex; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.settings-btn { padding: 8px 16px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; transition: all 0.15s; }
+.settings-btn-primary { background: var(--accent); color: #fff; }
+.settings-btn-primary:hover { background: var(--accent-hover); }
+.settings-btn-secondary { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); }
+.settings-btn-secondary:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.settings-btn-danger { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--error); }
+.settings-btn-danger:hover { background: var(--error); color: #fff; }
+.settings-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 8px 0; }
+.settings-status.success { color: var(--success); }
+.settings-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+.settings-card-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+.settings-card-title { font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
+.settings-card-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -356,6 +409,30 @@ const I18N = {
     activity_search: 'Search messages...',
     ws_connected: 'LIVE',
     ws_disconnected: 'OFFLINE',
+    tab_settings: 'Settings',
+    settings_display: 'Display',
+    settings_agent: 'Agent',
+    settings_providers: 'Providers',
+    settings_channels: 'Channels',
+    settings_skills: 'Skills',
+    settings_tools: 'Tools',
+    settings_about: 'About',
+    settings_theme: 'Theme',
+    settings_font_size: 'Font Size',
+    settings_send_key: 'Send Key',
+    settings_show_thinking: 'Show Thinking',
+    settings_show_tools: 'Show Tool Calls',
+    settings_auto_scroll: 'Auto Scroll',
+    settings_saved: 'Settings saved',
+    settings_save: 'Save',
+    settings_apply: 'Apply & Reload',
+    settings_reset: 'Reset',
+    theme_dark: 'Dark',
+    theme_light: 'Light',
+    theme_system: 'System',
+    font_sm: 'Small',
+    font_md: 'Medium',
+    font_lg: 'Large',
   },
   zh: {
     title: 'LemonClaw',
@@ -391,6 +468,30 @@ const I18N = {
     activity_search: '\u641C\u7D22\u6D88\u606F...',
     ws_connected: '\u5B9E\u65F6',
     ws_disconnected: '\u79BB\u7EBF',
+    tab_settings: '\u8BBE\u7F6E',
+    settings_display: '\u663E\u793A',
+    settings_agent: '\u667A\u80FD\u4F53',
+    settings_providers: '\u63D0\u4F9B\u5546',
+    settings_channels: '\u6E20\u9053',
+    settings_skills: 'Skills',
+    settings_tools: '\u5DE5\u5177',
+    settings_about: '\u5173\u4E8E',
+    settings_theme: '\u4E3B\u9898',
+    settings_font_size: '\u5B57\u4F53\u5927\u5C0F',
+    settings_send_key: '\u53D1\u9001\u952E',
+    settings_show_thinking: '\u663E\u793A\u601D\u8003\u8FC7\u7A0B',
+    settings_show_tools: '\u663E\u793A\u5DE5\u5177\u8C03\u7528',
+    settings_auto_scroll: '\u81EA\u52A8\u6EDA\u52A8',
+    settings_saved: '\u8BBE\u7F6E\u5DF2\u4FDD\u5B58',
+    settings_save: '\u4FDD\u5B58',
+    settings_apply: '\u5E94\u7528\u5E76\u91CD\u8F7D',
+    settings_reset: '\u91CD\u7F6E',
+    theme_dark: '\u6DF1\u8272',
+    theme_light: '\u6D45\u8272',
+    theme_system: '\u8DDF\u968F\u7CFB\u7EDF',
+    font_sm: '\u5C0F',
+    font_md: '\u4E2D',
+    font_lg: '\u5927',
   }
 };
 
@@ -404,6 +505,19 @@ let _lang = getLang();
 function t(key) { return (I18N[_lang] && I18N[_lang][key]) || key; }
 function updateHtmlLang() { const el = document.getElementById('html-root'); if (el) el.lang = _lang === 'zh' ? 'zh-CN' : 'en'; }
 updateHtmlLang();
+
+// ── Theme init ───────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('lc_theme') || 'dark';
+  const root = document.documentElement;
+  if (saved === 'system') {
+    root.setAttribute('data-theme', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  } else {
+    root.setAttribute('data-theme', saved);
+  }
+  const fs = localStorage.getItem('lc_font_size');
+  if (fs) document.body.style.fontSize = { sm: '13px', md: '14px', lg: '15px' }[fs] || '14px';
+})();
 
 // ── Markdown renderer ───────────────────────────────────────────────────
 marked.setOptions({ breaks: true });
@@ -520,6 +634,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
           ${t('tab_activity')}${unreadCount > 0 && activeTab !== 'activity' ? html`<span class="activity-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` : ''}
         </button>
         <button class="sidebar-tab ${activeTab === 'conductor' ? 'active' : ''}" onClick=${() => onTabChange('conductor')}>${t('tab_conductor')}</button>
+        <button class="sidebar-tab ${activeTab === 'settings' ? 'active' : ''}" onClick=${() => onTabChange('settings')}>${t('tab_settings')}</button>
       </div>
       ${activeTab === 'chat' ? html`
         <div class="sidebar-section-label">// ${t('sessions')}</div>
@@ -1079,6 +1194,122 @@ function ConductorPanel({ agents, plans }) {
   `;
 }
 
+// ── Settings Panel ──────────────────────────────────────────────────────
+
+function SettingsPanel() {
+  const [subTab, setSubTab] = useState('display');
+
+  // Display settings (localStorage only)
+  const [theme, setTheme] = useState(() => localStorage.getItem('lc_theme') || 'dark');
+  const [fontSize, setFontSize] = useState(() => localStorage.getItem('lc_font_size') || 'md');
+  const [sendKey, setSendKey] = useState(() => localStorage.getItem('lc_send_key') || 'enter');
+  const [showThinking, setShowThinking] = useState(() => localStorage.getItem('lc_show_thinking') !== 'false');
+  const [showTools, setShowTools] = useState(() => localStorage.getItem('lc_show_tools') !== 'false');
+  const [autoScroll, setAutoScroll] = useState(() => localStorage.getItem('lc_auto_scroll') !== 'false');
+
+  // Backend settings (loaded from API)
+  const [serverSettings, setServerSettings] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState('');
+
+  // Load server settings when switching to non-display tabs
+  useEffect(() => {
+    if (subTab !== 'display' && !serverSettings) {
+      api('/api/settings').then(r => r.json()).then(d => setServerSettings(d.settings)).catch(() => {});
+    }
+  }, [subTab]);
+
+  const applyTheme = useCallback((val) => {
+    setTheme(val);
+    localStorage.setItem('lc_theme', val);
+    const root = document.documentElement;
+    if (val === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+    } else {
+      root.setAttribute('data-theme', val);
+    }
+  }, []);
+
+  const applyFontSize = useCallback((val) => {
+    setFontSize(val);
+    localStorage.setItem('lc_font_size', val);
+    const sizes = { sm: '13px', md: '14px', lg: '15px' };
+    document.body.style.fontSize = sizes[val] || '14px';
+  }, []);
+
+  const Toggle = ({ on, onToggle }) => html`
+    <div class="settings-toggle ${on ? 'on' : ''}" onClick=${() => onToggle(!on)} />
+  `;
+
+  const subTabs = ['display', 'agent', 'providers', 'channels', 'skills', 'tools', 'about'];
+
+  return html`
+    <div class="settings-panel">
+      <div class="settings-inner">
+        <div class="settings-title">// ${t('tab_settings')}</div>
+        <div class="settings-tabs">
+          ${subTabs.map(st => html`
+            <button class="settings-tab ${subTab === st ? 'active' : ''}" onClick=${() => setSubTab(st)}>
+              ${t('settings_' + st)}
+            </button>
+          `)}
+        </div>
+
+        ${subTab === 'display' ? html`
+          <div class="settings-subtitle">// ${t('settings_display')}</div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_theme')}</div></div>
+            <select class="settings-select" value=${theme} onChange=${e => applyTheme(e.target.value)}>
+              <option value="dark">${t('theme_dark')}</option>
+              <option value="light">${t('theme_light')}</option>
+              <option value="system">${t('theme_system')}</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_font_size')}</div></div>
+            <select class="settings-select" value=${fontSize} onChange=${e => applyFontSize(e.target.value)}>
+              <option value="sm">${t('font_sm')}</option>
+              <option value="md">${t('font_md')}</option>
+              <option value="lg">${t('font_lg')}</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_send_key')}</div></div>
+            <select class="settings-select" value=${sendKey} onChange=${e => { setSendKey(e.target.value); localStorage.setItem('lc_send_key', e.target.value); }}>
+              <option value="enter">Enter</option>
+              <option value="ctrl+enter">Ctrl+Enter</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_show_thinking')}</div></div>
+            <${Toggle} on=${showThinking} onToggle=${v => { setShowThinking(v); localStorage.setItem('lc_show_thinking', v); }} />
+          </div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_show_tools')}</div></div>
+            <${Toggle} on=${showTools} onToggle=${v => { setShowTools(v); localStorage.setItem('lc_show_tools', v); }} />
+          </div>
+          <div class="settings-row">
+            <div><div class="settings-label">${t('settings_auto_scroll')}</div></div>
+            <${Toggle} on=${autoScroll} onToggle=${v => { setAutoScroll(v); localStorage.setItem('lc_auto_scroll', v); }} />
+          </div>
+        ` : subTab === 'about' ? html`
+          <div class="settings-subtitle">// ${t('settings_about')}</div>
+          ${serverSettings ? html`
+            <div class="settings-row">
+              <div class="settings-label">Version</div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--teal)">${serverSettings.agents?.defaults?.model || '—'}</span>
+            </div>
+          ` : html`<div class="settings-status">Loading...</div>`}
+        ` : html`
+          <div class="settings-subtitle">// ${t('settings_' + subTab)}</div>
+          <div class="settings-status" style="color:var(--text-muted)">Coming in next update...</div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 // ── App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1328,6 +1559,8 @@ function App() {
             onSelectSession=${setSelectedActivitySession} />
         ` : activeTab === 'conductor' ? html`
           <${ConductorPanel} agents=${conductorAgents} plans=${conductorPlans} />
+        ` : activeTab === 'settings' ? html`
+          <${SettingsPanel} />
         ` : ''}
       </div>
       ${confirmDelete && html`<${ConfirmDialog}
