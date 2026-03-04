@@ -2059,15 +2059,13 @@ function MemoryPanel() {
 
 // ── Settings Panel ──────────────────────────────────────────────────────
 
-function SettingsPanel() {
+function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools }) {
   const [subTab, setSubTab] = useState('display');
 
   // Display settings (localStorage only)
   const [theme, setTheme] = useState(() => localStorage.getItem('lc_theme') || 'dark');
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('lc_font_size') || 'md');
   const [sendKey, setSendKey] = useState(() => localStorage.getItem('lc_send_key') || 'enter');
-  const [showThinking, setShowThinking] = useState(() => localStorage.getItem('lc_show_thinking') !== 'false');
-  const [showTools, setShowTools] = useState(() => localStorage.getItem('lc_show_tools') !== 'false');
   const [autoScroll, setAutoScroll] = useState(() => localStorage.getItem('lc_auto_scroll') !== 'false');
 
   // Backend settings (loaded from API)
@@ -2712,6 +2710,8 @@ function App() {
   const [selectedActivitySession, setSelectedActivitySession] = useState(null);
   const [conductorAgents, setConductorAgents] = useState([]);
   const [conductorPlans, setConductorPlans] = useState([]);
+  const [showThinking, setShowThinking] = useState(() => localStorage.getItem('lc_show_thinking') !== 'false');
+  const [showTools, setShowTools] = useState(() => localStorage.getItem('lc_show_tools') !== 'false');
 
   const { connected: wsConnected, events: wsEvents, unreadCount, clearUnread, onNewEventRef } = useActivityWS(authed);
 
@@ -3034,7 +3034,8 @@ function App() {
         ` : activeTab === 'memory' ? html`
           <${MemoryPanel} />
         ` : activeTab === 'settings' ? html`
-          <${SettingsPanel} />
+          <${SettingsPanel} showThinking=${showThinking} setShowThinking=${setShowThinking}
+            showTools=${showTools} setShowTools=${setShowTools} />
         ` : ''}
       </div>
       ${confirmDelete && html`<${ConfirmDialog}
