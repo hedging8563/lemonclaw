@@ -79,7 +79,9 @@ _RESTART_FIELDS = re.compile(
 
 # Sensitive field names — values masked in GET response
 _SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key",
-                   "bridge_token", "bot_token", "app_token", "access_token"}
+                   "bridge_token", "bot_token", "app_token", "access_token",
+                   "client_secret", "imap_password", "smtp_password", "claw_token",
+                   "encrypt_key", "verification_token"}
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 

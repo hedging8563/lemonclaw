@@ -1380,6 +1380,7 @@ function SettingsPanel() {
       const r = await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editBuf) });
       if (r.ok) {
         setStatus(t('settings_saved'));
+        setEditBuf({});
         setDirty(false);
         loadSettings();
       } else {
@@ -1391,11 +1392,12 @@ function SettingsPanel() {
   }, [editBuf, loadSettings]);
 
   const handleApply = useCallback(async () => {
-    if (Object.keys(editBuf).length) await handleSave();
+    const paths = Object.keys(editBuf);
+    if (paths.length) await handleSave();
     try {
       const r = await api('/api/settings/apply', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ changed_paths: Object.keys(editBuf) }),
+        body: JSON.stringify({ changed_paths: paths }),
       });
       const d = await r.json().catch(() => ({}));
       if (d.restart_required) setStatus('Restarting...');
@@ -1418,18 +1420,19 @@ function SettingsPanel() {
   }, []);
 
   // Channel definitions: name → fields to show in the card
+  // fields: text/password inputs, intFields: number inputs, boolFields: toggle switches, listFields: comma-separated lists
   const channelDefs = [
-    { name: 'telegram', label: 'Telegram', fields: ['token', 'proxy'], listFields: ['allow_from'] },
-    { name: 'discord', label: 'Discord', fields: ['token'], listFields: ['allow_from'] },
-    { name: 'whatsapp', label: 'WhatsApp', fields: ['bridge_url', 'bridge_token'], listFields: ['allow_from'] },
-    { name: 'slack', label: 'Slack', fields: ['bot_token', 'app_token', 'group_policy'], listFields: [] },
-    { name: 'feishu', label: 'Feishu', fields: ['app_id', 'app_secret', 'encrypt_key', 'verification_token'], listFields: ['allow_from'] },
-    { name: 'dingtalk', label: 'DingTalk', fields: ['client_id', 'client_secret'], listFields: ['allow_from'] },
-    { name: 'wecom', label: 'WeCom', fields: ['corp_id', 'secret', 'agent_id', 'token', 'encoding_aes_key'], listFields: ['allow_from'] },
-    { name: 'email', label: 'Email', fields: ['imap_host', 'imap_port', 'imap_username', 'imap_password', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'from_address'], listFields: [] },
-    { name: 'qq', label: 'QQ', fields: ['app_id', 'secret'], listFields: ['allow_from'] },
-    { name: 'matrix', label: 'Matrix', fields: ['homeserver', 'access_token', 'user_id', 'device_id', 'group_policy'], listFields: ['allow_from'] },
-    { name: 'mochat', label: 'Mochat', fields: ['base_url', 'claw_token', 'agent_user_id'], listFields: ['allow_from'] },
+    { name: 'telegram', label: 'Telegram', fields: ['token', 'proxy'], intFields: [], boolFields: ['reply_to_message'], listFields: ['allow_from'] },
+    { name: 'discord', label: 'Discord', fields: ['token', 'gateway_url'], intFields: ['intents'], boolFields: [], listFields: ['allow_from'] },
+    { name: 'whatsapp', label: 'WhatsApp', fields: ['bridge_url', 'bridge_token'], intFields: [], boolFields: [], listFields: ['allow_from'] },
+    { name: 'slack', label: 'Slack', fields: ['bot_token', 'app_token', 'group_policy', 'react_emoji'], intFields: [], boolFields: ['reply_in_thread'], listFields: ['group_allow_from'] },
+    { name: 'feishu', label: 'Feishu', fields: ['app_id', 'app_secret', 'encrypt_key', 'verification_token', 'react_emoji'], intFields: [], boolFields: [], listFields: ['allow_from'] },
+    { name: 'dingtalk', label: 'DingTalk', fields: ['client_id', 'client_secret'], intFields: [], boolFields: [], listFields: ['allow_from'] },
+    { name: 'wecom', label: 'WeCom', fields: ['corp_id', 'secret', 'token', 'encoding_aes_key'], intFields: ['agent_id'], boolFields: [], listFields: ['allow_from'] },
+    { name: 'email', label: 'Email', fields: ['imap_host', 'imap_username', 'imap_password', 'smtp_host', 'smtp_username', 'smtp_password', 'from_address', 'imap_mailbox', 'subject_prefix'], intFields: ['imap_port', 'smtp_port', 'poll_interval_seconds', 'max_body_chars'], boolFields: ['consent_granted', 'imap_use_ssl', 'smtp_use_tls', 'smtp_use_ssl', 'auto_reply_enabled', 'mark_seen'], listFields: ['allow_from'] },
+    { name: 'qq', label: 'QQ', fields: ['app_id', 'secret'], intFields: [], boolFields: [], listFields: ['allow_from'] },
+    { name: 'matrix', label: 'Matrix', fields: ['homeserver', 'access_token', 'user_id', 'device_id', 'group_policy'], intFields: ['sync_stop_grace_seconds', 'max_media_bytes'], boolFields: ['e2ee_enabled', 'allow_room_mentions'], listFields: ['allow_from', 'group_allow_from'] },
+    { name: 'mochat', label: 'Mochat', fields: ['base_url', 'socket_url', 'socket_path', 'claw_token', 'agent_user_id', 'reply_delay_mode'], intFields: ['reply_delay_ms', 'refresh_interval_ms', 'socket_reconnect_delay_ms'], boolFields: [], listFields: ['allow_from', 'sessions', 'panels'] },
   ];
 
   const sensitiveFields = new Set(['token', 'secret', 'app_secret', 'bridge_token', 'bot_token', 'app_token',
@@ -1687,6 +1690,21 @@ function SettingsPanel() {
                             onInput=${e => setVal('channels.' + ch.name, { ...(getVal('channels.' + ch.name) || chData), [f]: e.target.value })} />
                         </div>
                       `)}
+                      ${(ch.intFields || []).map(f => html`
+                        <div class="settings-row">
+                          <div class="settings-label">${f}</div>
+                          <input class="settings-input" style="width:100px" type="number"
+                            value=${getVal('channels.' + ch.name)?.[f] ?? chData[f] ?? 0}
+                            onInput=${e => setVal('channels.' + ch.name, { ...(getVal('channels.' + ch.name) || chData), [f]: parseInt(e.target.value) || 0 })} />
+                        </div>
+                      `)}
+                      ${(ch.boolFields || []).map(f => html`
+                        <div class="settings-row">
+                          <div class="settings-label">${f}</div>
+                          <${Toggle} on=${getVal('channels.' + ch.name)?.[f] ?? chData[f] ?? false}
+                            onToggle=${v => setVal('channels.' + ch.name, { ...(getVal('channels.' + ch.name) || chData), [f]: v })} />
+                        </div>
+                      `)}
                       ${ch.listFields.map(f => html`
                         <div class="settings-row">
                           <div class="settings-label">${f}</div>
@@ -1729,7 +1747,7 @@ function SettingsPanel() {
                     try {
                       await api('/api/settings/skills/' + sk.name, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: v }) });
                       loadSkills();
-                    } catch {}
+                    } catch { setStatus('Toggle failed'); }
                   }} />
                   ${sk.source === 'workspace' ? html`
                     <button class="settings-btn settings-btn-secondary" style="padding:2px 6px;font-size:10px;color:var(--error)"
@@ -1738,7 +1756,7 @@ function SettingsPanel() {
                         try {
                           await api('/api/settings/skills/' + sk.name, { method: 'DELETE' });
                           loadSkills();
-                        } catch {}
+                        } catch { setStatus('Delete failed'); }
                       }}>✕</button>
                   ` : ''}
                 </div>
