@@ -164,7 +164,10 @@ input { font-family: inherit; font-size: inherit; }
 
 /* ── Activity Feed ────────────────────────────────────────────────── */
 .activity-area { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
-.activity-header { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); padding: 8px 0; }
+.activity-header { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); padding: 8px 0; display: flex; align-items: center; justify-content: space-between; max-width: 800px; width: 100%; margin: 0 auto; }
+.activity-search { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); outline: none; width: 180px; }
+.activity-search:focus { border-color: var(--teal); }
+.activity-search::placeholder { color: var(--text-muted); }
 .activity-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; }
 .activity-empty-icon { font-size: 48px; opacity: 0.3; }
 .activity-empty-text { font-size: 15px; }
@@ -196,6 +199,7 @@ input { font-family: inherit; font-size: inherit; }
 .sidebar-tab { flex: 1; padding: 8px 0; text-align: center; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); transition: all 0.15s; border-top: 2px solid transparent; }
 .sidebar-tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
 .sidebar-tab.active { color: var(--accent); border-top-color: var(--accent); }
+.activity-badge { display: inline-block; min-width: 16px; height: 16px; line-height: 16px; text-align: center; font-size: 9px; font-family: var(--font-mono); background: var(--accent); color: #fff; border-radius: 8px; margin-left: 4px; padding: 0 4px; vertical-align: middle; }
 
 /* ── Activity session list ───────────────────────────────────────── */
 .activity-session { display: flex; align-items: flex-start; padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; gap: 8px; border: 1px solid transparent; margin-bottom: 4px; }
@@ -205,6 +209,18 @@ input { font-family: inherit; font-size: inherit; }
 .activity-session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.3; }
 .activity-session-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .activity-session-channel { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--teal); flex-shrink: 0; }
+.activity-event-channel { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); }
+/* Channel-specific colors */
+.ch-tg { color: #29B6F6; border-color: #29B6F633; }
+.ch-dc { color: #7289DA; border-color: #7289DA33; }
+.ch-wa { color: #25D366; border-color: #25D36633; }
+.ch-sk { color: #E01E5A; border-color: #E01E5A33; }
+.ch-fs { color: #3370FF; border-color: #3370FF33; }
+.ch-dt { color: #0089FF; border-color: #0089FF33; }
+.ch-wc { color: #07C160; border-color: #07C16033; }
+.ch-qq { color: #12B7F5; border-color: #12B7F533; }
+.ch-em { color: #EA4335; border-color: #EA433533; }
+.ch-mx { color: #0DBD8B; border-color: #0DBD8B33; }
 
 /* ── WS status ───────────────────────────────────────────────────── */
 .ws-status { font-family: var(--font-mono); font-size: 10px; padding: 4px 12px; }
@@ -304,6 +320,7 @@ const I18N = {
     activity_empty: 'No IM activity yet',
     activity_hint: 'Messages from Telegram, Discord, etc. will appear here',
     activity_all: 'All Channels',
+    activity_search: 'Search messages...',
     ws_connected: 'LIVE',
     ws_disconnected: 'OFFLINE',
   },
@@ -337,6 +354,7 @@ const I18N = {
     activity_empty: '\u6682\u65E0 IM \u6D3B\u52A8',
     activity_hint: 'Telegram\u3001Discord \u7B49\u6E20\u9053\u7684\u6D88\u606F\u5C06\u663E\u793A\u5728\u8FD9\u91CC',
     activity_all: '\u5168\u90E8\u6E20\u9053',
+    activity_search: '\u641C\u7D22\u6D88\u606F...',
     ws_connected: '\u5B9E\u65F6',
     ws_disconnected: '\u79BB\u7EBF',
   }
@@ -448,7 +466,7 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open, activeTab, onTabChange, activitySessions, selectedActivitySession, onSelectActivitySession, wsConnected }) {
+function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangChange, usage, version, open, activeTab, onTabChange, activitySessions, selectedActivitySession, onSelectActivitySession, wsConnected, unreadCount }) {
   return html`
     <div class="sidebar ${open ? 'open' : ''}">
       <div class="sidebar-header">
@@ -464,7 +482,9 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
       </div>
       <div class="sidebar-tabs">
         <button class="sidebar-tab ${activeTab === 'chat' ? 'active' : ''}" onClick=${() => onTabChange('chat')}>${t('tab_chat')}</button>
-        <button class="sidebar-tab ${activeTab === 'activity' ? 'active' : ''}" onClick=${() => onTabChange('activity')}>${t('tab_activity')}</button>
+        <button class="sidebar-tab ${activeTab === 'activity' ? 'active' : ''}" onClick=${() => onTabChange('activity')}>
+          ${t('tab_activity')}${unreadCount > 0 && activeTab !== 'activity' ? html`<span class="activity-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` : ''}
+        </button>
       </div>
       ${activeTab === 'chat' ? html`
         <div class="sidebar-section-label">// ${t('sessions')}</div>
@@ -499,7 +519,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
           ${activitySessions.map(s => html`
             <div class="activity-session ${s.key === selectedActivitySession ? 'active' : ''}"
               onClick=${() => onSelectActivitySession(s.key)}>
-              <span class="activity-session-channel">${channelAbbr(s.channel)}</span>
+              <span class="activity-session-channel ${channelClass(s.channel)}">${channelAbbr(s.channel)}</span>
               <div class="activity-session-info">
                 <span class="activity-session-name">${s.title || s.key.split(':').slice(1).join(':')}</span>
                 <div class="activity-session-meta">
@@ -781,14 +801,18 @@ async function streamChat(message, sessionKey, model, onEvent) {
 
 // ── Channel abbreviations ────────────────────────────────────────────────
 const CHANNEL_ABBR = { telegram: 'TG', discord: 'DC', whatsapp: 'WA', feishu: 'FS', dingtalk: 'DT', email: 'EM', wecom: 'WC', qq: 'QQ', matrix: 'MX', mochat: 'MC', slack: 'SK', webui: 'WEB' };
+const CHANNEL_CSS = { telegram: 'ch-tg', discord: 'ch-dc', whatsapp: 'ch-wa', feishu: 'ch-fs', dingtalk: 'ch-dt', email: 'ch-em', wecom: 'ch-wc', qq: 'ch-qq', matrix: 'ch-mx', slack: 'ch-sk' };
 function channelAbbr(ch) { return CHANNEL_ABBR[ch] || ch.toUpperCase().slice(0, 2); }
+function channelClass(ch) { return CHANNEL_CSS[ch] || ''; }
 
 // ── Activity WebSocket hook ──────────────────────────────────────────────
 function useActivityWS(active) {
   const [connected, setConnected] = useState(false);
   const [events, setEvents] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
+  const onNewEventRef = useRef(null);
 
   useEffect(() => {
     if (!active) {
@@ -844,6 +868,16 @@ function useActivityWS(active) {
             const next = [...prev, evt];
             return next.length > 500 ? next.slice(-300) : next;
           });
+
+          // Increment unread count for new user/assistant messages
+          if (evt.type === 'message' || evt.role === 'user') {
+            setUnreadCount(c => c + 1);
+          }
+
+          // Notify parent for session list refresh on new user messages
+          if (evt.role === 'user' && onNewEventRef.current) {
+            onNewEventRef.current();
+          }
         } catch (_) {}
       };
     }
@@ -855,7 +889,12 @@ function useActivityWS(active) {
     };
   }, [active]);
 
-  return { connected, events, clearEvents: () => setEvents([]) };
+  return {
+    connected, events,
+    unreadCount, clearUnread: () => setUnreadCount(0),
+    clearEvents: () => setEvents([]),
+    onNewEventRef,
+  };
 }
 
 // ── Activity Event component ─────────────────────────────────────────────
@@ -869,7 +908,7 @@ function ActivityEvent({ evt, showChannel }) {
       <div class="activity-event-body">
         <div class="activity-event-meta">
           <span class="activity-event-role">${evt.type === 'tool_call' ? 'tool' : (evt.role || 'bot')}</span>
-          ${showChannel && evt.channel ? html`<span class="activity-event-channel">${channelAbbr(evt.channel)}</span>` : ''}
+          ${showChannel && evt.channel ? html`<span class="activity-event-channel ${channelClass(evt.channel)}">${channelAbbr(evt.channel)}</span>` : ''}
         </div>
         <div class="activity-event-content" dangerouslySetInnerHTML=${{ __html: renderMd(evt.content || '') }} />
       </div>
@@ -882,6 +921,7 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
   const endRef = useRef(null);
   const areaRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Track scroll position to decide auto-scroll
   useEffect(() => {
@@ -899,10 +939,15 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
     if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [events]);
 
-  // Filter events by selected session
-  const filtered = selectedSession
+  // Filter events by selected session and search query
+  let filtered = selectedSession
     ? events.filter(e => e.session_key === selectedSession)
     : events;
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(e => (e.content || '').toLowerCase().includes(q));
+  }
 
   // Detect streaming state from merged entries
   const isStreaming = filtered.some(e => e._streaming);
@@ -921,7 +966,11 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
 
   return html`
     <div class="activity-area" ref=${areaRef}>
-      <div class="activity-header">// activity ${selectedSession ? '\u00B7 ' + selectedSession.split(':')[0].toUpperCase() : ''}</div>
+      <div class="activity-header">
+        // activity ${selectedSession ? '\u00B7 ' + selectedSession.split(':')[0].toUpperCase() : ''}
+        <input class="activity-search" type="text" placeholder=${t('activity_search')}
+          value=${searchQuery} onInput=${(e) => setSearchQuery(e.target.value)} />
+      </div>
       ${filtered.map((evt, i) => html`
         <${ActivityEvent} key=${i} evt=${evt} showChannel=${!selectedSession} />
       `)}
@@ -951,7 +1000,18 @@ function App() {
   const [activitySessions, setActivitySessions] = useState([]);
   const [selectedActivitySession, setSelectedActivitySession] = useState(null);
 
-  const { connected: wsConnected, events: wsEvents } = useActivityWS(authed && activeTab === 'activity');
+  const { connected: wsConnected, events: wsEvents, unreadCount, clearUnread, onNewEventRef } = useActivityWS(authed);
+
+  // Auto-refresh activity sessions when new IM messages arrive
+  useEffect(() => {
+    onNewEventRef.current = () => { loadActivitySessions(); };
+    return () => { onNewEventRef.current = null; };
+  }, [loadActivitySessions]);
+
+  // Clear unread when switching to activity tab
+  useEffect(() => {
+    if (activeTab === 'activity') clearUnread();
+  }, [activeTab]);
 
   const toggleLang = useCallback(() => {
     const next = _lang === 'en' ? 'zh' : 'en';
@@ -1130,7 +1190,8 @@ function App() {
         activitySessions=${activitySessions}
         selectedActivitySession=${selectedActivitySession}
         onSelectActivitySession=${setSelectedActivitySession}
-        wsConnected=${wsConnected} />
+        wsConnected=${wsConnected}
+        unreadCount=${unreadCount} />
       <div class="main">
         <${TopBar}
           model=${currentModel} models=${models}
