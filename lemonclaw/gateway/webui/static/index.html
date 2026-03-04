@@ -194,6 +194,38 @@ input { font-family: inherit; font-size: inherit; }
 .activity-streaming { font-family: var(--font-mono); font-size: 10px; color: var(--teal); text-transform: uppercase; letter-spacing: 1px; padding: 4px 0; max-width: 800px; margin: 0 auto; width: 100%; }
 .activity-streaming::before { content: '\25CF'; margin-right: 6px; animation: blink 0.8s infinite; }
 
+/* ── Conductor panel ─────────────────────────────────────────────── */
+.conductor-area { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.conductor-header { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); padding: 8px 0; max-width: 800px; width: 100%; margin: 0 auto; }
+.conductor-section { max-width: 800px; width: 100%; margin: 0 auto; }
+.conductor-section-title { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
+.conductor-agent { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+.conductor-agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.conductor-agent-dot.idle { background: var(--text-muted); }
+.conductor-agent-dot.busy { background: var(--teal); animation: blink 0.8s infinite; }
+.conductor-agent-dot.error { background: var(--error); }
+.conductor-agent-info { flex: 1; min-width: 0; }
+.conductor-agent-name { font-size: 13px; font-weight: 500; }
+.conductor-agent-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.conductor-plan { padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.conductor-plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.conductor-plan-phase { font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+.conductor-plan-phase.analyzing { background: #FF6B3522; color: var(--accent); }
+.conductor-plan-phase.splitting { background: #7289DA22; color: #7289DA; }
+.conductor-plan-phase.assigning { background: #0ABAB522; color: var(--teal); }
+.conductor-plan-phase.monitoring { background: #25D36622; color: #25D366; }
+.conductor-plan-phase.merging { background: #EA433522; color: #EA4335; }
+.conductor-plan-msg { font-size: 13px; margin-bottom: 8px; word-break: break-word; }
+.conductor-progress { height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }
+.conductor-progress-bar { height: 100%; background: var(--teal); border-radius: 2px; transition: width 0.3s; }
+.conductor-subtask { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; border-left: 2px solid var(--border); margin-left: 8px; margin-bottom: 4px; }
+.conductor-subtask.completed { border-left-color: var(--success); }
+.conductor-subtask.running { border-left-color: var(--teal); }
+.conductor-subtask.failed { border-left-color: var(--error); }
+.conductor-subtask-status { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; min-width: 60px; }
+.conductor-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; }
+.conductor-empty-icon { font-size: 48px; opacity: 0.3; }
+
 /* ── Sidebar tabs ────────────────────────────────────────────────── */
 .sidebar-tabs { display: flex; border-top: 1px solid var(--border); }
 .sidebar-tab { flex: 1; padding: 8px 0; text-align: center; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); transition: all 0.15s; border-top: 2px solid transparent; }
@@ -317,6 +349,7 @@ const I18N = {
     loading_history: 'Loading...',
     tab_chat: 'Chat',
     tab_activity: 'Activity',
+    tab_conductor: 'Conductor',
     activity_empty: 'No IM activity yet',
     activity_hint: 'Messages from Telegram, Discord, etc. will appear here',
     activity_all: 'All Channels',
@@ -351,6 +384,7 @@ const I18N = {
     loading_history: '\u52A0\u8F7D\u4E2D...',
     tab_chat: '\u804A\u5929',
     tab_activity: '\u52A8\u6001',
+    tab_conductor: '\u7F16\u6392',
     activity_empty: '\u6682\u65E0 IM \u6D3B\u52A8',
     activity_hint: 'Telegram\u3001Discord \u7B49\u6E20\u9053\u7684\u6D88\u606F\u5C06\u663E\u793A\u5728\u8FD9\u91CC',
     activity_all: '\u5168\u90E8\u6E20\u9053',
@@ -485,6 +519,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
         <button class="sidebar-tab ${activeTab === 'activity' ? 'active' : ''}" onClick=${() => onTabChange('activity')}>
           ${t('tab_activity')}${unreadCount > 0 && activeTab !== 'activity' ? html`<span class="activity-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>` : ''}
         </button>
+        <button class="sidebar-tab ${activeTab === 'conductor' ? 'active' : ''}" onClick=${() => onTabChange('conductor')}>${t('tab_conductor')}</button>
       </div>
       ${activeTab === 'chat' ? html`
         <div class="sidebar-section-label">// ${t('sessions')}</div>
@@ -507,7 +542,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
             `)
           }
         </div>
-      ` : html`
+      ` : activeTab === 'activity' ? html`
         <div class="sidebar-section-label">// IM ${t('sessions')}</div>
         <div class="sidebar-sessions">
           <div class="activity-session ${!selectedActivitySession ? 'active' : ''}"
@@ -530,7 +565,12 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, lang, onLangC
             </div>
           `)}
         </div>
-      `}
+      ` : activeTab === 'conductor' ? html`
+        <div class="sidebar-section-label">// agents</div>
+        <div class="sidebar-sessions" style="padding:8px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">
+          Multi-agent orchestration
+        </div>
+      ` : ''}
       <div class="sidebar-footer">
         <div class="sidebar-stats">
           <span class="sidebar-stats-key">SESSIONS</span>
@@ -980,6 +1020,65 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
   `;
 }
 
+// ── Conductor Panel ──────────────────────────────────────────────────────
+function ConductorPanel({ agents, plans }) {
+  const STATUS_ICON = { idle: '\u25CB', busy: '\u25CF', error: '\u2716', retired: '\u2014' };
+
+  if (!agents.length && !plans.length) {
+    return html`
+      <div class="conductor-area">
+        <div class="conductor-empty">
+          <div class="conductor-empty-icon">\uD83C\uDFAD</div>
+          <div style="font-size:15px">No agents or plans</div>
+          <div style="font-size:12px;font-family:var(--font-mono)">Multi-agent orchestration will appear here</div>
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="conductor-area">
+      <div class="conductor-header">// conductor</div>
+      ${agents.length > 0 && html`
+        <div class="conductor-section">
+          <div class="conductor-section-title">agents (${agents.length})</div>
+          ${agents.map(a => html`
+            <div class="conductor-agent" key=${a.id}>
+              <div class="conductor-agent-dot ${a.status}"></div>
+              <div class="conductor-agent-info">
+                <div class="conductor-agent-name">${a.id} <span style="color:var(--text-muted);font-size:11px">${a.role}</span></div>
+                <div class="conductor-agent-meta">${a.model || 'default'} \u00B7 ${a.task_count} tasks \u00B7 ${(a.success_rate * 100).toFixed(0)}%</div>
+              </div>
+            </div>
+          `)}
+        </div>
+      `}
+      ${plans.length > 0 && html`
+        <div class="conductor-section">
+          <div class="conductor-section-title">active plans (${plans.length})</div>
+          ${plans.map(p => html`
+            <div class="conductor-plan" key=${p.request_id}>
+              <div class="conductor-plan-header">
+                <span class="conductor-plan-phase ${p.phase}">${p.phase}</span>
+                <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">${p.complexity}</span>
+              </div>
+              <div class="conductor-plan-msg">${p.message}</div>
+              <div class="conductor-progress"><div class="conductor-progress-bar" style="width:${(p.progress * 100).toFixed(0)}%"></div></div>
+              ${p.subtasks.map(st => html`
+                <div class="conductor-subtask ${st.status}" key=${st.id}>
+                  <span class="conductor-subtask-status" style="color:${st.status === 'completed' ? 'var(--success)' : st.status === 'failed' ? 'var(--error)' : st.status === 'running' ? 'var(--teal)' : 'var(--text-muted)'}">${st.status}</span>
+                  <span>${st.description}</span>
+                  ${st.assigned_agent ? html`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">\u2192 ${st.assigned_agent}</span>` : ''}
+                </div>
+              `)}
+            </div>
+          `)}
+        </div>
+      `}
+    </div>
+  `;
+}
+
 // ── App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -999,6 +1098,8 @@ function App() {
   const [activeTab, setActiveTab] = useState('chat');
   const [activitySessions, setActivitySessions] = useState([]);
   const [selectedActivitySession, setSelectedActivitySession] = useState(null);
+  const [conductorAgents, setConductorAgents] = useState([]);
+  const [conductorPlans, setConductorPlans] = useState([]);
 
   const { connected: wsConnected, events: wsEvents, unreadCount, clearUnread, onNewEventRef } = useActivityWS(authed);
 
@@ -1081,6 +1182,17 @@ function App() {
     } catch (_) {}
   }, []);
 
+  const loadConductor = useCallback(async () => {
+    try {
+      const [agentsRes, plansRes] = await Promise.all([
+        api('/api/conductor/agents'),
+        api('/api/conductor/plans'),
+      ]);
+      if (agentsRes.ok) { const d = await agentsRes.json(); setConductorAgents(d.agents || []); }
+      if (plansRes.ok) { const d = await plansRes.json(); setConductorPlans(d.plans || []); }
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     if (authed) {
       loadSessions();
@@ -1093,6 +1205,12 @@ function App() {
   useEffect(() => {
     if (authed && activeTab === 'activity') {
       loadActivitySessions();
+    }
+    if (authed && activeTab === 'conductor') {
+      loadConductor();
+      // Auto-refresh every 5s while on conductor tab
+      const iv = setInterval(loadConductor, 5000);
+      return () => clearInterval(iv);
     }
   }, [authed, activeTab]);
 
@@ -1201,14 +1319,16 @@ function App() {
         ${activeTab === 'chat' ? html`
           <${ChatArea} messages=${messages} streaming=${streaming} />
           <${InputArea} onSend=${sendMessage} disabled=${streaming} />
-        ` : html`
+        ` : activeTab === 'activity' ? html`
           <${ActivityPanel}
             connected=${wsConnected}
             events=${wsEvents}
             activitySessions=${activitySessions}
             selectedSession=${selectedActivitySession}
             onSelectSession=${setSelectedActivitySession} />
-        `}
+        ` : activeTab === 'conductor' ? html`
+          <${ConductorPanel} agents=${conductorAgents} plans=${conductorPlans} />
+        ` : ''}
       </div>
       ${confirmDelete && html`<${ConfirmDialog}
         message=${t('delete_confirm')}
