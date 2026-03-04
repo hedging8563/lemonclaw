@@ -336,7 +336,14 @@ def gateway(
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
+        """Execute a cron job through the agent or internal handler."""
+        if job.payload.kind == "system_event":
+            from lemonclaw.memory.cron import is_memory_event, run_memory_event
+            if is_memory_event(job.payload.message):
+                return await run_memory_event(job.payload.message, config.workspace_path)
+            logger.warning("Unknown system_event: {}", job.payload.message)
+            return None
+
         response = await agent.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
@@ -352,6 +359,10 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
+
+    # Register memory cron jobs (idempotent)
+    from lemonclaw.memory.cron import register_memory_jobs
+    register_memory_jobs(cron)
 
     # Create channel manager
     channels = ChannelManager(config, bus, activity_bus=activity_bus)

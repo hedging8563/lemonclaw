@@ -602,3 +602,104 @@ def test_context_builder_no_match_no_injection(tmp_path):
     )
     user_msg = messages[-1]["content"]
     assert "Relevant Memory" not in user_msg
+
+
+# ── Memory Cron ──────────────────────────────────────────────────────────────
+
+
+def test_memory_cron_daily_archive(tmp_path):
+    import asyncio
+    from lemonclaw.memory.cron import run_memory_event, EVENT_DAILY_ARCHIVE
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir()
+
+    # Write some today.md content
+    (memory_dir / "today.md").write_text("# 2020-01-01\n\n## 10:00 — Test\n- Detail\n", encoding="utf-8")
+
+    result = asyncio.get_event_loop().run_until_complete(
+        run_memory_event(EVENT_DAILY_ARCHIVE, workspace)
+    )
+    assert "Archived" in result
+    assert (memory_dir / "HISTORY.md").exists()
+    assert "Test" in (memory_dir / "HISTORY.md").read_text(encoding="utf-8")
+
+
+def test_memory_cron_daily_archive_empty(tmp_path):
+    import asyncio
+    from lemonclaw.memory.cron import run_memory_event, EVENT_DAILY_ARCHIVE
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = asyncio.get_event_loop().run_until_complete(
+        run_memory_event(EVENT_DAILY_ARCHIVE, workspace)
+    )
+    assert "Nothing" in result
+
+
+def test_memory_cron_weekly_promote(tmp_path):
+    import asyncio
+    from lemonclaw.memory.cron import run_memory_event, EVENT_WEEKLY_PROMOTE
+    from lemonclaw.memory.promote import PROMOTE_ACCESS_THRESHOLD
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir()
+
+    # Create a high-access card
+    from lemonclaw.memory.entities import EntityStore
+    store = EntityStore(memory_dir)
+    card = store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    card.meta["access_count"] = PROMOTE_ACCESS_THRESHOLD
+    card.save()
+
+    result = asyncio.get_event_loop().run_until_complete(
+        run_memory_event(EVENT_WEEKLY_PROMOTE, workspace)
+    )
+    assert "Promoted 1" in result
+
+
+def test_memory_cron_monthly_cleanup(tmp_path):
+    import asyncio
+    from lemonclaw.memory.cron import run_memory_event, EVENT_MONTHLY_CLEANUP
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = asyncio.get_event_loop().run_until_complete(
+        run_memory_event(EVENT_MONTHLY_CLEANUP, workspace)
+    )
+    assert "truncated" in result.lower() or "cleared" in result.lower()
+
+
+def test_memory_cron_register_jobs(tmp_path):
+    from lemonclaw.cron.service import CronService
+    from lemonclaw.memory.cron import register_memory_jobs
+
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    added = register_memory_jobs(cron)
+    assert added == 3
+
+    jobs = cron.list_jobs(include_disabled=True)
+    names = {j.name for j in jobs}
+    assert "memory:daily_archive" in names
+    assert "memory:weekly_promote" in names
+    assert "memory:monthly_cleanup" in names
+
+    # Idempotent — second call adds nothing
+    added2 = register_memory_jobs(cron)
+    assert added2 == 0
+
+
+def test_memory_cron_is_memory_event():
+    from lemonclaw.memory.cron import is_memory_event
+
+    assert is_memory_event("memory:daily_archive")
+    assert is_memory_event("memory:weekly_promote")
+    assert is_memory_event("memory:monthly_cleanup")
+    assert not is_memory_event("some:other:event")
+    assert not is_memory_event("")

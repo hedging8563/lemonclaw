@@ -291,19 +291,20 @@ class CronService:
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
+        payload_kind: str = "agent_turn",
     ) -> CronJob:
         """Add a new job."""
         store = self._load_store()
         _validate_schedule_for_add(schedule)
         now = _now_ms()
-        
+
         job = CronJob(
             id=str(uuid.uuid4())[:8],
             name=name,
             enabled=True,
             schedule=schedule,
             payload=CronPayload(
-                kind="agent_turn",
+                kind=payload_kind,
                 message=message,
                 deliver=deliver,
                 channel=channel,
