@@ -2715,12 +2715,6 @@ function App() {
 
   const { connected: wsConnected, events: wsEvents, unreadCount, clearUnread, onNewEventRef } = useActivityWS(authed);
 
-  // Auto-refresh activity sessions when new IM messages arrive
-  useEffect(() => {
-    onNewEventRef.current = () => { loadActivitySessions(); };
-    return () => { onNewEventRef.current = null; };
-  }, [loadActivitySessions]);
-
   // Clear unread when switching to activity tab
   useEffect(() => {
     if (activeTab === 'activity') clearUnread();
@@ -2790,6 +2784,12 @@ function App() {
       }
     } catch (_) {}
   }, []);
+
+  // Auto-refresh activity sessions when new IM messages arrive
+  useEffect(() => {
+    onNewEventRef.current = () => { loadActivitySessions(); };
+    return () => { onNewEventRef.current = null; };
+  }, [loadActivitySessions]);
 
   const loadConductor = useCallback(async () => {
     try {
