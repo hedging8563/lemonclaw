@@ -220,7 +220,9 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         turn_usage = TurnUsage()
-        _consecutive_errors: dict[str, int] = {}  # track repeated tool errors
+        _consecutive_errors: dict[str, int] = {}
+        _refusal_count = 0
+        _MAX_REFUSALS = 2  # track repeated tool errors
         _MAX_CONSECUTIVE_ERRORS = 3
 
         while iteration < self.max_iterations:
@@ -316,6 +318,11 @@ class AgentLoop:
                 clean = self._strip_think(response.content)
                 # Detect model refusal loops: very short responses that refuse to engage
                 if clean and len(clean) < 60 and self._REFUSAL_RE.search(clean):
+                    _refusal_count += 1
+                    if _refusal_count >= _MAX_REFUSALS:
+                        # Stop retrying — return the refusal as-is
+                        final_content = clean
+                        break
                     # Inject a system nudge to break the refusal loop
                     messages.append({"role": "assistant", "content": clean})
                     messages.append({"role": "user", "content": (
@@ -547,6 +554,11 @@ class AgentLoop:
 
         lang = session_lang(session)
 
+        # Empty message guard — don't waste tokens on blank input
+        if not msg.content.strip():
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                  content=t("empty_message", lang))
+
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
@@ -589,6 +601,13 @@ class AgentLoop:
                                   content=t("help", lang))
         if cmd == "/model" or cmd.startswith("/model "):
             return self._handle_model_command(msg, session, lang)
+        # Unknown slash command guard
+        if cmd.startswith("/") and not cmd[1:2].isspace():
+            known = ("/new", "/usage", "/help", "/model", "/stop")
+            first_word = cmd.split()[0]
+            if first_word not in known:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content=t("unknown_command", lang, cmd=first_word))
 
         # Orchestrator intercept: complex tasks get split & delegated
         if self.orchestrator and not msg.channel == "internal":
@@ -771,7 +790,7 @@ class AgentLoop:
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Uses Groq for speed + cost."""
         from lemonclaw.config.defaults import DEFAULT_CONSOLIDATION_MODEL
-        return await MemoryStore(self.workspace).consolidate(
+        return await self.context.memory.consolidate(
             session, self.provider, DEFAULT_CONSOLIDATION_MODEL,
             archive_all=archive_all, memory_window=self.memory_window,
         )

@@ -28,6 +28,8 @@ _RULE_RE = re.compile(r"^## Rule #(\d+)", re.MULTILINE)
 class ProceduralMemory:
     """Manages memory/rules.md — structured rules learned from failures."""
 
+    MAX_RULES = 50  # Hard cap to prevent unbounded growth
+
     def __init__(self, memory_dir: Path):
         self._file = memory_dir / "rules.md"
         self._dir = memory_dir
@@ -72,7 +74,23 @@ class ProceduralMemory:
         return max(ids, default=0) + 1
 
     def add_rule(self, trigger: str, lesson: str, action: str, source: str) -> int:
-        """Add a rule manually. Returns the rule number."""
+        """Add a rule manually. Returns the rule number.
+
+        Enforces MAX_RULES cap and deduplicates by trigger similarity.
+        """
+        rules = self.list_rules()
+
+        # Dedup: skip if a rule with very similar trigger already exists
+        trigger_lower = trigger.lower()
+        for existing in rules:
+            if existing.get("trigger", "").lower() == trigger_lower:
+                logger.debug("Procedural memory: duplicate trigger '{}', skipping", trigger[:40])
+                return int(existing.get("header", "# 0").split("#")[-1].split("—")[0].strip() or "0")
+
+        # Cap: drop oldest rules if at limit
+        if len(rules) >= self.MAX_RULES:
+            self._trim_oldest(len(rules) - self.MAX_RULES + 1)
+
         self._dir.mkdir(parents=True, exist_ok=True)
         rule_id = self._next_rule_id()
         entry = (
@@ -86,6 +104,27 @@ class ProceduralMemory:
             f.write(entry)
         logger.info("Procedural memory: added Rule #{}", rule_id)
         return rule_id
+
+    def _trim_oldest(self, count: int) -> None:
+        """Remove the oldest N rules from rules.md."""
+        rules_text = self.read_rules()
+        if not rules_text.strip():
+            return
+        parts = re.split(r"(?=^## Rule #\d+)", rules_text, flags=re.MULTILINE)
+        # parts[0] may be empty or preamble, rule parts start from index where "## Rule" begins
+        preamble_parts = []
+        rule_parts = []
+        for p in parts:
+            if p.strip().startswith("## Rule"):
+                rule_parts.append(p)
+            else:
+                preamble_parts.append(p)
+        if count >= len(rule_parts):
+            rule_parts = []
+        else:
+            rule_parts = rule_parts[count:]
+        self._file.write_text("".join(preamble_parts) + "".join(rule_parts), encoding="utf-8")
+        logger.info("Procedural memory: trimmed {} oldest rules", count)
 
     def match_rules(self, message: str, *, max_rules: int = 2) -> list[dict[str, str]]:
         """Find rules whose trigger keywords appear in the message."""
@@ -152,10 +191,5 @@ class ProceduralMemory:
             )
         except Exception as e:
             logger.warning("Procedural reflect failed: {}", e)
-            # Fallback: add a basic rule without LLM
-            return self.add_rule(
-                trigger=task_description[:50],
-                lesson=error[:100],
-                action="Review and fix",
-                source="auto-reflect fallback",
-            )
+            # Don't write low-quality fallback rules — they pollute memory
+            return None

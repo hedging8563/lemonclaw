@@ -337,7 +337,7 @@ def test_procedural_format_for_context(tmp_path):
 
 
 def test_procedural_reflect_fallback(tmp_path):
-    """Test reflect fallback when LLM is unavailable."""
+    """Test reflect fallback when LLM is unavailable — returns None, no low-quality rule."""
     import asyncio
     from lemonclaw.memory.reflect import ProceduralMemory
     from unittest.mock import AsyncMock
@@ -349,10 +349,8 @@ def test_procedural_reflect_fallback(tmp_path):
     rid = asyncio.get_event_loop().run_until_complete(
         pm.reflect(mock_provider, "deploy to K8s", "pod crash loop", model="test")
     )
-    assert rid is not None
-    rules = pm.list_rules()
-    assert len(rules) == 1
-    assert "deploy to K8s" in rules[0]["trigger"]
+    assert rid is None
+    assert pm.list_rules() == []
 
 
 def test_memory_store_has_procedural(tmp_path):

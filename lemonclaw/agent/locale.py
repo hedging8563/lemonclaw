@@ -77,6 +77,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Background task completed.",
         "zh": "后台任务已完成。",
     },
+    "empty_message": {
+        "en": "Please enter a message.",
+        "zh": "请输入消息内容。",
+    },
+    "unknown_command": {
+        "en": "Unknown command `{cmd}`. Use `/help` to see available commands.",
+        "zh": "未知命令 `{cmd}`，使用 `/help` 查看可用命令。",
+    },
 }
 
 
