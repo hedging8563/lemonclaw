@@ -332,6 +332,8 @@ def gateway(
         coding_config=config.tools.coding,
         activity_bus=activity_bus,
         default_timezone=config.agents.defaults.timezone,
+        system_prompt=config.agents.defaults.system_prompt,
+        disabled_skills=config.agents.defaults.disabled_skills,
     )
 
     # Set cron callback (needs agent)
@@ -467,10 +469,10 @@ def gateway(
         await heartbeat.start()
         await watchdog.start()
 
-        # Start config file watcher for API key hot-reload
+        # Start config file watcher for API key + agent defaults hot-reload
         from lemonclaw.config.watcher import ConfigWatcher
         from lemonclaw.config.loader import get_config_path
-        config_watcher = ConfigWatcher(get_config_path(), provider)
+        config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
         config_watcher.start()
 
         # Start incremental memory backup
@@ -558,6 +560,8 @@ def agent(
         channels_config=config.channels,
         coding_config=config.tools.coding,
         default_timezone=config.agents.defaults.timezone,
+        system_prompt=config.agents.defaults.system_prompt,
+        disabled_skills=config.agents.defaults.disabled_skills,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1050,6 +1054,8 @@ def cron_run(
         channels_config=config.channels,
         coding_config=config.tools.coding,
         default_timezone=config.agents.defaults.timezone,
+        system_prompt=config.agents.defaults.system_prompt,
+        disabled_skills=config.agents.defaults.disabled_skills,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"

@@ -18,10 +18,11 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
     
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
+    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._disabled: set[str] = set(disabled_skills or [])
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -111,13 +112,15 @@ class SkillsLoader:
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
-        
+
         def escape_xml(s: str) -> str:
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        
+
         lines = ["<skills>"]
         for s in all_skills:
             name = escape_xml(s["name"])
+            if s["name"] in self._disabled:
+                continue
             path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
             skill_meta = self._get_skill_meta(s["name"])
@@ -191,9 +194,11 @@ class SkillsLoader:
         return self._parse_skill_metadata(meta.get("metadata", ""))
     
     def get_always_skills(self) -> list[str]:
-        """Get skills marked as always=true that meet requirements."""
+        """Get skills marked as always=true that meet requirements and are not disabled."""
         result = []
         for s in self.list_skills(filter_unavailable=True):
+            if s["name"] in self._disabled:
+                continue
             meta = self.get_skill_metadata(s["name"]) or {}
             skill_meta = self._parse_skill_metadata(meta.get("metadata", ""))
             if skill_meta.get("always") or meta.get("always"):

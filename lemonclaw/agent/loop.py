@@ -80,6 +80,8 @@ class AgentLoop:
         coding_config: CodingToolConfig | None = None,
         activity_bus: ActivityBus | None = None,
         default_timezone: str = "",
+        system_prompt: str = "",
+        disabled_skills: list[str] | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.agent_id = agent_id
@@ -101,7 +103,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, system_prompt=system_prompt, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -129,6 +131,27 @@ class AgentLoop:
         self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
         self._session_locks: dict[str, asyncio.Lock] = {}  # per-session processing locks
         self._register_default_tools()
+
+    def update_defaults(
+        self,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> None:
+        """Hot-reload agent defaults. Only affects new sessions; existing sessions keep their overrides."""
+        changed: list[str] = []
+        if model is not None and model != self.model:
+            self.model = model
+            self.subagents.model = model
+            changed.append(f"model={model}")
+        if temperature is not None and temperature != self.temperature:
+            self.temperature = temperature
+            changed.append(f"temperature={temperature}")
+        if max_tokens is not None and max_tokens != self.max_tokens:
+            self.max_tokens = max_tokens
+            changed.append(f"max_tokens={max_tokens}")
+        if changed:
+            logger.info("Agent defaults updated: {}", ", ".join(changed))
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -761,6 +784,10 @@ class AgentLoop:
 
         session.metadata["current_model"] = match.id
         self.sessions.save(session)
+
+        # Also update global default (D5/R7: /model = same as Settings tab)
+        self.update_defaults(model=match.id)
+
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id,
             content=t("model_switched", lang, label=match.label, id=match.id, desc=match.description),
