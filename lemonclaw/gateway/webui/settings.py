@@ -189,9 +189,17 @@ def get_settings_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
-        from lemonclaw.config.loader import load_config
+        # Read config.json without env overlay so users see their saved values,
+        # not env-injected overrides (e.g. DEFAULT_MODEL).
+        import json as _json_mod
+        from lemonclaw.config.schema import Config
         try:
-            config = load_config(config_path)
+            if config_path.exists():
+                with open(config_path, encoding="utf-8") as f:
+                    raw = _json_mod.load(f)
+                config = Config.model_validate(raw)
+            else:
+                config = Config()
         except Exception as exc:
             logger.error("Failed to load config: {}", exc)
             return _json({"error": "Failed to load config"}, 500)
@@ -201,7 +209,13 @@ def get_settings_routes(
         data.pop("lemondata", None)
         data.pop("gateway", None)
 
-        return _maybe_refresh(request, _json({"settings": _mask_dict(data)}))
+        # Include the effective (runtime) model so frontend can show both
+        effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None
+        result = {"settings": _mask_dict(data)}
+        if effective_model:
+            result["effective_model"] = effective_model
+
+        return _maybe_refresh(request, _json(result))
 
     # ── PATCH /api/settings ───────────────────────────────────────────
 
@@ -283,9 +297,42 @@ def get_settings_routes(
                 restart_required = True
                 restart_fields.append(path)
 
-        # Always do hot-reload first (provider + agent defaults)
+        # Hot-reload provider credentials (API keys, api_base) + agent defaults
         if config_watcher:
             config_watcher.reload_now()
+
+        # After watcher reload, re-apply agent defaults from config.json directly
+        # (without env overlay) so WebUI-saved values aren't overridden by
+        # DEFAULT_MODEL / other env vars that load_config() always overlays.
+        if agent_loop and changed_paths:
+            import json as _json_mod
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    raw = _json_mod.load(f)
+                file_defaults = raw.get("agents", {}).get("defaults", {})
+                update_kwargs = {}
+                _FIELD_MAP = {
+                    "agents.defaults.model": ("model", ["model"]),
+                    "agents.defaults.temperature": ("temperature", ["temperature"]),
+                    "agents.defaults.max_tokens": ("max_tokens", ["maxTokens", "max_tokens"]),
+                    "agents.defaults.memory_window": ("memory_window", ["memoryWindow", "memory_window"]),
+                    "agents.defaults.max_tool_iterations": ("max_tool_iterations", ["maxToolIterations", "max_tool_iterations"]),
+                    "agents.defaults.system_prompt": ("system_prompt", ["systemPrompt", "system_prompt"]),
+                    "agents.defaults.disabled_skills": ("disabled_skills", ["disabledSkills", "disabled_skills"]),
+                }
+                for path in changed_paths:
+                    mapping = _FIELD_MAP.get(path)
+                    if not mapping:
+                        continue
+                    kwarg_name, json_keys = mapping
+                    for jk in json_keys:
+                        if jk in file_defaults:
+                            update_kwargs[kwarg_name] = file_defaults[jk]
+                            break
+                if update_kwargs:
+                    agent_loop.update_defaults(**update_kwargs)
+            except Exception:
+                logger.warning("Settings apply: failed to read config.json for direct update")
 
         if restart_required:
             logger.info("Settings apply: restart required for {}", restart_fields)

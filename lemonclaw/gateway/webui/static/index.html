@@ -227,7 +227,7 @@ input { font-family: inherit; font-size: inherit; }
 .memory-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
 .memory-tab { padding: 4px 10px; border-radius: 4px; font-size: 12px; color: var(--text-secondary); background: none; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
 .memory-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.memory-editor { width: 100%; min-height: 120px; max-height: 300px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; resize: vertical; outline: none; line-height: 1.5; }
+.memory-editor { width: 100%; min-height: 120px; max-height: 60vh; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; resize: vertical; outline: none; line-height: 1.5; overflow-y: auto; word-break: break-word; }
 .memory-editor:focus { border-color: var(--accent); }
 .memory-save-row { display: flex; justify-content: flex-end; margin-top: 6px; }
 .memory-save-btn { padding: 4px 14px; border-radius: 4px; font-size: 12px; background: var(--accent); color: #fff; border: none; cursor: pointer; }
@@ -608,6 +608,18 @@ const I18N = {
     settings_saved: 'Settings saved',
     settings_save: 'Save',
     settings_apply: 'Apply & Reload',
+    settings_save_failed: 'Save failed',
+    settings_network_error: 'Network error',
+    settings_restarting: 'Restarting...',
+    settings_applied: 'Applied',
+    settings_apply_failed: 'Apply failed',
+    settings_loading: 'Loading...',
+    settings_pending: 'pending',
+    settings_custom_prompt_placeholder: 'Custom instructions...',
+    sp_clear: 'Clear',
+    sp_save: 'Save',
+    activity_streaming: 'STREAMING',
+    conductor_desc: 'Multi-agent orchestration',
     settings_reset: 'Reset',
     settings_model: 'Default Model',
     settings_provider: 'Provider',
@@ -753,6 +765,18 @@ const I18N = {
     settings_saved: '\u8BBE\u7F6E\u5DF2\u4FDD\u5B58',
     settings_save: '\u4FDD\u5B58',
     settings_apply: '\u5E94\u7528\u5E76\u91CD\u8F7D',
+    settings_save_failed: '\u4FDD\u5B58\u5931\u8D25',
+    settings_network_error: '\u7F51\u7EDC\u9519\u8BEF',
+    settings_restarting: '\u91CD\u542F\u4E2D...',
+    settings_applied: '\u5DF2\u5E94\u7528',
+    settings_apply_failed: '\u5E94\u7528\u5931\u8D25',
+    settings_loading: '\u52A0\u8F7D\u4E2D...',
+    settings_pending: '\u5F85\u4FDD\u5B58',
+    settings_custom_prompt_placeholder: '\u81EA\u5B9A\u4E49\u6307\u4EE4...',
+    sp_clear: '\u6E05\u9664',
+    sp_save: '\u4FDD\u5B58',
+    activity_streaming: '\u6D41\u5F0F\u8F93\u51FA',
+    conductor_desc: '\u591A\u667A\u80FD\u4F53\u534F\u4F5C',
     settings_reset: '\u91CD\u7F6E',
     settings_model: '\u9ED8\u8BA4\u6A21\u578B',
     settings_provider: '\u63D0\u4F9B\u5546',
@@ -1050,7 +1074,7 @@ function Sidebar({ sessions, activeKey, onSelect, onNew, onDelete, onRename, lan
       ` : activeTab === 'conductor' ? html`
         <div class="sidebar-section-label">// agents</div>
         <div class="sidebar-sessions" style="padding:8px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">
-          Multi-agent orchestration
+          ${t('conductor_desc')}
         </div>
       ` : ''}
       <div class="sidebar-footer">
@@ -1152,8 +1176,8 @@ function SessionSystemPromptBar({ value, sessionKey, onSave }) {
             placeholder=${t('settings_system_prompt') + '...'} />
           <div class="session-sp-actions">
             ${saved ? html`<span style="font-size:11px;color:var(--teal)">✓</span>` : ''}
-            <button class="session-sp-btn" onClick=${() => { setDraft(''); handleSave(''); }}>Clear</button>
-            <button class="session-sp-btn save" onClick=${() => handleSave(draft)}>Save</button>
+            <button class="session-sp-btn" onClick=${() => { setDraft(''); handleSave(''); }}>${t('sp_clear')}</button>
+            <button class="session-sp-btn save" onClick=${() => handleSave(draft)}>${t('sp_save')}</button>
           </div>
         </div>
       `}
@@ -1741,7 +1765,7 @@ function ActivityPanel({ connected, events, activitySessions, selectedSession, o
       ${filtered.map((evt, i) => html`
         <${ActivityEvent} key=${i} evt=${evt} showChannel=${!selectedSession} />
       `)}
-      ${isStreaming ? html`<div class="activity-streaming">STREAMING</div>` : ''}
+      ${isStreaming ? html`<div class="activity-streaming">${t('activity_streaming')}</div>` : ''}
       <div ref=${endRef} />
     </div>
   `;
@@ -1834,7 +1858,7 @@ function ConductorPanel({ agents, plans, streaming }) {
         <div class="conductor-empty">
           <div class="conductor-empty-icon">\uD83C\uDFAD</div>
           <div style="font-size:15px">No agents or plans</div>
-          <div style="font-size:12px;font-family:var(--font-mono)">Multi-agent orchestration will appear here</div>
+          <div style="font-size:12px;font-family:var(--font-mono)">${t('conductor_desc')}</div>
         </div>
       </div>
     `;
@@ -2138,9 +2162,9 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
         loadSettings();
       } else {
         const d = await r.json().catch(() => ({}));
-        setStatus(d.error || 'Save failed');
+        setStatus(d.error || t('settings_save_failed'));
       }
-    } catch { setStatus('Network error'); }
+    } catch { setStatus(t('settings_network_error')); }
     setSaving(false);
   }, [editBuf, loadSettings]);
 
@@ -2153,9 +2177,9 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
         body: JSON.stringify({ changed_paths: paths }),
       });
       const d = await r.json().catch(() => ({}));
-      if (d.restart_required) setStatus('Restarting...');
-      else setStatus('Applied');
-    } catch { setStatus('Apply failed'); }
+      if (d.restart_required) setStatus(t('settings_restarting'));
+      else setStatus(t('settings_applied'));
+    } catch { setStatus(t('settings_apply_failed')); }
   }, [editBuf, handleSave]);
 
   const handleReset = useCallback(() => { setEditBuf({}); setDirty(false); setStatus(''); }, []);
@@ -2261,7 +2285,7 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
           </div>
         ` : subTab === 'agent' ? html`
           <div class="settings-subtitle">// ${t('settings_agent')}</div>
-          ${!serverSettings ? html`<div class="settings-status">Loading...</div>` : html`
+          ${!serverSettings ? html`<div class="settings-status">${t('settings_loading')}</div>` : html`
             <div class="settings-row">
               <div><div class="settings-label">${t('settings_model')}</div></div>
               <input class="settings-input" style="width:220px" value=${getVal('agents.defaults.model') || ''}
@@ -2327,7 +2351,7 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                 onInput=${e => { const v = parseFloat(e.target.value); setVal('agents.defaults.cost_budget_per_day', isNaN(v) || v <= 0 ? null : v); }} />
             </div>
             <div class="settings-subtitle" style="margin-top:16px">// ${t('settings_system_prompt')}</div>
-            <textarea class="settings-textarea" style="min-height:100px" placeholder="Custom instructions..." maxlength="4000"
+            <textarea class="settings-textarea" style="min-height:100px" placeholder="${t('settings_custom_prompt_placeholder')}" maxlength="4000"
               value=${getVal('agents.defaults.system_prompt') || ''}
               onInput=${e => setVal('agents.defaults.system_prompt', e.target.value)} />
             <div class="settings-subtitle" style="margin-top:16px">// IM Channels</div>
@@ -2352,13 +2376,13 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
               <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
-              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} ${t('settings_pending')}</span>
             </div>
           ` : ''}
           ${status ? html`<div class="settings-status">${status}</div>` : ''}
         ` : subTab === 'providers' ? html`
           <div class="settings-subtitle">// ${t('settings_providers')}</div>
-          ${!serverSettings ? html`<div class="settings-status">Loading...</div>` : html`
+          ${!serverSettings ? html`<div class="settings-status">${t('settings_loading')}</div>` : html`
             ${providerGroups.map(g => html`
               <div class="settings-subtitle" style="font-size:9px;margin-top:14px">// ${g.label}</div>
               ${g.items.map(name => {
@@ -2404,7 +2428,7 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
               <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
-              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} ${t('settings_pending')}</span>
             </div>
           ` : ''}
           ${status ? html`<div class="settings-status">${status}</div>` : ''}
@@ -2472,13 +2496,13 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                 </div>
               `;
             })}
-          ` : html`<div class="settings-status">Loading...</div>`}
+          ` : html`<div class="settings-status">${t('settings_loading')}</div>`}
           ${dirty ? html`
             <div class="settings-actions">
               <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
-              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} ${t('settings_pending')}</span>
             </div>
           ` : ''}
           ${status ? html`<div class="settings-status">${status}</div>` : ''}
@@ -2530,12 +2554,12 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                       const r = await api('/api/settings/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: installUrl.trim() }) });
                       if (r.ok) { setInstallUrl(''); loadSkills(); }
                       else { const d = await r.json().catch(() => ({})); setStatus(d.error || 'Install failed'); }
-                    } catch { setStatus('Network error'); }
+                    } catch { setStatus(t('settings_network_error')); }
                     setInstalling(false);
                   }}>${installing ? '...' : t('settings_skills_install_btn')}</button>
               </div>
             </div>
-          ` : html`<div class="settings-status">Loading...</div>`}
+          ` : html`<div class="settings-status">${t('settings_loading')}</div>`}
           ${status ? html`<div class="settings-status">${status}</div>` : ''}
         ` : subTab === 'tools' ? html`
           <div class="settings-subtitle">// ${t('settings_tools')}</div>
@@ -2641,13 +2665,13 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                 `;
               });
             })()}
-          ` : html`<div class="settings-status">Loading...</div>`}
+          ` : html`<div class="settings-status">${t('settings_loading')}</div>`}
           ${dirty ? html`
             <div class="settings-actions">
               <button class="settings-btn settings-btn-primary" disabled=${saving} onClick=${handleSave}>${saving ? '...' : t('settings_save')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleApply}>${t('settings_apply')}</button>
               <button class="settings-btn settings-btn-secondary" onClick=${handleReset}>${t('settings_reset')}</button>
-              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} pending</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:auto">${Object.keys(editBuf).length} ${t('settings_pending')}</span>
             </div>
           ` : ''}
           ${status ? html`<div class="settings-status">${status}</div>` : ''}
@@ -2678,7 +2702,7 @@ function SettingsPanel({ showThinking, setShowThinking, showTools, setShowTools 
                 <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)">${aboutInfo.llm_calls || 0}</span>
               </div>
             ` : ''}
-          ` : html`<div class="settings-status">Loading...</div>`}
+          ` : html`<div class="settings-status">${t('settings_loading')}</div>`}
         ` : html`
           <div class="settings-subtitle">// ${t('settings_' + subTab)}</div>
           <div class="settings-status" style="color:var(--text-muted)">Coming in next update...</div>
