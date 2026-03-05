@@ -44,7 +44,9 @@ const DICT = {
     no_plans: 'No active plans or agents',
     memo_yesterday: 'Yesterday',
     memo_today: 'Today',
-    new_chat_fallback: 'New Chat'
+    new_chat_fallback: 'New Chat',
+    generating: 'Generating...',
+    processing_tools: 'Processing...'
   },
   zh: {
     new_chat: '+ 新建',
@@ -89,7 +91,9 @@ const DICT = {
     no_plans: '当前无任务执行',
     memo_yesterday: '昨日摘要',
     memo_today: '今日日志',
-    new_chat_fallback: '新对话'
+    new_chat_fallback: '新对话',
+    generating: '生成中...',
+    processing_tools: '处理中...'
   }
 };
 

@@ -119,6 +119,19 @@ body {
 .skeleton-msg.assistant { width: 60%; align-self: flex-start; }
 .skeleton-msg.long { height: 100px; width: 80%; }
 
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 .msg-wrapper .msg-actions-bar { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .msg-wrapper:hover .msg-actions-bar { opacity: 1; pointer-events: auto; }
 

@@ -148,13 +148,18 @@ export function MessageList() {
                 <ToolDetail key={ti} tool={tool} />
               ))}
 
-              {msg.content && (
-                <div 
-                  className="msg-content markdown-body" 
+              {msg.content ? (
+                <div
+                  className="msg-content markdown-body"
                   style={{ wordBreak: 'break-word', textAlign: 'left' }}
-                  dangerouslySetInnerHTML={{ __html: renderMd(msg.content, isStreaming.value && i === messages.value.length - 1) }} 
+                  dangerouslySetInnerHTML={{ __html: renderMd(msg.content, isStreaming.value && i === messages.value.length - 1) }}
                 />
-              )}
+              ) : (isStreaming.value && i === messages.value.length - 1 && !isUser) ? (
+                <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  <span class="pulse-dot" />
+                  {msg.tool_calls && msg.tool_calls.length > 0 ? t('processing_tools') : t('generating')}
+                </div>
+              ) : null}
             </div>
 
             {isUser && (
