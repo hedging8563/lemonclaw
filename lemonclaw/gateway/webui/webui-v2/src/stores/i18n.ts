@@ -45,19 +45,15 @@ const DICT = {
     memo_yesterday: 'Yesterday',
     memo_today: 'Today',
     new_chat_fallback: 'New Chat',
-    generating: 'Generating...',
-    processing_tools: 'Processing...',
-    scroll_bottom: '↓ SCROLL TO BOTTOM',
     session_label: '// SESSION: ',
     click_edit_sp: 'Click to edit Session Prompt',
     toggle_inspector: 'Toggle Inspector',
-    toggle_theme: 'Toggle Theme',
-    delete_session: 'Delete Session',
     confirm_delete_session: 'Delete this session permanently?',
-    confirm_delete_skill: 'Delete skill {name}?',
+    delete_plugin: 'Delete Plugin',
+    skill_placeholder: 'owner/repo/skill or GitHub URL...',
+    supported_formats: 'Supported formats:',
     install_failed: 'Install failed: ',
-    supported_formats: '// SUPPORTED FORMATS',
-    skill_placeholder: 'owner/repo/skill or GitHub URL...'
+    confirm_delete_skill: 'Delete skill {name}?'
   },
   zh: {
     new_chat: '+ 新建',
@@ -103,19 +99,15 @@ const DICT = {
     memo_yesterday: '昨日摘要',
     memo_today: '今日日志',
     new_chat_fallback: '新对话',
-    generating: '生成中...',
-    processing_tools: '处理中...',
-    scroll_bottom: '↓ 滚动到底部',
     session_label: '// 会话: ',
-    click_edit_sp: '点击编辑会话提示词',
-    toggle_inspector: '切换检查面板',
-    toggle_theme: '切换主题',
-    delete_session: '删除会话',
-    confirm_delete_session: '确定永久删除此会话？',
-    confirm_delete_skill: '确定删除技能 {name}？',
+    click_edit_sp: '点击编辑会话 Prompt',
+    toggle_inspector: '展开/折叠检查器',
+    confirm_delete_session: '确定要永久删除此会话吗？',
+    delete_plugin: '删除插件',
+    skill_placeholder: '输入 owner/repo/skill 或 GitHub 链接...',
+    supported_formats: '支持的格式：',
     install_failed: '安装失败: ',
-    supported_formats: '// 支持的格式',
-    skill_placeholder: 'owner/repo/skill 或 GitHub URL...'
+    confirm_delete_skill: '确定要删除技能 {name} 吗？'
   }
 };
 

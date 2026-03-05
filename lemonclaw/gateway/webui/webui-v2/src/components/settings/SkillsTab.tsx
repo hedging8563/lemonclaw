@@ -75,15 +75,19 @@ export function SkillsTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch', height: '36px' }}>
         <input
           placeholder={t('skill_placeholder')}
           value={installUrl}
           onInput={e => setInstallUrl((e.target as HTMLInputElement).value)}
-          style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '8px 12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
+          style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '0 16px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', outline: 'none', transition: 'border-color 0.2s', height: '100%', boxSizing: 'border-box' }}
+          onFocus={e => (e.target as HTMLInputElement).style.borderColor = 'var(--accent)'}
+          onBlur={e => (e.target as HTMLInputElement).style.borderColor = 'var(--border)'}
         />
-        <InstallHint />
-        <button onClick={handleInstall} disabled={loading} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', padding: '0 20px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <InstallHint />
+        </div>
+        <button onClick={handleInstall} disabled={loading || !installUrl} style={{ background: loading || !installUrl ? 'var(--bg-tertiary)' : 'var(--accent)', color: loading || !installUrl ? 'var(--text-muted)' : '#fff', border: 'none', borderRadius: '6px', padding: '0 24px', fontWeight: 'bold', cursor: loading || !installUrl ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '13px', transition: 'all 0.2s', height: '100%', boxSizing: 'border-box' }}>
           {loading ? t('installing') : t('install')}
         </button>
       </div>
@@ -98,13 +102,26 @@ export function SkillsTab() {
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{s.description}</div>
             </div>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
-                <input type="checkbox" checked={s.enabled} onChange={() => toggleSkill(s.name, s.enabled)} />
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexShrink: 0 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: s.enabled ? 'var(--teal)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', userSelect: 'none', transition: 'color 0.2s' }}>
+                <input 
+                  type="checkbox" 
+                  checked={s.enabled} 
+                  onChange={() => toggleSkill(s.name, s.enabled)} 
+                  style={{ width: '14px', height: '14px', accentColor: 'var(--teal)', cursor: 'pointer' }}
+                />
                 {t('enabled')}
               </label>
               {s.source !== 'builtin' && (
-                <button onClick={() => deleteSkill(s.name)} style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }} title={t('delete_session')}>×</button>
+                <button 
+                  onClick={() => deleteSkill(s.name)} 
+                  style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255, 68, 68, 0.1)'; e.currentTarget.style.color = 'var(--error)'; e.currentTarget.style.borderColor = 'rgba(255, 68, 68, 0.3)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'transparent'; }}
+                  title="Delete Plugin"
+                >
+                  🗑️
+                </button>
               )}
             </div>
           </div>

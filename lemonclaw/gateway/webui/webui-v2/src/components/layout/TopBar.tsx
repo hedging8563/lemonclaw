@@ -6,17 +6,40 @@ import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
 import { showInspector, mobileMenuOpen } from '../../stores/ui';
 
+import { sessions, loadSessions } from '../../stores/sessions';
+
 export function TopBar() {
   const [showExport, setShowExport] = useState(false);
   const [spOpen, setSpOpen] = useState(false);
   const [spDraft, setSpDraft] = useState('');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
   const exportRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const isWebUI = activeSessionKey.value.startsWith('webui:');
+  const currentSession = sessions.value.find(s => s.key === activeSessionKey.value);
 
   useEffect(() => {
     loadModels();
   }, []);
+
+  useEffect(() => {
+    if (isEditingTitle) titleInputRef.current?.focus();
+  }, [isEditingTitle]);
+
+  const handleTitleSave = async () => {
+    if (!titleDraft.trim() || titleDraft === currentSession?.title) {
+      setIsEditingTitle(false);
+      return;
+    }
+    await apiFetch(`/api/sessions/${activeSessionKey.value}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: titleDraft.trim() })
+    });
+    setIsEditingTitle(false);
+    loadSessions();
+  };
 
   useEffect(() => {
     setSpOpen(false);
@@ -60,10 +83,29 @@ export function TopBar() {
       <div style={{ height: 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '18px', cursor: 'pointer', paddingRight: '8px' }}>☰</button>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            <span class="topbar-session-id">{t('session_label')}</span><span style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default' }} onClick={() => isWebUI && setSpOpen(!spOpen)} title={t('click_edit_sp')}>{activeSessionKey.value.replace('webui:', '')}</span>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span class="topbar-session-id">{t('session_label')}</span>
+            {isEditingTitle ? (
+              <input 
+                ref={titleInputRef}
+                value={titleDraft}
+                onInput={e => setTitleDraft((e.target as HTMLInputElement).value)}
+                onKeyDown={e => { if(e.key === 'Enter') handleTitleSave(); if(e.key === 'Escape') setIsEditingTitle(false); }}
+                onBlur={handleTitleSave}
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)', outline: 'none' }}
+              />
+            ) : (
+              <span 
+                style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default' }} 
+                onClick={() => { if(isWebUI) { setTitleDraft(currentSession?.title || ''); setIsEditingTitle(true); } }}
+                onDblClick={() => isWebUI && setSpOpen(!spOpen)}
+                title={t('click_edit_sp')}
+              >
+                {currentSession?.title || activeSessionKey.value.replace('webui:', '')}
+              </span>
+            )}
           </div>
-          {isWebUI && spDraft && <span style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '3px' }}>SP</span>}
+          {isWebUI && spDraft && <span style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '3px', cursor: 'pointer' }} onClick={() => setSpOpen(!spOpen)}>SP</span>}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>

@@ -1,15 +1,41 @@
-import { activeSessionKey, deleteSession } from '../../stores/sessions';
+import { useState, useRef, useEffect } from 'preact/hooks';
+import { activeSessionKey, deleteSession, loadSessions } from '../../stores/sessions';
 import type { Session } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
-
+import { apiFetch } from '../../api/client';
 import { mobileMenuOpen } from '../../stores/ui';
 
 export function SessionItem({ session }: { session: Session }) {
   const isActive = activeSessionKey.value === session.key;
-  
+  const [isEditing, setIsEditing] = useState(false);
+  const [title, setTitle] = useState(session.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing) inputRef.current?.focus();
+  }, [isEditing]);
+
+  const handleRename = async () => {
+    if (!title.trim() || title === session.title) {
+      setIsEditing(false);
+      return;
+    }
+    try {
+      await apiFetch(`/api/sessions/${session.key}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: title.trim() })
+      });
+      await loadSessions();
+    } catch (e) {
+      console.error('Rename failed', e);
+    }
+    setIsEditing(false);
+  };
+
   return (
     <div 
-      onClick={() => { activeSessionKey.value = session.key; mobileMenuOpen.value = false; }}
+      onClick={() => { if(!isEditing) { activeSessionKey.value = session.key; mobileMenuOpen.value = false; } }}
+      onDblClick={() => setIsEditing(true)}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -27,9 +53,20 @@ export function SessionItem({ session }: { session: Session }) {
       onMouseLeave={(e) => { if(!isActive) e.currentTarget.style.background = 'transparent' }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', lineHeight: '1.3', fontFamily: 'var(--font-mono)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-          {session.title || t('new_chat_fallback')}
-        </div>
+        {isEditing ? (
+          <input 
+            ref={inputRef}
+            value={title}
+            onInput={e => setTitle((e.target as HTMLInputElement).value)}
+            onKeyDown={e => { if(e.key === 'Enter') handleRename(); if(e.key === 'Escape') setIsEditing(false); }}
+            onBlur={handleRename}
+            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)', outline: 'none' }}
+          />
+        ) : (
+          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', lineHeight: '1.3', fontFamily: 'var(--font-mono)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+            {session.title || t('new_chat_fallback')}
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
           <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px' }}>●</span>
           {new Date(session.updated_at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
