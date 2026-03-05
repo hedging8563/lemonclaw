@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from json_repair import repair_json
 from loguru import logger
 
-from lemonclaw.conductor.intent_analyzer import _strip_fences
+from lemonclaw.utils.helpers import strip_fences
 
 from lemonclaw.conductor.types import (
     IntentAnalysis,
@@ -152,7 +152,7 @@ class Orchestrator:
                     temperature=0.1,
                     max_tokens=1024,
                 )
-            raw = _strip_fences(response.content)
+            raw = strip_fences(response.content)
             try:
                 tasks_data = json.loads(raw)
             except json.JSONDecodeError:
