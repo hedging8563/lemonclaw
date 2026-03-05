@@ -34,6 +34,7 @@ _WRITABLE_PATHS: set[str] = {
     "agents.defaults.max_tool_iterations",
     "agents.defaults.token_budget_per_session",
     "agents.defaults.cost_budget_per_day",
+    "agents.defaults.cost_per_1k_tokens",
     "agents.defaults.system_prompt",
     "agents.defaults.disabled_skills",
     # Channels (top-level flags)

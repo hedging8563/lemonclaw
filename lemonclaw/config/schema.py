@@ -229,6 +229,7 @@ class AgentDefaults(Base):
     memory_window: int = 100
     token_budget_per_session: int | None = None  # Max tokens per session (None = unlimited)
     cost_budget_per_day: float | None = None  # Max USD cost per day (None = unlimited)
+    cost_per_1k_tokens: float = 0.01  # Estimated cost per 1K tokens in USD (for budget tracking)
     system_prompt: str = ""  # Custom system prompt injected after identity, before bootstrap files
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to disable
 
