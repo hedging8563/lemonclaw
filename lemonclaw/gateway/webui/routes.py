@@ -584,11 +584,16 @@ def get_webui_routes(
             ext = "md"
 
         safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "chat"
+        # RFC 5987: use filename* for non-ASCII titles, ASCII fallback for filename
+        from urllib.parse import quote
+        ascii_fallback = "".join(c for c in safe_title if ord(c) < 128) or "chat"
+        encoded_title = quote(safe_title)
+        disposition = f'attachment; filename="{ascii_fallback}.{ext}"; filename*=UTF-8\'\'{encoded_title}.{ext}'
         resp = Response(
             content=body.encode("utf-8"),
             media_type=media,
             headers={
-                "Content-Disposition": f'attachment; filename="{safe_title}.{ext}"',
+                "Content-Disposition": disposition,
             },
         )
         _maybe_refresh_cookie(request, resp)
