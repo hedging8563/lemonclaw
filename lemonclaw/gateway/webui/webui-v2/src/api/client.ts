@@ -1,7 +1,9 @@
 export class APIError extends Error {
-  constructor(public status: number, message: string) {
+  public status: number;
+  constructor(status: number, message: string) {
     super(message);
     this.name = 'APIError';
+    this.status = status;
   }
 }
 
@@ -19,7 +21,7 @@ export async function apiFetch(path: string, options: RequestInit & { silent404?
   }
 
   if (!res.ok) {
-    if (options.silent404 && res.status === 404) return res;
+    if (options.silent404 && (res.status === 404 || res.status === 403)) return res;
     let msg = 'API Request Failed';
     try {
       const data = await res.json();

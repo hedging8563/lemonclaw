@@ -1,4 +1,5 @@
-import { Session, activeSessionKey, deleteSession } from '../../stores/sessions';
+import { activeSessionKey, deleteSession } from '../../stores/sessions';
+import type { Session } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
 
 export function SessionItem({ session }: { session: Session }) {

@@ -93,7 +93,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
          return (
            <div key={k} style={{ marginBottom: '12px' }}>
              <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom:'4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-             <input type="number" value={v} onInput={e => handleChange(currentPath, Number((e.target as any).value))} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
+             <input type="number" value={v as number} onInput={e => handleChange(currentPath, Number((e.target as any).value))} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
            </div>
          );
       } else {
@@ -101,7 +101,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
          return (
            <div key={k} style={{ marginBottom: '12px' }}>
              <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom:'4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-             <input type={isSecret ? 'password' : 'text'} value={v} onInput={e => handleChange(currentPath, (e.target as any).value)} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
+             <input type={isSecret ? 'password' : 'text'} value={v as string} onInput={e => handleChange(currentPath, (e.target as any).value)} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
            </div>
          );
       }

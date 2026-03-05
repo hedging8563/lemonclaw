@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@preact/signals": "^2.8.1",
     "dompurify": "^3.3.1",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.4",

@@ -9,9 +9,9 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { ToolDetail } from './ToolDetail';
 import { t } from '../../stores/i18n';
 
-marked.setOptions({
+(marked as any).setOptions({
   breaks: true,
-  highlight: function(code, lang) {
+  highlight: function(code: string, lang: string) {
     if ((window as any).__skipHighlight) return code;
     if (lang && hljs.getLanguage(lang)) {
       try {
@@ -22,14 +22,15 @@ marked.setOptions({
   }
 });
 
+DOMPurify.addHook('afterSanitizeAttributes', function(node) {
+  if ('target' in node) {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
 function renderMd(content: string, skipHighlight = false) {
   (window as any).__skipHighlight = skipHighlight;
-  DOMPurify.addHook('afterSanitizeAttributes', function(node) {
-    if ('target' in node) {
-      node.setAttribute('target', '_blank');
-      node.setAttribute('rel', 'noopener noreferrer');
-    }
-  });
   return DOMPurify.sanitize(marked.parse(content) as string);
 }
 

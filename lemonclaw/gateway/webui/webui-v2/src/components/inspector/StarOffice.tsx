@@ -79,7 +79,7 @@ export function StarOffice() {
                 class="star-cat" 
                 style={{ 
                   bottom: `${slot.bottom + 20}px`, 
-                  ...(slot.faceRight ? { left: `${slot.left + 10}px` } : { right: `${slot.right + 10}px` }),
+                  ...(slot.faceRight ? { left: `${(slot.left as number) + 10}px` } : { right: `${(slot.right as number) + 10}px` }),
                   filter: `hue-rotate(${hue}deg)`,
                   transform: slot.faceRight ? 'none' : 'scaleX(-1)',
                   zIndex: slot.zCat

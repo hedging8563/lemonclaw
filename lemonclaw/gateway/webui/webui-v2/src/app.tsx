@@ -8,7 +8,6 @@ import { initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
 
 export function App() {
-export function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

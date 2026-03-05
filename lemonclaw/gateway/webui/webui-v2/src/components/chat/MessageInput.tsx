@@ -1,4 +1,4 @@
-import { useRef } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import { sendMessage, isStreaming, abortStream, attachments, uploadFile, inputText } from '../../stores/chat';
 import { activeSessionKey } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
