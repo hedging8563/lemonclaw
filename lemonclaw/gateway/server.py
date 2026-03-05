@@ -14,6 +14,7 @@ import asyncio
 import hmac
 import signal
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
@@ -21,7 +22,8 @@ from loguru import logger
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
-from starlette.routing import Route, WebSocketRoute
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.staticfiles import StaticFiles
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
 
@@ -279,6 +281,11 @@ def create_app(
             config_watcher=config_watcher,
             agent_loop=agent_loop,
         ))
+
+    # Static assets for WebUI v2 (JS/CSS bundles)
+    _static_dir = Path(__file__).parent / "webui" / "static" / "assets"
+    if _static_dir.is_dir():
+        routes.append(Mount("/assets", app=StaticFiles(directory=str(_static_dir)), name="static-assets"))
 
     # WebUI routes (appended last so /health, /api/*, /webhook/* take priority)
     if webui_enabled and agent_loop and session_manager:
