@@ -3,7 +3,7 @@ import { SessionList } from '../sidebar/SessionList';
 import { ActivityList } from '../sidebar/ActivityList';
 import { activeSessionKey } from '../../stores/sessions';
 import { SettingsModal } from '../settings/SettingsModal';
-import { sidebarTab } from '../../stores/ui';
+import { sidebarTab, mobileMenuOpen } from '../../stores/ui';
 import { t, toggleLang, lang } from '../../stores/i18n';
 
 export function Sidebar() {
@@ -13,10 +13,11 @@ export function Sidebar() {
     sidebarTab.value = 'sessions';
     const newKey = 'webui:' + Math.random().toString(36).substring(2, 9);
     activeSessionKey.value = newKey;
+    mobileMenuOpen.value = false;
   };
 
   return (
-    <aside class="layout-sidebar">
+    <aside class={`layout-sidebar ${mobileMenuOpen.value ? 'open' : ''}`}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '16px', letterSpacing: '-0.5px' }}>
           Lemon<span style={{ color: 'var(--purple)', textShadow: '0 0 8px var(--purple-dim)' }}>Claw</span>

@@ -6,6 +6,7 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { checkAuth, isAuthenticated, authRequired } from './stores/auth';
 import { initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
+import { mobileMenuOpen } from './stores/ui';
 
 export function App() {
   const [loading, setLoading] = useState(true);
@@ -27,6 +28,7 @@ export function App() {
 
   return (
     <div class="app-container">
+      {mobileMenuOpen.value && <div class="mobile-overlay" onClick={() => mobileMenuOpen.value = false}></div>}
       <CommandPalette />
       <Sidebar />
       <ChatArea />

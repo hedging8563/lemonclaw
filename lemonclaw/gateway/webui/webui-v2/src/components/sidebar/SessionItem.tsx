@@ -2,12 +2,14 @@ import { activeSessionKey, deleteSession } from '../../stores/sessions';
 import type { Session } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
 
+import { mobileMenuOpen } from '../../stores/ui';
+
 export function SessionItem({ session }: { session: Session }) {
   const isActive = activeSessionKey.value === session.key;
   
   return (
     <div 
-      onClick={() => activeSessionKey.value = session.key}
+      onClick={() => { activeSessionKey.value = session.key; mobileMenuOpen.value = false; }}
       style={{
         display: 'flex',
         alignItems: 'flex-start',

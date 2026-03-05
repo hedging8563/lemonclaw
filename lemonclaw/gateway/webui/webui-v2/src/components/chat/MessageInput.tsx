@@ -54,7 +54,7 @@ export function MessageInput() {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
             {attachments.value.map((att, i) => (
               <div key={i} style={{ position: 'relative', width: '60px', height: '60px', borderRadius: '6px', border: '1px solid var(--border)', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
-                {att.url?.startsWith('data:image') ? <img src={att.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ padding: '4px', fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{att.filename}</div>}
+                {att.url?.startsWith('data:image') ? <img src={att.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : att.url?.startsWith('data:video') ? <video src={att.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted autoPlay loop /> : <div style={{ padding: '4px', fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{att.filename}</div>}
                 <button onClick={() => removeAttachment(i)} style={{ position: 'absolute', top: '2px', right: '2px', background: 'var(--error)', color: '#fff', border: 'none', borderRadius: '50%', width: '16px', height: '16px', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
               </div>
             ))}

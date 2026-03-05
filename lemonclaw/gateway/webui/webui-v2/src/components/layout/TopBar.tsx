@@ -4,7 +4,7 @@ import { currentModel, models, loadModels } from '../../stores/models';
 import { logout } from '../../stores/auth';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { showInspector } from '../../stores/ui';
+import { showInspector, mobileMenuOpen } from '../../stores/ui';
 
 export function TopBar() {
   const [showExport, setShowExport] = useState(false);
@@ -59,6 +59,7 @@ export function TopBar() {
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-primary)', zIndex: 20 }}>
       <div style={{ height: 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '18px', cursor: 'pointer', paddingRight: '8px' }}>☰</button>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
             // SESSION: <span style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default' }} onClick={() => isWebUI && setSpOpen(!spOpen)} title="Click to edit Session Prompt">{activeSessionKey.value}</span>
           </div>
