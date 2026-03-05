@@ -76,10 +76,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
            </div>
          );
       } else if (typeof v === 'object' && v !== null) {
+         let currentObj = v;
+         let displayKey = k;
+         let cPath = [...currentPath];
+         while (typeof currentObj === 'object' && currentObj !== null && !Array.isArray(currentObj)) {
+           const keys = Object.keys(currentObj);
+           if (keys.length === 1 && typeof currentObj[keys[0]] === 'object' && currentObj[keys[0]] !== null && !Array.isArray(currentObj[keys[0]])) {
+             displayKey += '.' + keys[0];
+             cPath.push(keys[0]);
+             currentObj = currentObj[keys[0]];
+           } else {
+             break;
+           }
+         }
          return (
-           <div key={k} style={{ marginBottom: '16px', borderLeft: '2px solid var(--border)', paddingLeft: '16px' }}>
-             <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '12px', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>{k}</div>
-             {renderFields(v, currentPath)}
+           <div key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
+             <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+               <span style={{ color: 'var(--purple)' }}>#</span> {displayKey}
+             </div>
+             {renderFields(currentObj, cPath)}
            </div>
          );
       } else if (typeof v === 'boolean') {
