@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 4
+MODEL_CONFIG_VERSION = 5
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -353,7 +353,9 @@ def _sync_model_config(config: Config) -> bool:
     if current_version >= MODEL_CONFIG_VERSION:
         return False
 
-    changed = False
+    # Force save on version upgrade to persist _apply_env_overrides values
+    # that are correct in memory but missing on disk
+    changed = True
     api_key = config.providers.lemondata.api_key or os.environ.get("API_KEY", "")
 
     # Ensure all 4 providers have correct api_base (always set, not conditional,
