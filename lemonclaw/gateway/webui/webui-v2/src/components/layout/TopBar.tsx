@@ -71,7 +71,7 @@ export function TopBar() {
             <select 
               value={currentModel.value}
               onChange={(e) => currentModel.value = (e.target as HTMLSelectElement).value}
-              style={{ maxWidth: '100px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
+              style={{ maxWidth: '240px', textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
             >
               {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
               {models.value.map(m => <option key={m.id} value={m.id}>{m.id.split('/').pop()}</option>)}
