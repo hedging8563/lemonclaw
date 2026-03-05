@@ -79,11 +79,12 @@ class MemoryStore:
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self.core_file = self.memory_dir / "core.md"
+        self._provider: LLMProvider | None = None
 
         # Bionic memory layers
-        self.entities = EntityStore(self.memory_dir)
-        self.today = TodayLog(self.memory_dir)
         self.search_index = MemorySearchIndex(self.memory_dir)
+        self.entities = EntityStore(self.memory_dir, on_write=self._on_entity_write)
+        self.today = TodayLog(self.memory_dir)
         self.trigger = MemoryTrigger(self.entities, search_index=self.search_index)
         self.procedural = ProceduralMemory(self.memory_dir)
         self.promoter = CorePromoter(self.memory_dir, self.entities)
@@ -93,6 +94,20 @@ class MemoryStore:
         if ws_key not in MemoryStore._write_locks:
             MemoryStore._write_locks[ws_key] = asyncio.Lock()
         self._lock = MemoryStore._write_locks[ws_key]
+
+    def _on_entity_write(self, name: str, body: str) -> None:
+        """Fire-and-forget search index update when an entity card is written."""
+        if not self.search_index.available or self._provider is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # No event loop — skip (e.g. migration scripts)
+        loop.create_task(self.search_index.upsert_entity(name, body, self._provider))
+
+    def set_provider(self, provider: LLMProvider) -> None:
+        """Bind an LLM provider for search index updates."""
+        self._provider = provider
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():

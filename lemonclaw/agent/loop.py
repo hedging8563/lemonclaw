@@ -104,6 +104,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace, system_prompt=system_prompt, disabled_skills=disabled_skills)
+        self.context.memory.set_provider(provider)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(

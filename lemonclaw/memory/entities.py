@@ -98,9 +98,10 @@ class EntityCard:
 class EntityStore:
     """Manages LTM entity cards in memory/entities/ directory."""
 
-    def __init__(self, memory_dir: Path):
+    def __init__(self, memory_dir: Path, on_write: Any | None = None):
         self.entities_dir = memory_dir / "entities"
         self._cards: dict[str, EntityCard] | None = None  # lazy cache
+        self._on_write = on_write  # Optional callback(name, body) for search index sync
 
     def _ensure_dir(self) -> None:
         self.entities_dir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +143,7 @@ class EntityStore:
         cards = self._load_all()
         cards[name] = card
         logger.debug("Created entity card: {}", name)
+        self._notify_write(name, body)
         return card
 
     def update_card(self, name: str, body: str) -> EntityCard | None:
@@ -151,7 +153,16 @@ class EntityStore:
             return None
         card.body = body
         card.save()
+        self._notify_write(name, body)
         return card
+
+    def _notify_write(self, name: str, body: str) -> None:
+        """Fire on_write callback if registered (for search index sync)."""
+        if self._on_write:
+            try:
+                self._on_write(name, body)
+            except Exception as e:
+                logger.debug("Entity on_write callback failed for {}: {}", name, e)
 
     def init_defaults(self) -> int:
         """Create default entity cards if entities/ is empty. Returns count created."""

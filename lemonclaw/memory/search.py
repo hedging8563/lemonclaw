@@ -232,6 +232,44 @@ class MemorySearchIndex:
             })
         return output
 
+    async def upsert_entity(
+        self, name: str, body: str, provider: LLMProvider, model: str | None = None,
+    ) -> bool:
+        """Incrementally update a single entity card in the index.
+
+        Called when an entity card is created or updated, avoiding a full rebuild.
+        Returns True on success, False on failure (non-fatal).
+        """
+        if not self.available:
+            return False
+
+        try:
+            self._get_or_create_table()
+            if self._table is None:
+                return False
+
+            text = f"{name}: {body.strip()}"
+            vectors = await self._embed([text], provider, model)
+            doc = {
+                "id": f"entity:{name}",
+                "source": "entity",
+                "name": name,
+                "text": text,
+                "vector": vectors[0],
+            }
+
+            # Delete existing entry if present, then add new one
+            try:
+                self._table.delete(f'id = "entity:{name}"')
+            except Exception:
+                pass  # Table may be empty or entry may not exist
+            self._table.add([doc])
+            logger.debug("Search index updated for entity: {}", name)
+            return True
+        except Exception as e:
+            logger.debug("Failed to upsert entity in search index: {}", e)
+            return False
+
     async def search_entities(
         self, query: str, provider: LLMProvider, *, limit: int = 3, model: str | None = None
     ) -> list[dict[str, Any]]:
