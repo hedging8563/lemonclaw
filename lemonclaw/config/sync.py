@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 1
+MODEL_CONFIG_VERSION = 2
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -369,6 +369,19 @@ def _sync_model_config(config: Config) -> bool:
             changed = True
         if not config.providers.lemondata_gemini.api_base:
             config.providers.lemondata_gemini.api_base = LEMONDATA_API_BASE
+            changed = True
+
+    # v2: Ensure coding tool has api_key + api_base + enabled
+    if api_key:
+        coding = config.tools.coding
+        if not coding.api_key:
+            coding.api_key = api_key
+            changed = True
+        if not coding.api_base:
+            coding.api_base = LEMONDATA_API_BASE
+            changed = True
+        if not coding.enabled:
+            coding.enabled = True
             changed = True
 
     # Ensure LemonData platform config
