@@ -97,7 +97,11 @@ _ENV_INJECTED_PROVIDERS = ("lemondata", "lemondataClaude", "lemondataMinimax", "
 
 
 def _strip_env_injected(data: dict, original: dict) -> None:
-    """Remove env-injected provider credentials that weren't in the original file."""
+    """Remove env-injected provider credentials that weren't in the original file.
+
+    Only strips apiKey (sensitive credential). apiBase is NOT stripped because
+    config-sync needs to persist it (e.g. filling in missing provider base URLs).
+    """
     if not os.environ.get("API_KEY"):
         return  # No env injection active
     providers = data.get("providers", {})
@@ -110,9 +114,6 @@ def _strip_env_injected(data: dict, original: dict) -> None:
         if not orig_prov.get("apiKey", orig_prov.get("api_key", "")):
             providers[name]["apiKey"] = ""
             providers[name].pop("api_key", None)
-        if not orig_prov.get("apiBase", orig_prov.get("api_base")):
-            providers[name]["apiBase"] = None
-            providers[name].pop("api_base", None)
 
 
 def _apply_env_overrides(config: Config) -> None:

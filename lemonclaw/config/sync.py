@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 2
+MODEL_CONFIG_VERSION = 3
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
