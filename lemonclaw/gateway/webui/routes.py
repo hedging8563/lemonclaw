@@ -489,14 +489,16 @@ def get_webui_routes(
         # Read user's configured default model from config.json (without env overlay)
         # so DEFAULT_MODEL env var doesn't override the user's choice in WebUI.
         current = ""
-        if config_path and config_path.exists():
-            try:
+        try:
+            from lemonclaw.config.loader import get_config_path
+            _cfg_path = get_config_path()
+            if _cfg_path.exists():
                 import json as _json_mod
-                with open(config_path, encoding="utf-8") as f:
+                with open(_cfg_path, encoding="utf-8") as f:
                     raw = _json_mod.load(f)
                 current = raw.get("agents", {}).get("defaults", {}).get("model", "")
-            except Exception:
-                pass
+        except Exception:
+            pass
         if not current:
             current = agent_loop.model if hasattr(agent_loop, "model") else ""
         resp = _json({"models": models, "current": current})
