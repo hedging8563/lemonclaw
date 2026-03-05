@@ -72,6 +72,7 @@ class UsageTracker:
         # Daily cost tracking
         self._daily_cost: float = 0.0
         self._daily_cost_date: date = date.today()
+        self._daily_cost_alerted: bool = False
 
     def _estimate_cost(self, total_tokens: int) -> float:
         """Estimate cost in USD from token count."""
@@ -83,6 +84,7 @@ class UsageTracker:
         if today != self._daily_cost_date:
             self._daily_cost = 0.0
             self._daily_cost_date = today
+            self._daily_cost_alerted = False
 
     def record_turn(self, session_key: str, turn: TurnUsage, session_metadata: dict[str, Any]) -> list[str]:
         """Record a completed turn's usage. Returns list of alert messages (empty if none)."""
@@ -116,8 +118,9 @@ class UsageTracker:
             alerts.append(msg)
             logger.warning("Session {} exceeded token budget: {}/{}", session_key, stats["total_tokens"], self.token_budget_per_session)
 
-        # Budget check: daily cost limit
-        if self.cost_budget_per_day and self._daily_cost > self.cost_budget_per_day:
+        # Budget check: daily cost limit (alert once per day)
+        if self.cost_budget_per_day and self._daily_cost > self.cost_budget_per_day and not self._daily_cost_alerted:
+            self._daily_cost_alerted = True
             msg = (
                 f"⚠️ Daily cost budget exceeded: ${self._daily_cost:.4f} / "
                 f"${self.cost_budget_per_day:.2f} (estimated)."
