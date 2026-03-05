@@ -47,6 +47,9 @@ class Orchestrator:
         registry: AgentRegistry,
         model: str | None = None,
         max_concurrent_llm: int = 3,
+        plan_timeout: int = 1800,  # 30 min overall plan timeout
+        subtask_timeout: int = 300,  # 5 min per subtask
+        max_retries: int = 1,  # retry failed subtasks once
     ):
         self._provider = provider
         self._bus = bus
@@ -54,6 +57,9 @@ class Orchestrator:
         self._model = model
         self._llm_semaphore = asyncio.Semaphore(max_concurrent_llm)
         self._active_plans: dict[str, OrchestrationPlan] = {}
+        self._plan_timeout = plan_timeout
+        self._subtask_timeout = subtask_timeout
+        self._max_retries = max_retries
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -82,6 +88,13 @@ class Orchestrator:
 
             # Phase 4: MONITORING
             await self._monitor(plan)
+
+            # Check if all subtasks failed — degrade to single-agent direct processing
+            all_failed = all(st.status == SubTaskStatus.FAILED for st in plan.subtasks)
+            if all_failed:
+                logger.warning("Orchestrator: all {} subtasks failed, degrading to single-agent",
+                               len(plan.subtasks))
+                return None  # Caller handles directly as single agent
 
             # Phase 5: MERGING
             result = await self._merge(plan)
@@ -199,7 +212,7 @@ class Orchestrator:
         logger.info("Orchestrator: MONITORING")
 
         pending_futures: dict[str, asyncio.Task[str | None]] = {}
-        monitor_timeout = 600  # 10 min hard ceiling for entire monitoring phase
+        monitor_timeout = self._plan_timeout
         loop = asyncio.get_running_loop()
         deadline = loop.time() + monitor_timeout
 
@@ -254,81 +267,91 @@ class Orchestrator:
     async def _execute_subtask(
         self, plan: OrchestrationPlan, subtask: SubTask,
     ) -> str | None:
-        """Execute a single subtask.
+        """Execute a single subtask with retry on failure.
 
         If the assigned agent has a registered bus queue, route through the
         bus with request-response.  Otherwise fall back to a direct LLM call.
+        Retries up to self._max_retries times with exponential backoff.
         """
         import uuid as _uuid
         from lemonclaw.bus.events import InboundMessage
         from lemonclaw.agent.types import AgentStatus
 
         agent_id = subtask.assigned_agent_id or "default"
-        logger.info("Orchestrator: executing '{}' on agent '{}'", subtask.id, agent_id)
+        last_error: Exception | None = None
 
-        self._registry.update_status(agent_id, AgentStatus.THINKING)
+        for attempt in range(1 + self._max_retries):
+            if attempt > 0:
+                backoff = min(2 ** attempt, 30)
+                logger.info("Orchestrator: retrying '{}' (attempt {}/{}) after {}s",
+                            subtask.id, attempt + 1, 1 + self._max_retries, backoff)
+                await asyncio.sleep(backoff)
 
-        try:
-            # Try bus route if agent has a queue (and is not "default" — the
-            # default agent handles user-facing messages, not internal tasks).
-            if agent_id != "default" and agent_id in self._bus.registered_agents:
-                request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
-                fut = self._bus.expect_response(request_id)
+            logger.info("Orchestrator: executing '{}' on agent '{}'", subtask.id, agent_id)
+            self._registry.update_status(agent_id, AgentStatus.THINKING)
 
-                msg = InboundMessage(
-                    channel="internal",
-                    sender_id="conductor",
-                    chat_id=agent_id,
-                    content=(
-                        f"Context: {plan.original_message}\n\n"
-                        f"Your specific task: {subtask.description}"
-                    ),
-                    target_agent_id=agent_id,
-                    metadata={"_request_id": request_id},
-                    # Unique session key per subtask so multiple subtasks on the
-                    # same agent don't serialize behind a single session lock.
-                    session_key_override=f"internal:{agent_id}:{subtask.id}",
-                )
-                await self._bus.publish_inbound(msg)
+            try:
+                if agent_id != "default" and agent_id in self._bus.registered_agents:
+                    request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
+                    fut = self._bus.expect_response(request_id)
 
-                try:
-                    result = await asyncio.wait_for(fut, timeout=300)
-                except asyncio.TimeoutError:
-                    self._bus.cancel_response(request_id)
-                    raise TimeoutError(f"Agent '{agent_id}' did not respond within 300s")
-            else:
-                # Fallback: direct LLM call (no active agent loop for this agent)
-                async with self._llm_semaphore:
-                    response = await self._provider.chat(
-                        messages=[
-                            {"role": "system", "content": (
-                                "You are a specialist agent. Complete the assigned task "
-                                "thoroughly and concisely. Focus only on this specific task."
-                            )},
-                            {"role": "user", "content": (
-                                f"Context: {plan.original_message}\n\n"
-                                f"Your specific task: {subtask.description}"
-                            )},
-                        ],
-                        model=self._model,
-                        temperature=0.3,
-                        max_tokens=4096,
+                    msg = InboundMessage(
+                        channel="internal",
+                        sender_id="conductor",
+                        chat_id=agent_id,
+                        content=(
+                            f"Context: {plan.original_message}\n\n"
+                            f"Your specific task: {subtask.description}"
+                        ),
+                        target_agent_id=agent_id,
+                        metadata={"_request_id": request_id},
+                        session_key_override=f"internal:{agent_id}:{subtask.id}",
                     )
-                result = response.content
+                    await self._bus.publish_inbound(msg)
 
-            subtask.result = result
-            subtask.status = SubTaskStatus.COMPLETED
-            self._registry.record_task_result(agent_id, success=True)
-            self._registry.update_status(agent_id, AgentStatus.IDLE)
-            return result
+                    try:
+                        result = await asyncio.wait_for(fut, timeout=self._subtask_timeout)
+                    except asyncio.TimeoutError:
+                        self._bus.cancel_response(request_id)
+                        raise TimeoutError(f"Agent '{agent_id}' did not respond within {self._subtask_timeout}s")
+                else:
+                    async with self._llm_semaphore:
+                        response = await self._provider.chat(
+                            messages=[
+                                {"role": "system", "content": (
+                                    "You are a specialist agent. Complete the assigned task "
+                                    "thoroughly and concisely. Focus only on this specific task."
+                                )},
+                                {"role": "user", "content": (
+                                    f"Context: {plan.original_message}\n\n"
+                                    f"Your specific task: {subtask.description}"
+                                )},
+                            ],
+                            model=self._model,
+                            temperature=0.3,
+                            max_tokens=4096,
+                        )
+                    result = response.content
 
-        except Exception as e:
-            logger.error("Orchestrator: subtask '{}' failed: {}", subtask.id, e)
-            subtask.result = str(e)
-            subtask.status = SubTaskStatus.FAILED
-            self._registry.record_task_result(agent_id, success=False)
-            self._registry.update_status(agent_id, AgentStatus.ERROR)
-            return None
+                subtask.result = result
+                subtask.status = SubTaskStatus.COMPLETED
+                self._registry.record_task_result(agent_id, success=True)
+                self._registry.update_status(agent_id, AgentStatus.IDLE)
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning("Orchestrator: subtask '{}' attempt {} failed: {}",
+                               subtask.id, attempt + 1, e)
+
+        # All retries exhausted
+        logger.error("Orchestrator: subtask '{}' failed after {} attempts: {}",
+                     subtask.id, 1 + self._max_retries, last_error)
+        subtask.result = str(last_error)
+        subtask.status = SubTaskStatus.FAILED
+        self._registry.record_task_result(agent_id, success=False)
+        self._registry.update_status(agent_id, AgentStatus.ERROR)
+        return None
 
     # ── Phase 5: MERGING ──────────────────────────────────────────────────
 
