@@ -112,7 +112,7 @@ export function MessageList() {
         <button 
           onClick={() => { if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
           style={{ position: 'sticky', bottom: '20px', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '20px', padding: '6px 16px', color: 'var(--text-primary)', zIndex: 100, cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-          ↓ SCROLL TO BOTTOM
+          {t('scroll_bottom')}
         </button>
       )}
       {messages.value.map((msg, i) => {

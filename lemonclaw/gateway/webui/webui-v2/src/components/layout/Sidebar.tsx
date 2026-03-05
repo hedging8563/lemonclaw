@@ -73,7 +73,7 @@ export function Sidebar() {
             style={{ width: '40px', padding: '8px 0', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-            title="Toggle Theme"
+            title={t('toggle_theme')}
           >
             🌓
           </button>

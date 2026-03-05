@@ -61,7 +61,7 @@ export function TopBar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '18px', cursor: 'pointer', paddingRight: '8px' }}>☰</button>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            <span class="topbar-session-id">// SESSION: </span><span style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default' }} onClick={() => isWebUI && setSpOpen(!spOpen)} title="Click to edit Session Prompt">{activeSessionKey.value.replace('webui:', '')}</span>
+            <span class="topbar-session-id">{t('session_label')}</span><span style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default' }} onClick={() => isWebUI && setSpOpen(!spOpen)} title={t('click_edit_sp')}>{activeSessionKey.value.replace('webui:', '')}</span>
           </div>
           {isWebUI && spDraft && <span style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '3px' }}>SP</span>}
         </div>
@@ -90,7 +90,7 @@ export function TopBar() {
 
           <button onClick={logout} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)', cursor: 'pointer' }}>🚪 <span class="topbar-text-label">{t('logout')}</span></button>
           
-          <button onClick={() => showInspector.value = !showInspector.value} style={{ background: showInspector.value ? 'var(--bg-tertiary)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)', cursor: 'pointer', marginLeft: '8px', transition: 'all 0.2s' }} title="Toggle Inspector">
+          <button onClick={() => showInspector.value = !showInspector.value} style={{ background: showInspector.value ? 'var(--bg-tertiary)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)', cursor: 'pointer', marginLeft: '8px', transition: 'all 0.2s' }} title={t('toggle_inspector')}>
             👁️
           </button>
         </div>

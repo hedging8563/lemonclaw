@@ -76,7 +76,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
            </div>
          );
       } else if (typeof v === 'object' && v !== null) {
-         let currentObj = v;
+         let currentObj: any = v;
          let displayKey = k;
          let cPath = [...currentPath];
          while (typeof currentObj === 'object' && currentObj !== null && !Array.isArray(currentObj)) {

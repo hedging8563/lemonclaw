@@ -37,9 +37,9 @@ export function SessionItem({ session }: { session: Session }) {
         </div>
       </div>
       <button 
-        onClick={(e) => { e.stopPropagation(); if(confirm('Delete this session permanently?')) deleteSession(session.key); }}
+        onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
         style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', fontFamily: 'var(--font-mono)' }}
-        title="Delete Session"
+        title={t('delete_session')}
         onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error)'}
         onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
       >
