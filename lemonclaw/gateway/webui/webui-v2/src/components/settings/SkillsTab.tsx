@@ -46,9 +46,9 @@ export function SkillsTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', gap: '8px' }}>
-        <input 
-          placeholder="GitHub URL to install skill..." 
-          value={installUrl} 
+        <input
+          placeholder="owner/repo/skill or GitHub URL..."
+          value={installUrl}
           onInput={e => setInstallUrl((e.target as HTMLInputElement).value)} 
           style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '8px 12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }} 
         />

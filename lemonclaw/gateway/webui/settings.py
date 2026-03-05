@@ -445,15 +445,91 @@ def get_settings_routes(
         if not url:
             return _json({"error": "Missing 'url' field"}, 400)
 
-        # Basic URL validation
-        if not url.startswith(("https://", "http://")):
-            return _json({"error": "URL must start with https:// or http://"}, 400)
-
         if not agent_loop:
             return _json({"error": "Agent not available"}, 503)
 
         workspace_skills = agent_loop.context.skills.workspace_skills
         workspace_skills.mkdir(parents=True, exist_ok=True)
+
+        import subprocess, shutil, tempfile, re as _re
+
+        # Parse various input formats:
+        # 1. "npx skills add https://github.com/owner/repo --skill skill-name"
+        # 2. "npx skills add owner/repo --skill skill-name"
+        # 3. "https://skills.sh/owner/repo/skill-name"
+        # 4. "owner/repo/skill-name"
+        # 5. "https://github.com/owner/repo" (existing git clone)
+
+        # Strip "npx skills add " prefix if pasted from CLI
+        cleaned = url
+        if cleaned.startswith("npx "):
+            cleaned = _re.sub(r'^npx\s+skills?\s+add\s+', '', cleaned).strip()
+
+        # Extract --skill flag
+        explicit_skill = None
+        skill_flag_match = _re.search(r'--skill\s+(\S+)', cleaned)
+        if skill_flag_match:
+            explicit_skill = skill_flag_match.group(1)
+            cleaned = _re.sub(r'\s*--skill\s+\S+', '', cleaned).strip()
+
+        # Detect skills.sh format: "owner/repo/skill" or "https://skills.sh/owner/repo/skill"
+        skills_sh_match = None
+
+        if explicit_skill and _SAFE_NAME_RE.match(explicit_skill):
+            # --skill flag provided: extract owner/repo from URL or shorthand
+            repo_url = cleaned.replace("https://skills.sh/", "").replace("http://skills.sh/", "")
+            repo_url = repo_url.replace("https://github.com/", "").replace("http://github.com/", "")
+            repo_url = repo_url.rstrip("/").removesuffix(".git")
+            repo_parts = [p for p in repo_url.split("/") if p]
+            if len(repo_parts) >= 2:
+                skills_sh_match = (repo_parts[0], repo_parts[1], explicit_skill)
+        else:
+            stripped = cleaned.replace("https://skills.sh/", "").replace("http://skills.sh/", "")
+            # Match owner/repo/skill-name (3 segments, no protocol)
+            parts = [p for p in stripped.strip("/").split("/") if p]
+            if len(parts) == 3 and not cleaned.startswith(("https://github", "http://github")):
+                owner, repo, skill_name = parts
+                if _SAFE_NAME_RE.match(skill_name):
+                    skills_sh_match = (owner, repo, skill_name)
+
+        if skills_sh_match:
+            owner, repo, skill_name = skills_sh_match
+            target = workspace_skills / skill_name
+            if not target.resolve().parent == workspace_skills.resolve():
+                return _json({"error": "Invalid skill path"}, 400)
+            if target.exists():
+                return _json({"error": f"Skill '{skill_name}' already exists"}, 409)
+
+            # Clone to temp dir, extract skill subdirectory
+            tmp_dir = tempfile.mkdtemp(prefix="lc_skill_")
+            try:
+                git_url = f"https://github.com/{owner}/{repo}.git"
+                result = subprocess.run(
+                    ["git", "clone", "--depth=1", git_url, tmp_dir],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    return _json({"error": f"git clone failed: {result.stderr.strip()}"}, 422)
+
+                # Look for skill in skills/<name>/ or <name>/
+                skill_src = Path(tmp_dir) / "skills" / skill_name
+                if not skill_src.is_dir():
+                    skill_src = Path(tmp_dir) / skill_name
+                if not skill_src.is_dir() or not (skill_src / "SKILL.md").exists():
+                    return _json({"error": f"Skill '{skill_name}' not found in {owner}/{repo}"}, 422)
+
+                shutil.copytree(str(skill_src), str(target))
+                return _maybe_refresh(request, _json({"installed": skill_name, "source": f"skills.sh:{owner}/{repo}"}, 201))
+            except subprocess.TimeoutExpired:
+                return _json({"error": "git clone timed out"}, 422)
+            except FileNotFoundError:
+                return _json({"error": "git not found on system"}, 500)
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        # Standard GitHub URL install (existing logic)
+        if not url.startswith(("https://", "http://")):
+            return _json({"error": "URL must start with https:// or http://, or use owner/repo/skill format"}, 400)
 
         # Extract skill name from URL (last path segment) with strict validation
         skill_name = url.rstrip("/").split("/")[-1]
@@ -470,7 +546,6 @@ def get_settings_routes(
             return _json({"error": f"Skill '{skill_name}' already exists"}, 409)
 
         # Git clone
-        import subprocess
         try:
             result = subprocess.run(
                 ["git", "clone", "--depth=1", url, str(target)],
@@ -480,7 +555,6 @@ def get_settings_routes(
                 return _json({"error": f"git clone failed: {result.stderr.strip()}"}, 422)
         except subprocess.TimeoutExpired:
             # Clean up partial clone
-            import shutil
             if target.exists():
                 shutil.rmtree(target)
             return _json({"error": "git clone timed out"}, 422)
@@ -489,7 +563,6 @@ def get_settings_routes(
 
         # Verify SKILL.md exists
         if not (target / "SKILL.md").exists():
-            import shutil
             shutil.rmtree(target)
             return _json({"error": "No SKILL.md found in repository"}, 422)
 
