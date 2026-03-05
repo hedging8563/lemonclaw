@@ -124,8 +124,8 @@ export function MessageList() {
             style={{ display: 'flex', gap: '12px', maxWidth: '800px', width: '100%', margin: '0 auto', justifyContent: isUser ? 'flex-end' : 'flex-start', position: 'relative' }}
           >
             {!isUser && (
-              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0, marginTop: '2px', fontFamily: 'var(--font-mono)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--teal)' }}>
-                A
+              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '2px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                <img src="/logo-icon.svg" style={{ width: '18px', height: '18px', objectFit: 'contain' }} alt="Bot" />
               </div>
             )}
 
