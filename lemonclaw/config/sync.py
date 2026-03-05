@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 3
+MODEL_CONFIG_VERSION = 4
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -356,20 +356,20 @@ def _sync_model_config(config: Config) -> bool:
     changed = False
     api_key = config.providers.lemondata.api_key or os.environ.get("API_KEY", "")
 
-    # Ensure all 4 providers have correct api_base
+    # Ensure all 4 providers have correct api_base (always set, not conditional,
+    # because _apply_env_overrides may have set in-memory values that mask
+    # missing disk values — we need to persist them)
     if api_key:
-        if not config.providers.lemondata.api_base:
-            config.providers.lemondata.api_base = LEMONDATA_API_BASE_V1
-            changed = True
-        if not config.providers.lemondata_claude.api_base:
-            config.providers.lemondata_claude.api_base = LEMONDATA_API_BASE
-            changed = True
-        if not config.providers.lemondata_minimax.api_base:
-            config.providers.lemondata_minimax.api_base = LEMONDATA_API_BASE
-            changed = True
-        if not config.providers.lemondata_gemini.api_base:
-            config.providers.lemondata_gemini.api_base = LEMONDATA_API_BASE
-            changed = True
+        expected = [
+            (config.providers.lemondata, LEMONDATA_API_BASE_V1),
+            (config.providers.lemondata_claude, LEMONDATA_API_BASE),
+            (config.providers.lemondata_minimax, LEMONDATA_API_BASE),
+            (config.providers.lemondata_gemini, LEMONDATA_API_BASE),
+        ]
+        for prov, expected_base in expected:
+            if prov.api_base != expected_base:
+                prov.api_base = expected_base
+                changed = True
 
     # v2: Ensure coding tool has api_key + api_base + enabled
     if api_key:
