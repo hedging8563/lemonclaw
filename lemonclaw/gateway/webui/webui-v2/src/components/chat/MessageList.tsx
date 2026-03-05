@@ -49,7 +49,7 @@ function MsgActions({ msg }: { msg: any }) {
   };
 
   return (
-    <div style={{ position: 'absolute', top: '-14px', right: '10px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', zIndex: 10 }} className="msg-actions-bar">
+    <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} className="msg-actions-bar">
        <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : t('copy')}</button>
        {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
@@ -124,12 +124,21 @@ export function MessageList() {
             style={{ display: 'flex', gap: '12px', maxWidth: '800px', width: '100%', margin: '0 auto', justifyContent: isUser ? 'flex-end' : 'flex-start', position: 'relative' }}
           >
             {!isUser && (
-              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0, marginTop: '4px', fontFamily: 'var(--font-mono)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--teal)' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0, marginTop: '2px', fontFamily: 'var(--font-mono)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--teal)' }}>
                 A
               </div>
             )}
 
-            <div style={{ position: 'relative', maxWidth: '680px', minWidth: 0, flex: 1, padding: '4px 14px', textAlign: isUser ? 'right' : 'left' }}>
+            <div style={{ 
+              position: 'relative', 
+              maxWidth: '680px', 
+              minWidth: 0, 
+              padding: isUser ? '10px 14px' : '4px 0', 
+              textAlign: 'left',
+              background: isUser ? 'var(--bg-tertiary)' : 'transparent',
+              border: isUser ? '1px solid var(--border)' : 'none',
+              borderRadius: isUser ? '8px 8px 0 8px' : '0'
+            }}>
               
               <MsgActions msg={msg} />
 

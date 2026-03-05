@@ -51,6 +51,7 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
+  font-size: 14px;
 }
 
 /* ── Layout ───────────────────────────────────────────────────────── */
