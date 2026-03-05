@@ -230,6 +230,8 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+        if key in self._cache_order:
+            self._cache_order.remove(key)
     
     def list_sessions(self) -> list[dict[str, Any]]:
         """

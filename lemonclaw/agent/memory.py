@@ -103,7 +103,8 @@ class MemoryStore:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return  # No event loop — skip (e.g. migration scripts)
-        loop.create_task(self.search_index.upsert_entity(name, body, self._provider))
+        task = loop.create_task(self.search_index.upsert_entity(name, body, self._provider))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     def set_provider(self, provider: LLMProvider) -> None:
         """Bind an LLM provider for search index updates."""

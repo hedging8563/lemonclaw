@@ -477,7 +477,10 @@ class AgentLoop:
     def _evict_idle_session_locks(self) -> None:
         """Remove oldest idle session locks when over the LRU limit."""
         evicted = 0
-        while len(self._session_locks) > self._MAX_SESSION_LOCKS and self._session_lock_order:
+        max_scan = min(len(self._session_lock_order), 50)  # Cap scan to avoid O(n) sweep
+        scanned = 0
+        while len(self._session_locks) > self._MAX_SESSION_LOCKS and self._session_lock_order and scanned < max_scan:
+            scanned += 1
             oldest = self._session_lock_order.pop(0)
             lock = self._session_locks.get(oldest)
             if lock and not lock.locked():
@@ -486,9 +489,8 @@ class AgentLoop:
                 self._consolidation_locks.pop(oldest, None)
                 evicted += 1
             else:
-                # Still in use, put it back at the end
+                # Still in use, put it back at the end and keep scanning
                 self._session_lock_order.append(oldest)
-                break  # Avoid infinite loop if all locks are active
         if evicted:
             logger.debug("Evicted {} idle session locks (total: {})", evicted, len(self._session_locks))
 
