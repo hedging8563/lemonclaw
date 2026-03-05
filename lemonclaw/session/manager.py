@@ -85,6 +85,8 @@ class SessionManager:
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".lemonclaw" / "sessions"
         self._cache: dict[str, Session] = {}
+        self._cache_order: list[str] = []  # LRU tracking
+        self._MAX_CACHED_SESSIONS = 200  # Upper bound to prevent unbounded memory growth
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -96,24 +98,40 @@ class SessionManager:
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
     
+    def _touch_cache(self, key: str) -> None:
+        """Update LRU order for a cache key."""
+        if key in self._cache_order:
+            self._cache_order.remove(key)
+        self._cache_order.append(key)
+
+    def _evict_cache(self) -> None:
+        """Evict oldest cached sessions when over the LRU limit."""
+        while len(self._cache) > self._MAX_CACHED_SESSIONS and self._cache_order:
+            oldest = self._cache_order.pop(0)
+            self._cache.pop(oldest, None)
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
-        
+
         Args:
             key: Session key (usually channel:chat_id).
-        
+
         Returns:
             The session.
         """
         if key in self._cache:
+            self._touch_cache(key)
             return self._cache[key]
-        
+
         session = self._load(key)
         if session is None:
             session = Session(key=key)
-        
+
         self._cache[key] = session
+        self._touch_cache(key)
+        if len(self._cache) > self._MAX_CACHED_SESSIONS:
+            self._evict_cache()
         return session
     
     def _load(self, key: str) -> Session | None:
@@ -207,6 +225,7 @@ class SessionManager:
         path = self._get_session_path(session.key)
         self._atomic_save(path, session)
         self._cache[session.key] = session
+        self._touch_cache(session.key)
     
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
