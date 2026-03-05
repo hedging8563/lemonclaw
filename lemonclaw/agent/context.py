@@ -74,7 +74,7 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
-        return f"""# LemonClaw
+        return f"""# LemonClaw 🍋
 
 You are LemonClaw, a helpful AI assistant powered by LemonData.
 
@@ -175,10 +175,14 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             if rules_ctx:
                 text_prefix += "\n\n" + rules_ctx
             user_content = [{"type": "text", "text": text_prefix}, *user_content]
+        user_msg: dict[str, Any] = {"role": "user", "content": user_content}
+        # Preserve original user text so _save_turn can strip runtime context
+        if isinstance(user_content, str) and user_content.startswith(self._RUNTIME_CONTEXT_TAG):
+            user_msg["_original_text"] = current_message
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
-            {"role": "user", "content": user_content},
+            user_msg,
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:

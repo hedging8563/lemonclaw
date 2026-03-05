@@ -906,7 +906,14 @@ class AgentLoop:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    continue
+                    # Strip runtime context prefix — save only the user's actual message.
+                    # build_messages() stores original text in _original_text key.
+                    original = m.get("_original_text")
+                    if original:
+                        entry["content"] = original
+                        entry.pop("_original_text", None)
+                    else:
+                        continue
                 if isinstance(content, list):
                     entry["content"] = [
                         {"type": "text", "text": "[image]"} if (
