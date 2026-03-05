@@ -317,7 +317,7 @@ class EmailChannel(BaseChannel):
             try:
                 client.logout()
             except Exception:
-                pass
+                logger.debug("IMAP logout failed")
 
         return messages
 

@@ -26,32 +26,31 @@ class TestSSRFProtection:
     """web_fetch must block access to private/internal addresses."""
 
     def test_private_ip_detected(self):
-        from lemonclaw.agent.tools.web import _is_private_ip
-        assert _is_private_ip("127.0.0.1") is True
-        assert _is_private_ip("localhost") is True
-        assert _is_private_ip("10.0.0.1") is True
-        assert _is_private_ip("172.16.0.1") is True
-        assert _is_private_ip("192.168.1.1") is True
+        from lemonclaw.agent.tools.web import _is_private_ip_addr
+        assert _is_private_ip_addr("127.0.0.1") is True
+        assert _is_private_ip_addr("10.0.0.1") is True
+        assert _is_private_ip_addr("172.16.0.1") is True
+        assert _is_private_ip_addr("192.168.1.1") is True
 
     def test_link_local_blocked(self):
-        from lemonclaw.agent.tools.web import _is_private_ip
+        from lemonclaw.agent.tools.web import _is_private_ip_addr
         # Cloud metadata endpoint
-        assert _is_private_ip("169.254.169.254") is True
+        assert _is_private_ip_addr("169.254.169.254") is True
 
     def test_public_ip_allowed(self):
-        from lemonclaw.agent.tools.web import _is_private_ip
-        assert _is_private_ip("8.8.8.8") is False
-        assert _is_private_ip("1.1.1.1") is False
+        from lemonclaw.agent.tools.web import _is_private_ip_addr
+        assert _is_private_ip_addr("8.8.8.8") is False
+        assert _is_private_ip_addr("1.1.1.1") is False
 
     def test_validate_url_blocks_private(self):
         from lemonclaw.agent.tools.web import _validate_url
-        valid, err = _validate_url("http://127.0.0.1:8080/secret")
+        valid, err, _ip = _validate_url("http://127.0.0.1:8080/secret")
         assert valid is False
         assert "private" in err.lower() or "internal" in err.lower()
 
     def test_validate_url_blocks_metadata(self):
         from lemonclaw.agent.tools.web import _validate_url
-        valid, err = _validate_url("http://169.254.169.254/latest/meta-data/")
+        valid, err, _ip = _validate_url("http://169.254.169.254/latest/meta-data/")
         assert valid is False
 
     def test_validate_url_allows_public(self):
@@ -60,16 +59,17 @@ class TestSSRFProtection:
         # Mock DNS to return a known public IP (avoid local DNS proxy interference)
         fake_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
         with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", return_value=fake_info):
-            valid, err = _validate_url("https://example.com")
+            valid, err, _ip = _validate_url("https://example.com")
         assert valid is True
 
     def test_unresolvable_host_blocked(self):
-        from lemonclaw.agent.tools.web import _is_private_ip
+        from lemonclaw.agent.tools.web import _resolve_to_safe_ip
         from unittest.mock import patch as mock_patch
         import socket
         # Simulate DNS resolution failure — fail-closed
         with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", side_effect=socket.gaierror("not found")):
-            assert _is_private_ip("this-domain-does-not-exist-xyz123.invalid") is True
+            ip, err = _resolve_to_safe_ip("this-domain-does-not-exist-xyz123.invalid")
+            assert ip is None
 
 
 # ── 2a. Tool Safety (CVE-2026-25253, shell.py deny_patterns) ──

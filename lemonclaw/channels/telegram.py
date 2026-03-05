@@ -381,9 +381,8 @@ class TelegramChannel(BaseChannel):
                             message_id=stream.message_id,
                             text=chunks[0],
                         )
-                    except Exception:
-                        pass
-                # Send remaining chunks as new messages
+                    except Exception as e2:
+                        logger.warning("Telegram message delivery failed completely: {}", e2)
                 remaining = chunks[1:]
             else:
                 remaining = chunks

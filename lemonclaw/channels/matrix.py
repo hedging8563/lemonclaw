@@ -399,7 +399,7 @@ class MatrixChannel(BaseChannel):
             if isinstance(response, RoomTypingError):
                 logger.debug("Matrix typing failed for {}: {}", room_id, response)
         except Exception:
-            pass
+            logger.debug("Matrix typing indicator failed")
 
     async def _start_typing_keepalive(self, room_id: str) -> None:
         """Start periodic typing refresh (spec-recommended keepalive)."""

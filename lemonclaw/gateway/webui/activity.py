@@ -160,7 +160,7 @@ def get_activity_routes(
         try:
             await asyncio.gather(_send_loop(), _recv_loop())
         except Exception:
-            pass
+            logger.debug("Activity WebSocket session ended")
         finally:
             activity_bus.unsubscribe(queue)
             logger.info("Activity WebSocket disconnected (clients: {})", activity_bus.client_count)

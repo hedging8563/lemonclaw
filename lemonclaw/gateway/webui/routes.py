@@ -86,7 +86,7 @@ def _load_index_html() -> str:
         _INDEX_HTML = ref.read_text(encoding="utf-8")
         return _INDEX_HTML
     except Exception:
-        pass
+        logger.debug("importlib.resources load failed, trying filesystem fallback")
 
     # Fallback: relative path (development)
     dev_path = Path(__file__).parent / "static" / "index.html"
@@ -498,7 +498,7 @@ def get_webui_routes(
                     raw = _json_mod.load(f)
                 current = raw.get("agents", {}).get("defaults", {}).get("model", "")
         except Exception:
-            pass
+            logger.debug("Failed to read current model from config")
         if not current:
             current = agent_loop.model if hasattr(agent_loop, "model") else ""
         resp = _json({"models": models, "current": current})

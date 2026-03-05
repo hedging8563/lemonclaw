@@ -74,7 +74,7 @@ def _restore_terminal() -> None:
         import termios
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
     except Exception:
-        pass
+        logger.debug("Terminal state restore failed")
 
 
 def _init_prompt_session() -> None:
@@ -1306,7 +1306,7 @@ def _login_openai_codex() -> None:
         try:
             token = get_token()
         except Exception:
-            pass
+            logger.debug("Cached token retrieval failed, will prompt login")
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(

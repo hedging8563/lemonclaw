@@ -214,7 +214,7 @@ class AgentLoop:
                 try:
                     await self._mcp_stack.aclose()
                 except Exception:
-                    pass
+                    logger.debug("MCP stack close failed", exc_info=True)
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
@@ -460,8 +460,10 @@ class AgentLoop:
         for tk in tasks:
             try:
                 await tk
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.debug("Task ended with error during stop for session {}", msg.session_key)
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
         total = cancelled + sub_cancelled
         lang = session_lang(self.sessions._load(msg.session_key))

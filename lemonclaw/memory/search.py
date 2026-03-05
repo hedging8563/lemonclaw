@@ -156,7 +156,7 @@ class MemorySearchIndex:
         try:
             self._db.drop_table("memory")
         except Exception:
-            pass
+            logger.warning("Failed to drop old memory table, rebuild may fail")
         self._table = self._db.create_table("memory", docs)
 
         # Create FTS index for BM25
