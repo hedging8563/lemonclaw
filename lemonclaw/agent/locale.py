@@ -41,7 +41,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
     },
     "help": {
         "en": (
-            "🐾 LemonClaw commands:\n"
+            "🍋 LemonClaw commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/model — List or switch models\n"
@@ -49,7 +49,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/help — Show available commands"
         ),
         "zh": (
-            "🐾 LemonClaw 命令：\n"
+            "🍋 LemonClaw 命令：\n"
             "/new — 开始新会话\n"
             "/stop — 停止当前任务\n"
             "/model — 查看或切换模型\n"

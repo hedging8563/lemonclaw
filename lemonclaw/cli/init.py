@@ -55,7 +55,7 @@ SYSTEMD_WATCHDOG_TIMER = "lemonclaw-watchdog.timer"
 def run_init(*, telegram_only: bool = False) -> None:
     """Run the full interactive init wizard."""
     console.print(Panel.fit(
-        f"[bold cyan]🐾 LemonClaw v{__version__} — Setup Wizard[/bold cyan]\n"
+        f"[bold cyan]🍋 LemonClaw v{__version__} — Setup Wizard[/bold cyan]\n"
         "[dim]Configure LemonClaw for self-hosted deployment.[/dim]",
         border_style="cyan",
     ))
@@ -430,7 +430,7 @@ def _print_summary(gateway_token: str, service_registered: bool) -> None:
     )
 
     console.print(Panel.fit(
-        f"[bold green]🐾 LemonClaw Setup Complete![/bold green]\n\n"
+        f"[bold green]🍋 LemonClaw Setup Complete![/bold green]\n\n"
         f"Config:   {CONFIG_FILE}\n"
         f"Model:    {DEFAULT_MODEL}\n"
         f"Gateway:  http://localhost:{DEFAULT_GATEWAY_PORT}\n"
