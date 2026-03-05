@@ -56,11 +56,13 @@ class UsageTracker:
         self,
         token_budget_per_session: int | None = None,
         cost_budget_per_day: float | None = None,
-        cost_per_1k_tokens: float = 0.01,
+        input_cost_per_1k_tokens: float = 0.003,
+        output_cost_per_1k_tokens: float = 0.015,
     ) -> None:
         self.token_budget_per_session = token_budget_per_session
         self.cost_budget_per_day = cost_budget_per_day
-        self.cost_per_1k_tokens = cost_per_1k_tokens
+        self.input_cost_per_1k_tokens = input_cost_per_1k_tokens
+        self.output_cost_per_1k_tokens = output_cost_per_1k_tokens
         self._start_time = time.monotonic()
         # Instance-level cumulative counters (reset on restart)
         self._instance_totals: dict[str, int] = {
@@ -74,9 +76,10 @@ class UsageTracker:
         self._daily_cost_date: date = date.today()
         self._daily_cost_alerted: bool = False
 
-    def _estimate_cost(self, total_tokens: int) -> float:
-        """Estimate cost in USD from token count."""
-        return (total_tokens / 1000.0) * self.cost_per_1k_tokens
+    def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        """Estimate cost in USD from input/output token counts."""
+        return (prompt_tokens / 1000.0) * self.input_cost_per_1k_tokens + \
+               (completion_tokens / 1000.0) * self.output_cost_per_1k_tokens
 
     def _rotate_daily(self) -> None:
         """Reset daily cost counter if date has changed."""
@@ -106,7 +109,7 @@ class UsageTracker:
 
         # Update daily cost
         self._rotate_daily()
-        turn_cost = self._estimate_cost(turn.total_tokens)
+        turn_cost = self._estimate_cost(turn.prompt_tokens, turn.completion_tokens)
         self._daily_cost += turn_cost
 
         # Budget check: session token limit
@@ -133,13 +136,14 @@ class UsageTracker:
     def get_session_summary(self, session_metadata: dict[str, Any]) -> dict[str, Any]:
         """Get usage summary for a single session from its metadata."""
         stats = session_metadata.get("usage_stats", {})
-        total = stats.get("total_tokens", 0)
+        prompt = stats.get("prompt_tokens", 0)
+        completion = stats.get("completion_tokens", 0)
         return {
-            "prompt_tokens": stats.get("prompt_tokens", 0),
-            "completion_tokens": stats.get("completion_tokens", 0),
-            "total_tokens": total,
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": stats.get("total_tokens", 0),
             "llm_calls": stats.get("llm_calls", 0),
-            "estimated_cost": self._estimate_cost(total),
+            "estimated_cost": self._estimate_cost(prompt, completion),
         }
 
     def get_instance_summary(self) -> dict[str, Any]:
@@ -152,7 +156,8 @@ class UsageTracker:
             "budgets": {
                 "token_budget_per_session": self.token_budget_per_session,
                 "cost_budget_per_day": self.cost_budget_per_day,
-                "cost_per_1k_tokens": self.cost_per_1k_tokens,
+                "input_cost_per_1k_tokens": self.input_cost_per_1k_tokens,
+                "output_cost_per_1k_tokens": self.output_cost_per_1k_tokens,
             },
         }
 

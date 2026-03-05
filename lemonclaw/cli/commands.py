@@ -301,7 +301,8 @@ def gateway(
     usage_tracker = UsageTracker(
         token_budget_per_session=config.agents.defaults.token_budget_per_session,
         cost_budget_per_day=config.agents.defaults.cost_budget_per_day,
-        cost_per_1k_tokens=config.agents.defaults.cost_per_1k_tokens,
+        input_cost_per_1k_tokens=config.agents.defaults.input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=config.agents.defaults.output_cost_per_1k_tokens,
     )
 
     # Create cron service first (callback set after agent creation)
