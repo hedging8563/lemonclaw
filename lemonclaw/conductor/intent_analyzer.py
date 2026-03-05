@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from json_repair import repair_json
 from loguru import logger
 
 from lemonclaw.conductor.types import IntentAnalysis, TaskComplexity
@@ -45,7 +46,11 @@ async def analyze_intent(
             temperature=0.0,
             max_tokens=256,
         )
-        data = json.loads(strip_fences(response.content or ""))
+        raw = strip_fences(response.content or "")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = json.loads(repair_json(raw))
         return IntentAnalysis(
             complexity=TaskComplexity(data.get("complexity", "simple")),
             summary=data.get("summary", message[:80]),

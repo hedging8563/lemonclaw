@@ -130,6 +130,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
         self._session_locks: dict[str, asyncio.Lock] = {}  # per-session processing locks
+        self._session_lock_order: list[str] = []  # LRU tracking for session locks
+        self._MAX_SESSION_LOCKS = 1000  # Upper bound to prevent unbounded growth
         self._register_default_tools()
 
     def update_defaults(
@@ -440,6 +442,9 @@ class AgentLoop:
                     tasks = self._active_tasks.get(key, [])
                     if t in tasks:
                         tasks.remove(t)
+                    # Clean up empty list to prevent unbounded dict growth
+                    if not tasks and key in self._active_tasks:
+                        del self._active_tasks[key]
 
                 task.add_done_callback(_on_task_done)
 
@@ -466,6 +471,24 @@ class AgentLoop:
             metadata=msg.metadata or {},
         ))
 
+    def _evict_idle_session_locks(self) -> None:
+        """Remove oldest idle session locks when over the LRU limit."""
+        evicted = 0
+        while len(self._session_locks) > self._MAX_SESSION_LOCKS and self._session_lock_order:
+            oldest = self._session_lock_order.pop(0)
+            lock = self._session_locks.get(oldest)
+            if lock and not lock.locked():
+                del self._session_locks[oldest]
+                self._stop_events.pop(oldest, None)
+                self._consolidation_locks.pop(oldest, None)
+                evicted += 1
+            else:
+                # Still in use, put it back at the end
+                self._session_lock_order.append(oldest)
+                break  # Avoid infinite loop if all locks are active
+        if evicted:
+            logger.debug("Evicted {} idle session locks (total: {})", evicted, len(self._session_locks))
+
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under a per-session lock."""
         is_internal = msg.channel == "internal"
@@ -474,6 +497,13 @@ class AgentLoop:
         # Per-session lock: different sessions can run concurrently
         if msg.session_key not in self._session_locks:
             self._session_locks[msg.session_key] = asyncio.Lock()
+            # LRU eviction: remove oldest idle locks when over limit
+            if len(self._session_locks) > self._MAX_SESSION_LOCKS:
+                self._evict_idle_session_locks()
+        # Touch LRU order
+        if msg.session_key in self._session_lock_order:
+            self._session_lock_order.remove(msg.session_key)
+        self._session_lock_order.append(msg.session_key)
         lock = self._session_locks[msg.session_key]
 
         # Create a fresh stop event for this dispatch
@@ -905,6 +935,11 @@ class AgentLoop:
         await self._connect_mcp()
         if session_key not in self._session_locks:
             self._session_locks[session_key] = asyncio.Lock()
+            if len(self._session_locks) > self._MAX_SESSION_LOCKS:
+                self._evict_idle_session_locks()
+        if session_key in self._session_lock_order:
+            self._session_lock_order.remove(session_key)
+        self._session_lock_order.append(session_key)
         async with self._session_locks[session_key]:
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
                                  metadata=metadata or {}, media=media or [])

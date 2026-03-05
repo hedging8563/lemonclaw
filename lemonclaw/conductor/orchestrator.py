@@ -12,6 +12,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING
 
+from json_repair import repair_json
 from loguru import logger
 
 from lemonclaw.conductor.intent_analyzer import _strip_fences
@@ -138,7 +139,11 @@ class Orchestrator:
                     temperature=0.1,
                     max_tokens=1024,
                 )
-            tasks_data = json.loads(_strip_fences(response.content))
+            raw = _strip_fences(response.content)
+            try:
+                tasks_data = json.loads(raw)
+            except json.JSONDecodeError:
+                tasks_data = json.loads(repair_json(raw))
             for td in tasks_data:
                 plan.subtasks.append(SubTask(
                     id=td["id"],
@@ -195,11 +200,12 @@ class Orchestrator:
 
         pending_futures: dict[str, asyncio.Task[str | None]] = {}
         monitor_timeout = 600  # 10 min hard ceiling for entire monitoring phase
-        deadline = asyncio.get_event_loop().time() + monitor_timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + monitor_timeout
 
         while not plan.is_complete:
             # Hard timeout guard
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 logger.error("Orchestrator: MONITORING timeout ({}s), aborting", monitor_timeout)
                 for tid, t in pending_futures.items():
