@@ -1,0 +1,65 @@
+/* ── Star Office pixel scene (Multi-Agent Co-working) ── */
+.star-office { position: relative; width: 100%; max-width: 100%; height: 180px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; image-rendering: pixelated; margin-bottom: 16px; }
+.star-office::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.4; }
+
+.star-scene { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%) scale(1.5); transform-origin: bottom center; width: 400px; height: 120px; }
+.star-office-floor { position: absolute; bottom: 0; left: -100px; right: -100px; height: 30px; background: var(--bg-secondary); border-top: 1px solid var(--border); box-shadow: inset 0 4px 10px rgba(0,0,0,0.5); z-index: 0; }
+
+/* Desks */
+.star-desk-main { position: absolute; bottom: 30px; left: 150px; width: 100px; height: 24px; background: #222; border: 1px solid #333; border-bottom: none; border-radius: 2px 2px 0 0; z-index: 20; }
+.star-desk-main::before { content:''; position: absolute; top:0; left:-4px; right:-4px; height:4px; background: #333; border-radius: 2px; }
+
+.star-desk-side { position: absolute; width: 60px; height: 20px; background: #1A1A1A; border: 1px solid #2A2A2A; border-bottom: none; border-radius: 2px 2px 0 0; }
+.star-desk-side::before { content:''; position: absolute; top:0; left:-2px; right:-2px; height:3px; background: #2A2A2A; border-radius: 2px; }
+
+/* Monitors */
+.star-monitor-main { position: absolute; bottom: 24px; left: 20px; width: 60px; height: 32px; background: #111; border: 1px solid #444; border-radius: 4px; box-shadow: inset 0 0 6px var(--teal); transition: all 0.3s; }
+.star-monitor-main.executing { box-shadow: inset 0 0 8px var(--accent); }
+.star-monitor-main.error { box-shadow: inset 0 0 8px #F00; animation: screen-err 0.3s infinite; }
+
+.star-monitor-side { position: absolute; bottom: 20px; width: 24px; height: 28px; background: #111; border: 1px solid #444; border-radius: 2px; transition: all 0.3s; }
+
+/* Wall Dashboard */
+.star-dash { position: absolute; bottom: 70px; left: 120px; width: 160px; height: 40px; background: #0A0A0A; border: 1px solid #333; border-radius: 4px; overflow: hidden; display: flex; align-items: flex-end; padding: 4px; gap: 4px; z-index: 5; }
+.star-dash-bar { width: 8px; background: var(--teal); opacity: 0.8; height: 10px; transition: height 0.3s; }
+.star-dash.executing .star-dash-bar { animation: dash-bounce 0.5s infinite alternate; }
+.star-dash.executing .star-dash-bar:nth-child(2) { animation-delay: 0.1s; }
+.star-dash.executing .star-dash-bar:nth-child(3) { animation-delay: 0.2s; }
+.star-dash.executing .star-dash-bar:nth-child(4) { animation-delay: 0.3s; }
+.star-dash.executing .star-dash-bar:nth-child(5) { animation-delay: 0.4s; background: var(--accent); }
+
+/* Server Racks */
+.star-rack { position: absolute; bottom: 30px; width: 24px; height: 70px; background: #151515; border: 1px solid #222; z-index: 1; }
+.star-rack.left { left: 10px; }
+.star-rack.right { right: 10px; }
+.star-rack-light { position: absolute; width: 2px; height: 2px; background: var(--success); left: 4px; box-shadow: 8px 0 0 var(--teal), 0 6px 0 var(--accent), 8px 6px 0 var(--success); }
+.star-rack.executing .star-rack-light { animation: server-blink 0.3s infinite; }
+
+/* Cats (Agents) */
+.star-cat { position: absolute; width: 4px; height: 4px; }
+.star-cat-body { width: 4px; height: 4px; background: transparent; box-shadow: 0px 0px 0 0 var(--accent), 8px 0px 0 0 var(--accent), 0px 4px 0 0 var(--accent), 4px 4px 0 0 #D84D1A, 8px 4px 0 0 var(--accent), 0px 8px 0 0 var(--accent), 4px 8px 0 0 var(--accent), 8px 8px 0 0 var(--accent), 0px 12px 0 0 var(--accent), 4px 12px 0 0 #000, 8px 12px 0 0 var(--accent), 0px 16px 0 0 #D84D1A, 4px 16px 0 0 var(--accent), 8px 16px 0 0 #D84D1A, 0px 20px 0 0 #D84D1A, 4px 20px 0 0 #D84D1A, 8px 20px 0 0 #D84D1A, 0px 24px 0 0 #D4A574, 8px 24px 0 0 #D4A574; }
+
+.star-cat.agent-center { bottom: 54px; left: 196px; z-index: 21; }
+
+/* Status label */
+.star-status { position: absolute; top: 8px; left: 12px; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 2px 6px; border-radius: 4px; border: 1px solid transparent; z-index: 30; }
+.star-status.writing, .star-status.WRITING { color: var(--teal); background: rgba(10, 186, 181, 0.1); border-color: rgba(10, 186, 181, 0.3); }
+.star-status.executing, .star-status.EXECUTING { color: var(--accent); background: rgba(255, 107, 53, 0.1); border-color: rgba(255, 107, 53, 0.3); }
+.star-status.idle, .star-status.IDLE { color: var(--text-muted); background: var(--bg-secondary); border-color: var(--border); }
+.star-status.error, .star-status.ERROR { color: var(--error); background: rgba(255, 68, 68, 0.1); border-color: rgba(255, 68, 68, 0.3); }
+
+/* Particles */
+.star-particle { position: absolute; width: 2px; height: 2px; background: var(--teal); opacity: 0; z-index: 30; }
+.star-scene.executing .star-particle { animation: particle-float 1s infinite linear; }
+.star-scene.executing .star-particle:nth-child(1) { left: 80px; bottom: 60px; animation-delay: 0.1s; }
+.star-scene.executing .star-particle:nth-child(2) { left: 300px; bottom: 50px; animation-delay: 0.4s; background: var(--accent); }
+.star-scene.executing .star-particle:nth-child(3) { left: 200px; bottom: 90px; animation-delay: 0.7s; }
+
+/* Animations */
+@keyframes dash-bounce { 0% { height: 10px; } 100% { height: 30px; } }
+@keyframes server-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes screen-err { 0%,100% { box-shadow: inset 0 0 6px #F00; } 50% { box-shadow: inset 0 0 12px #F00; } }
+@keyframes cat-type { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes cat-run { 0%,100% { transform: translateX(0); } 50% { transform: translateX(2px); } }
+@keyframes cat-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+@keyframes particle-float { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-20px); opacity: 0; } }

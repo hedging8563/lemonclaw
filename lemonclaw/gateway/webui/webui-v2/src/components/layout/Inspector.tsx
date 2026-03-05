@@ -1,0 +1,23 @@
+import { StarOffice } from '../inspector/StarOffice';
+import { ConductorPanel } from '../inspector/ConductorPanel';
+import { MemoryPanel } from '../inspector/MemoryPanel';
+import { YesterdayMemo } from '../inspector/YesterdayMemo';
+import { showInspector } from '../../stores/ui';
+
+export function Inspector() {
+  return (
+    <aside class={`layout-inspector ${showInspector.value ? '' : 'closed'}`}>
+      <div style={{ height: 'var(--topbar-h)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 16px', flexShrink: 0, minWidth: '320px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
+          // INSPECTOR
+        </div>
+      </div>
+      <div style={{ flex: 1, padding: '16px', overflowY: 'auto' }}>
+        <YesterdayMemo />
+        <StarOffice />
+        <ConductorPanel />
+        <MemoryPanel />
+      </div>
+    </aside>
+  );
+}
