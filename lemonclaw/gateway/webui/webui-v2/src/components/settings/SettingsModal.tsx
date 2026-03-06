@@ -90,7 +90,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
            }
          }
          return (
-           <div key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
+           <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
              <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                <span style={{ color: 'var(--purple)' }}>#</span> {displayKey}
              </div>
@@ -158,18 +158,47 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* Content Area */}
-          <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--bg-primary)' }}>
+          <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
             {!draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading_configs')}</div> : (
-              <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize' }}>
-                  {(t as any)(`tab_${activeTab}`)}
+              <>
+                <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize' }}>
+                    {(t as any)(`tab_${activeTab}`)}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '32px' }}>
+                    {t('settings_desc')}
+                  </div>
+                  
+                  {activeTab === 'skills' ? <SkillsTab /> : renderFields(draft[activeTab], [activeTab])}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '32px' }}>
-                  {t('settings_desc')}
-                </div>
-                
-                {activeTab === 'skills' ? <SkillsTab /> : renderFields(draft[activeTab], [activeTab])}
-              </div>
+
+                {activeTab !== 'skills' && draft[activeTab] && Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).length > 0 && (
+                  <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
+                    {Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).map(k => {
+                      const isEnabled = draft[activeTab][k]?.enabled;
+                      return (
+                        <button 
+                          key={k}
+                          onClick={() => document.getElementById(`setting-group-${k}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          style={{ 
+                            textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px',
+                            display: 'flex', alignItems: 'center', gap: '6px', 
+                            color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'),
+                            background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'),
+                            border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'),
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.2)'}
+                          onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                        >
+                          <span style={{ opacity: 0.5 }}>#</span> {k}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
