@@ -596,6 +596,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_chunk: Callable[..., Awaitable[None]] | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
@@ -820,7 +821,7 @@ class AgentLoop:
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
-            on_chunk=_bus_chunk,
+            on_chunk=on_chunk or _bus_chunk,
             on_tool_call=_activity_tool_call,
             stop_event=stop_event, session_model=session_model, lang=lang,
         )
@@ -940,6 +941,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_chunk: Callable[..., Awaitable[None]] | None = None,
         metadata: dict | None = None,
         media: list[str] | None = None,
     ) -> str:
@@ -955,5 +957,5 @@ class AgentLoop:
         async with self._session_locks[session_key]:
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
                                  metadata=metadata or {}, media=media or [])
-            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
         return response.content if response else ""

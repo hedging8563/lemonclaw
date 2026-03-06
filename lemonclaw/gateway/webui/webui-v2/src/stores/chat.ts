@@ -113,6 +113,11 @@ export async function sendMessage(content: string) {
             lastMsg.tool_calls[lastMsg.tool_calls.length - 1].state = 'done';
             lastMsg.tool_calls[lastMsg.tool_calls.length - 1].result = event.data;
          }
+      } else if (event.type === 'done') {
+        // Final complete response — replace any partial content
+        if (event.data) {
+          lastMsg.content = event.data;
+        }
       } else if (event.type === 'error') {
         lastMsg.error = event.data;
       }

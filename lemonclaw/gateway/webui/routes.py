@@ -341,6 +341,10 @@ def get_webui_routes(
             event = {"type": etype, "data": content}
             await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
+        async def on_chunk(content: str, *, first: bool = False) -> None:
+            event = {"type": "content", "data": content}
+            await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
+
         async def run_agent() -> None:
             try:
                 # If model specified, temporarily set it via session metadata
@@ -350,6 +354,7 @@ def get_webui_routes(
                     channel="webui",
                     chat_id="webui",
                     on_progress=on_progress,
+                    on_chunk=on_chunk,
                     metadata={"timezone": user_timezone} if user_timezone else None,
                     media=media_files or None,
                 )
