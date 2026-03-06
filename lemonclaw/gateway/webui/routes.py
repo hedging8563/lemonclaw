@@ -227,42 +227,38 @@ def get_webui_routes(
 
     # ── Async session title generation ────────────────────────────────────
 
-    async def _generate_session_title(session_key: str, first_message: str) -> None:
-        """Generate a short title for the session via Groq LLM, fallback to truncation."""
+    def _extract_session_title(first_message: str, max_len: int = 25) -> str:
+        """Extract a clean title from the first message — no LLM, instant."""
+        import re
+        text = first_message.strip()
+        # Strip markdown/URLs/mentions
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'[#*_`~>\[\]()]', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return first_message[:max_len].strip() or "New Chat"
+        # Take first line only
+        text = text.split('\n')[0].strip()
+        if len(text) <= max_len:
+            return text
+        # Smart break: prefer word/CJK boundary
+        truncated = text[:max_len]
+        # For CJK-heavy text, just cut
+        cjk_count = sum(1 for c in truncated if '\u4e00' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' or '\uac00' <= c <= '\ud7af')
+        if cjk_count > len(truncated) * 0.3:
+            return truncated.rstrip() + "…"
+        # For latin text, break at last space
+        last_space = truncated.rfind(' ')
+        if last_space > max_len // 2:
+            return truncated[:last_space].rstrip() + "…"
+        return truncated.rstrip() + "…"
+
+    def _set_session_title(session_key: str, first_message: str) -> None:
+        """Set session title from first message — instant, no LLM."""
         session = session_manager.get_or_create(session_key)
         if session.metadata.get("title"):
-            return  # Already has a title
-
-        title = ""
-        try:
-            from lemonclaw.config.defaults import DEFAULT_CONSOLIDATION_MODEL
-            resp = await asyncio.wait_for(
-                agent_loop.provider.chat(
-                    model=DEFAULT_CONSOLIDATION_MODEL,
-                    messages=[
-                        {"role": "system", "content": (
-                            "Generate a short title (max 20 chars) for this conversation. "
-                            "Reply with ONLY the title, no quotes, no punctuation at the end. "
-                            "Use the same language as the user message."
-                        )},
-                        {"role": "user", "content": first_message[:500]},
-                    ],
-                    max_tokens=30,
-                    temperature=0.3,
-                ),
-                timeout=5.0,
-            )
-            title = (resp.content or "").strip().strip('"\'').strip()[:30]
-        except Exception as exc:
-            logger.debug("Title generation failed ({}), using fallback", exc)
-
-        # Fallback A: truncate first message
-        if not title:
-            title = first_message[:30].strip()
-            if len(first_message) > 30:
-                title += "…"
-
-        session.metadata["title"] = title
+            return
+        session.metadata["title"] = _extract_session_title(first_message)
         session_manager.save(session)
 
     # ── POST /api/chat/stream — SSE streaming ────────────────────────────
@@ -403,16 +399,8 @@ def get_webui_routes(
                 # Send final response
                 event = {"type": "done", "data": final}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
-                # Generate title for new sessions (fire-and-forget)
-                s = session_manager.get_or_create(session_key)
-                if not s.metadata.get("title"):
-                    _t = asyncio.create_task(
-                        _generate_session_title(session_key, message),
-                        name=f"title-gen-{session_key}",
-                    )
-                    _t.add_done_callback(
-                        lambda t: t.exception() and logger.warning("Title gen failed: {}", t.exception())
-                    )
+                # Set title for new sessions (instant, no LLM)
+                _set_session_title(session_key, message)
             except Exception as exc:
                 logger.error("WebUI chat error: {}", exc)
                 event = {"type": "error", "data": str(exc)}

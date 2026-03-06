@@ -19,8 +19,11 @@ export function Sidebar() {
   return (
     <aside class={`layout-sidebar ${mobileMenuOpen.value ? 'open' : ''}`}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '16px', letterSpacing: '-0.5px' }}>
-          Lemon<span style={{ color: 'var(--purple)', textShadow: '0 0 8px var(--purple-dim)' }}>Claw</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <img src="/logo-icon.svg" alt="" style={{ width: '22px', height: '22px' }} />
+          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '16px', letterSpacing: '-0.5px' }}>
+            Lemon<span style={{ color: 'var(--purple)', textShadow: '0 0 8px var(--purple-dim)' }}>Claw</span>
+          </div>
         </div>
       </div>
 
