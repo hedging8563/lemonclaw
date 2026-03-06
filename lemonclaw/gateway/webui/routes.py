@@ -97,6 +97,20 @@ def _load_index_html() -> str:
     raise FileNotFoundError("WebUI index.html not found")
 
 
+def _get_static_file(name: str) -> bytes | None:
+    """Load a static file from resources or filesystem fallback."""
+    try:
+        ref = importlib.resources.files("lemonclaw.gateway.webui.static").joinpath(name)
+        return ref.read_bytes()
+    except Exception:
+        pass
+
+    dev_path = Path(__file__).parent / "static" / name
+    if dev_path.exists():
+        return dev_path.read_bytes()
+    return None
+
+
 # ── Route factory ────────────────────────────────────────────────────────────
 
 
@@ -124,6 +138,34 @@ def get_webui_routes(
         except FileNotFoundError:
             return _json({"error": "WebUI not available"}, 404)
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    # ── GET /logo-icon.svg — serve bot avatar & favicon ──────────────────
+
+    async def logo_icon(request: Request) -> Response:
+        content = _get_static_file("logo-icon.svg")
+        if not content:
+            return Response("Not Found", status_code=404)
+        return Response(content, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def vite_icon(request: Request) -> Response:
+        content = _get_static_file("vite.svg")
+        if not content:
+            return Response("Not Found", status_code=404)
+        return Response(content, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def logo_64_png(request: Request) -> Response:
+        # 1. Try static dir (if packaged)
+        content = _get_static_file("logo-64.png")
+        if not content:
+            # 2. Try root assets dir (development)
+            from pathlib import Path
+            asset_path = Path(agent_loop.workspace) / "assets" / "logo-64.png"
+            if asset_path.exists():
+                content = asset_path.read_bytes()
+        
+        if not content:
+            return Response("Not Found", status_code=404)
+        return Response(content, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
     # ── POST /api/auth — login ───────────────────────────────────────────
 
@@ -787,6 +829,11 @@ def get_webui_routes(
 
     return [
         Route("/", index, methods=["GET"]),
+        Route("/logo-icon.svg", logo_icon, methods=["GET"]),
+        Route("/favicon.ico", logo_icon, methods=["GET"]),  # Use logo as favicon
+        Route("/favicon.png", logo_64_png, methods=["GET"]), # High-compatibility favicon
+        Route("/logo-64.png", logo_64_png, methods=["GET"]),
+        Route("/vite.svg", vite_icon, methods=["GET"]),
         Route("/api/auth", auth_login, methods=["POST"]),
         Route("/api/auth", auth_logout, methods=["DELETE"]),
         Route("/api/auth/check", auth_check, methods=["GET"]),

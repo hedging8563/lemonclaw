@@ -1,9 +1,18 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { login } from '../../stores/auth';
 
 export function LoginScreen() {
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('token');
+    if (t) {
+      setToken(t);
+      login(t).catch(err => setError(err.message || 'Login failed'));
+    }
+  }, []);
 
   const handleLogin = async (e: Event) => {
     e.preventDefault();
@@ -22,11 +31,14 @@ export function LoginScreen() {
       <form onSubmit={handleLogin} style={{ display: 'flex', gap: '8px' }}>
         <input 
           type="password" 
+          name="token"
+          autocomplete="current-password"
           placeholder="Gateway Token..." 
-          value={token}
+          value={token} 
           onInput={(e) => setToken((e.target as HTMLInputElement).value)}
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px 16px', color: 'var(--text-primary)', outline: 'none', fontFamily: 'var(--font-mono)' }}
         />
+
         <button type="submit" style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', padding: '0 16px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
           LOGIN
         </button>
