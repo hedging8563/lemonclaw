@@ -53,10 +53,11 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isHttp = !!server.url;
-  const mode = isHttp ? 'http' : 'stdio';
+  const [mode, setModeState] = useState<'stdio' | 'http'>(server.url ? 'http' : 'stdio');
+  const isHttp = mode === 'http';
 
   const setMode = (m: 'stdio' | 'http') => {
+    setModeState(m);
     if (m === 'http') {
       onUpdate({ url: server.url || '', headers: server.headers || {}, tool_timeout: server.tool_timeout ?? 30 });
     } else {
