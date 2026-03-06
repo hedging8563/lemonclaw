@@ -3,11 +3,39 @@ import { messages, loadHistory, isStreaming, inputText, isLoadingHistory } from 
 import { activeSessionKey } from '../../stores/sessions';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import hljs from 'highlight.js';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import css from 'highlight.js/lib/languages/css';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import plaintext from 'highlight.js/lib/languages/plaintext';
+import python from 'highlight.js/lib/languages/python';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolDetail } from './ToolDetail';
 import { t } from '../../stores/i18n';
+
+hljs.registerLanguage('bash', bash);
+hljs.registerAliases(['sh', 'shell', 'zsh'], { languageName: 'bash' });
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerAliases(['js', 'jsx', 'mjs', 'cjs'], { languageName: 'javascript' });
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('plaintext', plaintext);
+hljs.registerAliases(['text', 'txt'], { languageName: 'plaintext' });
+hljs.registerLanguage('python', python);
+hljs.registerAliases(['py'], { languageName: 'python' });
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerAliases(['ts', 'tsx'], { languageName: 'typescript' });
+hljs.registerLanguage('xml', xml);
+hljs.registerAliases(['html', 'svg'], { languageName: 'xml' });
+hljs.registerLanguage('yaml', yaml);
+hljs.registerAliases(['yml'], { languageName: 'yaml' });
 
 (marked as any).setOptions({
   breaks: true,

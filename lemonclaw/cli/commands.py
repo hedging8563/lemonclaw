@@ -791,6 +791,24 @@ def channels_status():
         em_config
     )
 
+    # Matrix
+    matrix = config.channels.matrix
+    matrix_config = matrix.user_id or matrix.homeserver or "[dim]not configured[/dim]"
+    table.add_row(
+        "Matrix",
+        "✓" if matrix.enabled else "✗",
+        matrix_config
+    )
+
+    # WeCom
+    wecom = config.channels.wecom
+    wecom_config = wecom.corp_id or "[dim]not configured[/dim]"
+    table.add_row(
+        "WeCom",
+        "✓" if wecom.enabled else "✗",
+        wecom_config
+    )
+
     console.print(table)
 
 
@@ -808,7 +826,7 @@ def _get_bridge_dir() -> Path:
     
     # Check for npm
     if not shutil.which("npm"):
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
+        console.print("[red]npm not found. Please install Node.js >= 20.[/red]")
         raise typer.Exit(1)
     
     # Find source bridge: first check package data, then source dir

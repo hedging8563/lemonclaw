@@ -1,9 +1,17 @@
+import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import preact from '@preact/preset-vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [preact()],
+  // Force the preset to use its Babel path with the current Vite 8 beta toolchain.
+  // This avoids the deprecated `esbuild` option warning until preset-vite fully aligns with Vite 8 / oxc.
+  plugins: [preact({ babel: {} })],
+  build: {
+    // The Python gateway serves files from ../static, so production builds write there directly.
+    outDir: fileURLToPath(new URL('../static', import.meta.url)),
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     proxy: {

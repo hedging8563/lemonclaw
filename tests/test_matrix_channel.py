@@ -4,15 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 
-import lemonclaw.channels.matrix as matrix_module
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
-from lemonclaw.channels.matrix import (
-    MATRIX_HTML_FORMAT,
-    TYPING_NOTICE_TIMEOUT_MS,
-    MatrixChannel,
-)
 from lemonclaw.config.schema import MatrixConfig
+
+matrix_module = pytest.importorskip(
+    "lemonclaw.channels.matrix",
+    reason="Matrix dependencies not installed",
+    exc_type=ImportError,
+)
+MATRIX_HTML_FORMAT = matrix_module.MATRIX_HTML_FORMAT
+TYPING_NOTICE_TIMEOUT_MS = matrix_module.TYPING_NOTICE_TIMEOUT_MS
+MatrixChannel = matrix_module.MatrixChannel
 
 _ROOM_SEND_UNSET = object()
 

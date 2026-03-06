@@ -128,3 +128,20 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_channels_status_lists_matrix_and_wecom():
+    config = Config()
+    config.channels.matrix.enabled = True
+    config.channels.matrix.user_id = "@bot:matrix.org"
+    config.channels.wecom.enabled = True
+    config.channels.wecom.corp_id = "wx-demo-corp"
+
+    with patch("lemonclaw.config.loader.load_config", return_value=config):
+        result = runner.invoke(app, ["channels", "status"])
+
+    assert result.exit_code == 0
+    assert "Matrix" in result.stdout
+    assert "@bot:matrix.org" in result.stdout
+    assert "WeCom" in result.stdout
+    assert "wx-demo-corp" in result.stdout

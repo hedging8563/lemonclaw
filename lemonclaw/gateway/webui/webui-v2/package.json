@@ -9,21 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@preact/signals": "^2.8.1",
-    "dompurify": "^3.3.1",
-    "highlight.js": "^11.11.1",
-    "marked": "^17.0.4",
-    "preact": "^10.27.2"
+    "@preact/signals": "2.8.1",
+    "dompurify": "3.3.1",
+    "highlight.js": "11.11.1",
+    "marked": "17.0.4",
+    "preact": "10.27.2"
   },
   "devDependencies": {
-    "@preact/preset-vite": "^2.10.2",
-    "@types/dompurify": "^3.0.5",
-    "@types/marked": "^5.0.2",
-    "@types/node": "^24.10.1",
-    "typescript": "~5.9.3",
-    "vite": "^8.0.0-beta.13"
-  },
-  "overrides": {
-    "vite": "^8.0.0-beta.13"
+    "@babel/core": "7.29.0",
+    "@preact/preset-vite": "2.10.3",
+    "@types/dompurify": "3.0.5",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vite": "8.0.0-beta.16"
   }
 }

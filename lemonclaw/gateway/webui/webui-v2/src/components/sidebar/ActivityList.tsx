@@ -2,6 +2,7 @@ import { useEffect } from 'preact/hooks';
 import { activitySessions, loadActivitySessions } from '../../stores/activity';
 import { activeSessionKey } from '../../stores/sessions'; 
 import { t } from '../../stores/i18n';
+import { mobileMenuOpen } from '../../stores/ui';
 
 export function ActivityList() {
   useEffect(() => {
@@ -16,7 +17,7 @@ export function ActivityList() {
       {activitySessions.value.map(session => (
         <div 
           key={session.key}
-          onClick={() => { activeSessionKey.value = session.key; import('../../stores/ui').then(m => m.mobileMenuOpen.value = false); }}
+          onClick={() => { activeSessionKey.value = session.key; mobileMenuOpen.value = false; }}
           style={{
             display: 'flex', alignItems: 'flex-start', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', gap: '8px', marginBottom: '2px',
             background: activeSessionKey.value === session.key ? 'var(--bg-tertiary)' : 'transparent',
