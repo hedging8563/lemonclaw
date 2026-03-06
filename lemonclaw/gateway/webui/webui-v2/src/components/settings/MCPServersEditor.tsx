@@ -154,7 +154,7 @@ export function MCPServersEditor({ servers, onChange }: Props) {
   };
 
   return (
-    <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
+    <div id="setting-group-mcp_servers" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
       <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
         <span style={{ color: 'var(--purple)' }}>#</span> mcp_servers
         <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
