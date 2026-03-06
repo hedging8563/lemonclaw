@@ -90,8 +90,12 @@ _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 
 
 def _mask(value: str) -> str:
-    if not value or len(value) < 8:
-        return "****" if value else ""
+    if not value:
+        return ""
+    if value.startswith("(") and value.endswith(")"):
+        return value  # Preserve markers like "(env)"
+    if len(value) < 8:
+        return "****"
     return value[:4] + "****" + value[-4:]
 
 
@@ -129,8 +133,8 @@ def _get_nested(data: dict, path: str) -> Any:
 
 
 def _is_masked(value: str) -> bool:
-    """Check if a string looks like a masked sensitive value (contains ****)."""
-    return isinstance(value, str) and "****" in value
+    """Check if a string looks like a masked or env-injected placeholder."""
+    return isinstance(value, str) and ("****" in value or value == "(env)")
 
 
 def _unmark_sensitive(new_obj: dict, path: str, original_data: dict) -> dict:
@@ -211,6 +215,17 @@ def get_settings_routes(
         # Remove platform-level fields that users shouldn't see/edit
         data.pop("lemondata", None)
         data.pop("gateway", None)
+
+        # For env-injected LemonData providers: if config.json has no api_key
+        # but env var API_KEY is set, show a placeholder so users know keys are active.
+        import os as _os
+        if _os.environ.get("API_KEY"):
+            _ENV_PROVIDERS = ("lemondata", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
+            providers = data.get("providers", {})
+            for pname in _ENV_PROVIDERS:
+                prov = providers.get(pname, {})
+                if isinstance(prov, dict) and not prov.get("api_key"):
+                    prov["api_key"] = "(env)"  # will be masked to "(env)" by _mask_dict
 
         # Include the effective (runtime) model so frontend can show both
         effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None

@@ -77,7 +77,7 @@ fi
 WORKSPACE_DIR="$CONFIG_DIR/workspace"
 SOUL_FILE="$WORKSPACE_DIR/SOUL.md"
 TEMPLATE_SOUL="/app/lemonclaw/templates/SOUL.md"
-mkdir -p "$WORKSPACE_DIR"
+mkdir -p "$WORKSPACE_DIR/sessions" "$WORKSPACE_DIR/memory" "$WORKSPACE_DIR/skills"
 
 if [ ! -f "$SOUL_FILE" ]; then
     cp "$TEMPLATE_SOUL" "$SOUL_FILE"

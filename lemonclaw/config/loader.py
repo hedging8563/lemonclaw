@@ -139,8 +139,12 @@ def _apply_env_overrides(config: Config) -> None:
         except ValueError:
             logger.warning(f"Invalid GATEWAY_PORT={port}, ignoring")
 
+    # DEFAULT_MODEL is a fallback: only apply if config.json didn't set a model
+    # (i.e. still has the Pydantic default). This allows users to override via Settings.
     if model := os.environ.get("DEFAULT_MODEL"):
-        config.agents.defaults.model = model
+        _DEFAULT_MODEL = "anthropic/claude-opus-4-5"  # must match AgentDefaults.model default
+        if config.agents.defaults.model == _DEFAULT_MODEL:
+            config.agents.defaults.model = model
 
     if instance_id := os.environ.get("INSTANCE_ID"):
         config.lemondata.instance_id = instance_id

@@ -686,6 +686,9 @@ class AgentLoop:
                 if not lock.locked():
                     self._consolidation_locks.pop(session.key, None)
 
+            # Archive old session file so it remains visible in activity feed,
+            # then create a fresh session with the same key.
+            self.sessions.archive_session(session.key)
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)

@@ -268,6 +268,37 @@ class SessionManager:
         
         return sorted(sessions, key=lambda x: x.get("updated_at") or "", reverse=True)
 
+    def archive_session(self, key: str) -> bool:
+        """Archive a session by renaming its file with a timestamp suffix.
+
+        The archived file gets a new key (original + timestamp) so that
+        both list_sessions() and _load() can discover and read it.
+        Returns True if archived.
+        """
+        path = self._get_session_path(key)
+        if not path.exists():
+            return False
+
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+        archived_key = f"{key}:{ts}"
+
+        # Load, update key, save to new path
+        session = self._load(key)
+        if session:
+            session.key = archived_key
+            archived_path = self._get_session_path(archived_key)
+            self._atomic_save(archived_path, session)
+
+        # Remove old file + cache
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        self._cache.pop(key, None)
+        if key in self._cache_order:
+            self._cache_order.remove(key)
+        return True
+
     def delete_session(self, key: str) -> bool:
         """Delete a session by key. Returns True if deleted, False if not found."""
         path = self._get_session_path(key)
