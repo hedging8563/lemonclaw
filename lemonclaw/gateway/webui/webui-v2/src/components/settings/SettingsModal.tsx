@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { SkillsTab } from './SkillsTab';
+import { MCPServersEditor } from './MCPServersEditor';
 import { t } from '../../stores/i18n';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -68,6 +69,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!data) return null;
     return Object.entries(data).map(([k, v]) => {
       const currentPath = [...path, k];
+      if (k === 'mcp_servers' && typeof v === 'object' && v !== null) {
+         return (
+           <MCPServersEditor
+             key={k}
+             servers={v as Record<string, any>}
+             onChange={(newVal) => handleChange(currentPath, newVal)}
+           />
+         );
+      }
       if (Array.isArray(v)) {
          return (
            <div key={k} style={{ marginBottom: '12px' }}>
