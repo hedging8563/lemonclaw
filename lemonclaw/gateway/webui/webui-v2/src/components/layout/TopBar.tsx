@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import { activeSessionKey } from '../../stores/sessions';
-import { currentModel, models, loadModels } from '../../stores/models';
+import { currentModel, models, loadModels, globalDefaultModel } from '../../stores/models';
 import { logout } from '../../stores/auth';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
@@ -23,6 +23,14 @@ export function TopBar() {
   useEffect(() => {
     loadModels();
   }, []);
+
+  useEffect(() => {
+    if (currentSession && currentSession.model) {
+      currentModel.value = currentSession.model;
+    } else if (globalDefaultModel.value) {
+      currentModel.value = globalDefaultModel.value;
+    }
+  }, [activeSessionKey.value, currentSession?.model, globalDefaultModel.value]);
 
   useEffect(() => {
     if (isEditingTitle) titleInputRef.current?.focus();
