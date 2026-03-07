@@ -11,8 +11,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyParameters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 from lemonclaw.bus.events import OutboundMessage
@@ -179,6 +179,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("model", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+
+        # Inline keyboard callback handler (for /model buttons)
+        self._app.add_handler(CallbackQueryHandler(self._on_model_callback, pattern=r"^model:"))
+        self._app.add_handler(CallbackQueryHandler(self._on_noop_callback, pattern=r"^noop$"))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -207,7 +211,7 @@ class TelegramChannel(BaseChannel):
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
         
@@ -474,6 +478,11 @@ class TelegramChannel(BaseChannel):
         if msg.content and msg.content != "[empty message]":
             chunks = _split_message(msg.content)
 
+            # Inline keyboard for /model list (Telegram-specific)
+            reply_markup = None
+            if msg.metadata.get("_command") == "model_list":
+                reply_markup = self._build_model_keyboard(msg.metadata.get("_current_model"))
+
             # If we have a stream message, edit the first chunk into it
             if stream and stream.message_id and len(chunks) >= 1:
                 first_html = _markdown_to_telegram_html(chunks[0])
@@ -483,6 +492,7 @@ class TelegramChannel(BaseChannel):
                         message_id=stream.message_id,
                         text=first_html,
                         parse_mode="HTML",
+                        reply_markup=reply_markup,
                     )
                 except Exception as e:
                     logger.debug("Final edit failed, falling back to plain: {}", e)
@@ -491,10 +501,12 @@ class TelegramChannel(BaseChannel):
                             chat_id=chat_id,
                             message_id=stream.message_id,
                             text=chunks[0],
+                            reply_markup=reply_markup,
                         )
                     except Exception as e2:
                         logger.warning("Telegram message delivery failed completely: {}", e2)
                 remaining = chunks[1:]
+                reply_markup = None  # Only attach to first chunk
             else:
                 remaining = chunks
 
@@ -506,6 +518,7 @@ class TelegramChannel(BaseChannel):
                         text=html,
                         parse_mode="HTML",
                         reply_parameters=reply_params,
+                        reply_markup=reply_markup,
                         **topic_kwargs,
                     )
                 except Exception as e:
@@ -515,10 +528,27 @@ class TelegramChannel(BaseChannel):
                             chat_id=chat_id,
                             text=chunk,
                             reply_parameters=reply_params,
+                            reply_markup=reply_markup,
                             **topic_kwargs,
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
+                reply_markup = None  # Only attach to first chunk
+
+            # After model switch, update the original keyboard to reflect new selection
+            if msg.metadata.get("_command") == "model_switched":
+                callback_msg_id = msg.metadata.get("_callback_message_id")
+                new_model = msg.metadata.get("_current_model")
+                if callback_msg_id and new_model:
+                    try:
+                        new_keyboard = self._build_model_keyboard(new_model)
+                        await self._app.bot.edit_message_reply_markup(
+                            chat_id=chat_id,
+                            message_id=callback_msg_id,
+                            reply_markup=new_keyboard,
+                        )
+                    except Exception as e:
+                        logger.debug("Failed to update model keyboard: {}", e)
     
     def _dedup_update(self, update: Update) -> bool:
         """Return True if this update is new, False if duplicate."""
@@ -590,7 +620,82 @@ class TelegramChannel(BaseChannel):
             metadata=metadata,
             session_key=session_key,
         )
-    
+
+    # ── Inline keyboard for /model ────────────────────────────────────────
+
+    def _build_model_keyboard(self, current_model: str | None) -> InlineKeyboardMarkup:
+        """Build an inline keyboard with model buttons grouped by tier."""
+        from lemonclaw.providers.catalog import get_model_tiers
+
+        buttons: list[list[InlineKeyboardButton]] = []
+        for tier_label, models in get_model_tiers():
+            # Tier header (non-clickable)
+            buttons.append([InlineKeyboardButton(f"── {tier_label} ──", callback_data="noop")])
+            # Model buttons, 2 per row
+            row: list[InlineKeyboardButton] = []
+            for m in models:
+                check = " ✓" if current_model and m.id == current_model else ""
+                row.append(InlineKeyboardButton(f"{m.label}{check}", callback_data=f"model:{m.id}"))
+                if len(row) == 2:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+
+        buttons.append([InlineKeyboardButton("Close", callback_data="model:close")])
+        return InlineKeyboardMarkup(buttons)
+
+    async def _on_noop_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Acknowledge tier-header button taps (no action)."""
+        if update.callback_query:
+            await update.callback_query.answer()
+
+    async def _on_model_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard button presses for model selection."""
+        query = update.callback_query
+        if not query or not query.data or not update.effective_user:
+            return
+
+        await query.answer()
+
+        data = query.data
+
+        # Close button: remove the keyboard
+        if data == "model:close":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        # model:<id> — forward as /model <id> through the bus
+        if data.startswith("model:"):
+            model_id = data[6:]
+            chat_id = str(query.message.chat_id)
+            sender_id = self._sender_id(update.effective_user)
+
+            is_group = query.message.chat.type != "private"
+            thread_id = getattr(query.message, "message_thread_id", None) if is_group else None
+            session_key = f"telegram:{chat_id}:{thread_id}" if thread_id else None
+
+            metadata = {
+                "user_id": update.effective_user.id,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "is_group": is_group,
+                "_callback_message_id": query.message.message_id,
+            }
+            if thread_id:
+                metadata["message_thread_id"] = thread_id
+
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=f"/model {model_id}",
+                metadata=metadata,
+                session_key=session_key,
+            )
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:

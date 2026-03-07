@@ -69,6 +69,22 @@ TIER_LABELS: dict[str, str] = {
 }
 
 
+def get_model_tiers() -> list[tuple[str, list[ModelEntry]]]:
+    """Return visible models grouped by tier, ordered by TIER_ORDER.
+
+    Used by channel-specific UI (e.g. Telegram inline keyboard).
+    """
+    grouped: dict[str, list[ModelEntry]] = {}
+    for m in MODEL_CATALOG:
+        if m.hidden:
+            continue
+        grouped.setdefault(m.tier, []).append(m)
+    return [
+        (TIER_LABELS.get(tier, tier.title()), grouped[tier])
+        for tier in sorted(grouped, key=lambda t: TIER_ORDER.get(t, 99))
+    ]
+
+
 def fuzzy_match(query: str) -> ModelEntry | None:
     """Find a model by exact ID, partial ID, label substring, or semantic alias.
 
