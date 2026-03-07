@@ -1,8 +1,8 @@
 ---
 name: summarize
-description: Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for “transcribe this YouTube/video”).
+description: Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for "transcribe this YouTube/video").
 homepage: https://summarize.sh
-metadata: {“lemonclaw”:{“emoji”:”🧾”,”requires”:{“bins”:[“summarize”]},”install”:[{“id”:”brew”,”kind”:”brew”,”formula”:”steipete/tap/summarize”,”bins”:[“summarize”],”label”:”Install summarize (brew)”}]}}
+metadata: {"lemonclaw":{"emoji":"🧾","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"}]}}
 triggers: 总结网页,总结链接,摘要,summarize,transcript,播客,podcast,总结视频,总结文章
 ---
 
@@ -13,10 +13,10 @@ Fast CLI to summarize URLs, local files, and YouTube links.
 ## When to use (trigger phrases)
 
 Use this skill immediately when the user asks any of:
-- “use summarize.sh”
-- “what’s this link/video about?”
-- “summarize this URL/article”
-- “transcribe this YouTube/video” (best-effort transcript extraction; no `yt-dlp` needed)
+- "use summarize.sh"
+- "what’s this link/video about?"
+- "summarize this URL/article"
+- "transcribe this YouTube/video" (best-effort transcript extraction; no `yt-dlp` needed)
 
 ## Quick start
 

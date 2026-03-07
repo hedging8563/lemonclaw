@@ -915,7 +915,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id,
                 content=format_model_list(current),
-                metadata={"_command": "model_list", "_current_model": current},
+                metadata={**(msg.metadata or {}), "_command": "model_list", "_current_model": current},
             )
 
         match = fuzzy_match(arg)
