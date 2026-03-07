@@ -3,7 +3,7 @@ name: summarize
 description: Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for “transcribe this YouTube/video”).
 homepage: https://summarize.sh
 metadata: {“lemonclaw”:{“emoji”:”🧾”,”requires”:{“bins”:[“summarize”]},”install”:[{“id”:”brew”,”kind”:”brew”,”formula”:”steipete/tap/summarize”,”bins”:[“summarize”],”label”:”Install summarize (brew)”}]}}
-triggers: “总结网页,总结链接,摘要,summarize,transcript,播客,podcast,总结视频,总结文章”
+triggers: 总结网页,总结链接,摘要,summarize,transcript,播客,podcast,总结视频,总结文章
 ---
 
 # Summarize

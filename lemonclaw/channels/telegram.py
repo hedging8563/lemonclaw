@@ -296,10 +296,12 @@ class TelegramChannel(BaseChannel):
                 result = subprocess.run(cmd, capture_output=True, timeout=120)
                 if result.returncode != 0 or not os.path.exists(out_path):
                     logger.error("ffmpeg split failed for segment {}", i + 1)
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
                     return []
                 segments.append(out_path)
         except Exception as e:
             logger.error("Video split failed: {}", e)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             return []
 
         return segments

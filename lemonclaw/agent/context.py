@@ -160,10 +160,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         prompt so the LLM has processing guidance without needing to read
         SKILL.md manually.
         """
-        # Auto-trigger: match skills by keywords in user message
-        triggered = self.skills.match_skills(current_message)
-        if triggered:
-            self._triggered_skills = triggered
+        # Auto-trigger: match skills by keywords in user message (reset each turn)
+        self._triggered_skills = self.skills.match_skills(current_message)
 
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
 

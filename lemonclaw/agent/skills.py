@@ -200,10 +200,30 @@ class SkillsLoader:
         and returns skill names whose triggers appear in the message.
         Skills already marked ``always=true`` are excluded (they are loaded
         separately).  Disabled and unavailable skills are also skipped.
+
+        Matching strategy:
+        - Pure ASCII alpha triggers (e.g. "pr", "gh") use word-boundary
+          matching to avoid false positives ("pr" in "prompt").
+        - Triggers containing non-ASCII (Chinese), dots, slashes, or other
+          special chars use substring matching (e.g. ".xlsx", "youtube.com").
         """
+        import re
+
         msg_lower = message.lower()
         matched: list[str] = []
         always = set(self.get_always_skills())
+
+        # Cache compiled word-boundary patterns
+        _wb_cache: dict[str, re.Pattern] = {}
+
+        def _trigger_matches(trigger: str) -> bool:
+            # Triggers with non-ASCII or special chars → substring match
+            if not trigger.isascii() or not trigger.replace("-", "").replace("_", "").isalpha():
+                return trigger in msg_lower
+            # Pure ASCII alpha triggers → word boundary match
+            if trigger not in _wb_cache:
+                _wb_cache[trigger] = re.compile(rf"\b{re.escape(trigger)}\b", re.IGNORECASE)
+            return _wb_cache[trigger].search(msg_lower) is not None
 
         for s in self.list_skills(filter_unavailable=True):
             name = s["name"]
@@ -214,7 +234,7 @@ class SkillsLoader:
             if not raw_triggers:
                 continue
             triggers = [t.strip().lower() for t in raw_triggers.split(",") if t.strip()]
-            if any(t in msg_lower for t in triggers):
+            if any(_trigger_matches(t) for t in triggers):
                 matched.append(name)
 
         return matched
