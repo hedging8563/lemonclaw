@@ -2,7 +2,7 @@
 # LemonClaw - K8s Container Image
 # ============================================================
 # Multi-stage build: python3.12-slim + Node.js 20 (WhatsApp bridge)
-# Target: ~500MB (vs OpenClaw 1.8GB)
+# Target: ~900MB (vs OpenClaw 1.8GB) — includes Chromium for browser tool
 #
 # Build:
 #   docker build -t ghcr.io/hedging8563/lemonclaw:latest -f deploy/k8s/Dockerfile .
@@ -43,10 +43,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromium + agent-browser for browser automation (optional, ~400MB)
-# Playwright installs Chromium and its system dependencies
+# Playwright installs Chromium to /ms-playwright so it's accessible
+# regardless of HOME (entrypoint.sh sets HOME=/home/lemonclaw).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install --with-deps chromium \
     && npm install -g agent-browser \
-    && rm -rf /root/.cache/ms-playwright/.links \
+    && rm -rf /ms-playwright/.links \
     && rm -rf /tmp/* /root/.npm
 
 # Create non-root user

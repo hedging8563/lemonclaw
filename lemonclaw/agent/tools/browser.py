@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+import re
 import shlex
 import shutil
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -161,7 +163,6 @@ class BrowserTool(Tool):
             return None
 
         # Split on shell operators to handle chained commands
-        import re
         sub_commands = [s.strip() for s in re.split(r"&&|\|\||;", command)]
         for sub in sub_commands:
             parts = sub.split(None, 1)
@@ -172,7 +173,6 @@ class BrowserTool(Tool):
 
             url = parts[1].strip().strip("\"'")
             try:
-                from urllib.parse import urlparse
                 # Detect scheme: urlparse needs :// for proper parsing;
                 # "javascript:x" has : but not ://, still has a scheme
                 if ":" in url.split("/")[0] and "://" not in url:

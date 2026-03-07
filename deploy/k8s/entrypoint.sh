@@ -100,6 +100,7 @@ export LOG_TARGET="${LOG_TARGET:-stdout}"
 
 # --- Browser tool env (agent-browser) ---
 export AGENT_BROWSER_CONTENT_BOUNDARIES="${AGENT_BROWSER_CONTENT_BOUNDARIES:-1}"
+export PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"
 
 echo "Starting LemonClaw gateway (instance: ${INSTANCE_ID:-unknown})"
 exec /usr/local/bin/lemonclaw gateway --bind lan --port 18789
