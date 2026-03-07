@@ -327,7 +327,9 @@ def get_settings_routes(
         except Exception:
             body = {}
 
-        changed_paths = body.get("changed_paths", [])
+        raw_paths = body.get("changed_paths", [])
+        # Only accept paths that are in the writable whitelist (prevent fake restart triggers)
+        changed_paths = [p for p in raw_paths if isinstance(p, str) and p in _WRITABLE_PATHS]
         for path in changed_paths:
             if _RESTART_FIELDS.match(path):
                 restart_required = True
@@ -530,6 +532,8 @@ def get_settings_routes(
 
         if skills_sh_match:
             owner, repo, skill_name = skills_sh_match
+            if not _SAFE_NAME_RE.match(owner) or not _SAFE_NAME_RE.match(repo):
+                return _json({"error": "Invalid owner or repo name"}, 400)
             target = workspace_skills / skill_name
             if not target.resolve().parent == workspace_skills.resolve():
                 return _json({"error": "Invalid skill path"}, 400)

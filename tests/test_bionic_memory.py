@@ -287,31 +287,33 @@ def test_context_builder_injects_matched_cards(tmp_path):
 # ── Procedural Memory ────────────────────────────────────────────────────────
 
 
-def test_procedural_add_and_list(tmp_path):
+@pytest.mark.asyncio
+async def test_procedural_add_and_list(tmp_path):
     from lemonclaw.memory.reflect import ProceduralMemory
 
     pm = ProceduralMemory(tmp_path / "memory")
     assert pm.list_rules() == []
 
-    rid = pm.add_rule("MiniMax 路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D 踩坑")
+    rid = await pm.add_rule("MiniMax 路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D 踩坑")
     assert rid == 1
     rules = pm.list_rules()
     assert len(rules) == 1
     assert rules[0]["trigger"] == "MiniMax 路由"
     assert rules[0]["lesson"] == "原生格式是 Anthropic"
 
-    rid2 = pm.add_rule("Fastify body", "空 body 禁令", "检查一致性", "API 502")
+    rid2 = await pm.add_rule("Fastify body", "空 body 禁令", "检查一致性", "API 502")
     assert rid2 == 2
     assert len(pm.list_rules()) == 2
 
 
-def test_procedural_match_rules(tmp_path):
+@pytest.mark.asyncio
+async def test_procedural_match_rules(tmp_path):
     from lemonclaw.memory.reflect import ProceduralMemory
 
     pm = ProceduralMemory(tmp_path / "memory")
-    pm.add_rule("MiniMax 模型路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D")
-    pm.add_rule("Fastify 空 body", "禁止空 body", "检查一致性", "API")
-    pm.add_rule("K8s 部署", "Recreate 策略", "不用 RollingUpdate", "Claw")
+    await pm.add_rule("MiniMax 模型路由", "原生格式是 Anthropic", "用 anthropic provider", "P2-D")
+    await pm.add_rule("Fastify 空 body", "禁止空 body", "检查一致性", "API")
+    await pm.add_rule("K8s 部署", "Recreate 策略", "不用 RollingUpdate", "Claw")
 
     # Match MiniMax
     matched = pm.match_rules("MiniMax 模型怎么路由")
@@ -322,11 +324,12 @@ def test_procedural_match_rules(tmp_path):
     assert pm.match_rules("hello world") == []
 
 
-def test_procedural_format_for_context(tmp_path):
+@pytest.mark.asyncio
+async def test_procedural_format_for_context(tmp_path):
     from lemonclaw.memory.reflect import ProceduralMemory
 
     pm = ProceduralMemory(tmp_path / "memory")
-    pm.add_rule("test trigger", "test lesson", "test action", "test source")
+    await pm.add_rule("test trigger", "test lesson", "test action", "test source")
 
     rules = pm.match_rules("test trigger")
     text = ProceduralMemory.format_for_context(rules)
@@ -360,7 +363,8 @@ def test_memory_store_has_procedural(tmp_path):
     assert store.procedural is not None
 
 
-def test_context_builder_injects_matched_rules(tmp_path):
+@pytest.mark.asyncio
+async def test_context_builder_injects_matched_rules(tmp_path):
     from lemonclaw.agent.context import ContextBuilder
 
     workspace = tmp_path / "workspace"
@@ -368,7 +372,7 @@ def test_context_builder_injects_matched_rules(tmp_path):
     (workspace / "memory").mkdir()
 
     ctx = ContextBuilder(workspace)
-    ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
+    await ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
 
     messages = ctx.build_messages(
         history=[],

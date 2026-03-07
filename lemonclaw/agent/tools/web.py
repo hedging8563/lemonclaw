@@ -58,12 +58,15 @@ def _resolve_to_safe_ip(host: str) -> tuple[str | None, str]:
     except (socket.gaierror, OSError):
         return None, "DNS resolution failed"
 
+    # Check ALL resolved addresses — reject if any is private (fail-closed)
     for _family, _, _, _, sockaddr in infos:
         ip_str = sockaddr[0]
         if _is_private_ip_addr(ip_str):
             return None, "Access to private/internal addresses is blocked"
-        # Return the first safe IP (prefer IPv4 for compatibility)
-        return ip_str, ""
+
+    # All IPs are safe, return the first one
+    if infos:
+        return infos[0][4][0], ""
 
     return None, "No addresses returned by DNS"
 

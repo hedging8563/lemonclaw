@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import date
 from pathlib import Path
@@ -33,6 +34,7 @@ class ProceduralMemory:
     def __init__(self, memory_dir: Path):
         self._file = memory_dir / "rules.md"
         self._dir = memory_dir
+        self._lock = asyncio.Lock()
 
     def read_rules(self) -> str:
         if self._file.exists():
@@ -73,37 +75,39 @@ class ProceduralMemory:
         ids = [int(m.group(1)) for m in _RULE_RE.finditer(text)]
         return max(ids, default=0) + 1
 
-    def add_rule(self, trigger: str, lesson: str, action: str, source: str) -> int:
+    async def add_rule(self, trigger: str, lesson: str, action: str, source: str) -> int:
         """Add a rule manually. Returns the rule number.
 
         Enforces MAX_RULES cap and deduplicates by trigger similarity.
+        Uses asyncio.Lock to prevent concurrent file access races.
         """
-        rules = self.list_rules()
+        async with self._lock:
+            rules = self.list_rules()
 
-        # Dedup: skip if a rule with very similar trigger already exists
-        trigger_lower = trigger.lower()
-        for existing in rules:
-            if existing.get("trigger", "").lower() == trigger_lower:
-                logger.debug("Procedural memory: duplicate trigger '{}', skipping", trigger[:40])
-                return int(existing.get("header", "# 0").split("#")[-1].split("—")[0].strip() or "0")
+            # Dedup: skip if a rule with very similar trigger already exists
+            trigger_lower = trigger.lower()
+            for existing in rules:
+                if existing.get("trigger", "").lower() == trigger_lower:
+                    logger.debug("Procedural memory: duplicate trigger '{}', skipping", trigger[:40])
+                    return int(existing.get("header", "# 0").split("#")[-1].split("—")[0].strip() or "0")
 
-        # Cap: drop oldest rules if at limit
-        if len(rules) >= self.MAX_RULES:
-            self._trim_oldest(len(rules) - self.MAX_RULES + 1)
+            # Cap: drop oldest rules if at limit
+            if len(rules) >= self.MAX_RULES:
+                self._trim_oldest(len(rules) - self.MAX_RULES + 1)
 
-        self._dir.mkdir(parents=True, exist_ok=True)
-        rule_id = self._next_rule_id()
-        entry = (
-            f"\n## Rule #{rule_id} — {date.today()}\n"
-            f"- trigger: {trigger}\n"
-            f"- lesson: {lesson}\n"
-            f"- action: {action}\n"
-            f"- source: {source}\n"
-        )
-        with open(self._file, "a", encoding="utf-8") as f:
-            f.write(entry)
-        logger.info("Procedural memory: added Rule #{}", rule_id)
-        return rule_id
+            self._dir.mkdir(parents=True, exist_ok=True)
+            rule_id = self._next_rule_id()
+            entry = (
+                f"\n## Rule #{rule_id} — {date.today()}\n"
+                f"- trigger: {trigger}\n"
+                f"- lesson: {lesson}\n"
+                f"- action: {action}\n"
+                f"- source: {source}\n"
+            )
+            with open(self._file, "a", encoding="utf-8") as f:
+                f.write(entry)
+            logger.info("Procedural memory: added Rule #{}", rule_id)
+            return rule_id
 
     def _trim_oldest(self, count: int) -> None:
         """Remove the oldest N rules from rules.md."""
@@ -183,7 +187,7 @@ class ProceduralMemory:
                 max_tokens=256,
             )
             data = json.loads(strip_fences(response.content or ""))
-            return self.add_rule(
+            return await self.add_rule(
                 trigger=data.get("trigger", task_description[:50]),
                 lesson=data.get("lesson", error[:100]),
                 action=data.get("action", "Review and fix"),

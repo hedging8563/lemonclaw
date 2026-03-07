@@ -693,6 +693,8 @@ def get_webui_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
         content = body.get("content", "")
+        if len(content) > 8000:
+            return _json({"error": "Content too large (max 8000 characters)"}, 400)
         _memory.write_core(content)
         resp = _json({"ok": True})
         _maybe_refresh_cookie(request, resp)
@@ -743,6 +745,8 @@ def get_webui_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
         content = body.get("content", "")
+        if len(content) > 16000:
+            return _json({"error": "Content too large (max 16000 characters)"}, 400)
         _soul_path.write_text(content, encoding="utf-8")
         resp = _json({"ok": True})
         _maybe_refresh_cookie(request, resp)
