@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - 'lemonclaw/gateway/webui/webui-v2/**'
+      - 'lemonclaw/gateway/webui/static/**'
+      - 'scripts/check_webui_lockfile.sh'
+      - 'scripts/check_webui_build.sh'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/webui-lockfile.yml'
+  push:
+    paths:
+      - 'lemonclaw/gateway/webui/webui-v2/**'
+      - 'lemonclaw/gateway/webui/static/**'
+      - 'scripts/check_webui_lockfile.sh'
+      - 'scripts/check_webui_build.sh'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/webui-lockfile.yml'
+  workflow_dispatch:
+
+jobs:
+  webui-checks:
+    uses: ./.github/workflows/webui-lockfile.yml

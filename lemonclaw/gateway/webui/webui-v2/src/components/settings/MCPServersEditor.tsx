@@ -12,6 +12,7 @@ interface MCPServer {
 
 interface Props {
   servers: Record<string, MCPServer>;
+  restrictToWorkspace: boolean;
   onChange: (servers: Record<string, MCPServer>) => void;
 }
 
@@ -27,6 +28,7 @@ const S = {
   addBtn: { width: '100%', padding: '10px', background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' } as const,
   row: { display: 'flex', gap: '10px' } as const,
   modeBtn: (active: boolean) => ({ flex: 1, padding: '6px', background: active ? 'var(--bg-tertiary)' : 'transparent', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '4px', color: active ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px' }),
+  notice: (warning: boolean) => ({ marginBottom: '12px', padding: '10px 12px', borderRadius: '6px', border: `1px solid ${warning ? 'rgba(255, 170, 0, 0.28)' : 'rgba(100, 149, 237, 0.28)'}`, background: warning ? 'rgba(255, 170, 0, 0.08)' : 'rgba(100, 149, 237, 0.08)', color: warning ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: 1.6 }) as const,
 };
 
 function dictToLines(d: Record<string, string> | undefined): string {
@@ -57,12 +59,10 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
   const [mode, setModeState] = useState<'stdio' | 'http'>(server.url ? 'http' : 'stdio');
   const isHttp = mode === 'http';
 
-  // Local state buffers — parse on blur, not on every keystroke
   const [argsText, setArgsText] = useState((server.args || []).join(', '));
   const [envText, setEnvText] = useState(dictToLines(server.env));
   const [headersText, setHeadersText] = useState(dictToLines(server.headers));
 
-  // Sync local buffers when server prop changes from outside (e.g. mode switch)
   useEffect(() => { setArgsText((server.args || []).join(', ')); }, [JSON.stringify(server.args)]);
   useEffect(() => { setEnvText(dictToLines(server.env)); }, [JSON.stringify(server.env)]);
   useEffect(() => { setHeadersText(dictToLines(server.headers)); }, [JSON.stringify(server.headers)]);
@@ -94,7 +94,6 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
 
       {expanded && (
         <div style={S.cardBody as any}>
-          {/* Mode selector */}
           <div>
             <label style={S.label}>{t('mcp_mode')}</label>
             <div style={S.row}>
@@ -111,7 +110,7 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
               </div>
               <div>
                 <label style={S.label}>{t('mcp_args')}</label>
-                <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /tmp" onInput={(e) => setArgsText((e.target as any).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
+                <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /workspace" onInput={(e) => setArgsText((e.target as any).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
               </div>
               <div>
                 <label style={S.label}>{t('mcp_env')}</label>
@@ -141,7 +140,7 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
   );
 }
 
-export function MCPServersEditor({ servers, onChange }: Props) {
+export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Props) {
   const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
 
@@ -170,6 +169,10 @@ export function MCPServersEditor({ servers, onChange }: Props) {
       <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
         <span style={{ color: 'var(--purple)' }}>#</span> mcp_servers
         <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
+      </div>
+
+      <div style={S.notice(!restrictToWorkspace)}>
+        {t(restrictToWorkspace ? 'mcp_workspace_warning_on' : 'mcp_workspace_warning_off')}
       </div>
 
       {entries.length === 0 && !adding && (

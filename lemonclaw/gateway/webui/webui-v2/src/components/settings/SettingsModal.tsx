@@ -5,8 +5,21 @@ import { SoulEditor } from './SoulEditor';
 import { MCPServersEditor } from './MCPServersEditor';
 import { t } from '../../stores/i18n';
 
+type NoticeTone = 'info' | 'warning';
+
+const noticeStyle = (tone: NoticeTone) => ({
+  marginBottom: '12px',
+  padding: '10px 12px',
+  borderRadius: '6px',
+  border: `1px solid ${tone === 'warning' ? 'rgba(255, 170, 0, 0.28)' : 'rgba(100, 149, 237, 0.28)'}`,
+  background: tone === 'warning' ? 'rgba(255, 170, 0, 0.08)' : 'rgba(100, 149, 237, 0.08)',
+  color: tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '11px',
+  lineHeight: 1.6,
+}) as const;
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [settings, setSettings] = useState<any>(null);
   const [draft, setDraft] = useState<any>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
@@ -16,11 +29,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     try {
       const res = await apiFetch('/api/settings');
       const data = await res.json();
-      setSettings(data.settings);
       setDraft(JSON.parse(JSON.stringify(data.settings)));
       setChangedPaths(new Set());
     } catch (e) {
-      console.error("Failed to load settings", e);
+      console.error('Failed to load settings', e);
     }
   };
 
@@ -34,8 +46,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     }
     obj[path[path.length - 1]] = value;
     setDraft({ ...draft });
-    
-    const topPath = path[0] === 'agents' ? 'agents.defaults.' + path[2] : path[0] + '.' + path[1];
+
+    const topPath = path[0] === 'agents' ? `agents.defaults.${path[2]}` : `${path[0]}.${path[1]}`;
     setChangedPaths(prev => new Set(prev).add(topPath));
   };
 
@@ -56,7 +68,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
     try {
       await apiFetch('/api/settings', { method: 'PATCH', body: JSON.stringify(payload) });
-      const applyRes = await apiFetch('/api/settings/apply', { method: 'POST', body: JSON.stringify({ changed_paths: Array.from(changedPaths) }) });
+      const applyRes = await apiFetch('/api/settings/apply', {
+        method: 'POST',
+        body: JSON.stringify({ changed_paths: Array.from(changedPaths) }),
+      });
       const applyData = await applyRes.json();
       if (applyData.restart_required) {
         console.log('Backend is restarting to apply changes.');
@@ -72,79 +87,119 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const renderFields = (data: any, path: string[]) => {
+  const renderNotice = (message: string, tone: NoticeTone = 'info') => (
+    <div style={noticeStyle(tone)}>{message}</div>
+  );
+
+  const workspaceRestricted = Boolean(draft?.tools?.restrict_to_workspace);
+
+  const renderFields = (data: any, path: string[]): any => {
     if (!data) return null;
+
     return Object.entries(data).map(([k, v]) => {
       const currentPath = [...path, k];
+      const fullPath = currentPath.join('.');
+
       if (k === 'mcp_servers' && typeof v === 'object' && v !== null) {
-         return (
-           <MCPServersEditor
-             key={k}
-             servers={v as Record<string, any>}
-             onChange={(newVal) => handleChange(currentPath, newVal)}
-           />
-         );
+        return (
+          <MCPServersEditor
+            key={k}
+            servers={v as Record<string, any>}
+            restrictToWorkspace={workspaceRestricted}
+            onChange={(newVal) => handleChange(currentPath, newVal)}
+          />
+        );
       }
+
       if (Array.isArray(v)) {
-         return (
-           <div key={k} style={{ marginBottom: '12px' }}>
-             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-             <input type="text" value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as any).value.split(',').map((s:string)=>s.trim()))} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
-           </div>
-         );
-      } else if (typeof v === 'object' && v !== null) {
-         let currentObj: any = v;
-         let displayKey = k;
-         let cPath = [...currentPath];
-         while (typeof currentObj === 'object' && currentObj !== null && !Array.isArray(currentObj)) {
-           const keys = Object.keys(currentObj);
-           if (keys.length === 1 && typeof currentObj[keys[0]] === 'object' && currentObj[keys[0]] !== null && !Array.isArray(currentObj[keys[0]])) {
-             displayKey += '.' + keys[0];
-             cPath.push(keys[0]);
-             currentObj = currentObj[keys[0]];
-           } else {
-             break;
-           }
-         }
-         return (
-           <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
-             <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-               <span style={{ color: 'var(--purple)' }}>#</span> {displayKey}
-             </div>
-             {renderFields(currentObj, cPath)}
-           </div>
-         );
-      } else if (typeof v === 'boolean') {
-         return (
-           <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-             <input type="checkbox" checked={v} onChange={e => handleChange(currentPath, (e.target as any).checked)} />
-             <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{k}</label>
-           </div>
-         );
-      } else if (typeof v === 'number') {
-         return (
-           <div key={k} style={{ marginBottom: '12px' }}>
-             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom:'4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-             <input type="number" value={v as number} onInput={e => handleChange(currentPath, Number((e.target as any).value))} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
-           </div>
-         );
-      } else {
-         const isSecret = k.includes('key') || k.includes('token') || k.includes('secret');
-         return (
-           <div key={k} style={{ marginBottom: '12px' }}>
-             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom:'4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-             <input type={isSecret ? 'password' : 'text'} value={v as string} onInput={e => handleChange(currentPath, (e.target as any).value)} style={{ width:'100%', background:'var(--bg-primary)', border:'1px solid var(--border)', color:'var(--text-primary)', padding:'8px 10px', borderRadius:'4px', fontFamily:'var(--font-mono)', fontSize:'12px', outline: 'none' }} />
-           </div>
-         );
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
+            <input
+              type="text"
+              value={v.join(', ')}
+              onInput={(e) => handleChange(currentPath, (e.target as any).value.split(',').map((s: string) => s.trim()))}
+              style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
+            />
+          </div>
+        );
       }
+
+      if (typeof v === 'object' && v !== null) {
+        let currentObj: any = v;
+        let displayKey = k;
+        const cPath = [...currentPath];
+        while (typeof currentObj === 'object' && currentObj !== null && !Array.isArray(currentObj)) {
+          const keys = Object.keys(currentObj);
+          if (keys.length === 1 && typeof currentObj[keys[0]] === 'object' && currentObj[keys[0]] !== null && !Array.isArray(currentObj[keys[0]])) {
+            displayKey += `.${keys[0]}`;
+            cPath.push(keys[0]);
+            currentObj = currentObj[keys[0]];
+          } else {
+            break;
+          }
+        }
+
+        return (
+          <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
+            <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+              <span style={{ color: 'var(--purple)' }}>#</span> {displayKey}
+            </div>
+            {path[0] === 'tools' && displayKey === 'browser' && renderNotice(
+              t(workspaceRestricted ? 'browser_workspace_warning_on' : 'browser_workspace_warning_off'),
+              workspaceRestricted ? 'info' : 'warning',
+            )}
+            {renderFields(currentObj, cPath)}
+          </div>
+        );
+      }
+
+      if (typeof v === 'boolean') {
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked={v} onChange={e => handleChange(currentPath, (e.target as any).checked)} />
+              <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{k}</label>
+            </div>
+            {fullPath === 'tools.restrict_to_workspace' && renderNotice(
+              t(v ? 'tools_restrict_warning_on' : 'tools_restrict_warning_off'),
+              v ? 'info' : 'warning',
+            )}
+          </div>
+        );
+      }
+
+      if (typeof v === 'number') {
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
+            <input
+              type="number"
+              value={v as number}
+              onInput={e => handleChange(currentPath, Number((e.target as any).value))}
+              style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
+          <input
+            type="text"
+            value={String(v ?? '')}
+            onInput={e => handleChange(currentPath, (e.target as any).value)}
+            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
+          />
+        </div>
+      );
     });
   };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
       <div style={{ width: '95%', maxWidth: '1100px', height: '85vh', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
-        
-        {/* Header */}
         <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '1px' }}>
             <span style={{ color: 'var(--purple)' }}>//</span> {t('settings_title')}
@@ -152,20 +207,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
 
-        {/* Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          {/* Tabs */}
           <div style={{ width: '200px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', padding: '16px' }}>
             {['soul', 'providers', 'agents', 'channels', 'tools', 'skills'].map(tab => (
-              <button 
+              <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                style={{ 
-                  textAlign: 'left', padding: '10px 12px', 
-                  background: activeTab === tab ? 'var(--bg-tertiary)' : 'transparent', 
-                  color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)', 
-                  border: '1px solid', borderColor: activeTab === tab ? 'var(--border)' : 'transparent', 
-                  borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '12px', 
+                style={{
+                  textAlign: 'left', padding: '10px 12px',
+                  background: activeTab === tab ? 'var(--bg-tertiary)' : 'transparent',
+                  color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
+                  border: '1px solid', borderColor: activeTab === tab ? 'var(--border)' : 'transparent',
+                  borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '12px',
                   textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s'
                 }}
               >
@@ -174,7 +227,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
 
-          {/* Content Area */}
           <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
             {activeTab === 'soul' ? (
               <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
@@ -189,7 +241,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '32px' }}>
                     {t('settings_desc')}
                   </div>
-                  
                   {activeTab === 'skills' ? <SkillsTab /> : renderFields(draft[activeTab], [activeTab])}
                 </div>
 
@@ -198,23 +249,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
                     {Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).map(k => {
                       const isEnabled = draft[activeTab][k]?.enabled;
-                      // Compute flattened display key (must match renderFields logic)
                       let displayKey = k;
                       let obj = draft[activeTab][k];
                       while (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
                         const keys = Object.keys(obj);
                         if (keys.length === 1 && typeof obj[keys[0]] === 'object' && obj[keys[0]] !== null && !Array.isArray(obj[keys[0]])) {
-                          displayKey += '.' + keys[0];
+                          displayKey += `.${keys[0]}`;
                           obj = obj[keys[0]];
-                        } else { break; }
+                        } else {
+                          break;
+                        }
                       }
                       return (
                         <button
                           key={k}
                           onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                          style={{ 
+                          style={{
                             textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px',
-                            display: 'flex', alignItems: 'center', gap: '6px', 
+                            display: 'flex', alignItems: 'center', gap: '6px',
                             color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'),
                             background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'),
                             border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'),
@@ -234,7 +286,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)' }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {changedPaths.size > 0 && <span style={{ color: 'var(--accent)' }}>● {changedPaths.size} {t('unsaved_changes')}</span>}

@@ -8,33 +8,37 @@ import re
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
 from lemonclaw.agent.context import ContextBuilder
 from lemonclaw.agent.locale import detect_lang, session_lang, t
-from lemonclaw.agent.memory import MemoryStore
 from lemonclaw.agent.subagent import SubagentManager
+from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.cron import CronTool
 from lemonclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.registry import ToolRegistry
-from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.shell import ExecTool
 from lemonclaw.agent.tools.spawn import SpawnTool
 from lemonclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.providers.base import LLMProvider
-from lemonclaw.providers.catalog import MODEL_MAP, fuzzy_match, format_model_list
+from lemonclaw.providers.catalog import format_model_list, fuzzy_match
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.conductor.orchestrator import Orchestrator
-    from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig, BrowserToolConfig
+    from lemonclaw.config.schema import (
+        BrowserToolConfig,
+        ChannelsConfig,
+        CodingToolConfig,
+        ExecToolConfig,
+    )
     from lemonclaw.cron.service import CronService
 
 
@@ -208,6 +212,8 @@ class AgentLoop:
                 headed=self.browser_config.headed,
                 content_boundaries=self.browser_config.content_boundaries,
                 max_output=self.browser_config.max_output,
+                workspace=self.workspace,
+                restrict_to_workspace=self.restrict_to_workspace,
             ))
 
     async def _connect_mcp(self) -> None:
@@ -219,7 +225,13 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            await connect_mcp_servers(
+                self._mcp_servers,
+                self.tools,
+                self._mcp_stack,
+                workspace=self.workspace,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
             self._mcp_connected = True
         except Exception as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
@@ -259,6 +271,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
+        session_key: str = "",
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_chunk: Callable[..., Awaitable[None]] | None = None,
         on_tool_call: Callable[..., Awaitable[None]] | None = None,
@@ -276,8 +289,8 @@ class AgentLoop:
         turn_usage = TurnUsage()
         _consecutive_errors: dict[str, int] = {}
         _refusal_count = 0
-        _MAX_REFUSALS = 2  # track repeated tool errors
-        _MAX_CONSECUTIVE_ERRORS = 3
+        max_refusals = 2  # track repeated tool errors
+        max_consecutive_errors = 3
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -360,7 +373,11 @@ class AgentLoop:
                             "arguments": tool_call.arguments,
                         }, ensure_ascii=False), tool_start=True)
 
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = await self.tools.execute(
+                        tool_call.name,
+                        tool_call.arguments,
+                        context={"_session_key": session_key} if session_key else None,
+                    )
 
                     # 6.2: Send tool_result event
                     if on_progress:
@@ -376,9 +393,9 @@ class AgentLoop:
                     if isinstance(result, str) and result.startswith("Error"):
                         err_key = f"{tool_call.name}:{result[:80]}"
                         _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
-                        if _consecutive_errors[err_key] >= _MAX_CONSECUTIVE_ERRORS:
+                        if _consecutive_errors[err_key] >= max_consecutive_errors:
                             logger.warning("Tool {} failed {} times with same error, breaking loop",
-                                           tool_call.name, _MAX_CONSECUTIVE_ERRORS)
+                                           tool_call.name, max_consecutive_errors)
                             final_content = t("tool_repeated_fail", _lang, name=tool_call.name)
                     else:
                         _consecutive_errors.clear()
@@ -398,7 +415,7 @@ class AgentLoop:
                 # Detect model refusal loops: very short responses that refuse to engage
                 if clean and len(clean) < 60 and self._REFUSAL_RE.search(clean):
                     _refusal_count += 1
-                    if _refusal_count >= _MAX_REFUSALS:
+                    if _refusal_count >= max_refusals:
                         # Stop retrying — return the refusal as-is
                         final_content = clean
                         break
@@ -637,7 +654,7 @@ class AgentLoop:
             if needs_compaction(messages, session_model or self.model):
                 messages = await compact(messages, session_model or self.model, self.provider)
             final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
-                messages, stop_event=stop_event, session_model=session_model,
+                messages, session_key=key, stop_event=stop_event, session_model=session_model,
                 lang=session_lang(session),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -840,7 +857,7 @@ class AgentLoop:
                 })
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, session_key=key, on_progress=on_progress or _bus_progress,
             on_chunk=on_chunk or _bus_chunk,
             on_tool_call=_activity_tool_call,
             stop_event=stop_event, session_model=session_model, lang=lang,
@@ -907,7 +924,7 @@ class AgentLoop:
     def _persist_model_default(self, model: str) -> None:
         """Persist model change to config.json (D5: /model = same as Settings tab)."""
         try:
-            from lemonclaw.config import load_config, get_config_path
+            from lemonclaw.config import get_config_path, load_config
             from lemonclaw.config.loader import save_config
             path = get_config_path()
             config = load_config(path)

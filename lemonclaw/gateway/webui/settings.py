@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,7 +13,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from lemonclaw.gateway.webui.auth import verify_session_cookie, COOKIE_NAME
+from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 
 if TYPE_CHECKING:
     from lemonclaw.config.watcher import ConfigWatcher
@@ -86,7 +85,7 @@ for _p in _PROVIDER_NAMES:
 # Fields that require restart (not hot-reloadable)
 _RESTART_FIELDS = re.compile(
     r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding|browser))"
+    r"|tools\.(mcp_servers|coding|browser|restrict_to_workspace))"
 )
 
 # Sensitive field names — values masked in GET response
@@ -208,6 +207,7 @@ def get_settings_routes(
         # Read config.json without env overlay so users see their saved values,
         # not env-injected overrides (e.g. DEFAULT_MODEL).
         import json as _json_mod
+
         from lemonclaw.config.schema import Config
         try:
             if config_path.exists():
@@ -229,9 +229,9 @@ def get_settings_routes(
         # but env var API_KEY is set, show a placeholder so users know keys are active.
         import os as _os
         if _os.environ.get("API_KEY"):
-            _ENV_PROVIDERS = ("lemondata", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
+            env_providers = ("lemondata", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
             providers = data.get("providers", {})
-            for pname in _ENV_PROVIDERS:
+            for pname in env_providers:
                 prov = providers.get(pname, {})
                 if isinstance(prov, dict) and not prov.get("api_key"):
                     prov["api_key"] = "(injected from environment variable)"
@@ -338,7 +338,7 @@ def get_settings_routes(
                     raw = _json_mod.load(f)
                 file_defaults = raw.get("agents", {}).get("defaults", {})
                 update_kwargs = {}
-                _FIELD_MAP = {
+                field_map = {
                     "agents.defaults.model": ("model", ["model"]),
                     "agents.defaults.temperature": ("temperature", ["temperature"]),
                     "agents.defaults.max_tokens": ("max_tokens", ["maxTokens", "max_tokens"]),
@@ -348,7 +348,7 @@ def get_settings_routes(
                     "agents.defaults.disabled_skills": ("disabled_skills", ["disabledSkills", "disabled_skills"]),
                 }
                 for path in changed_paths:
-                    mapping = _FIELD_MAP.get(path)
+                    mapping = field_map.get(path)
                     if not mapping:
                         continue
                     kwarg_name, json_keys = mapping
@@ -475,7 +475,10 @@ def get_settings_routes(
         workspace_skills = agent_loop.context.skills.workspace_skills
         workspace_skills.mkdir(parents=True, exist_ok=True)
 
-        import subprocess, shutil, tempfile, re as _re
+        import re as _re
+        import shutil
+        import subprocess
+        import tempfile
 
         # Parse various input formats:
         # 1. "npx skills add https://github.com/owner/repo --skill skill-name"

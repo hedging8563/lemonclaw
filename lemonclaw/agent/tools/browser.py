@@ -1,10 +1,14 @@
 """Browser automation via agent-browser CLI."""
 
+from __future__ import annotations
+
 import asyncio
+import hashlib
 import os
 import re
 import shlex
 import shutil
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,12 +16,15 @@ from loguru import logger
 
 from lemonclaw.agent.tools.base import Tool
 
+_CHAIN_OPERATORS = {"&&", "||", ";"}
+_BLOCKED_SHELL_TOKENS = {"|", "&", "<", ">", "<<", ">>", "<<<"}
+
 
 class BrowserTool(Tool):
     """Browser automation via agent-browser CLI.
 
     Wraps the agent-browser CLI to provide web interaction capabilities:
-    navigation, snapshots, clicking, form filling, screenshots, etc.
+    navigation, snapshots, clicking, form filling, screenshots, PDFs, etc.
     """
 
     def __init__(
@@ -28,14 +35,19 @@ class BrowserTool(Tool):
         headed: bool = False,
         content_boundaries: bool = True,
         max_output: int = 50000,
+        workspace: Path | str | None = None,
+        restrict_to_workspace: bool = False,
     ):
         self._timeout = timeout
-        self._allowed_domains = allowed_domains or []
-        self._session_name = session_name
+        self._allowed_domains = [d.strip().lower() for d in (allowed_domains or []) if d.strip()]
+        self._session_prefix = self._sanitize_session_component(session_name or "lc")
         self._headed = headed
         self._content_boundaries = content_boundaries
         self._max_output = max_output
+        self._workspace = Path(workspace).expanduser().resolve() if workspace else None
+        self._restrict_to_workspace = restrict_to_workspace
         self._cli_path = shutil.which("agent-browser")
+        self._active_sessions: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -45,6 +57,11 @@ class BrowserTool(Tool):
     def description(self) -> str:
         available = "AVAILABLE" if self._cli_path else "NOT INSTALLED"
         domains = f" Allowed domains: {', '.join(self._allowed_domains)}." if self._allowed_domains else ""
+        workspace = (
+            f" Relative files stay under: {self._workspace}."
+            if self._restrict_to_workspace and self._workspace
+            else ""
+        )
         return (
             f"Browser automation via agent-browser CLI ({available}). "
             "Use for interacting with websites: navigating pages, filling forms, "
@@ -53,7 +70,7 @@ class BrowserTool(Tool):
             "Examples: 'open https://example.com', 'snapshot -i', 'click @e1', "
             "'fill @e2 \"text\"', 'screenshot', 'close'. "
             "Always snapshot after navigation to get fresh element refs (@e1, @e2...)."
-            f"{domains}"
+            f"{domains}{workspace}"
         )
 
     @property
@@ -73,129 +90,253 @@ class BrowserTool(Tool):
             "required": ["command"],
         }
 
-    async def execute(self, command: str, **kwargs: Any) -> str:
+    async def execute(self, command: str, _session_key: str | None = None, **kwargs: Any) -> str:
+        del kwargs
         if not self._cli_path:
             return "Error: agent-browser CLI is not installed. Install with: npm install -g agent-browser"
 
         if not command.strip():
             return "Error: empty command"
 
-        # Domain allowlist check on 'open' / 'goto' / 'navigate' commands
-        violation = self._check_domain(command)
+        parsed = self._parse_command_chain(command)
+        if isinstance(parsed, str):
+            return parsed
+        commands, operators = parsed
+
+        violation = self._check_commands(commands)
         if violation:
             return violation
 
-        shell_cmd = self._build_command(command)
+        session_name = self._resolve_session_name(_session_key)
+        self._active_sessions.add(session_name)
+        env = self._build_env()
+        cwd = str(self._workspace) if self._restrict_to_workspace and self._workspace else None
 
-        logger.info("browser: {}", command)
-        try:
-            process = await asyncio.create_subprocess_shell(
-                shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=self._build_env(),
-            )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=self._timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
+        logger.info("browser [{}]: {}", session_name, command)
+        outputs: list[str] = []
+        last_success = True
+        last_error: str | None = None
+        deadline = asyncio.get_running_loop().time() + self._timeout
+
+        for index, step in enumerate(commands):
+            if index > 0:
+                op = operators[index - 1]
+                if op == "&&" and not last_success:
+                    break
+                if op == "||" and last_success:
+                    continue
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
                 return f"Error: browser command timed out after {self._timeout}s"
-            except asyncio.CancelledError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass
-                raise
 
-            output = stdout.decode("utf-8", errors="replace").strip()
-            err = stderr.decode("utf-8", errors="replace").strip()
+            output, error = await self._run_step(
+                step_args=step,
+                session_name=session_name,
+                env=env,
+                cwd=cwd,
+                timeout=remaining,
+            )
+            if output:
+                outputs.append(output)
+            if error:
+                last_success = False
+                last_error = error
+            else:
+                last_success = True
+                last_error = None
 
-            if process.returncode != 0:
-                # Combine stderr + stdout for error context
-                error_text = err or output or "unknown error"
-                return f"Error (exit {process.returncode}): {error_text}"
+        if last_error:
+            return last_error
 
-            return self._truncate(output) if output else "(no output)"
+        combined = "\n".join(part for part in outputs if part).strip()
+        return self._truncate(combined) if combined else "(no output)"
 
+    async def _run_step(
+        self,
+        *,
+        step_args: list[str],
+        session_name: str,
+        env: dict[str, str],
+        cwd: str | None,
+        timeout: float,
+    ) -> tuple[str, str | None]:
+        process = await asyncio.create_subprocess_exec(
+            *self._build_argv(step_args, session_name),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            cwd=cwd,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            return "", f"Error: browser command timed out after {self._timeout}s"
         except asyncio.CancelledError:
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
             raise
-        except Exception as e:
-            return f"Error running agent-browser: {e}"
 
-    def _build_command(self, command: str) -> str:
-        """Build the full shell command with global flags."""
-        parts = [shlex.quote(self._cli_path or "agent-browser")]
+        output = stdout.decode("utf-8", errors="replace").strip()
+        err = stderr.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            error_text = err or output or "unknown error"
+            return "", f"Error (exit {process.returncode}): {error_text}"
+        return output, None
 
-        if self._session_name:
-            parts.append(f"--session {shlex.quote(self._session_name)}")
+    def _build_argv(self, step_args: list[str], session_name: str) -> list[str]:
+        """Build the full argv list for agent-browser."""
+        argv = [self._cli_path or "agent-browser"]
+        if session_name:
+            argv.extend(["--session", session_name])
         if self._headed:
-            parts.append("--headed")
-
-        parts.append(command)
-        return " ".join(parts)
+            argv.append("--headed")
+        argv.extend(step_args)
+        return argv
 
     def _build_env(self) -> dict[str, str]:
         """Build environment variables for agent-browser."""
         env = os.environ.copy()
-
         if self._content_boundaries:
             env["AGENT_BROWSER_CONTENT_BOUNDARIES"] = "1"
         if self._allowed_domains:
             env["AGENT_BROWSER_ALLOWED_DOMAINS"] = ",".join(self._allowed_domains)
         if self._max_output:
             env["AGENT_BROWSER_MAX_OUTPUT"] = str(self._max_output)
-
         return env
 
-    def _check_domain(self, command: str) -> str | None:
-        """Check domain allowlist for navigation commands. Returns error string or None.
+    def _parse_command_chain(self, command: str) -> tuple[list[list[str]], list[str]] | str:
+        """Parse browser commands without invoking a shell."""
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            tokens = list(lexer)
+        except ValueError:
+            return "Error: malformed browser command"
 
-        Handles chained commands (&&, ||, ;) by checking each sub-command.
-        """
-        if not self._allowed_domains:
+        if not tokens:
+            return "Error: empty command"
+
+        commands: list[list[str]] = []
+        operators: list[str] = []
+        current: list[str] = []
+        for token in tokens:
+            if token in _CHAIN_OPERATORS:
+                if not current:
+                    return "Error: malformed browser command"
+                commands.append(current)
+                operators.append(token)
+                current = []
+                continue
+            if token in _BLOCKED_SHELL_TOKENS:
+                return (
+                    "Error: shell redirection and pipes are not supported in browser commands. "
+                    "Use multiple browser calls or filesystem tools instead."
+                )
+            current.append(token)
+
+        if not current:
+            return "Error: malformed browser command"
+        commands.append(current)
+        return commands, operators
+
+    def _check_commands(self, commands: list[list[str]]) -> str | None:
+        for step_args in commands:
+            violation = self._check_navigation(step_args)
+            if violation:
+                return violation
+            violation = self._check_workspace_paths(step_args)
+            if violation:
+                return violation
+        return None
+
+    def _check_navigation(self, step_args: list[str]) -> str | None:
+        if not step_args or step_args[0] not in {"open", "goto", "navigate"}:
             return None
 
-        # Split on shell operators to handle chained commands
-        sub_commands = [s.strip() for s in re.split(r"&&|\|\||;", command)]
-        for sub in sub_commands:
-            parts = sub.split(None, 1)
-            if not parts or parts[0] not in ("open", "goto", "navigate"):
-                continue
-            if len(parts) < 2:
-                continue
+        url = next((token for token in step_args[1:] if not token.startswith("-")), "")
+        if not url:
+            return None
 
-            url = parts[1].strip().strip("\"'")
-            try:
-                # Detect scheme: urlparse needs :// for proper parsing;
-                # "javascript:x" has : but not ://, still has a scheme
-                if ":" in url.split("/")[0] and "://" not in url:
-                    # Looks like scheme:something (javascript:, data:, file:)
-                    parsed = urlparse(url)
-                else:
-                    parsed = urlparse(url if "://" in url else f"https://{url}")
-                scheme = parsed.scheme or ""
-                domain = parsed.hostname or ""
-            except Exception:
-                continue  # Let agent-browser handle invalid URLs
+        try:
+            if ":" in url.split("/")[0] and "://" not in url:
+                parsed = urlparse(url)
+            else:
+                parsed = urlparse(url if "://" in url else f"https://{url}")
+        except Exception:
+            return None
 
-            # Block non-http(s) schemes (file://, javascript:, data:, etc.)
-            if scheme and scheme not in ("http", "https"):
-                return f"Error: scheme '{scheme}' is not allowed (only http/https)"
-
-            if not domain:
-                continue
-
-            if not self._is_domain_allowed(domain):
-                return f"Error: domain '{domain}' is not in the allowed domains list: {', '.join(self._allowed_domains)}"
-
+        scheme = (parsed.scheme or "").lower()
+        domain = (parsed.hostname or "").lower()
+        if scheme and scheme not in {"http", "https"}:
+            return f"Error: scheme '{scheme}' is not allowed (only http/https)"
+        if domain and self._allowed_domains and not self._is_domain_allowed(domain):
+            return (
+                f"Error: domain '{domain}' is not in the allowed domains list: "
+                f"{', '.join(self._allowed_domains)}"
+            )
         return None
+
+    def _check_workspace_paths(self, step_args: list[str]) -> str | None:
+        if not self._restrict_to_workspace or not self._workspace or not step_args:
+            return None
+
+        command = step_args[0]
+        candidate_indexes: set[int] = set()
+
+        if command == "state" and len(step_args) >= 3 and step_args[1] in {"save", "load"}:
+            candidate_indexes.add(2)
+        elif command in {"pdf", "screenshot"}:
+            index = self._first_positional_index(step_args, start=1)
+            if index is not None:
+                candidate_indexes.add(index)
+
+        for index, token in enumerate(step_args):
+            if token in {"--baseline", "--output", "-o"} and index + 1 < len(step_args):
+                candidate_indexes.add(index + 1)
+
+        for index in sorted(candidate_indexes):
+            violation = self._validate_workspace_path(step_args[index])
+            if violation:
+                return violation
+        return None
+
+    @staticmethod
+    def _first_positional_index(tokens: list[str], start: int = 0) -> int | None:
+        for index in range(start, len(tokens)):
+            token = tokens[index]
+            if token.startswith("-"):
+                continue
+            return index
+        return None
+
+    def _validate_workspace_path(self, raw_path: str) -> str | None:
+        path = Path(raw_path).expanduser()
+        resolved = path.resolve() if path.is_absolute() else (self._workspace / path).resolve()
+        if resolved != self._workspace and self._workspace not in resolved.parents:
+            return f"Error: path '{raw_path}' is outside the workspace"
+        return None
+
+    def _resolve_session_name(self, session_key: str | None) -> str:
+        if not session_key:
+            return self._session_prefix
+        safe_key = self._sanitize_session_component(session_key, default="session")[:32]
+        digest = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:10]
+        return f"{self._session_prefix}-{safe_key}-{digest}"[:80]
+
+    @staticmethod
+    def _sanitize_session_component(value: str, default: str = "lc") -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-._")
+        return cleaned[:48] or default
 
     def _is_domain_allowed(self, domain: str) -> bool:
         """Check if a domain matches the allowlist."""
@@ -215,18 +356,25 @@ class BrowserTool(Tool):
         return text[:self._max_output] + f"\n... (truncated, {len(text) - self._max_output} more chars)"
 
     async def cleanup(self) -> None:
-        """Close the browser session. Called on agent shutdown."""
+        """Close all browser sessions. Called on agent shutdown."""
         if not self._cli_path:
             return
-        try:
-            cmd = self._build_command("close")
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=self._build_env(),
-            )
-            await asyncio.wait_for(process.communicate(), timeout=10.0)
-            logger.info("browser: session closed")
-        except Exception as e:
-            logger.debug("browser: cleanup error (non-fatal): {}", e)
+        env = self._build_env()
+        cwd = str(self._workspace) if self._restrict_to_workspace and self._workspace else None
+        for session_name in sorted(self._active_sessions):
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self._cli_path,
+                    "--session",
+                    session_name,
+                    "close",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=cwd,
+                )
+                await asyncio.wait_for(process.communicate(), timeout=10.0)
+                logger.info("browser [{}]: session closed", session_name)
+            except Exception as e:
+                logger.debug("browser [{}]: cleanup error (non-fatal): {}", session_name, e)
+        self._active_sessions.clear()

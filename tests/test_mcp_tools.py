@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+from contextlib import AsyncExitStack, asynccontextmanager
+from types import SimpleNamespace
+
+import pytest
+
+from lemonclaw.agent.tools.mcp import connect_mcp_servers
+from lemonclaw.agent.tools.registry import ToolRegistry
+from lemonclaw.config.schema import ToolsConfig
+from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_uses_workspace_cwd_when_restricted(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import mcp
+    import mcp.client.stdio as mcp_stdio
+
+    captured: dict[str, object] = {}
+
+    class FakeParams:
+        def __init__(self, **kwargs):
+            captured["params"] = SimpleNamespace(**kwargs)
+
+    @asynccontextmanager
+    async def fake_stdio_client(params):
+        captured["stdio_params"] = params
+        yield ("read", "write")
+
+    class FakeSession:
+        def __init__(self, read, write):
+            self.read = read
+            self.write = write
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(
+                        name="ping",
+                        description="Ping",
+                        inputSchema={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+
+    monkeypatch.setattr(mcp, "StdioServerParameters", FakeParams)
+    monkeypatch.setattr(mcp, "ClientSession", FakeSession)
+    monkeypatch.setattr(mcp_stdio, "stdio_client", fake_stdio_client)
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers(
+            {"filesystem": SimpleNamespace(command="npx", args=["@mcp/server-filesystem"], env={}, tool_timeout=30, url="", headers={})},
+            registry,
+            stack,
+            workspace=tmp_path,
+            restrict_to_workspace=True,
+        )
+
+    params = captured["params"]
+    assert getattr(params, "cwd") == str(tmp_path)
+    assert registry.has("mcp_filesystem_ping")
+
+
+def test_tools_restrict_to_workspace_defaults_on() -> None:
+    assert ToolsConfig().restrict_to_workspace is True
+
+
+def test_workspace_restriction_requires_restart() -> None:
+    assert _RESTART_FIELDS.match("tools.restrict_to_workspace")

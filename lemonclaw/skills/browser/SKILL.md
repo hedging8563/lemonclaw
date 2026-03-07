@@ -31,7 +31,7 @@ browser: snapshot -i
 
 ## Command Chaining
 
-Commands can be chained with `&&` in a single browser tool call:
+Commands can be chained with `&&`, `||`, or `;` in a single browser tool call:
 
 ```
 browser: open https://example.com && wait --load networkidle && snapshot -i
@@ -120,7 +120,8 @@ browser: open https://app.example.com/dashboard
 browser: open https://example.com/products
 browser: snapshot -i
 browser: get text @e5
-browser: get text body > page.txt
+browser: get text body
+write_file: path="browser/page.txt", content="...captured text..."
 ```
 
 ### Annotated Screenshots (Vision Mode)
@@ -140,7 +141,9 @@ browser: eval 'document.title'
 browser: eval 'document.querySelectorAll("img").length'
 ```
 
-For complex JS, use `--stdin` with heredoc to avoid shell quoting issues.
+Do not use shell redirection, pipes, or heredocs in browser commands. The browser tool
+executes `agent-browser` directly without a shell; if you need to persist output, use
+the filesystem tools.
 
 ## Ref Lifecycle (Important)
 
@@ -161,6 +164,8 @@ browser: click @e1        # Use new refs
 - **Domain allowlist**: Configure `tools.browser.allowed_domains` to restrict navigation
 - **Content boundaries**: Enabled by default, wraps page output in markers to prevent prompt injection
 - **Output limits**: Configure `tools.browser.max_output` to prevent context flooding
+- **Workspace restriction**: With `tools.restrict_to_workspace=true`, relative files used by
+  `state save/load`, screenshots, and PDFs stay under the workspace directory
 
 ## Configuration
 

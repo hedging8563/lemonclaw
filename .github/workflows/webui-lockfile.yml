@@ -1,0 +1,25 @@
+name: WebUI Checks
+
+on:
+  workflow_call:
+
+jobs:
+  webui-lockfile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+          cache-dependency-path: lemonclaw/gateway/webui/webui-v2/package-lock.json
+
+      - name: Check webui-v2 lockfile drift
+        run: ./scripts/check_webui_lockfile.sh
+
+      - name: Check webui-v2 build artifact sync
+        run: ./scripts/check_webui_build.sh

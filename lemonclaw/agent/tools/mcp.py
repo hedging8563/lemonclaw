@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -54,7 +55,12 @@ class MCPToolWrapper(Tool):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack
+    mcp_servers: dict,
+    registry: ToolRegistry,
+    stack: AsyncExitStack,
+    *,
+    workspace: Path | None = None,
+    restrict_to_workspace: bool = False,
 ) -> None:
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
@@ -64,7 +70,10 @@ async def connect_mcp_servers(
         try:
             if cfg.command:
                 params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
+                    command=cfg.command,
+                    args=cfg.args,
+                    env=cfg.env or None,
+                    cwd=str(workspace) if restrict_to_workspace and workspace else None,
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif cfg.url:
