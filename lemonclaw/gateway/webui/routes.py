@@ -717,6 +717,37 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── 9.2b: SOUL.md (bootstrap file) API ──────────────────────────────
+
+    _soul_path = agent_loop.workspace / "SOUL.md"
+
+    async def get_soul(request: Request) -> Response:
+        """Return SOUL.md content."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        content = ""
+        if _soul_path.exists():
+            content = _soul_path.read_text(encoding="utf-8")
+        resp = _json({"content": content})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def update_soul(request: Request) -> Response:
+        """Update SOUL.md content."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        content = body.get("content", "")
+        _soul_path.write_text(content, encoding="utf-8")
+        resp = _json({"ok": True})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── 9.3: MCP status API ──────────────────────────────────────────────
 
     async def get_mcp_status(request: Request) -> Response:
@@ -830,6 +861,8 @@ def get_webui_routes(
         Route("/api/memory", get_memory, methods=["GET"]),
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
+        Route("/api/soul", get_soul, methods=["GET"]),
+        Route("/api/soul", update_soul, methods=["PATCH"]),
         Route("/api/mcp/status", get_mcp_status, methods=["GET"]),
         Route("/api/memo/yesterday", get_yesterday_memo, methods=["GET"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),

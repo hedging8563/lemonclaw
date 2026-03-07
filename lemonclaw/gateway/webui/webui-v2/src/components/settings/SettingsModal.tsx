@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { SkillsTab } from './SkillsTab';
+import { SoulEditor } from './SoulEditor';
 import { MCPServersEditor } from './MCPServersEditor';
 import { t } from '../../stores/i18n';
 
@@ -8,7 +9,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<any>(null);
   const [draft, setDraft] = useState<any>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState('providers');
+  const [activeTab, setActiveTab] = useState('soul');
 
   const load = async () => {
     try {
@@ -149,7 +150,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* Tabs */}
           <div style={{ width: '200px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', padding: '16px' }}>
-            {['providers', 'agents', 'channels', 'tools', 'skills'].map(tab => (
+            {['soul', 'providers', 'agents', 'channels', 'tools', 'skills'].map(tab => (
               <button 
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -169,7 +170,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
           {/* Content Area */}
           <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
-            {!draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading_configs')}</div> : (
+            {activeTab === 'soul' ? (
+              <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
+                <SoulEditor />
+              </div>
+            ) : !draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading_configs')}</div> : (
               <>
                 <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize' }}>

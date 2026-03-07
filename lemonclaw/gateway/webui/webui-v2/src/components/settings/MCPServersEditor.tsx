@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 
 interface MCPServer {
   command?: string;
@@ -56,6 +56,16 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
   const [mode, setModeState] = useState<'stdio' | 'http'>(server.url ? 'http' : 'stdio');
   const isHttp = mode === 'http';
 
+  // Local state buffers — parse on blur, not on every keystroke
+  const [argsText, setArgsText] = useState((server.args || []).join(', '));
+  const [envText, setEnvText] = useState(dictToLines(server.env));
+  const [headersText, setHeadersText] = useState(dictToLines(server.headers));
+
+  // Sync local buffers when server prop changes from outside (e.g. mode switch)
+  useEffect(() => { setArgsText((server.args || []).join(', ')); }, [JSON.stringify(server.args)]);
+  useEffect(() => { setEnvText(dictToLines(server.env)); }, [JSON.stringify(server.env)]);
+  useEffect(() => { setHeadersText(dictToLines(server.headers)); }, [JSON.stringify(server.headers)]);
+
   const setMode = (m: 'stdio' | 'http') => {
     setModeState(m);
     if (m === 'http') {
@@ -100,11 +110,11 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
               </div>
               <div>
                 <label style={S.label}>args (comma-separated)</label>
-                <input style={S.input as any} type="text" value={(server.args || []).join(', ')} placeholder="@modelcontextprotocol/server-filesystem, /tmp" onInput={(e) => onUpdate({ ...server, args: (e.target as any).value.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
+                <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /tmp" onInput={(e) => setArgsText((e.target as any).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
               </div>
               <div>
                 <label style={S.label}>env (KEY=VALUE, one per line)</label>
-                <textarea style={S.textarea as any} value={dictToLines(server.env)} placeholder="NODE_ENV=production" onInput={(e) => onUpdate({ ...server, env: linesToDict((e.target as any).value) })} />
+                <textarea style={S.textarea as any} value={envText} placeholder="NODE_ENV=production" onInput={(e) => setEnvText((e.target as any).value)} onBlur={() => onUpdate({ ...server, env: linesToDict(envText) })} />
               </div>
             </>
           ) : (
@@ -115,7 +125,7 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
               </div>
               <div>
                 <label style={S.label}>headers (KEY=VALUE, one per line)</label>
-                <textarea style={S.textarea as any} value={dictToLines(server.headers)} placeholder="Authorization=Bearer sk-xxx" onInput={(e) => onUpdate({ ...server, headers: linesToDict((e.target as any).value) })} />
+                <textarea style={S.textarea as any} value={headersText} placeholder="Authorization=Bearer sk-xxx" onInput={(e) => setHeadersText((e.target as any).value)} onBlur={() => onUpdate({ ...server, headers: linesToDict(headersText) })} />
               </div>
             </>
           )}
