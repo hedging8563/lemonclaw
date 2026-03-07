@@ -77,6 +77,8 @@ export function wsConnect(path: string, onMessage: (data: any) => void, onStatus
   let ws: WebSocket;
   let pingTimer: any;
   let isIntentionallyClosed = false;
+  let retryDelay = 1000;
+  const MAX_RETRY_DELAY = 30000;
 
   const connect = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -84,6 +86,7 @@ export function wsConnect(path: string, onMessage: (data: any) => void, onStatus
     ws = new WebSocket(url);
 
     ws.onopen = () => {
+      retryDelay = 1000; // Reset on successful connection
       onStatusChange(true);
       pingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -105,7 +108,8 @@ export function wsConnect(path: string, onMessage: (data: any) => void, onStatus
       onStatusChange(false);
       clearInterval(pingTimer);
       if (!isIntentionallyClosed) {
-        setTimeout(connect, 5000);
+        setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       }
     };
 

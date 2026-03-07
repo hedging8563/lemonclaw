@@ -10,6 +10,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<any>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -35,12 +36,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setDraft({ ...draft });
     
     const topPath = path[0] === 'agents' ? 'agents.defaults.' + path[2] : path[0] + '.' + path[1];
-    setChangedPaths(new Set(changedPaths).add(topPath));
+    setChangedPaths(prev => new Set(prev).add(topPath));
   };
 
   const handleSave = async () => {
     if (changedPaths.size === 0) return onClose();
-    
+    setSaveError(null);
+
     const payload: any = {};
     for (const p of Array.from(changedPaths)) {
       if (p.startsWith('agents.defaults.')) {
@@ -57,13 +59,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const applyRes = await apiFetch('/api/settings/apply', { method: 'POST', body: JSON.stringify({ changed_paths: Array.from(changedPaths) }) });
       const applyData = await applyRes.json();
       if (applyData.restart_required) {
-        // Instead of a blocking alert, just log or use a mild prompt
         console.log('Backend is restarting to apply changes.');
       }
       onClose();
     } catch (e: any) {
-      console.error('Save failed: ', e);
+      setSaveError(e.message || 'Save failed');
     }
+  };
+
+  const handleClose = () => {
+    if (changedPaths.size > 0 && !confirm(t('confirm_discard_changes'))) return;
+    onClose();
   };
 
   const renderFields = (data: any, path: string[]) => {
@@ -143,7 +149,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '1px' }}>
             <span style={{ color: 'var(--purple)' }}>//</span> {t('settings_title')}
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}>×</button>
+          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
 
         {/* Body */}
@@ -222,8 +228,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)' }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {changedPaths.size > 0 && <span style={{ color: 'var(--accent)' }}>● {changedPaths.size} {t('unsaved_changes')}</span>}
+            {saveError && <span style={{ color: 'var(--error)', marginLeft: '8px' }}>{saveError}</span>}
           </div>
-          <button onClick={onClose} style={{ padding: '8px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('btn_cancel')}</button>
+          <button onClick={handleClose} style={{ padding: '8px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('btn_cancel')}</button>
           <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '8px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold' }}>{t('btn_save_apply')}</button>
         </div>
       </div>

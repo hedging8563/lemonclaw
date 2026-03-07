@@ -1,14 +1,29 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { agents, plans, loadConductor } from '../../stores/conductor';
 import { t } from '../../stores/i18n';
 
 export function ConductorPanel() {
+  const timerRef = useRef<any>(null);
+
   useEffect(() => {
     loadConductor();
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadConductor();
-    }, 3000); 
-    return () => clearInterval(timer);
+
+    const startPolling = () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      const hasBusy = agents.peek().some(a => a.status === 'busy');
+      timerRef.current = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          loadConductor().then(() => {
+            // Adjust interval if busy state changed
+            const nowBusy = agents.peek().some(a => a.status === 'busy');
+            if (nowBusy !== hasBusy) startPolling();
+          });
+        }
+      }, hasBusy ? 3000 : 15000);
+    };
+
+    startPolling();
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
   return (

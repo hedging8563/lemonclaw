@@ -9,6 +9,8 @@ export function LoginScreen() {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('token');
     if (t) {
+      // Clear token from URL to prevent it lingering in browser history
+      history.replaceState({}, '', window.location.pathname);
       setToken(t);
       login(t).catch(err => setError(err.message || 'Login failed'));
     }

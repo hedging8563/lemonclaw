@@ -37,16 +37,18 @@ hljs.registerAliases(['html', 'svg'], { languageName: 'xml' });
 hljs.registerLanguage('yaml', yaml);
 hljs.registerAliases(['yml'], { languageName: 'yaml' });
 
+let _skipHighlight = false;
+
 (marked as any).setOptions({
   breaks: true,
   highlight: function(code: string, lang: string) {
-    if ((window as any).__skipHighlight) return code;
+    if (_skipHighlight) return code;
     if (lang && hljs.getLanguage(lang)) {
       try {
         return hljs.highlight(code, { language: lang }).value;
       } catch (err) {}
     }
-    return code; 
+    return code;
   }
 });
 
@@ -58,7 +60,7 @@ DOMPurify.addHook('afterSanitizeAttributes', function(node) {
 });
 
 function renderMd(content: string, skipHighlight = false) {
-  (window as any).__skipHighlight = skipHighlight;
+  _skipHighlight = skipHighlight;
   return DOMPurify.sanitize(marked.parse(content) as string);
 }
 

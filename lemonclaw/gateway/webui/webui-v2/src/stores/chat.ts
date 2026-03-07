@@ -56,7 +56,7 @@ export async function loadHistory() {
   isLoadingHistory.value = true;
   
   try {
-    let url = `/api/sessions/${activeSessionKey.value}/messages`;
+    let url = `/api/sessions/${encodeURIComponent(activeSessionKey.value)}/messages`;
     if (!activeSessionKey.value.startsWith('webui:')) {
       url = `/api/activity/messages?session_key=${encodeURIComponent(activeSessionKey.value)}&limit=100`;
     }

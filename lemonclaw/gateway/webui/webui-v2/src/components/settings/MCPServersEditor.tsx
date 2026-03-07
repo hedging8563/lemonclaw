@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { t } from '../../stores/i18n';
 
 interface MCPServer {
   command?: string;
@@ -95,7 +96,7 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
         <div style={S.cardBody as any}>
           {/* Mode selector */}
           <div>
-            <label style={S.label}>mode</label>
+            <label style={S.label}>{t('mcp_mode')}</label>
             <div style={S.row}>
               <button style={S.modeBtn(mode === 'stdio')} onClick={() => setMode('stdio')}>Stdio</button>
               <button style={S.modeBtn(mode === 'http')} onClick={() => setMode('http')}>HTTP</button>
@@ -105,33 +106,33 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
           {mode === 'stdio' ? (
             <>
               <div>
-                <label style={S.label}>command</label>
+                <label style={S.label}>{t('mcp_command')}</label>
                 <input style={S.input as any} type="text" value={server.command || ''} placeholder="npx" onInput={(e) => onUpdate({ ...server, command: (e.target as any).value })} />
               </div>
               <div>
-                <label style={S.label}>args (comma-separated)</label>
+                <label style={S.label}>{t('mcp_args')}</label>
                 <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /tmp" onInput={(e) => setArgsText((e.target as any).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
               </div>
               <div>
-                <label style={S.label}>env (KEY=VALUE, one per line)</label>
+                <label style={S.label}>{t('mcp_env')}</label>
                 <textarea style={S.textarea as any} value={envText} placeholder="NODE_ENV=production" onInput={(e) => setEnvText((e.target as any).value)} onBlur={() => onUpdate({ ...server, env: linesToDict(envText) })} />
               </div>
             </>
           ) : (
             <>
               <div>
-                <label style={S.label}>url</label>
+                <label style={S.label}>{t('mcp_url')}</label>
                 <input style={S.input as any} type="text" value={server.url || ''} placeholder="http://localhost:3000/mcp" onInput={(e) => onUpdate({ ...server, url: (e.target as any).value })} />
               </div>
               <div>
-                <label style={S.label}>headers (KEY=VALUE, one per line)</label>
+                <label style={S.label}>{t('mcp_headers')}</label>
                 <textarea style={S.textarea as any} value={headersText} placeholder="Authorization=Bearer sk-xxx" onInput={(e) => setHeadersText((e.target as any).value)} onBlur={() => onUpdate({ ...server, headers: linesToDict(headersText) })} />
               </div>
             </>
           )}
 
           <div>
-            <label style={S.label}>tool_timeout (seconds)</label>
+            <label style={S.label}>{t('mcp_timeout')}</label>
             <input style={{ ...(S.input as any), width: '120px' }} type="number" value={server.tool_timeout ?? 30} min={1} max={600} onInput={(e) => onUpdate({ ...server, tool_timeout: Number((e.target as any).value) || 30 })} />
           </div>
         </div>
@@ -173,7 +174,7 @@ export function MCPServersEditor({ servers, onChange }: Props) {
 
       {entries.length === 0 && !adding && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
-          No MCP servers configured. Add one to extend your agent with external tools.
+          {t('mcp_no_servers')}
         </div>
       )}
 
@@ -198,11 +199,11 @@ export function MCPServersEditor({ servers, onChange }: Props) {
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
             autoFocus
           />
-          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap' }}>Add</button>
-          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>Cancel</button>
+          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap' }}>{t('mcp_add')}</button>
+          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('btn_cancel')}</button>
         </div>
       ) : (
-        <button style={S.addBtn} onClick={() => setAdding(true)}>+ Add MCP Server</button>
+        <button style={S.addBtn} onClick={() => setAdding(true)}>{t('mcp_add_server')}</button>
       )}
     </div>
   );

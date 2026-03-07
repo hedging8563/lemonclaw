@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { sessions, activeSessionKey } from '../../stores/sessions';
 import { activitySessions } from '../../stores/activity';
+import { t } from '../../stores/i18n';
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -78,14 +79,14 @@ export function CommandPalette() {
             value={query}
             onInput={e => { setQuery((e.target as HTMLInputElement).value); setSelectedIndex(0); }}
             onKeyDown={handleListKeyDown}
-            placeholder="Search sessions or channels... (Type to filter)"
+            placeholder={t('cmd_search_placeholder')}
             style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '16px', fontFamily: 'var(--font-mono)' }}
           />
           <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', border: '1px solid var(--border)', padding: '2px 6px', borderRadius: '4px' }}>ESC</span>
         </div>
         
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {filtered.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>No results found.</div>}
+          {filtered.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('cmd_no_results')}</div>}
           {filtered.map((item, idx) => (
             <div 
               key={item.key}

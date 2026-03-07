@@ -63,13 +63,13 @@ export function SkillsTab() {
   };
 
   const toggleSkill = async (name: string, enabled: boolean) => {
-    await apiFetch(`/api/settings/skills/${name}`, { method: 'PATCH', body: JSON.stringify({ enabled: !enabled }) });
+    await apiFetch(`/api/settings/skills/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify({ enabled: !enabled }) });
     await load();
   };
 
   const deleteSkill = async (name: string) => {
     if (!confirm(t('confirm_delete_skill').replace('{name}', name))) return;
-    await apiFetch(`/api/settings/skills/${name}`, { method: 'DELETE' });
+    await apiFetch(`/api/settings/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     await load();
   };
 
@@ -118,7 +118,7 @@ export function SkillsTab() {
                   style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255, 68, 68, 0.1)'; e.currentTarget.style.color = 'var(--error)'; e.currentTarget.style.borderColor = 'rgba(255, 68, 68, 0.3)'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'transparent'; }}
-                  title="Delete Plugin"
+                  title={t('delete_plugin')}
                 >
                   🗑️
                 </button>

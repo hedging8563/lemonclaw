@@ -23,7 +23,7 @@ export async function loadSessions() {
 }
 
 export async function deleteSession(key: string) {
-  await apiFetch(`/api/sessions/${key}`, { method: 'DELETE' });
+  await apiFetch(`/api/sessions/${encodeURIComponent(key)}`, { method: 'DELETE' });
   if (activeSessionKey.value === key) {
     activeSessionKey.value = 'webui:default';
   }

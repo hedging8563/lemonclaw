@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import { apiFetch, wsConnect } from '../api/client';
 import { activeSessionKey } from './sessions';
-import { loadHistory } from './chat';
+import { loadHistory, isStreaming } from './chat';
 
 export interface ActivitySession {
   key: string;
@@ -31,8 +31,8 @@ export function initActivityWS() {
   wsClient = wsConnect('/ws/activity', (event) => {
     if (event.type === 'message_in' || event.type === 'message_out' || event.type === 'tool_call') {
       loadActivitySessions();
-      // If we are currently viewing this session, reload the history to show the new message
-      if (activeSessionKey.value === event.session_key) {
+      // If we are currently viewing this session and not streaming, reload the history
+      if (activeSessionKey.value === event.session_key && !isStreaming.value) {
         loadHistory();
       }
     }
