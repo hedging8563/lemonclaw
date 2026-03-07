@@ -142,7 +142,7 @@ def _get_nested(data: dict, path: str) -> Any:
 
 def _is_masked(value: str) -> bool:
     """Check if a string looks like a masked or env-injected placeholder."""
-    return isinstance(value, str) and ("****" in value or value.startswith("(injected"))
+    return isinstance(value, str) and ("****" in value or (value.startswith("(") and value.endswith(")")))
 
 
 def _unmark_sensitive(new_obj: dict, path: str, original_data: dict) -> dict:
@@ -234,7 +234,7 @@ def get_settings_routes(
             for pname in env_providers:
                 prov = providers.get(pname, {})
                 if isinstance(prov, dict) and not prov.get("api_key"):
-                    prov["api_key"] = "(injected from environment variable)"
+                    prov["api_key"] = "(auto-configured by platform)"
 
         # Include the effective (runtime) model so frontend can show both
         effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None
