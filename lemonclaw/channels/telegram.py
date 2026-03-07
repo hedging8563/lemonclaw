@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -405,28 +406,32 @@ class TelegramChannel(BaseChannel):
                     logger.info("File {} is {:.1f}MB, splitting for Telegram", filename, file_size / 1024 / 1024)
                     segments = self._split_video(media_path)
                     if segments:
-                        total = len(segments)
-                        for idx, seg_path in enumerate(segments, 1):
-                            try:
-                                caption = f"{filename} [{idx}/{total}]"
-                                sender = self._app.bot.send_video if media_type == "video" else self._app.bot.send_audio
-                                param = media_type
-                                with open(seg_path, 'rb') as f:
-                                    await sender(
+                        tmp_dir = os.path.dirname(segments[0])
+                        try:
+                            total = len(segments)
+                            for idx, seg_path in enumerate(segments, 1):
+                                try:
+                                    caption = f"{filename} [{idx}/{total}]"
+                                    sender = self._app.bot.send_video if media_type == "video" else self._app.bot.send_audio
+                                    param = media_type
+                                    with open(seg_path, 'rb') as f:
+                                        await sender(
+                                            chat_id=chat_id,
+                                            **{param: f},
+                                            caption=caption,
+                                            reply_parameters=reply_params,
+                                            **topic_kwargs,
+                                        )
+                                except Exception as e:
+                                    logger.error("Failed to send segment {}/{}: {}", idx, total, e)
+                                    await self._app.bot.send_message(
                                         chat_id=chat_id,
-                                        **{param: f},
-                                        caption=caption,
+                                        text=f"[Failed to send: {filename} part {idx}/{total}]",
                                         reply_parameters=reply_params,
                                         **topic_kwargs,
                                     )
-                            except Exception as e:
-                                logger.error("Failed to send segment {}/{}: {}", idx, total, e)
-                                await self._app.bot.send_message(
-                                    chat_id=chat_id,
-                                    text=f"[Failed to send: {filename} part {idx}/{total}]",
-                                    reply_parameters=reply_params,
-                                    **topic_kwargs,
-                                )
+                        finally:
+                            shutil.rmtree(tmp_dir, ignore_errors=True)
                         continue
                     else:
                         # Split failed, notify user with file path
@@ -634,18 +639,28 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
+                # Preserve original filename when available (e.g. document.file_name)
+                original_name = getattr(media_file, 'file_name', None)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
+
+                # Save to ~/.lemonclaw/media/
                 from pathlib import Path
                 media_dir = Path.home() / ".lemonclaw" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+
+                if original_name:
+                    # Use original filename with file_id prefix to avoid collisions
+                    safe_name = re.sub(r'[^\w\s.\-\u4e00-\u9fff]', '_', original_name)
+                    file_path = media_dir / f"{media_file.file_id[:8]}_{safe_name}"
+                else:
+                    file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
                 await file.download_to_drive(str(file_path))
-                
+
                 media_paths.append(str(file_path))
-                
+
+                # Build descriptive label for the agent
+                label = original_name or file_path.name
+
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
                     from lemonclaw.providers.transcription import TranscriptionProvider
@@ -655,9 +670,9 @@ class TelegramChannel(BaseChannel):
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
+                        content_parts.append(f"[{media_type}: {file_path} ({label})]")
                 else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
+                    content_parts.append(f"[{media_type}: {file_path} ({label})]")
                     
                 logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
