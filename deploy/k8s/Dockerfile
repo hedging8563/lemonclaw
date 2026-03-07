@@ -42,6 +42,13 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Chromium + agent-browser for browser automation (optional, ~400MB)
+# Playwright installs Chromium and its system dependencies
+RUN npx playwright install --with-deps chromium \
+    && npm install -g agent-browser \
+    && rm -rf /root/.cache/ms-playwright/.links \
+    && rm -rf /tmp/* /root/.npm
+
 # Create non-root user
 RUN useradd -m -s /bin/bash lemonclaw
 

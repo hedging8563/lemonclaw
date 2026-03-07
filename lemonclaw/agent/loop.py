@@ -34,7 +34,7 @@ from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.conductor.orchestrator import Orchestrator
-    from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig
+    from lemonclaw.config.schema import ChannelsConfig, CodingToolConfig, ExecToolConfig, BrowserToolConfig
     from lemonclaw.cron.service import CronService
 
 
@@ -78,6 +78,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         usage_tracker: UsageTracker | None = None,
         coding_config: CodingToolConfig | None = None,
+        browser_config: BrowserToolConfig | None = None,
         activity_bus: ActivityBus | None = None,
         default_timezone: str = "",
         system_prompt: str = "",
@@ -98,6 +99,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.coding_config = coding_config
+        self.browser_config = browser_config
         self.activity_bus = activity_bus
         self.orchestrator: Orchestrator | None = None
         self.cron_service = cron_service
@@ -196,6 +198,16 @@ class AgentLoop:
                 api_key=self.coding_config.api_key,
                 api_base=self.coding_config.api_base,
                 restrict_to_workspace=self.restrict_to_workspace,
+            ))
+        if self.browser_config and self.browser_config.enabled:
+            from lemonclaw.agent.tools.browser import BrowserTool
+            self.tools.register(BrowserTool(
+                timeout=self.browser_config.timeout,
+                allowed_domains=self.browser_config.allowed_domains,
+                session_name=self.browser_config.session_name or f"lc-{self.agent_id}",
+                headed=self.browser_config.headed,
+                content_boundaries=self.browser_config.content_boundaries,
+                max_output=self.browser_config.max_output,
             ))
 
     async def _connect_mcp(self) -> None:
@@ -578,13 +590,18 @@ class AgentLoop:
                 self._stop_events.pop(msg.session_key, None)
 
     async def close_mcp(self) -> None:
-        """Close MCP connections."""
+        """Close MCP connections and tool resources."""
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+        # Cleanup browser session if registered
+        browser_tool = self.tools.get("browser")
+        if browser_tool and hasattr(browser_tool, "cleanup"):
+            await browser_tool.cleanup()
 
     def stop(self) -> None:
         """Stop the agent loop."""

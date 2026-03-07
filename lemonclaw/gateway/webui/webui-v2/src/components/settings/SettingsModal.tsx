@@ -198,10 +198,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
                     {Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).map(k => {
                       const isEnabled = draft[activeTab][k]?.enabled;
+                      // Compute flattened display key (must match renderFields logic)
+                      let displayKey = k;
+                      let obj = draft[activeTab][k];
+                      while (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
+                        const keys = Object.keys(obj);
+                        if (keys.length === 1 && typeof obj[keys[0]] === 'object' && obj[keys[0]] !== null && !Array.isArray(obj[keys[0]])) {
+                          displayKey += '.' + keys[0];
+                          obj = obj[keys[0]];
+                        } else { break; }
+                      }
                       return (
-                        <button 
+                        <button
                           key={k}
-                          onClick={() => document.getElementById(`setting-group-${k}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                           style={{ 
                             textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px',
                             display: 'flex', alignItems: 'center', gap: '6px', 

@@ -49,6 +49,15 @@ _WRITABLE_PATHS: set[str] = {
     "tools.coding.timeout",
     "tools.coding.api_key",
     "tools.coding.api_base",
+    "tools.coding",  # Whole-object replacement (handleSave sends tools.coding as one object)
+    "tools.browser.enabled",
+    "tools.browser.timeout",
+    "tools.browser.allowed_domains",
+    "tools.browser.session_name",
+    "tools.browser.headed",
+    "tools.browser.content_boundaries",
+    "tools.browser.max_output",
+    "tools.browser",  # Whole-object replacement
     "tools.exec.timeout",
     "tools.exec.path_append",
     "tools.restrict_to_workspace",
@@ -77,7 +86,7 @@ for _p in _PROVIDER_NAMES:
 # Fields that require restart (not hot-reloadable)
 _RESTART_FIELDS = re.compile(
     r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding))"
+    r"|tools\.(mcp_servers|coding|browser))"
 )
 
 # Sensitive field names — values masked in GET response

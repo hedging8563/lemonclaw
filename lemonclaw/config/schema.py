@@ -333,6 +333,18 @@ class CodingToolConfig(Base):
     api_base: str = ""  # Custom API endpoint (e.g. https://api.lemondata.cc)
 
 
+class BrowserToolConfig(Base):
+    """Browser automation tool configuration (agent-browser CLI)."""
+
+    enabled: bool = False
+    timeout: int = 60
+    allowed_domains: list[str] = Field(default_factory=list)
+    session_name: str = ""
+    headed: bool = False
+    content_boundaries: bool = True
+    max_output: int = 50000
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -357,6 +369,7 @@ class ToolsConfig(Base):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     coding: CodingToolConfig = Field(default_factory=CodingToolConfig)
+    browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
