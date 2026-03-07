@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { t } from '../../stores/i18n';
 
 interface MCPServer {
@@ -16,20 +16,50 @@ interface Props {
   onChange: (servers: Record<string, MCPServer>) => void;
 }
 
+const MOBILE_BREAKPOINT = 640;
+const srOnly = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
+
 const S = {
   card: { marginBottom: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' } as const,
-  cardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', gap: '8px' } as const,
+  headerRow: { display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '8px' } as const,
+  headerButton: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '12px 16px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' as const } as const,
   cardBody: { padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } as const,
   label: { display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' } as const,
   input: { width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' } as const,
   textarea: { width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', resize: 'vertical', minHeight: '60px', boxSizing: 'border-box' } as const,
   tag: (color: string) => ({ fontSize: '10px', padding: '2px 6px', borderRadius: '3px', fontFamily: 'var(--font-mono)', background: color === 'green' ? 'rgba(76,175,80,0.15)' : 'rgba(100,149,237,0.15)', color: color === 'green' ? 'var(--success)' : 'cornflowerblue', border: `1px solid ${color === 'green' ? 'rgba(76,175,80,0.3)' : 'rgba(100,149,237,0.3)'}` }),
-  deleteBtn: { background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: '16px', padding: '4px 8px', borderRadius: '4px', lineHeight: 1 } as const,
+  deleteBtn: { alignSelf: 'center', background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: '16px', padding: '4px 8px', borderRadius: '4px', lineHeight: 1 } as const,
   addBtn: { width: '100%', padding: '10px', background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: '6px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' } as const,
   row: { display: 'flex', gap: '10px' } as const,
   modeBtn: (active: boolean) => ({ flex: 1, padding: '6px', background: active ? 'var(--bg-tertiary)' : 'transparent', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '4px', color: active ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px' }),
   notice: (warning: boolean) => ({ marginBottom: '12px', padding: '10px 12px', borderRadius: '6px', border: `1px solid ${warning ? 'rgba(255, 170, 0, 0.28)' : 'rgba(100, 149, 237, 0.28)'}`, background: warning ? 'rgba(255, 170, 0, 0.08)' : 'rgba(100, 149, 237, 0.08)', color: warning ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: 1.6 }) as const,
 };
+
+function ExternalLinkButton({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={label}
+      title={label}
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '34px', padding: '0 14px', background: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '12px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+    >
+      <span>{label}</span>
+      <span aria-hidden="true">↗</span>
+    </a>
+  );
+}
 
 function dictToLines(d: Record<string, string> | undefined): string {
   if (!d) return '';
@@ -82,16 +112,29 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
 
   return (
     <div style={S.card}>
-      <div style={S.cardHeader} onClick={() => setExpanded(!expanded)}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-          <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold' }}>{name}</span>
-          <span style={S.tag(isHttp ? 'blue' : 'green')}>{isHttp ? t('mcp_mode_http') : t('mcp_mode_stdio')}</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <button style={S.deleteBtn} onClick={(e) => { e.stopPropagation(); onDelete(); }} title={t('mcp_delete')}>×</button>
-          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{expanded ? '▲' : '▼'}</span>
-        </div>
+      <div style={S.headerRow}>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          style={S.headerButton}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
+            <span style={S.tag(isHttp ? 'blue' : 'green')}>{isHttp ? t('mcp_mode_http') : t('mcp_mode_stdio')}</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+          </div>
+          <span style={{ color: 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
+        </button>
+        <button
+          type="button"
+          style={S.deleteBtn}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          aria-label={t('mcp_delete')}
+          title={t('mcp_delete')}
+        >
+          ×
+        </button>
       </div>
 
       {expanded && (
@@ -99,8 +142,8 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
           <div>
             <label style={S.label}>{t('mcp_mode')}</label>
             <div style={S.row}>
-              <button style={S.modeBtn(mode === 'stdio')} onClick={() => setMode('stdio')}>{t('mcp_mode_stdio')}</button>
-              <button style={S.modeBtn(mode === 'http')} onClick={() => setMode('http')}>{t('mcp_mode_http')}</button>
+              <button type="button" style={S.modeBtn(mode === 'stdio')} onClick={() => setMode('stdio')}>{t('mcp_mode_stdio')}</button>
+              <button type="button" style={S.modeBtn(mode === 'http')} onClick={() => setMode('http')}>{t('mcp_mode_http')}</button>
             </div>
           </div>
 
@@ -145,6 +188,18 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
 export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Props) {
   const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+      }
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   const entries = Object.entries(servers || {});
 
@@ -153,6 +208,7 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
   };
 
   const handleDelete = (name: string) => {
+    if (!confirm(t('confirm_delete_mcp').replace('{name}', name))) return;
     const next = { ...servers };
     delete next[name];
     onChange(next);
@@ -177,6 +233,17 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
         {t(restrictToWorkspace ? 'mcp_workspace_warning_on' : 'mcp_workspace_warning_off')}
       </div>
 
+      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: isMobile ? '12px' : '14px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: '12px', marginBottom: '12px' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>{t('mcp_discovery_title')}</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('mcp_discovery_note')}</div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <ExternalLinkButton href="https://registry.mcpservers.org/" label={t('mcp_discovery_registry_action')} />
+          <ExternalLinkButton href="https://smithery.ai/" label={t('mcp_discovery_smithery_action')} />
+        </div>
+      </div>
+
       {entries.length === 0 && !adding && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
           {t('mcp_no_servers')}
@@ -188,8 +255,12 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
       ))}
 
       {adding ? (
-        <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+          <label htmlFor="mcp-server-name" style={srOnly}>{t('mcp_server_name_placeholder')}</label>
           <input
+            id="mcp-server-name"
+            name="mcp_server_name"
+            aria-label={t('mcp_server_name_placeholder')}
             style={S.input as any}
             type="text"
             value={newName}
@@ -198,8 +269,8 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
             autoFocus
           />
-          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap' }}>{t('mcp_add')}</button>
-          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('btn_cancel')}</button>
+          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('mcp_add')}</button>
+          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', width: isMobile ? '100%' : 'auto' }}>{t('btn_cancel')}</button>
         </div>
       ) : (
         <button style={S.addBtn} onClick={() => setAdding(true)}>{t('mcp_add_server')}</button>
