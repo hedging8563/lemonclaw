@@ -29,7 +29,8 @@ SUMMARY_SYSTEM_PROMPT = (
     "between a user and an AI assistant.\n"
     "Focus on: key decisions made, important facts/data mentioned, pending tasks, "
     "and context needed for the conversation to continue.\n"
-    "Be concise but preserve critical details. Output only the summary."
+    "Be concise but preserve critical details. Output only the summary.\n"
+    "IMPORTANT: Write the summary in the same language as the user's messages."
 )
 
 

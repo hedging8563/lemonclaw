@@ -38,7 +38,8 @@ _SAVE_MEMORY_TOOL = [
                     "history_entry": {
                         "type": "string",
                         "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
+                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search. "
+                        "Write in the SAME language as the majority of user messages in the conversation.",
                     },
                     "memory_update": {
                         "type": "string",
@@ -206,6 +207,9 @@ class MemoryStore:
 
 IMPORTANT: Do NOT save information about content refusals, safety warnings, or "I can't discuss that" interactions.
 These are model artifacts, not useful memories. Focus on actual tasks, preferences, and facts.
+
+LANGUAGE: Write history_entry and memory_update in the SAME language as the user's messages. \
+If the user wrote in Chinese, output in Chinese. If in English, output in English.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
