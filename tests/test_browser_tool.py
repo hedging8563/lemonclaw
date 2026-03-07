@@ -85,7 +85,7 @@ async def test_browser_blocks_paths_outside_workspace(tmp_path) -> None:
 
     result = await tool.execute("state save ../auth.json")
 
-    assert "outside the workspace" in result
+    assert "outside the allowed boundary" in result
 
 
 def test_browser_session_isolation_uses_session_key() -> None:

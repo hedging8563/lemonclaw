@@ -77,6 +77,7 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        home_dir: Path | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -108,6 +109,11 @@ class AgentLoop:
         self.orchestrator: Orchestrator | None = None
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        # Explicit security boundary: defaults to ~/.lemonclaw/ when not configured.
+        # Never derive from workspace.parent — custom workspace paths would leak siblings.
+        self.home_dir: Path | None = None
+        if restrict_to_workspace:
+            self.home_dir = home_dir or Path.home() / ".lemonclaw"
 
         self.context = ContextBuilder(workspace, system_prompt=system_prompt, disabled_skills=disabled_skills)
         self.context.memory.set_provider(provider)
@@ -123,6 +129,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            home_dir=self.home_dir,
         )
 
         self._running = False
@@ -182,14 +189,13 @@ class AgentLoop:
         """Register the default set of tools."""
         # Security boundary: allow access to entire ~/.lemonclaw/ (media, config, etc.)
         # while keeping workspace as the working directory (cwd).
-        home_dir = self.workspace.parent if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=home_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=self.home_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
-            home_dir=str(self.workspace.parent) if self.restrict_to_workspace else None,
+            home_dir=str(self.home_dir) if self.home_dir else None,
             path_append=self.exec_config.path_append,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
@@ -206,7 +212,7 @@ class AgentLoop:
                 api_base=self.coding_config.api_base,
                 model=self.coding_config.model,
                 restrict_to_workspace=self.restrict_to_workspace,
-                home_dir=str(self.workspace.parent) if self.restrict_to_workspace else None,
+                home_dir=str(self.home_dir) if self.home_dir else None,
             ))
         if self.browser_config and self.browser_config.enabled:
             from lemonclaw.agent.tools.browser import BrowserTool
@@ -219,7 +225,7 @@ class AgentLoop:
                 max_output=self.browser_config.max_output,
                 workspace=self.workspace,
                 restrict_to_workspace=self.restrict_to_workspace,
-                home_dir=self.workspace.parent if self.restrict_to_workspace else None,
+                home_dir=self.home_dir if self.home_dir else None,
             )
             if browser_tool.available:
                 self.tools.register(browser_tool)
