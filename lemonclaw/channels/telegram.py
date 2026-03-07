@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from loguru import logger
@@ -15,6 +18,11 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import TelegramConfig
+
+# Telegram Bot API file size limit (50MB)
+_TG_MAX_FILE_BYTES = 50 * 1024 * 1024
+# Target size per split segment (45MB, leave headroom)
+_TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
 
 
 @dataclass
@@ -241,6 +249,60 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
+    @staticmethod
+    def _get_video_duration(path: str) -> float | None:
+        """Get video duration in seconds using ffprobe."""
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, timeout=10,
+            )
+            return float(result.stdout.strip()) if result.returncode == 0 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _split_video(path: str, target_bytes: int = _TG_SPLIT_TARGET_BYTES) -> list[str]:
+        """Split a video into segments that fit within Telegram's file size limit.
+
+        Returns a list of file paths for the segments, or an empty list on failure.
+        """
+        file_size = os.path.getsize(path)
+        duration = TelegramChannel._get_video_duration(path)
+        if not duration or duration <= 0:
+            logger.warning("Cannot determine video duration for {}", path)
+            return []
+
+        # Calculate number of segments needed
+        num_segments = max(2, int(file_size / target_bytes) + 1)
+        segment_duration = duration / num_segments
+
+        ext = path.rsplit(".", 1)[-1] if "." in path else "mp4"
+        basename = os.path.basename(path).rsplit(".", 1)[0]
+        tmp_dir = tempfile.mkdtemp(prefix="tg_split_")
+        segments = []
+
+        try:
+            for i in range(num_segments):
+                start = i * segment_duration
+                out_path = os.path.join(tmp_dir, f"{basename}_part{i + 1}.{ext}")
+                cmd = [
+                    "ffmpeg", "-y", "-ss", str(start), "-i", path,
+                    "-t", str(segment_duration), "-c", "copy",
+                    "-avoid_negative_ts", "make_zero", out_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=120)
+                if result.returncode != 0 or not os.path.exists(out_path):
+                    logger.error("ffmpeg split failed for segment {}", i + 1)
+                    return []
+                segments.append(out_path)
+        except Exception as e:
+            logger.error("Video split failed: {}", e)
+            return []
+
+        return segments
+
     # ── Streaming support (editMessageText approach) ────────────────────
 
     def _get_or_create_stream(self, chat_id: str) -> _StreamState:
@@ -331,10 +393,52 @@ class TelegramChannel(BaseChannel):
         # Common kwargs for forum topic routing
         topic_kwargs = {"message_thread_id": thread_id} if thread_id else {}
 
-        # Send media files
+        # Send media files (with automatic splitting for large videos)
         for media_path in (msg.media or []):
             try:
+                file_size = os.path.getsize(media_path)
                 media_type = self._get_media_type(media_path)
+
+                # Large video/audio: split into segments
+                if file_size > _TG_MAX_FILE_BYTES and media_type in ("video", "audio"):
+                    filename = os.path.basename(media_path)
+                    logger.info("File {} is {:.1f}MB, splitting for Telegram", filename, file_size / 1024 / 1024)
+                    segments = self._split_video(media_path)
+                    if segments:
+                        total = len(segments)
+                        for idx, seg_path in enumerate(segments, 1):
+                            try:
+                                caption = f"{filename} [{idx}/{total}]"
+                                sender = self._app.bot.send_video if media_type == "video" else self._app.bot.send_audio
+                                param = media_type
+                                with open(seg_path, 'rb') as f:
+                                    await sender(
+                                        chat_id=chat_id,
+                                        **{param: f},
+                                        caption=caption,
+                                        reply_parameters=reply_params,
+                                        **topic_kwargs,
+                                    )
+                            except Exception as e:
+                                logger.error("Failed to send segment {}/{}: {}", idx, total, e)
+                                await self._app.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=f"[Failed to send: {filename} part {idx}/{total}]",
+                                    reply_parameters=reply_params,
+                                    **topic_kwargs,
+                                )
+                        continue
+                    else:
+                        # Split failed, notify user with file path
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=f"[File too large for Telegram ({file_size / 1024 / 1024:.0f}MB): {media_path}]",
+                            reply_parameters=reply_params,
+                            **topic_kwargs,
+                        )
+                        continue
+
+                # Normal send
                 sender = {
                     "photo": self._app.bot.send_photo,
                     "video": self._app.bot.send_video,
