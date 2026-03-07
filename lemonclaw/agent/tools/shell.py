@@ -25,6 +25,7 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        home_dir: str | None = None,
         path_append: str = "",
     ):
         self.timeout = timeout
@@ -45,6 +46,9 @@ class ExecTool(Tool):
         }
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
+        # home_dir: broader security boundary (e.g. ~/.lemonclaw/) for path checks.
+        # working_dir is still used as cwd; home_dir gates which paths are reachable.
+        self.home_dir = home_dir
         self.path_append = path_append
 
     @property
@@ -141,8 +145,11 @@ class ExecTool(Tool):
 
         raw_target = Path(working_dir).expanduser()
         target = raw_target.resolve() if raw_target.is_absolute() else (base_dir / raw_target).resolve()
-        if self.restrict_to_workspace and target != base_dir and base_dir not in target.parents:
-            return base_dir, "Error: working_dir is outside the workspace"
+        if self.restrict_to_workspace:
+            # Use home_dir as the security boundary (e.g. ~/.lemonclaw/)
+            boundary = Path(self.home_dir).resolve() if self.home_dir else base_dir
+            if target != boundary and boundary not in target.parents:
+                return base_dir, "Error: working_dir is outside the allowed boundary"
         return target, None
 
     def _guard_command(self, command: str, cwd: Path) -> tuple[str | None, list[str]]:
@@ -194,6 +201,8 @@ class ExecTool(Tool):
                 if ".." in normalized.split(os.sep):
                     return "Error: Command blocked by safety guard (path traversal detected)", []
 
+            # Use home_dir as boundary for absolute path checks
+            boundary = Path(self.home_dir).resolve() if self.home_dir else cwd
             win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
             posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", cmd)
             for raw in win_paths + posix_paths:
@@ -201,7 +210,7 @@ class ExecTool(Tool):
                     path = Path(raw.strip()).resolve()
                 except Exception:
                     continue
-                if path.is_absolute() and cwd not in path.parents and path != cwd:
-                    return "Error: Command blocked by safety guard (path outside working dir)", []
+                if path.is_absolute() and boundary not in path.parents and path != boundary:
+                    return "Error: Command blocked by safety guard (path outside allowed boundary)", []
 
         return None, tokens

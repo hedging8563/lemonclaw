@@ -37,6 +37,7 @@ class BrowserTool(Tool):
         max_output: int = 50000,
         workspace: Path | str | None = None,
         restrict_to_workspace: bool = False,
+        home_dir: Path | str | None = None,
     ):
         self._timeout = timeout
         self._allowed_domains = [d.strip().lower() for d in (allowed_domains or []) if d.strip()]
@@ -46,6 +47,8 @@ class BrowserTool(Tool):
         self._max_output = max_output
         self._workspace = Path(workspace).expanduser().resolve() if workspace else None
         self._restrict_to_workspace = restrict_to_workspace
+        # home_dir: broader security boundary (e.g. ~/.lemonclaw/) for path validation
+        self._home_dir = Path(home_dir).expanduser().resolve() if home_dir else self._workspace
         self._cli_path = shutil.which("agent-browser")
         self._active_sessions: set[str] = set()
 
@@ -327,8 +330,10 @@ class BrowserTool(Tool):
     def _validate_workspace_path(self, raw_path: str) -> str | None:
         path = Path(raw_path).expanduser()
         resolved = path.resolve() if path.is_absolute() else (self._workspace / path).resolve()
-        if resolved != self._workspace and self._workspace not in resolved.parents:
-            return f"Error: path '{raw_path}' is outside the workspace"
+        # Use home_dir as the security boundary
+        boundary = self._home_dir or self._workspace
+        if boundary and resolved != boundary and boundary not in resolved.parents:
+            return f"Error: path '{raw_path}' is outside the allowed boundary"
         return None
 
     def _resolve_session_name(self, session_key: str | None) -> str:

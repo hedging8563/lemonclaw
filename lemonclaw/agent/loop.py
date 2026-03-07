@@ -180,13 +180,16 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        # Security boundary: allow access to entire ~/.lemonclaw/ (media, config, etc.)
+        # while keeping workspace as the working directory (cwd).
+        home_dir = self.workspace.parent if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=home_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            home_dir=str(self.workspace.parent) if self.restrict_to_workspace else None,
             path_append=self.exec_config.path_append,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
@@ -203,6 +206,7 @@ class AgentLoop:
                 api_base=self.coding_config.api_base,
                 model=self.coding_config.model,
                 restrict_to_workspace=self.restrict_to_workspace,
+                home_dir=str(self.workspace.parent) if self.restrict_to_workspace else None,
             ))
         if self.browser_config and self.browser_config.enabled:
             from lemonclaw.agent.tools.browser import BrowserTool
@@ -215,6 +219,7 @@ class AgentLoop:
                 max_output=self.browser_config.max_output,
                 workspace=self.workspace,
                 restrict_to_workspace=self.restrict_to_workspace,
+                home_dir=self.workspace.parent if self.restrict_to_workspace else None,
             )
             if browser_tool.available:
                 self.tools.register(browser_tool)
