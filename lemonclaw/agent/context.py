@@ -15,15 +15,16 @@ from lemonclaw.agent.skills import SkillsLoader
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
-    
+
     def __init__(self, workspace: Path, system_prompt: str = "", disabled_skills: list[str] | None = None):
         self.workspace = workspace
         self.system_prompt = system_prompt
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=disabled_skills)
+        self._triggered_skills: list[str] = []
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -56,6 +57,15 @@ class ContextBuilder:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
+
+        # Auto-triggered skills (matched by keywords in user message)
+        if self._triggered_skills:
+            # Exclude any that are already in always_skills
+            triggered_new = [s for s in self._triggered_skills if s not in (always_skills or [])]
+            if triggered_new:
+                triggered_content = self.skills.load_skills_for_context(triggered_new)
+                if triggered_content:
+                    parts.append(f"# Triggered Skills (auto-loaded)\n\n{triggered_content}")
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -145,7 +155,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         LTM entity cards matched by keyword trigger are injected before the
         user message for relevant context.
+
+        Skills matched by trigger keywords are auto-injected into the system
+        prompt so the LLM has processing guidance without needing to read
+        SKILL.md manually.
         """
+        # Auto-trigger: match skills by keywords in user message
+        triggered = self.skills.match_skills(current_message)
+        if triggered:
+            self._triggered_skills = triggered
+
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
 
         # Keyword trigger: match LTM entity cards against user message

@@ -3,6 +3,7 @@ name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
 metadata: {"lemonclaw":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+triggers: "天气,气温,下雨,weather,forecast,温度,几度,穿什么"
 ---
 
 # Weather

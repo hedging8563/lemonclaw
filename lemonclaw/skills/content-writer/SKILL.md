@@ -1,6 +1,7 @@
 ---
 name: content-writer
 description: Write high-quality content that doesn't read like AI slop. Use when the user asks to write articles, blog posts, marketing copy, technical docs, social media posts, research reports, or any long-form content. Also triggers on 写文章、写博客、写文案、内容创作、写报告、写稿子.
+triggers: "写文章,写博客,写文案,内容创作,写报告,写稿子,blog post,write article,write copy,长文,撰写,起草"
 ---
 
 # Content Writer

@@ -1,6 +1,7 @@
 ---
 name: frontend-design
 description: Create distinctive, production-grade frontend interfaces with high design quality. Use when the user asks to build web components, pages, posters, or applications (websites, landing pages, dashboards, React components, HTML/CSS layouts). Also triggers on 做网页、设计页面、前端、UI设计、做个网站.
+triggers: "做网页,设计页面,前端,ui设计,做个网站,landing page,dashboard,react组件,html页面,网页设计,做海报,做poster"
 ---
 
 # Frontend Design

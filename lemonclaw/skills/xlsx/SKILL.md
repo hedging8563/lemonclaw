@@ -1,6 +1,7 @@
 ---
 name: xlsx
 description: "Use this skill for any spreadsheet task — reading, creating, editing .xlsx/.csv/.tsv files, data analysis, formatting, formulas, charts, or cleaning messy tabular data. Triggers when user mentions spreadsheet files or wants tabular data output. Also triggers on 处理Excel、表格、数据分析、电子表格."
+triggers: ".xlsx,.xls,.csv,.tsv,excel,spreadsheet,表格,电子表格,数据分析,处理excel,openpyxl,pandas,力学实验"
 ---
 
 # Excel / Spreadsheet Guide

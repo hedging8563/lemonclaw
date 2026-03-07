@@ -2,6 +2,7 @@
 name: skill-installer
 description: Install, list, and manage agent skills from skills.sh, GitHub repos, or local paths. Use when the user asks to install, search, update, or remove skills.
 metadata: {"lemonclaw":{"emoji":"📦"}}
+triggers: "安装skill,install skill,skills.sh,卸载skill,skill列表,搜索skill"
 ---
 
 # Skill Installer

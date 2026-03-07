@@ -1,6 +1,7 @@
 ---
 name: docx
 description: "Use this skill for any Word document task — creating, reading, editing .docx files, formatting with headings/tables/images, tracked changes, or converting content to polished Word documents. Also triggers on 创建Word、Word文档、docx文件."
+triggers: ".docx,.doc,word文档,word文件,创建word,docx文件,python-docx,写报告,读取word"
 ---
 
 # Word Document (.docx) Guide

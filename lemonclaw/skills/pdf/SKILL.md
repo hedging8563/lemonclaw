@@ -1,6 +1,7 @@
 ---
 name: pdf
 description: Use this skill for any PDF task — reading, extracting text/tables, merging, splitting, rotating, watermarking, creating, encrypting, or OCR. Triggers when user mentions .pdf files or asks to produce one. Also triggers on 处理PDF、合并PDF、拆分PDF、PDF转文字、创建PDF.
+triggers: ".pdf,pdf文件,处理pdf,合并pdf,拆分pdf,pdf转,创建pdf,pypdf,pdfplumber,ocr,读取pdf,提取pdf"
 ---
 
 # PDF Processing Guide

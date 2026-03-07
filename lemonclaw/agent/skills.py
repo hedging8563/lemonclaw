@@ -193,6 +193,32 @@ class SkillsLoader:
         meta = self.get_skill_metadata(name) or {}
         return self._parse_skill_metadata(meta.get("metadata", ""))
     
+    def match_skills(self, message: str) -> list[str]:
+        """Match skills by triggers against user message.
+
+        Scans the ``triggers`` frontmatter field (comma-separated keywords)
+        and returns skill names whose triggers appear in the message.
+        Skills already marked ``always=true`` are excluded (they are loaded
+        separately).  Disabled and unavailable skills are also skipped.
+        """
+        msg_lower = message.lower()
+        matched: list[str] = []
+        always = set(self.get_always_skills())
+
+        for s in self.list_skills(filter_unavailable=True):
+            name = s["name"]
+            if name in self._disabled or name in always:
+                continue
+            meta = self.get_skill_metadata(name) or {}
+            raw_triggers = meta.get("triggers", "")
+            if not raw_triggers:
+                continue
+            triggers = [t.strip().lower() for t in raw_triggers.split(",") if t.strip()]
+            if any(t in msg_lower for t in triggers):
+                matched.append(name)
+
+        return matched
+
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements and are not disabled."""
         result = []
