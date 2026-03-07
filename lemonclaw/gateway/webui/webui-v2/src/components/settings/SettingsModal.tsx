@@ -169,9 +169,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     : activeTab === 'tools'
       ? omitKeys(activeTabData, ['restrict_to_workspace'])
       : activeTabData;
-  const quickJumpKeys = activeTab !== 'skills' && contentData
+  const dataKeys = activeTab !== 'skills' && contentData
     ? Object.keys(contentData).filter((key) => isGroup(contentData[key]))
     : [];
+  // Prepend tool status + safety cards for the tools tab (they render before contentData)
+  const quickJumpKeys = activeTab === 'tools'
+    ? ['_tool_status', '_tool_safety', ...dataKeys]
+    : dataKeys;
 
   const renderWorkspaceCard = () => {
     if (!draft?.agents?.defaults?.workspace) return null;
@@ -192,7 +196,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!draft?.tools) return null;
     const browserInstalled = Boolean(toolStatus?.browser?.installed);
     const codingInstalled = Boolean(toolStatus?.coding?.installed);
-    const rows = [
+    const rows: Array<{ id: string; title: string; enabled: boolean; installed: boolean; binary: string; warning: boolean }> = [
       {
         id: 'browser',
         title: t('tool_status_browser_title'),
@@ -212,7 +216,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     ];
 
     return (
-      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+      <div id="setting-group-_tool_status" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
         <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ color: 'var(--purple)' }}>#</span> {t('tool_status_title')}
         </div>
@@ -247,11 +251,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const renderToolSafetyCard = () => {
     if (!draft?.tools) return null;
     return (
-      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+      <div id="setting-group-_tool_safety" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
         <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ color: 'var(--purple)' }}>#</span> {t('tools_safety_title')}
         </div>
-        {renderNotice(t('tools_safety_note'), workspaceRestricted ? 'info' : 'warning')}
+        {renderNotice(t(workspaceRestricted ? 'tools_restrict_warning_on' : 'tools_restrict_warning_off'), workspaceRestricted ? 'info' : 'warning')}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
           <input type="checkbox" checked={workspaceRestricted} onChange={(e) => handleChange(['tools', 'restrict_to_workspace'], (e.target as HTMLInputElement).checked)} />
           <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{t('tools_restrict_label')}</label>
@@ -377,21 +381,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
                     {quickJumpKeys.map((key) => {
-                      const isEnabled = contentData?.[key]?.enabled;
+                      // Special cards rendered outside contentData
+                      const isSpecial = key.startsWith('_');
+                      const isEnabled = key === '_tool_safety' ? workspaceRestricted
+                        : isSpecial ? undefined
+                        : contentData?.[key]?.enabled;
                       let displayKey = key;
-                      let obj = contentData?.[key];
-                      while (isGroup(obj)) {
-                        const keys = Object.keys(obj);
-                        if (keys.length === 1 && isGroup(obj[keys[0]])) {
-                          displayKey += `.${keys[0]}`;
-                          obj = obj[keys[0]];
-                        } else {
-                          break;
+                      if (!isSpecial) {
+                        let obj = contentData?.[key];
+                        while (isGroup(obj)) {
+                          const keys = Object.keys(obj);
+                          if (keys.length === 1 && isGroup(obj[keys[0]])) {
+                            displayKey += `.${keys[0]}`;
+                            obj = obj[keys[0]];
+                          } else {
+                            break;
+                          }
                         }
                       }
+                      const label = key === '_tool_status' ? t('tool_status_title')
+                        : key === '_tool_safety' ? t('tools_safety_title')
+                        : displayLabel(displayKey);
                       return (
                         <button key={key} onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'), background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'), border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'), transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.2)'} onMouseLeave={(e) => e.currentTarget.style.filter = 'none'}>
-                          <span style={{ opacity: 0.5 }}>#</span> {displayLabel(displayKey)}
+                          <span style={{ opacity: 0.5 }}>#</span> {label}
                         </button>
                       );
                     })}
