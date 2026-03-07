@@ -103,6 +103,7 @@ Your workspace is at: {workspace_path}
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
+- NEVER fabricate, guess, or hardcode API keys or secrets. Always use environment variables (e.g. $API_KEY). If unsure which variable to use, check with `env | grep -i key` first.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.
 

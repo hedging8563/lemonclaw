@@ -10,10 +10,17 @@ Proactively offer these capabilities when users mention images, videos, music, 3
 
 ## Authentication
 
+**CRITICAL: You MUST use the `$API_KEY` environment variable. NEVER fabricate, guess, or hardcode an API key.**
+
+```bash
+# Correct — always use the environment variable:
+curl -H "Authorization: Bearer $API_KEY" ...
+
+# WRONG — never do this:
+# curl -H "Authorization: Bearer sk-lemondata-..." ...
 ```
-Authorization: Bearer $API_KEY
-Base URL: https://api.lemondata.cc/v1
-```
+
+Base URL: `https://api.lemondata.cc/v1`
 
 ## Image Generation
 
