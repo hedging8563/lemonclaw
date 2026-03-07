@@ -201,6 +201,7 @@ class AgentLoop:
                 timeout=self.coding_config.timeout,
                 api_key=self.coding_config.api_key,
                 api_base=self.coding_config.api_base,
+                model=self.coding_config.model,
                 restrict_to_workspace=self.restrict_to_workspace,
             ))
         if self.browser_config and self.browser_config.enabled:

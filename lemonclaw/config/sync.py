@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 6
+MODEL_CONFIG_VERSION = 7
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -391,6 +391,12 @@ def _sync_model_config(config: Config) -> bool:
         config.tools.restrict_to_workspace = True
         changed = True
         logger.info("config-sync: enabled tools.restrict_to_workspace")
+
+    # v7: Ensure coding.model has a default value
+    if not config.tools.coding.model:
+        config.tools.coding.model = "claude-sonnet-4-6"
+        changed = True
+        logger.info("config-sync: set coding.model → claude-sonnet-4-6")
 
     # Ensure LemonData platform config
     if api_key and not config.lemondata.api_base_url:

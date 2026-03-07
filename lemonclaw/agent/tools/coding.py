@@ -20,12 +20,14 @@ class CodingTool(Tool):
         timeout: int = 300,
         api_key: str = "",
         api_base: str = "",
+        model: str = "",
         restrict_to_workspace: bool = False,
     ):
         self._working_dir = working_dir
         self._timeout = timeout
         self._api_key = api_key
         self._api_base = api_base
+        self._model = model
         self._restrict_to_workspace = restrict_to_workspace
         self._cli_path = shutil.which("claude")
 
@@ -86,8 +88,16 @@ class CodingTool(Tool):
             "--print",
             "--output-format", "json",
             "--max-turns", "10",
-            task,
+            "--dangerously-skip-permissions",
         ]
+        if self._model:
+            # Basic validation: model names are alphanumeric with hyphens/dots/slashes
+            import re
+            if re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,127}', self._model):
+                cmd.extend(["--model", self._model])
+            else:
+                logger.warning("coding: invalid model name '{}', using CLI default", self._model[:40])
+        cmd.append(task)
 
         logger.info("coding: running claude CLI in {}", cwd)
         try:

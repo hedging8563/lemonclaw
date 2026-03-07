@@ -329,6 +329,7 @@ class CodingToolConfig(Base):
 
     enabled: bool = False
     timeout: int = 300
+    model: str = "claude-sonnet-4-6"  # CLI model (must be supported by the API endpoint)
     api_key: str = ""   # Anthropic API key (or LemonData key with api_base)
     api_base: str = ""  # Custom API endpoint (e.g. https://api.lemondata.cc)
 
