@@ -20,7 +20,7 @@ export class ErrorBoundary extends Component<{ children: any }, State> {
   render() {
     if (this.state.error) {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '16px', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', gap: '16px', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
           <div style={{ fontSize: '14px', color: 'var(--error)' }}>{safeT('error_boundary', 'Something went wrong')}</div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', maxWidth: '400px', textAlign: 'center', wordBreak: 'break-word' }}>
             {this.state.error.message}

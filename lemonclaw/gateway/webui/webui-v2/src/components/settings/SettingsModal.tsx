@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
+import { t } from '../../stores/i18n';
+import { MCPServersEditor } from './MCPServersEditor';
 import { SkillsTab } from './SkillsTab';
 import { SoulEditor } from './SoulEditor';
-import { MCPServersEditor } from './MCPServersEditor';
-import { t } from '../../stores/i18n';
 
 type NoticeTone = 'info' | 'warning';
+type DraftData = Record<string, any>;
+type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
+
+const MOBILE_BREAKPOINT = 768;
+const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
 
 const noticeStyle = (tone: NoticeTone) => ({
   marginBottom: '12px',
@@ -19,17 +24,77 @@ const noticeStyle = (tone: NoticeTone) => ({
   lineHeight: 1.6,
 }) as const;
 
+function isGroup(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getNestedValue(data: DraftData, path: string): any {
+  return path.split('.').reduce<any>((current, key) => current?.[key], data);
+}
+
+function normalizeChangedPath(path: string[]): string {
+  if (path[0] === 'agents' && path[1] === 'defaults') {
+    return `agents.defaults.${path[2]}`;
+  }
+  if (path[0] === 'channels') {
+    return `channels.${path[1]}`;
+  }
+  if (path[0] === 'providers') {
+    return `providers.${path[1]}`;
+  }
+  if (path[0] === 'tools') {
+    if (path[1] === 'restrict_to_workspace' || path[1] === 'mcp_servers') {
+      return `tools.${path[1]}`;
+    }
+    if (path[1] === 'browser' || path[1] === 'coding') {
+      return `tools.${path[1]}`;
+    }
+    if (path[1] === 'exec' && path[2]) {
+      return `tools.exec.${path[2]}`;
+    }
+    if (path[1] === 'web' && path[2] === 'search' && path[3]) {
+      return `tools.web.search.${path[3]}`;
+    }
+  }
+  return path.join('.');
+}
+
+function humanizeLabel(key: string): string {
+  return key.replaceAll('.', ' / ').replaceAll('_', ' ');
+}
+
+function omitKeys<T extends Record<string, any>>(value: T | null | undefined, keys: string[]): T | null {
+  if (!value) return null;
+  const clone: Record<string, any> = { ...value };
+  for (const key of keys) delete clone[key];
+  return clone as T;
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [draft, setDraft] = useState<any>(null);
+  const [draft, setDraft] = useState<DraftData | null>(null);
+  const [toolStatus, setToolStatus] = useState<ToolStatusMap | null>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+      }
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   const load = async () => {
     try {
       const res = await apiFetch('/api/settings');
       const data = await res.json();
       setDraft(JSON.parse(JSON.stringify(data.settings)));
+      setToolStatus(data.tool_status || null);
       setChangedPaths(new Set());
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -39,31 +104,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   useEffect(() => { load(); }, []);
 
   const handleChange = (path: string[], value: any) => {
-    let obj = draft;
+    if (!draft) return;
+    let obj: DraftData = draft;
     for (let i = 0; i < path.length - 1; i++) {
       if (!obj[path[i]]) obj[path[i]] = {};
       obj = obj[path[i]];
     }
     obj[path[path.length - 1]] = value;
     setDraft({ ...draft });
-
-    const topPath = path[0] === 'agents' ? `agents.defaults.${path[2]}` : `${path[0]}.${path[1]}`;
-    setChangedPaths(prev => new Set(prev).add(topPath));
+    const changedPath = normalizeChangedPath(path);
+    setChangedPaths((prev) => new Set(prev).add(changedPath));
   };
 
   const handleSave = async () => {
-    if (changedPaths.size === 0) return onClose();
+    if (!draft || changedPaths.size === 0) return onClose();
     setSaveError(null);
 
-    const payload: any = {};
-    for (const p of Array.from(changedPaths)) {
-      if (p.startsWith('agents.defaults.')) {
-        const key = p.replace('agents.defaults.', '');
-        payload[p] = draft.agents.defaults[key];
-      } else {
-        const [cat, key] = p.split('.');
-        payload[p] = draft[cat][key];
-      }
+    const payload: Record<string, any> = {};
+    for (const path of Array.from(changedPaths)) {
+      payload[path] = getNestedValue(draft, path);
     }
 
     try {
@@ -91,7 +150,115 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <div style={noticeStyle(tone)}>{message}</div>
   );
 
+  const displayLabel = (key: string): string => {
+    if (key === 'browser') return t('tools_browser_title');
+    if (key === 'coding') return t('tools_coding_title');
+    if (key === 'web.search') return t('tools_web_search_title');
+    if (key === 'exec') return t('tools_exec_title');
+    if (key === 'mcp_servers') return t('mcp_servers_title');
+    if (key === 'restrict_to_workspace') return t('tools_restrict_label');
+    return humanizeLabel(key);
+  };
+
   const workspaceRestricted = Boolean(draft?.tools?.restrict_to_workspace);
+  const activeTabData = draft?.[activeTab];
+  const settingsDescKey = `settings_desc_${activeTab}` as keyof any;
+  const settingsDesc = (t as any)(settingsDescKey) || t('settings_desc');
+  const contentData = activeTab === 'agents'
+    ? { ...activeTabData, defaults: omitKeys(activeTabData?.defaults, ['workspace']) }
+    : activeTab === 'tools'
+      ? omitKeys(activeTabData, ['restrict_to_workspace'])
+      : activeTabData;
+  const quickJumpKeys = activeTab !== 'skills' && contentData
+    ? Object.keys(contentData).filter((key) => isGroup(contentData[key]))
+    : [];
+
+  const renderWorkspaceCard = () => {
+    if (!draft?.agents?.defaults?.workspace) return null;
+    return (
+      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--purple)' }}>#</span> {t('settings_workspace_readonly_title')}
+        </div>
+        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>
+          {draft.agents.defaults.workspace}
+        </div>
+        {renderNotice(t('settings_workspace_readonly_note'), 'info')}
+      </div>
+    );
+  };
+
+  const renderToolStatusCard = () => {
+    if (!draft?.tools) return null;
+    const browserInstalled = Boolean(toolStatus?.browser?.installed);
+    const codingInstalled = Boolean(toolStatus?.coding?.installed);
+    const rows = [
+      {
+        id: 'browser',
+        title: t('tool_status_browser_title'),
+        enabled: Boolean(draft.tools.browser?.enabled),
+        installed: browserInstalled,
+        binary: toolStatus?.browser?.binary || '',
+        warning: draft.tools.browser?.enabled && !browserInstalled,
+      },
+      {
+        id: 'coding',
+        title: t('tool_status_coding_title'),
+        enabled: Boolean(draft.tools.coding?.enabled),
+        installed: codingInstalled,
+        binary: toolStatus?.coding?.binary || '',
+        warning: draft.tools.coding?.enabled && !codingInstalled,
+      },
+    ];
+
+    return (
+      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--purple)' }}>#</span> {t('tool_status_title')}
+        </div>
+        {rows.map((row) => (
+          <div key={row.id} style={{ padding: '10px 0', borderTop: row.id === 'browser' ? 'none' : '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>{row.title}</div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ padding: '2px 6px', borderRadius: '999px', fontFamily: 'var(--font-mono)', fontSize: '10px', background: row.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: row.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                  {row.enabled ? t('tool_status_enabled') : t('tool_status_disabled')}
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: '999px', fontFamily: 'var(--font-mono)', fontSize: '10px', background: row.installed ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 68, 68, 0.12)', color: row.installed ? 'var(--success)' : 'var(--error)', border: '1px solid var(--border)' }}>
+                  {row.installed ? t('tool_status_installed') : t('tool_status_missing')}
+                </span>
+              </div>
+            </div>
+            {row.installed && row.binary ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                {t('tool_status_binary_label')}: {row.binary}
+              </div>
+            ) : row.warning ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)' }}>
+                {t('tool_status_missing_note')}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderToolSafetyCard = () => {
+    if (!draft?.tools) return null;
+    return (
+      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--purple)' }}>#</span> {t('tools_safety_title')}
+        </div>
+        {renderNotice(t('tools_safety_note'), workspaceRestricted ? 'info' : 'warning')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+          <input type="checkbox" checked={workspaceRestricted} onChange={(e) => handleChange(['tools', 'restrict_to_workspace'], (e.target as HTMLInputElement).checked)} />
+          <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{t('tools_restrict_label')}</label>
+        </div>
+      </div>
+    );
+  };
 
   const renderFields = (data: any, path: string[]): any => {
     if (!data) return null;
@@ -100,38 +267,28 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const currentPath = [...path, k];
       const fullPath = currentPath.join('.');
 
-      if (k === 'mcp_servers' && typeof v === 'object' && v !== null) {
+      if (k === 'mcp_servers' && isGroup(v)) {
         return (
-          <MCPServersEditor
-            key={k}
-            servers={v as Record<string, any>}
-            restrictToWorkspace={workspaceRestricted}
-            onChange={(newVal) => handleChange(currentPath, newVal)}
-          />
+          <MCPServersEditor key={k} servers={v as Record<string, any>} restrictToWorkspace={workspaceRestricted} onChange={(newVal) => handleChange(currentPath, newVal)} />
         );
       }
 
       if (Array.isArray(v)) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-            <input
-              type="text"
-              value={v.join(', ')}
-              onInput={(e) => handleChange(currentPath, (e.target as any).value.split(',').map((s: string) => s.trim()))}
-              style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
-            />
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
+            <input type="text" value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
           </div>
         );
       }
 
-      if (typeof v === 'object' && v !== null) {
+      if (isGroup(v)) {
         let currentObj: any = v;
         let displayKey = k;
         const cPath = [...currentPath];
-        while (typeof currentObj === 'object' && currentObj !== null && !Array.isArray(currentObj)) {
+        while (isGroup(currentObj)) {
           const keys = Object.keys(currentObj);
-          if (keys.length === 1 && typeof currentObj[keys[0]] === 'object' && currentObj[keys[0]] !== null && !Array.isArray(currentObj[keys[0]])) {
+          if (keys.length === 1 && isGroup(currentObj[keys[0]])) {
             displayKey += `.${keys[0]}`;
             cPath.push(keys[0]);
             currentObj = currentObj[keys[0]];
@@ -141,14 +298,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }
 
         return (
-          <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
-            <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-              <span style={{ color: 'var(--purple)' }}>#</span> {displayKey}
+          <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+            <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px', overflowWrap: 'anywhere' }}>
+              <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel(displayKey)}
             </div>
-            {path[0] === 'tools' && displayKey === 'browser' && renderNotice(
-              t(workspaceRestricted ? 'browser_workspace_warning_on' : 'browser_workspace_warning_off'),
-              workspaceRestricted ? 'info' : 'warning',
-            )}
+            {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'browser' && renderNotice(t(workspaceRestricted ? 'browser_workspace_warning_on' : 'browser_workspace_warning_off'), workspaceRestricted ? 'info' : 'warning')}
             {renderFields(currentObj, cPath)}
           </div>
         );
@@ -158,13 +314,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={v} onChange={e => handleChange(currentPath, (e.target as any).checked)} />
-              <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{k}</label>
+              <input type="checkbox" checked={v} onChange={(e) => handleChange(currentPath, (e.target as HTMLInputElement).checked)} />
+              <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
             </div>
-            {fullPath === 'tools.restrict_to_workspace' && renderNotice(
-              t(v ? 'tools_restrict_warning_on' : 'tools_restrict_warning_off'),
-              v ? 'info' : 'warning',
-            )}
           </div>
         );
       }
@@ -172,88 +324,65 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       if (typeof v === 'number') {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-            <input
-              type="number"
-              value={v as number}
-              onInput={e => handleChange(currentPath, Number((e.target as any).value))}
-              style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
-            />
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
+            <input type="number" value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
           </div>
         );
       }
 
       return (
         <div key={fullPath} style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{k}</label>
-          <input
-            type="text"
-            value={String(v ?? '')}
-            onInput={e => handleChange(currentPath, (e.target as any).value)}
-            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none' }}
-          />
+          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
+          <input type="text" value={String(v ?? '')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
         </div>
       );
     });
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
-      <div style={{ width: '95%', maxWidth: '1100px', height: '85vh', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '1px' }}>
-            <span style={{ color: 'var(--purple)' }}>//</span> {t('settings_title')}
-          </div>
-          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}>×</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center', padding: isMobile ? '0' : '24px', backdropFilter: 'blur(4px)' }}>
+      <div style={{ width: '100%', maxWidth: isMobile ? '100%' : '1100px', height: isMobile ? '100dvh' : '85vh', background: 'var(--bg-secondary)', border: isMobile ? 'none' : '1px solid var(--border)', borderRadius: isMobile ? '0' : '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: isMobile ? 'none' : '0 20px 60px rgba(0,0,0,0.6)' }}>
+        <div style={{ padding: isMobile ? '14px 16px' : '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '14px' : '16px', color: 'var(--text-primary)', letterSpacing: '1px', minWidth: 0 }}><span style={{ color: 'var(--purple)' }}>//</span> {t('settings_title')}</div>
+          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>×</button>
         </div>
 
-        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div style={{ width: '200px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', padding: '16px' }}>
-            {['soul', 'providers', 'agents', 'channels', 'tools', 'skills'].map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                style={{
-                  textAlign: 'left', padding: '10px 12px',
-                  background: activeTab === tab ? 'var(--bg-tertiary)' : 'transparent',
-                  color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
-                  border: '1px solid', borderColor: activeTab === tab ? 'var(--border)' : 'transparent',
-                  borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '12px',
-                  textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: isMobile ? 'column' : 'row' }}>
+          <div style={{ width: isMobile ? '100%' : '200px', minWidth: isMobile ? '100%' : '200px', maxWidth: '100%', borderRight: isMobile ? 'none' : '1px solid var(--border)', borderBottom: isMobile ? '1px solid var(--border)' : 'none', display: 'flex', flexDirection: isMobile ? 'row' : 'column', gap: '6px', padding: isMobile ? '12px 12px 8px' : '16px', overflowX: isMobile ? 'auto' : 'visible', overflowY: 'hidden', scrollbarWidth: 'none' }}>
+            {TABS.map((tab) => (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{ textAlign: 'left', padding: '10px 12px', minWidth: isMobile ? 'max-content' : 'auto', background: activeTab === tab ? 'var(--bg-tertiary)' : 'transparent', color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)', border: '1px solid', borderColor: activeTab === tab ? 'var(--border)' : 'transparent', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: isMobile ? '11px' : '12px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s', flexShrink: 0, whiteSpace: 'nowrap' }}>
                 {(t as any)(`tab_${tab}`)}
               </button>
             ))}
           </div>
 
-          <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0, padding: isMobile ? '16px' : '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: isMobile ? '0' : '24px', alignItems: 'flex-start' }}>
             {activeTab === 'soul' ? (
-              <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
-                <SoulEditor />
-              </div>
+              <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}><SoulEditor /></div>
             ) : !draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading_configs')}</div> : (
               <>
                 <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '18px' : '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize', overflowWrap: 'anywhere' }}>
                     {(t as any)(`tab_${activeTab}`)}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '32px' }}>
-                    {t('settings_desc')}
-                  </div>
-                  {activeTab === 'skills' ? <SkillsTab /> : renderFields(draft[activeTab], [activeTab])}
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: isMobile ? '20px' : '32px' }}>{settingsDesc}</div>
+
+                  {activeTab === 'agents' && renderWorkspaceCard()}
+                  {activeTab === 'tools' && renderToolStatusCard()}
+                  {activeTab === 'tools' && renderToolSafetyCard()}
+                  {activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
                 </div>
 
-                {activeTab !== 'skills' && draft[activeTab] && Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).length > 0 && (
+                {!isMobile && activeTab !== 'skills' && quickJumpKeys.length > 0 && (
                   <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
-                    {Object.keys(draft[activeTab]).filter(k => typeof draft[activeTab][k] === 'object' && draft[activeTab][k] !== null && !Array.isArray(draft[activeTab][k])).map(k => {
-                      const isEnabled = draft[activeTab][k]?.enabled;
-                      let displayKey = k;
-                      let obj = draft[activeTab][k];
-                      while (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
+                    {quickJumpKeys.map((key) => {
+                      const isEnabled = contentData?.[key]?.enabled;
+                      let displayKey = key;
+                      let obj = contentData?.[key];
+                      while (isGroup(obj)) {
                         const keys = Object.keys(obj);
-                        if (keys.length === 1 && typeof obj[keys[0]] === 'object' && obj[keys[0]] !== null && !Array.isArray(obj[keys[0]])) {
+                        if (keys.length === 1 && isGroup(obj[keys[0]])) {
                           displayKey += `.${keys[0]}`;
                           obj = obj[keys[0]];
                         } else {
@@ -261,21 +390,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         }
                       }
                       return (
-                        <button
-                          key={k}
-                          onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                          style={{
-                            textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px',
-                            display: 'flex', alignItems: 'center', gap: '6px',
-                            color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'),
-                            background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'),
-                            border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'),
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.2)'}
-                          onMouseLeave={e => e.currentTarget.style.filter = 'none'}
-                        >
-                          <span style={{ opacity: 0.5 }}>#</span> {k}
+                        <button key={key} onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'), background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'), border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'), transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.2)'} onMouseLeave={(e) => e.currentTarget.style.filter = 'none'}>
+                          <span style={{ opacity: 0.5 }}>#</span> {displayLabel(displayKey)}
                         </button>
                       );
                     })}
@@ -286,13 +402,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)' }}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ padding: isMobile ? '12px 16px calc(12px + env(safe-area-inset-bottom))' : '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' }}>
+          <div style={{ flex: isMobile ? '0 0 auto' : 1, display: 'flex', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', minHeight: '16px' }}>
             {changedPaths.size > 0 && <span style={{ color: 'var(--accent)' }}>● {changedPaths.size} {t('unsaved_changes')}</span>}
-            {saveError && <span style={{ color: 'var(--error)', marginLeft: '8px' }}>{saveError}</span>}
+            {saveError && <span style={{ color: 'var(--error)', marginLeft: changedPaths.size > 0 ? '8px' : '0' }}>{saveError}</span>}
           </div>
-          <button onClick={handleClose} style={{ padding: '8px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('btn_cancel')}</button>
-          <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '8px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold' }}>{t('btn_save_apply')}</button>
+          <div style={{ display: 'flex', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
+            <button onClick={handleClose} style={{ padding: '10px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_cancel')}</button>
+            <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '10px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_save_apply')}</button>
+          </div>
         </div>
       </div>
     </div>

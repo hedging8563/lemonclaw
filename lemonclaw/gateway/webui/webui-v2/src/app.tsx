@@ -7,6 +7,7 @@ import { checkAuth, isAuthenticated, authRequired } from './stores/auth';
 import { initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
 import { mobileMenuOpen } from './stores/ui';
+import { t } from './stores/i18n';
 
 export function App() {
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,7 @@ export function App() {
   }, []);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Loading...</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading')}</div>;
   }
 
   if (authRequired.value && !isAuthenticated.value) {

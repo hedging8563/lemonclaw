@@ -76,18 +76,20 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
     }
   };
 
-  const summary = isHttp ? (server.url || 'no url') : (server.command ? `${server.command} ${(server.args || []).join(' ')}` : 'no command');
+  const summary = isHttp
+    ? (server.url || t('mcp_summary_no_url'))
+    : (server.command ? `${server.command} ${(server.args || []).join(' ')}` : t('mcp_summary_no_command'));
 
   return (
     <div style={S.card}>
       <div style={S.cardHeader} onClick={() => setExpanded(!expanded)}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold' }}>{name}</span>
-          <span style={S.tag(isHttp ? 'blue' : 'green')}>{isHttp ? 'HTTP' : 'STDIO'}</span>
+          <span style={S.tag(isHttp ? 'blue' : 'green')}>{isHttp ? t('mcp_mode_http') : t('mcp_mode_stdio')}</span>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <button style={S.deleteBtn} onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete">×</button>
+          <button style={S.deleteBtn} onClick={(e) => { e.stopPropagation(); onDelete(); }} title={t('mcp_delete')}>×</button>
           <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{expanded ? '▲' : '▼'}</span>
         </div>
       </div>
@@ -97,8 +99,8 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
           <div>
             <label style={S.label}>{t('mcp_mode')}</label>
             <div style={S.row}>
-              <button style={S.modeBtn(mode === 'stdio')} onClick={() => setMode('stdio')}>Stdio</button>
-              <button style={S.modeBtn(mode === 'http')} onClick={() => setMode('http')}>HTTP</button>
+              <button style={S.modeBtn(mode === 'stdio')} onClick={() => setMode('stdio')}>{t('mcp_mode_stdio')}</button>
+              <button style={S.modeBtn(mode === 'http')} onClick={() => setMode('http')}>{t('mcp_mode_http')}</button>
             </div>
           </div>
 
@@ -106,33 +108,33 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
             <>
               <div>
                 <label style={S.label}>{t('mcp_command')}</label>
-                <input style={S.input as any} type="text" value={server.command || ''} placeholder="npx" onInput={(e) => onUpdate({ ...server, command: (e.target as any).value })} />
+                <input style={S.input as any} type="text" value={server.command || ''} placeholder="npx" onInput={(e) => onUpdate({ ...server, command: (e.target as HTMLInputElement).value })} />
               </div>
               <div>
                 <label style={S.label}>{t('mcp_args')}</label>
-                <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /workspace" onInput={(e) => setArgsText((e.target as any).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
+                <input style={S.input as any} type="text" value={argsText} placeholder="@modelcontextprotocol/server-filesystem, /workspace" onInput={(e) => setArgsText((e.target as HTMLInputElement).value)} onBlur={() => onUpdate({ ...server, args: argsText.split(',').map((s: string) => s.trim()).filter(Boolean) })} />
               </div>
               <div>
                 <label style={S.label}>{t('mcp_env')}</label>
-                <textarea style={S.textarea as any} value={envText} placeholder="NODE_ENV=production" onInput={(e) => setEnvText((e.target as any).value)} onBlur={() => onUpdate({ ...server, env: linesToDict(envText) })} />
+                <textarea style={S.textarea as any} value={envText} placeholder="NODE_ENV=production" onInput={(e) => setEnvText((e.target as HTMLTextAreaElement).value)} onBlur={() => onUpdate({ ...server, env: linesToDict(envText) })} />
               </div>
             </>
           ) : (
             <>
               <div>
                 <label style={S.label}>{t('mcp_url')}</label>
-                <input style={S.input as any} type="text" value={server.url || ''} placeholder="http://localhost:3000/mcp" onInput={(e) => onUpdate({ ...server, url: (e.target as any).value })} />
+                <input style={S.input as any} type="text" value={server.url || ''} placeholder="http://localhost:3000/mcp" onInput={(e) => onUpdate({ ...server, url: (e.target as HTMLInputElement).value })} />
               </div>
               <div>
                 <label style={S.label}>{t('mcp_headers')}</label>
-                <textarea style={S.textarea as any} value={headersText} placeholder="Authorization=Bearer sk-xxx" onInput={(e) => setHeadersText((e.target as any).value)} onBlur={() => onUpdate({ ...server, headers: linesToDict(headersText) })} />
+                <textarea style={S.textarea as any} value={headersText} placeholder="Authorization=Bearer sk-xxx" onInput={(e) => setHeadersText((e.target as HTMLTextAreaElement).value)} onBlur={() => onUpdate({ ...server, headers: linesToDict(headersText) })} />
               </div>
             </>
           )}
 
           <div>
             <label style={S.label}>{t('mcp_timeout')}</label>
-            <input style={{ ...(S.input as any), width: '120px' }} type="number" value={server.tool_timeout ?? 30} min={1} max={600} onInput={(e) => onUpdate({ ...server, tool_timeout: Number((e.target as any).value) || 30 })} />
+            <input style={{ ...(S.input as any), width: '120px' }} type="number" value={server.tool_timeout ?? 30} min={1} max={600} onInput={(e) => onUpdate({ ...server, tool_timeout: Number((e.target as HTMLInputElement).value) || 30 })} />
           </div>
         </div>
       )}
@@ -167,7 +169,7 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
   return (
     <div id="setting-group-mcp_servers" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
       <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-        <span style={{ color: 'var(--purple)' }}>#</span> mcp_servers
+        <span style={{ color: 'var(--purple)' }}>#</span> {t('mcp_servers_title')}
         <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
       </div>
 
@@ -182,13 +184,7 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
       )}
 
       {entries.map(([name, server]) => (
-        <ServerCard
-          key={name}
-          name={name}
-          server={server}
-          onUpdate={(s) => handleUpdate(name, s)}
-          onDelete={() => handleDelete(name)}
-        />
+        <ServerCard key={name} name={name} server={server} onUpdate={(s) => handleUpdate(name, s)} onDelete={() => handleDelete(name)} />
       ))}
 
       {adding ? (
@@ -197,8 +193,8 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
             style={S.input as any}
             type="text"
             value={newName}
-            placeholder="server name (e.g. filesystem)"
-            onInput={(e) => setNewName((e.target as any).value)}
+            placeholder={t('mcp_server_name_placeholder')}
+            onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
             autoFocus
           />

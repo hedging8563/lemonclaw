@@ -238,7 +238,16 @@ def get_settings_routes(
 
         # Include the effective (runtime) model so frontend can show both
         effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None
-        result = {"settings": _mask_dict(data)}
+        import shutil as _shutil
+        browser_bin = _shutil.which("agent-browser") or ""
+        coding_bin = _shutil.which("claude") or ""
+        result = {
+            "settings": _mask_dict(data),
+            "tool_status": {
+                "browser": {"installed": bool(browser_bin), "binary": browser_bin},
+                "coding": {"installed": bool(coding_bin), "binary": coding_bin},
+            },
+        }
         if effective_model:
             result["effective_model"] = effective_model
 

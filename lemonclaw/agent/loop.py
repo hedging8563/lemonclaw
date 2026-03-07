@@ -205,7 +205,7 @@ class AgentLoop:
             ))
         if self.browser_config and self.browser_config.enabled:
             from lemonclaw.agent.tools.browser import BrowserTool
-            self.tools.register(BrowserTool(
+            browser_tool = BrowserTool(
                 timeout=self.browser_config.timeout,
                 allowed_domains=self.browser_config.allowed_domains,
                 session_name=self.browser_config.session_name or f"lc-{self.agent_id}",
@@ -214,7 +214,11 @@ class AgentLoop:
                 max_output=self.browser_config.max_output,
                 workspace=self.workspace,
                 restrict_to_workspace=self.restrict_to_workspace,
-            ))
+            )
+            if browser_tool.available:
+                self.tools.register(browser_tool)
+            else:
+                logger.warning("Browser tool enabled but agent-browser is not installed; skipping registration")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

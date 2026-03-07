@@ -1,7 +1,4 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { messages, loadHistory, isStreaming, inputText, isLoadingHistory } from '../../stores/chat';
-import { activeSessionKey } from '../../stores/sessions';
-import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
@@ -15,9 +12,14 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
+import { marked } from 'marked';
+import { activeSessionKey } from '../../stores/sessions';
+import { inputText, isLoadingHistory, isStreaming, loadHistory, messages } from '../../stores/chat';
+import { t } from '../../stores/i18n';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolDetail } from './ToolDetail';
-import { t } from '../../stores/i18n';
+
+const MOBILE_BREAKPOINT = 640;
 
 hljs.registerLanguage('bash', bash);
 hljs.registerAliases(['sh', 'shell', 'zsh'], { languageName: 'bash' });
@@ -46,7 +48,7 @@ let _skipHighlight = false;
     if (lang && hljs.getLanguage(lang)) {
       try {
         return hljs.highlight(code, { language: lang }).value;
-      } catch (err) {}
+      } catch (_err) {}
     }
     return code;
   }
@@ -66,13 +68,13 @@ function renderMd(content: string, skipHighlight = false) {
 
 function MsgActions({ msg }: { msg: any }) {
   const [copied, setCopied] = useState(false);
-  
+
   const handleCopy = () => {
     navigator.clipboard.writeText(msg.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-  
+
   const handleEdit = () => {
     inputText.value = msg.content;
     setTimeout(() => document.querySelector('textarea')?.focus(), 50);
@@ -80,8 +82,8 @@ function MsgActions({ msg }: { msg: any }) {
 
   return (
     <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} className="msg-actions-bar">
-       <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : t('copy')}</button>
-       {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
+      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : t('copy')}</button>
+      {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
   );
 }
@@ -89,6 +91,19 @@ function MsgActions({ msg }: { msg: any }) {
 export function MessageList() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+      }
+    };
+
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -130,28 +145,50 @@ export function MessageList() {
           {t('start_conversation')}
         </div>
         <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', opacity: 0.7, marginTop: '8px' }}>
-          Session: {activeSessionKey.value}
+          {t('session_debug_label')}: {activeSessionKey.value}
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={scrollRef} onScroll={handleScroll} style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div ref={scrollRef} onScroll={handleScroll} style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: isMobile ? '16px 12px 24px' : '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {showScrollButton && (
-        <button 
-          onClick={() => { if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
-          style={{ position: 'sticky', bottom: '20px', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '20px', padding: '6px 16px', color: 'var(--text-primary)', zIndex: 100, cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-          {t('scroll_bottom')}
+        <button
+          onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
+          style={{
+            position: 'sticky',
+            alignSelf: 'center',
+            bottom: isMobile ? '12px' : '20px',
+            maxWidth: isMobile ? 'calc(100% - 16px)' : '280px',
+            width: 'fit-content',
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            borderRadius: '999px',
+            padding: isMobile ? '8px 12px' : '6px 16px',
+            color: 'var(--text-primary)',
+            zIndex: 100,
+            cursor: 'pointer',
+            fontFamily: 'var(--font-mono)',
+            fontSize: isMobile ? '11px' : '12px',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          }}
+          title={t('scroll_bottom')}
+        >
+          {isMobile ? t('scroll_bottom_short') : t('scroll_bottom')}
         </button>
       )}
       {messages.value.map((msg, i) => {
         const isUser = msg.role === 'user';
         return (
-          <div 
-            key={i} 
+          <div
+            key={i}
             class="msg-animate-in msg-wrapper"
-            style={{ display: 'flex', gap: '12px', maxWidth: '800px', width: '100%', margin: '0 auto', justifyContent: isUser ? 'flex-end' : 'flex-start', position: 'relative' }}
+            style={{ display: 'flex', gap: isMobile ? '8px' : '12px', maxWidth: '800px', width: '100%', margin: '0 auto', justifyContent: isUser ? 'flex-end' : 'flex-start', position: 'relative' }}
           >
             {!isUser && (
               <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '2px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
@@ -159,17 +196,16 @@ export function MessageList() {
               </div>
             )}
 
-            <div style={{ 
-              position: 'relative', 
-              maxWidth: '680px', 
-              minWidth: 0, 
-              padding: isUser ? '10px 14px' : '4px 0', 
+            <div style={{
+              position: 'relative',
+              maxWidth: isMobile ? 'min(100%, calc(100vw - 72px))' : '680px',
+              minWidth: 0,
+              padding: isUser ? '10px 14px' : '4px 0',
               textAlign: 'left',
               background: isUser ? 'var(--bg-tertiary)' : 'transparent',
               border: isUser ? '1px solid var(--border)' : 'none',
               borderRadius: isUser ? '8px 8px 0 8px' : '0'
             }}>
-              
               <MsgActions msg={msg} />
 
               {msg.thinking && <ThinkingBlock content={msg.thinking} />}
@@ -197,7 +233,6 @@ export function MessageList() {
                 U
               </div>
             )}
-
           </div>
         );
       })}

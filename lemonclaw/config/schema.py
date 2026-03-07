@@ -17,7 +17,7 @@ class Base(BaseModel):
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
-    enabled: bool = False
+    enabled: bool = True
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
@@ -336,7 +336,7 @@ class CodingToolConfig(Base):
 class BrowserToolConfig(Base):
     """Browser automation tool configuration (agent-browser CLI)."""
 
-    enabled: bool = False
+    enabled: bool = True
     timeout: int = 60
     allowed_domains: list[str] = Field(default_factory=list)
     session_name: str = ""

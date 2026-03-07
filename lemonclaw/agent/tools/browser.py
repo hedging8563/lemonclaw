@@ -49,6 +49,11 @@ class BrowserTool(Tool):
         self._cli_path = shutil.which("agent-browser")
         self._active_sessions: set[str] = set()
 
+
+    @property
+    def available(self) -> bool:
+        return bool(self._cli_path)
+
     @property
     def name(self) -> str:
         return "browser"
