@@ -329,7 +329,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 5
+MODEL_CONFIG_VERSION = 6
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -385,6 +385,12 @@ def _sync_model_config(config: Config) -> bool:
         if not coding.enabled:
             coding.enabled = True
             changed = True
+
+    # v6: Ensure restrict_to_workspace defaults to True (security boundary)
+    if not config.tools.restrict_to_workspace:
+        config.tools.restrict_to_workspace = True
+        changed = True
+        logger.info("config-sync: enabled tools.restrict_to_workspace")
 
     # Ensure LemonData platform config
     if api_key and not config.lemondata.api_base_url:
