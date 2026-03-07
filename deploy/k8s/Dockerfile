@@ -47,7 +47,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # regardless of HOME (entrypoint.sh sets HOME=/home/lemonclaw).
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install --with-deps chromium \
-    && npm install -g agent-browser \
+    && npm install -g agent-browser @anthropic-ai/claude-code \
     && rm -rf /ms-playwright/.links \
     && rm -rf /tmp/* /root/.npm
 
