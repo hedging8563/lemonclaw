@@ -36,15 +36,37 @@ class AutoPairing:
         return self._state.get("owner")
 
     @property
+    def owner_notify_target(self) -> str | None:
+        target = self._state.get("owner_notify_target")
+        if isinstance(target, str) and target:
+            return target
+        owner = self.owner
+        if isinstance(owner, str) and owner:
+            return owner.split("|")[0]
+        return None
+
+    @property
     def approved(self) -> list[str]:
         return self._state.get("approved", [])
 
     @property
-    def pending(self) -> dict[str, str]:
-        """Pending requests: {sender_id: display_name}."""
+    def pending(self) -> dict[str, dict[str, str]]:
         return self._state.get("pending", {})
 
-    def check_or_pair(self, sender_id: str, display_name: str = "") -> str:
+    def get_pending_notify_target(self, sender_id: str) -> str | None:
+        entry = self.pending.get(str(sender_id), {})
+        target = entry.get("notify_target")
+        if isinstance(target, str) and target:
+            return target
+        sid = str(sender_id)
+        return sid.split("|")[0] if sid else None
+
+    def check_or_pair(
+        self,
+        sender_id: str,
+        display_name: str = "",
+        notify_target: str | None = None,
+    ) -> str:
         """Check a sender and return an action.
 
         Returns:
@@ -54,55 +76,62 @@ class AutoPairing:
             "already_pending" — request already queued
         """
         sid = str(sender_id)
+        target = str(notify_target or sid).strip() or sid
 
-        # Already approved?
         if sid == self.owner or sid in self.approved:
+            if sid == self.owner and not self._state.get("owner_notify_target"):
+                self._state["owner_notify_target"] = target
+                self._save()
             return "allowed"
 
-        # Also check by splitting "id|username" format
         for part in sid.split("|"):
             if part and (part == self.owner or part in self.approved):
                 return "allowed"
 
-        # No owner yet → first user becomes owner
         if not self.owner:
             self._state["owner"] = sid
+            self._state["owner_notify_target"] = target
             self._state.setdefault("approved", []).append(sid)
             self._save()
             logger.info("auto-pairing: {} is now owner of {}", sid, self._channel)
             return "paired"
 
-        # Already pending?
-        if sid in self._state.get("pending", {}):
+        if sid in self.pending:
             return "already_pending"
 
-        # Queue for approval
-        self._state.setdefault("pending", {})[sid] = display_name or sid
+        self._state.setdefault("pending", {})[sid] = {
+            "display_name": display_name or sid,
+            "notify_target": target,
+        }
         self._save()
         logger.info("auto-pairing: {} queued for approval on {}", sid, self._channel)
         return "pending"
 
-    def approve(self, sender_id: str) -> bool:
-        """Approve a pending user. Returns True if found and approved."""
+    def approve(self, sender_id: str) -> str | None:
+        """Approve a pending user. Returns the requester notify target if found."""
         sid = str(sender_id)
-        pending = self._state.get("pending", {})
+        pending = self.pending
         if sid not in pending:
-            return False
+            return None
+        target = pending.get(sid, {}).get("notify_target") or sid.split("|")[0]
         del pending[sid]
-        self._state.setdefault("approved", []).append(sid)
+        approved = self._state.setdefault("approved", [])
+        if sid not in approved:
+            approved.append(sid)
         self._save()
         logger.info("auto-pairing: {} approved on {}", sid, self._channel)
-        return True
+        return target
 
-    def deny(self, sender_id: str) -> bool:
-        """Deny a pending user. Returns True if found and removed."""
+    def deny(self, sender_id: str) -> str | None:
+        """Deny a pending user. Returns the requester notify target if found."""
         sid = str(sender_id)
-        pending = self._state.get("pending", {})
+        pending = self.pending
         if sid not in pending:
-            return False
+            return None
+        target = pending.get(sid, {}).get("notify_target") or sid.split("|")[0]
         del pending[sid]
         self._save()
-        return True
+        return target
 
     # ------------------------------------------------------------------
     # Persistence
@@ -111,10 +140,31 @@ class AutoPairing:
     def _load(self) -> dict[str, Any]:
         if self._path.exists():
             try:
-                return json.loads(self._path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+                raw = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    pending_raw = raw.get("pending", {})
+                    pending: dict[str, dict[str, str]] = {}
+                    if isinstance(pending_raw, dict):
+                        for sid, value in pending_raw.items():
+                            if isinstance(value, str):
+                                pending[str(sid)] = {
+                                    "display_name": value,
+                                    "notify_target": str(sid),
+                                }
+                            elif isinstance(value, dict):
+                                pending[str(sid)] = {
+                                    "display_name": str(value.get("display_name") or sid),
+                                    "notify_target": str(value.get("notify_target") or sid),
+                                }
+                    return {
+                        "owner": raw.get("owner"),
+                        "owner_notify_target": raw.get("owner_notify_target") or raw.get("owner"),
+                        "approved": list(raw.get("approved", [])),
+                        "pending": pending,
+                    }
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
                 logger.warning("auto-pairing: corrupt state for {}, resetting", self._channel)
-        return {"owner": None, "approved": [], "pending": {}}
+        return {"owner": None, "owner_notify_target": None, "approved": [], "pending": {}}
 
     def _save(self) -> None:
         tmp = self._path.with_suffix(".json.tmp")

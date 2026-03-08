@@ -4,6 +4,7 @@ import { t } from '../../stores/i18n';
 import { MCPServersEditor } from './MCPServersEditor';
 import { SkillsTab } from './SkillsTab';
 import { SoulEditor } from './SoulEditor';
+import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 
 type NoticeTone = 'info' | 'warning';
 type DraftData = Record<string, any>;
@@ -23,6 +24,57 @@ const noticeStyle = (tone: NoticeTone) => ({
   fontSize: '11px',
   lineHeight: 1.6,
 }) as const;
+
+const badgeStyle = (tone: 'teal' | 'amber' | 'slate') => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '2px 8px',
+  borderRadius: '999px',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '10px',
+  lineHeight: 1.4,
+  border: '1px solid',
+  borderColor: tone === 'teal'
+    ? 'rgba(45, 212, 191, 0.28)'
+    : tone === 'amber'
+      ? 'rgba(255, 184, 77, 0.28)'
+      : 'rgba(148, 163, 184, 0.24)',
+  background: tone === 'teal'
+    ? 'rgba(45, 212, 191, 0.10)'
+    : tone === 'amber'
+      ? 'rgba(255, 184, 77, 0.10)'
+      : 'rgba(148, 163, 184, 0.10)',
+  color: tone === 'teal'
+    ? 'var(--teal, #2dd4bf)'
+    : tone === 'amber'
+      ? 'var(--warning, #ffb84d)'
+      : 'var(--text-muted)',
+}) as const;
+
+type ChannelBadge = { label: string; tone: 'teal' | 'amber' | 'slate' };
+
+function getChannelBadges(channelKey: string): ChannelBadge[] {
+  const autoPairing = { label: t('channel_badge_auto_pairing'), tone: 'teal' as const };
+  const qrLogin = { label: t('channel_badge_requires_qr'), tone: 'amber' as const };
+  const whitelistOnly = { label: t('channel_badge_whitelist_only'), tone: 'slate' as const };
+  const manualApproval = { label: t('channel_badge_manual_approval'), tone: 'teal' as const };
+
+  const map: Record<string, ChannelBadge[]> = {
+    telegram: [autoPairing, manualApproval],
+    discord: [autoPairing, manualApproval],
+    whatsapp: [qrLogin, autoPairing, manualApproval],
+    slack: [autoPairing, manualApproval],
+    feishu: [autoPairing, manualApproval],
+    matrix: [autoPairing, manualApproval],
+    wecom: [whitelistOnly],
+    dingtalk: [whitelistOnly],
+    qq: [whitelistOnly],
+    email: [whitelistOnly],
+    mochat: [whitelistOnly],
+  };
+
+  return map[channelKey] || [];
+}
 
 function isGroup(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -395,12 +447,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         return (
           <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-            <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px', overflowWrap: 'anywhere' }}>
-              <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel(displayKey)}
+            <div style={{ marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+              <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', overflowWrap: 'anywhere' }}>
+                <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel(displayKey)}
+              </div>
+              {path[0] === 'channels' && getChannelBadges(displayKey).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                  {getChannelBadges(displayKey).map((badge) => (
+                    <span key={`${displayKey}-${badge.label}`} style={badgeStyle(badge.tone)}>
+                      {badge.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
             {renderFields(currentObj, cPath)}
+            {path[0] === 'channels' && displayKey === 'whatsapp' && (
+              <WhatsAppPairingCard
+                enabled={Boolean((currentObj as any).enabled)}
+                dirty={changedPaths.has('channels.whatsapp')}
+              />
+            )}
           </div>
         );
       }

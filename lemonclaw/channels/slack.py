@@ -157,7 +157,15 @@ class SlackChannel(BaseChannel):
 
         channel_type = event.get("channel_type") or ""
 
-        if not self._is_allowed(sender_id, chat_id, channel_type):
+        if channel_type == "im" and self.config.dm.policy == "pairing":
+            if not await self._run_pairing_flow(
+                sender_id=sender_id,
+                notify_target=chat_id,
+                content=text,
+                display_name=sender_id,
+            ):
+                return
+        elif not self._is_allowed(sender_id, chat_id, channel_type):
             return
 
         if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):

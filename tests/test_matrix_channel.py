@@ -172,6 +172,40 @@ def _make_config(**kwargs) -> MatrixConfig:
 
 
 @pytest.mark.asyncio
+async def test_matrix_dm_pairing_routes_pending_and_approval(tmp_path) -> None:
+    bus = MessageBus()
+    inbound = []
+    outbound = []
+
+    async def _capture_inbound(msg):
+        inbound.append(msg)
+
+    async def _capture_outbound(msg):
+        outbound.append(msg)
+
+    bus.publish_inbound = _capture_inbound  # type: ignore[assignment]
+    bus.publish_outbound = _capture_outbound  # type: ignore[assignment]
+
+    channel = MatrixChannel(_make_config(allow_from=[]), bus)
+    channel.enable_auto_pairing(tmp_path)
+
+    owner_room = SimpleNamespace(room_id='!owner:matrix.org', display_name='Owner DM', member_count=2)
+    owner_event = SimpleNamespace(sender='@alice:matrix.org', body='hello', event_id='$owner', source={'content': {}})
+    await channel._on_message(owner_room, owner_event)
+    assert len(inbound) == 1
+
+    pending_room = SimpleNamespace(room_id='!pending:matrix.org', display_name='Pending DM', member_count=2)
+    pending_event = SimpleNamespace(sender='@bob:matrix.org', body='hello', event_id='$pending', source={'content': {}})
+    await channel._on_message(pending_room, pending_event)
+    assert len(inbound) == 1
+    assert outbound[-1].chat_id == '!owner:matrix.org'
+
+    approve_event = SimpleNamespace(sender='@alice:matrix.org', body='/approve @bob:matrix.org', event_id='$approve', source={'content': {}})
+    await channel._on_message(owner_room, approve_event)
+    assert any(msg.chat_id == '!pending:matrix.org' and 'approved' in (msg.content or '').lower() for msg in outbound)
+
+
+@pytest.mark.asyncio
 async def test_start_skips_load_store_when_device_id_missing(
     monkeypatch, tmp_path
 ) -> None:
@@ -274,6 +308,23 @@ async def test_stop_stops_sync_forever_before_close(monkeypatch) -> None:
     assert channel._running is False
     assert client.stop_sync_forever_called is True
     assert task.cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_room_invite_with_pairing_only_joins_direct_rooms(tmp_path) -> None:
+    channel = MatrixChannel(_make_config(allow_from=[]), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel.enable_auto_pairing(tmp_path)
+
+    direct_room = SimpleNamespace(room_id="!direct:matrix.org", member_count=2)
+    group_room = SimpleNamespace(room_id="!group:matrix.org", member_count=4)
+    event = SimpleNamespace(sender="@alice:matrix.org")
+
+    await channel._on_room_invite(direct_room, event)
+    await channel._on_room_invite(group_room, event)
+
+    assert client.join_calls == ["!direct:matrix.org"]
 
 
 @pytest.mark.asyncio

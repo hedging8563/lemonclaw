@@ -26,11 +26,17 @@ export interface InboundMessage {
   isGroup: boolean;
 }
 
+export interface WhatsAppAccountSummary {
+  id?: string;
+  phone?: string;
+  name?: string;
+}
+
 export interface WhatsAppClientOptions {
   authDir: string;
   onMessage: (msg: InboundMessage) => void;
   onQR: (qr: string) => void;
-  onStatus: (status: string) => void;
+  onStatus: (status: string, account?: WhatsAppAccountSummary | null) => void;
 }
 
 export class WhatsAppClient {
@@ -42,6 +48,19 @@ export class WhatsAppClient {
     this.options = options;
   }
 
+  private resolveAccountSummary(stateCreds: any): WhatsAppAccountSummary | null {
+    const user = this.sock?.user || stateCreds?.me || null;
+    if (!user || typeof user !== 'object') return null;
+
+    const rawId = typeof user.id === 'string' ? user.id : '';
+    const phone = rawId ? rawId.split(':')[0].split('@')[0] : undefined;
+    const name = typeof user.name === 'string' && user.name.trim() ? user.name.trim() : undefined;
+    const id = rawId || undefined;
+
+    if (!id && !phone && !name) return null;
+    return { id, phone, name };
+  }
+
   async connect(): Promise<void> {
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
@@ -49,7 +68,6 @@ export class WhatsAppClient {
 
     console.log(`Using Baileys version: ${version.join('.')}`);
 
-    // Create socket following OpenClaw's pattern
     this.sock = makeWASocket({
       auth: {
         creds: state.creds,
@@ -63,19 +81,16 @@ export class WhatsAppClient {
       markOnlineOnConnect: false,
     });
 
-    // Handle WebSocket errors
     if (this.sock.ws && typeof this.sock.ws.on === 'function') {
       this.sock.ws.on('error', (err: Error) => {
         console.error('WebSocket error:', err.message);
       });
     }
 
-    // Handle connection updates
     this.sock.ev.on('connection.update', async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        // Display QR code in terminal
         console.log('\n📱 Scan this QR code with WhatsApp (Linked Devices):\n');
         qrcode.generate(qr, { small: true });
         this.options.onQR(qr);
@@ -86,7 +101,7 @@ export class WhatsAppClient {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
         console.log(`Connection closed. Status: ${statusCode}, Will reconnect: ${shouldReconnect}`);
-        this.options.onStatus('disconnected');
+        this.options.onStatus('disconnected', null);
 
         if (shouldReconnect && !this.reconnecting) {
           this.reconnecting = true;
@@ -98,22 +113,17 @@ export class WhatsAppClient {
         }
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
-        this.options.onStatus('connected');
+        this.options.onStatus('connected', this.resolveAccountSummary(state.creds));
       }
     });
 
-    // Save credentials on update
     this.sock.ev.on('creds.update', saveCreds);
 
-    // Handle incoming messages
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
         if (msg.key.fromMe) continue;
-
-        // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const content = this.extractMessageContent(msg);
@@ -174,8 +184,14 @@ export class WhatsAppClient {
     if (!this.sock) {
       throw new Error('Not connected');
     }
-
     await this.sock.sendMessage(to, { text });
+  }
+
+  async logout(): Promise<void> {
+    if (this.sock?.logout && typeof this.sock.logout === 'function') {
+      await this.sock.logout();
+    }
+    await this.disconnect();
   }
 
   async disconnect(): Promise<void> {

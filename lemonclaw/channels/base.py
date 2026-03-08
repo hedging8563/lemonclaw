@@ -85,6 +85,8 @@ class BaseChannel(ABC):
             return False
 
         sender_str = str(sender_id)
+        if '*' in allow_list:
+            return True
         if sender_str in allow_list:
             return True
         if "|" in sender_str:
@@ -97,6 +99,60 @@ class BaseChannel(ABC):
         """Enable auto-pairing for this channel."""
         from lemonclaw.channels.auto_pairing import AutoPairing
         self._pairing = AutoPairing(self.name, data_dir)
+
+    async def _run_pairing_flow(
+        self,
+        *,
+        sender_id: str,
+        notify_target: str,
+        content: str,
+        display_name: str | None = None,
+    ) -> bool:
+        """Run the standard auto-pairing gate.
+
+        Returns True when the message should continue into normal handling.
+        Returns False when the message was blocked, queued for approval,
+        or consumed as an approval command.
+        """
+        stripped = content.strip()
+        if self._pairing and stripped.startswith(("/approve ", "/deny ")):
+            reply = await self._handle_pairing_command(sender_id, stripped)
+            if reply:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name, chat_id=str(notify_target), content=reply,
+                ))
+            return False
+
+        if self.is_allowed(sender_id):
+            return True
+
+        if not self._pairing:
+            logger.warning(
+                "Access denied for sender {} on channel {}. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id, self.name,
+            )
+            return False
+
+        result = self._pairing.check_or_pair(
+            sender_id,
+            display_name=display_name or str(sender_id),
+            notify_target=str(notify_target),
+        )
+        if result == "paired":
+            logger.info("Auto-paired {} as owner on {}", sender_id, self.name)
+            return True
+        if result == "allowed":
+            return True
+        if result == "pending":
+            owner_target = self._pairing.owner_notify_target
+            if owner_target:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name,
+                    chat_id=str(owner_target),
+                    content=f"New user wants access: {sender_id}\nReply /approve {sender_id} or /deny {sender_id}",
+                ))
+        return False
 
     async def _handle_message(
         self,
@@ -113,44 +169,13 @@ class BaseChannel(ABC):
         This method checks permissions (static allow_from + auto-pairing)
         and forwards to the bus.
         """
-        # Handle /approve and /deny commands (owner only, before ACL check)
-        if self._pairing and content.strip().startswith(("/approve ", "/deny ")):
-            reply = await self._handle_pairing_command(sender_id, content.strip())
-            if reply:
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=self.name, chat_id=str(chat_id), content=reply,
-                ))
+        if not await self._run_pairing_flow(
+            sender_id=str(sender_id),
+            notify_target=str(chat_id),
+            content=content,
+            display_name=str(sender_id),
+        ):
             return
-
-        if not self.is_allowed(sender_id):
-            # Try auto-pairing if enabled
-            if self._pairing:
-                result = self._pairing.check_or_pair(
-                    sender_id, display_name=str(sender_id),
-                )
-                if result == "paired":
-                    logger.info("Auto-paired {} as owner on {}", sender_id, self.name)
-                elif result == "pending":
-                    owner = self._pairing.owner
-                    if owner:
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=self.name, chat_id=str(owner).split("|")[0],
-                            content=f"New user wants access: {sender_id}\nReply /approve {sender_id} or /deny {sender_id}",
-                        ))
-                    return
-                elif result == "already_pending":
-                    return
-                elif result == "allowed":
-                    pass  # fall through to normal processing
-                else:
-                    return
-            else:
-                logger.warning(
-                    "Access denied for sender {} on channel {}. "
-                    "Add them to allowFrom list in config to grant access.",
-                    sender_id, self.name,
-                )
-                return
 
         msg = InboundMessage(
             channel=self.name,
@@ -185,11 +210,18 @@ class BaseChannel(ABC):
         cmd, target = parts[0].lower(), parts[1].strip()
 
         if cmd == "/approve":
-            if self._pairing.approve(target):
+            notify_target = self._pairing.approve(target)
+            if notify_target:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name,
+                    chat_id=str(notify_target),
+                    content="✅ Access approved. Send a message to start chatting.",
+                ))
                 return f"Approved: {target}"
             return f"No pending request from: {target}"
         elif cmd == "/deny":
-            if self._pairing.deny(target):
+            notify_target = self._pairing.deny(target)
+            if notify_target:
                 return f"Denied: {target}"
             return f"No pending request from: {target}"
         return None

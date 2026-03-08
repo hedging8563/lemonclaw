@@ -3,8 +3,10 @@
  * Security: binds to 127.0.0.1 only; optional BRIDGE_TOKEN auth.
  */
 
+import { mkdirSync, renameSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { WhatsAppClient, InboundMessage } from './whatsapp.js';
+import { WhatsAppClient, InboundMessage, WhatsAppAccountSummary } from './whatsapp.js';
 
 interface SendCommand {
   type: 'send';
@@ -21,27 +23,46 @@ export class BridgeServer {
   private wss: WebSocketServer | null = null;
   private wa: WhatsAppClient | null = null;
   private clients: Set<WebSocket> = new Set();
+  private lastStatus: string | null = null;
+  private lastQR: string | null = null;
+  private lastAccount: WhatsAppAccountSummary | null = null;
 
-  constructor(private port: number, private authDir: string, private token?: string) {}
+  constructor(private port: number, private authDir: string, private token?: string, private stateFile?: string) {}
+
+  private persistState(): void {
+    if (!this.stateFile) return;
+    try {
+      mkdirSync(dirname(this.stateFile), { recursive: true });
+      const tmp = `${this.stateFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify({
+        status: this.lastStatus,
+        qr: this.lastQR,
+        account: this.lastAccount,
+        pid: process.pid,
+        updated_at: Date.now() / 1000,
+      }, null, 2));
+      renameSync(tmp, this.stateFile);
+    } catch (error) {
+      console.error('Failed to persist bridge state:', error);
+    }
+  }
 
   async start(): Promise<void> {
-    // Bind to localhost only — never expose to external network
+    this.lastStatus = 'starting';
+    this.persistState();
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port });
     console.log(`🌉 Bridge server listening on ws://127.0.0.1:${this.port}`);
     if (this.token) console.log('🔒 Token authentication enabled');
 
-    // Initialize WhatsApp client
     this.wa = new WhatsAppClient({
       authDir: this.authDir,
       onMessage: (msg) => this.broadcast({ type: 'message', ...msg }),
       onQR: (qr) => this.broadcast({ type: 'qr', qr }),
-      onStatus: (status) => this.broadcast({ type: 'status', status }),
+      onStatus: (status, account) => this.broadcast({ type: 'status', status, account }),
     });
 
-    // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
       if (this.token) {
-        // Require auth handshake as first message
         const timeout = setTimeout(() => ws.close(4001, 'Auth timeout'), 5000);
         ws.once('message', (data) => {
           clearTimeout(timeout);
@@ -63,12 +84,17 @@ export class BridgeServer {
       }
     });
 
-    // Connect to WhatsApp
     await this.wa.connect();
   }
 
   private setupClient(ws: WebSocket): void {
     this.clients.add(ws);
+    if (this.lastStatus) {
+      ws.send(JSON.stringify({ type: 'status', status: this.lastStatus, account: this.lastAccount }));
+    }
+    if (this.lastQR) {
+      ws.send(JSON.stringify({ type: 'qr', qr: this.lastQR }));
+    }
 
     ws.on('message', async (data) => {
       try {
@@ -99,6 +125,20 @@ export class BridgeServer {
   }
 
   private broadcast(msg: BridgeMessage): void {
+    if (msg.type === 'status') {
+      this.lastStatus = String(msg.status || 'unknown');
+      this.lastAccount = (msg.account as WhatsAppAccountSummary | null | undefined) || null;
+      if (this.lastStatus === 'connected') this.lastQR = null;
+    }
+    if (msg.type === 'qr') {
+      this.lastStatus = 'qr';
+      this.lastQR = typeof msg.qr === 'string' ? msg.qr : null;
+    }
+    if (msg.type === 'error') {
+      this.lastStatus = 'error';
+    }
+    this.persistState();
+
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -108,19 +148,20 @@ export class BridgeServer {
   }
 
   async stop(): Promise<void> {
-    // Close all client connections
+    this.lastStatus = 'stopped';
+    this.lastQR = null;
+    this.persistState();
+
     for (const client of this.clients) {
       client.close();
     }
     this.clients.clear();
 
-    // Close WebSocket server
     if (this.wss) {
       this.wss.close();
       this.wss = null;
     }
 
-    // Disconnect WhatsApp
     if (this.wa) {
       await this.wa.disconnect();
       this.wa = null;

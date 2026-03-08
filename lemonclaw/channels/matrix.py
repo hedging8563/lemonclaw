@@ -24,7 +24,6 @@ except ImportError as e:
         "Matrix dependencies not installed. Run: pip install lemonclaw[matrix]"
     ) from e
 
-from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.loader import get_data_dir
 from lemonclaw.utils.helpers import safe_filename
@@ -440,7 +439,10 @@ class MatrixChannel(BaseChannel):
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         allow_from = self.config.allow_from or []
-        if not allow_from or event.sender in allow_from:
+        if not allow_from or "*" in allow_from or event.sender in allow_from:
+            await self.client.join(room.room_id)
+            return
+        if self._pairing and self._is_direct_room(room):
             await self.client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
@@ -646,7 +648,17 @@ class MatrixChannel(BaseChannel):
         return meta
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if event.sender == self.config.user_id:
+            return
+        if self._is_direct_room(room):
+            if not await self._run_pairing_flow(
+                sender_id=event.sender,
+                notify_target=room.room_id,
+                content=event.body,
+                display_name=event.sender,
+            ):
+                return
+        elif not self._should_process_message(room, event):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
@@ -659,7 +671,18 @@ class MatrixChannel(BaseChannel):
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if event.sender == self.config.user_id:
+            return
+        if self._is_direct_room(room):
+            body = getattr(event, 'body', '') if isinstance(getattr(event, 'body', None), str) else ''
+            if not await self._run_pairing_flow(
+                sender_id=event.sender,
+                notify_target=room.room_id,
+                content=body,
+                display_name=event.sender,
+            ):
+                return
+        elif not self._should_process_message(room, event):
             return
         attachment, marker = await self._fetch_media_attachment(room, event)
         parts: list[str] = []

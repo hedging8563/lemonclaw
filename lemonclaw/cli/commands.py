@@ -814,60 +814,17 @@ def channels_status():
 
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
-    import shutil
-    import subprocess
-    
-    # User's bridge location
-    user_bridge = Path.home() / ".lemonclaw" / "bridge"
-    
-    # Check if already built
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-    
-    # Check for npm
-    if not shutil.which("npm"):
-        console.print("[red]npm not found. Please install Node.js >= 20.[/red]")
-        raise typer.Exit(1)
-    
-    # Find source bridge: first check package data, then source dir
-    pkg_bridge = Path(__file__).parent.parent / "bridge"  # lemonclaw/bridge (installed)
-    src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
-    
-    source = None
-    if (pkg_bridge / "package.json").exists():
-        source = pkg_bridge
-    elif (src_bridge / "package.json").exists():
-        source = src_bridge
-    
-    if not source:
-        console.print("[red]Bridge source not found.[/red]")
-        console.print("Try reinstalling: pip install --force-reinstall lemonclaw")
-        raise typer.Exit(1)
-    
+    from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError, ensure_bridge_ready
+
     console.print(f"{__logo__} Setting up bridge...")
-    
-    # Copy to user directory
-    user_bridge.parent.mkdir(parents=True, exist_ok=True)
-    if user_bridge.exists():
-        shutil.rmtree(user_bridge)
-    shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
-    
-    # Install and build
     try:
-        console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
-        
-        console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
-        
-        console.print("[green]✓[/green] Bridge ready\n")
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Build failed: {e}[/red]")
-        if e.stderr:
-            console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
+        bridge_dir = ensure_bridge_ready()
+    except WhatsAppBridgeError as e:
+        console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
-    
-    return user_bridge
+
+    console.print("[green]✓[/green] Bridge ready\n")
+    return bridge_dir
 
 
 @channels_app.command("login")
@@ -883,6 +840,8 @@ def channels_login():
     console.print("Scan the QR code to connect.\n")
     
     env = {**os.environ}
+    env["AUTH_DIR"] = str((Path.home() / '.lemonclaw' / 'whatsapp-auth'))
+    env["BRIDGE_STATE_FILE"] = str((Path.home() / '.lemonclaw' / 'whatsapp-bridge-state.json'))
     if config.channels.whatsapp.bridge_token:
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
     

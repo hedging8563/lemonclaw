@@ -14,6 +14,12 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
+from lemonclaw.channels.whatsapp_bridge_runtime import (
+    WhatsAppBridgeError,
+    disconnect_whatsapp,
+    get_whatsapp_pairing_state,
+    restart_whatsapp_pairing,
+)
 
 if TYPE_CHECKING:
     from lemonclaw.config.watcher import ConfigWatcher
@@ -388,6 +394,63 @@ def get_settings_routes(
 
         return _maybe_refresh(request, _json({"reloaded": True, "restart_required": False}))
 
+    # ── GET /api/settings/channels/whatsapp/pairing ───────────────────
+
+    async def get_whatsapp_pairing(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        from lemonclaw.config.loader import load_config
+
+        config = load_config(config_path)
+        try:
+            state = await asyncio.to_thread(get_whatsapp_pairing_state, config.channels.whatsapp, start_if_needed=False)
+            return _json(state)
+        except WhatsAppBridgeError as exc:
+            return _json({"error": str(exc), "status": "error", "running": False, "qr": None}, 400)
+
+    # ── POST /api/settings/channels/whatsapp/pairing ──────────────────
+
+    async def start_whatsapp_pairing(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        from lemonclaw.config.loader import load_config
+
+        config = load_config(config_path)
+        try:
+            state = await asyncio.to_thread(get_whatsapp_pairing_state, config.channels.whatsapp, start_if_needed=True, wait_timeout=20.0)
+            return _json(state)
+        except WhatsAppBridgeError as exc:
+            return _json({"error": str(exc), "status": "error", "running": False, "qr": None}, 400)
+
+    # ── POST /api/settings/channels/whatsapp/disconnect ───────────────
+
+    async def disconnect_whatsapp_pairing(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        state = await asyncio.to_thread(disconnect_whatsapp)
+        return _json(state)
+
+    # ── POST /api/settings/channels/whatsapp/repair ───────────────────
+
+    async def repair_whatsapp_pairing(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        from lemonclaw.config.loader import load_config
+
+        config = load_config(config_path)
+        try:
+            state = await asyncio.to_thread(restart_whatsapp_pairing, config.channels.whatsapp, wait_timeout=20.0)
+            return _json(state)
+        except WhatsAppBridgeError as exc:
+            return _json({"error": str(exc), "status": "error", "running": False, "qr": None, "account": None}, 400)
+
     # ── GET /api/settings/skills ──────────────────────────────────────
 
     async def list_skills(request: Request) -> Response:
@@ -655,6 +718,10 @@ def get_settings_routes(
 
     return [
         Route("/api/settings", get_settings, methods=["GET"]),
+        Route("/api/settings/channels/whatsapp/pairing", get_whatsapp_pairing, methods=["GET"]),
+        Route("/api/settings/channels/whatsapp/pairing", start_whatsapp_pairing, methods=["POST"]),
+        Route("/api/settings/channels/whatsapp/disconnect", disconnect_whatsapp_pairing, methods=["POST"]),
+        Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings", patch_settings, methods=["PATCH"]),
         Route("/api/settings/apply", apply_settings, methods=["POST"]),
         Route("/api/settings/skills", list_skills, methods=["GET"]),

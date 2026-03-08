@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -55,6 +56,39 @@ class TestBaseChannelACL:
         assert ch.is_allowed("alice") is True
         assert ch.is_allowed("bob") is True
         assert ch.is_allowed("charlie") is False
+
+    def test_wildcard_allow_from_allows_any_sender(self):
+        ch = _FakeChannel(["*"])
+        assert ch.is_allowed("alice") is True
+        assert ch.is_allowed("bob|charlie") is True
+
+
+class TestAutoPairing:
+    def test_stores_owner_and_pending_notify_targets(self, tmp_path: Path):
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        pairing = AutoPairing('slack', tmp_path)
+        assert pairing.check_or_pair('U1', notify_target='D1') == 'paired'
+        assert pairing.owner_notify_target == 'D1'
+
+        assert pairing.check_or_pair('U2', notify_target='D2') == 'pending'
+        assert pairing.get_pending_notify_target('U2') == 'D2'
+        assert pairing.approve('U2') == 'D2'
+
+    def test_loads_legacy_pending_string_shape(self, tmp_path: Path):
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        path = tmp_path / 'pairing' / 'telegram.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            'owner': 'alice',
+            'approved': ['alice'],
+            'pending': {'bob': 'bob'},
+        }))
+
+        pairing = AutoPairing('telegram', tmp_path)
+        assert pairing.owner_notify_target == 'alice'
+        assert pairing.get_pending_notify_target('bob') == 'bob'
 
 
 # ── 2. Session Manager LRU ──────────────────────────────────────────────
