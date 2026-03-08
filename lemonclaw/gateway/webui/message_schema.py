@@ -166,7 +166,14 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
         return msg
 
     role = raw.get("role", "assistant")
-    content = raw.get("content", "") if isinstance(raw.get("content", ""), str) else ""
+    raw_content = raw.get("content", "")
+    if isinstance(raw_content, list):
+        # Multimodal content array (e.g. from Anthropic) — extract text parts
+        content = " ".join(p.get("text", "") for p in raw_content if isinstance(p, dict) and p.get("type") == "text")
+    elif isinstance(raw_content, str):
+        content = raw_content
+    else:
+        content = ""
     raw_media = [m for m in raw.get("media", []) if isinstance(m, str)] if isinstance(raw.get("media"), list) else []
     media, blocks = _parse_content_blocks(content, raw_media, session_key=session_key)
 

@@ -86,3 +86,17 @@ def test_session_get_history_remains_llm_friendly_with_native_blocks(tmp_path: P
         {'role': 'user', 'content': '先看图片'},
         {'role': 'assistant', 'content': '好的'},
     ]
+
+
+def test_serialize_ui_message_handles_multimodal_content_list() -> None:
+    """Legacy messages from Anthropic have content as a list of parts."""
+    msg = serialize_ui_message({
+        'role': 'assistant',
+        'content': [
+            {'type': 'text', 'text': 'Here is the analysis.'},
+            {'type': 'text', 'text': ' And more details.'},
+        ],
+        'timestamp': '2026-03-08T12:00:00',
+    })
+    assert 'Here is the analysis.' in msg['content'] and 'And more details.' in msg['content']
+    assert any(block['type'] == 'markdown' and 'analysis' in block['text'] for block in msg['blocks'])
