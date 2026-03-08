@@ -90,6 +90,10 @@ def get_activity_routes(
             if role == "tool":
                 continue  # tool results too verbose
 
+            # Multimodal content (images, runtime context) — extract text parts
+            if isinstance(content, list):
+                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+
             if role == "assistant" and not content and msg.get("tool_calls"):
                 # tool_call message — format as summary
                 calls = msg.get("tool_calls", [])
