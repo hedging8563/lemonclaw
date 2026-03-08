@@ -3,10 +3,11 @@ import { Sidebar } from './components/layout/Sidebar';
 import { ChatArea } from './components/layout/ChatArea';
 import { Inspector } from './components/layout/Inspector';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { SettingsModal } from './components/settings/SettingsModal';
 import { checkAuth, isAuthenticated, authRequired } from './stores/auth';
 import { initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
-import { mobileMenuOpen } from './stores/ui';
+import { mobileMenuOpen, showSettings } from './stores/ui';
 import { t } from './stores/i18n';
 
 export function App() {
@@ -34,6 +35,7 @@ export function App() {
       <Sidebar />
       <ChatArea />
       <Inspector />
+      {showSettings.value && <SettingsModal onClose={() => showSettings.value = false} />}
     </div>
   );
 }

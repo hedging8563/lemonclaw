@@ -935,7 +935,7 @@ class AgentLoop:
         if final_content is None:
             final_content = t("no_response", lang)
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, 1 + len(history), turn_media=list(msg.media or []))
 
         # Record usage and check budgets
         alerts: list[str] = []
@@ -1031,8 +1031,9 @@ class AgentLoop:
         except Exception:
             logger.warning("/model: failed to persist to config.json (ephemeral only)")
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(self, session: Session, messages: list[dict], skip: int, *, turn_media: list[str] | None = None) -> None:
         """Save new-turn messages into session, truncating large tool results."""
+        _media_injected = False
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             role, content = entry.get("role"), entry.get("content")
@@ -1047,6 +1048,7 @@ class AgentLoop:
                         entry["content"] = original
                         entry.pop("_original_text", None)
                     else:
+                        _media_injected = True  # skip this msg, don't inject to later ones
                         continue
                 if isinstance(content, list):
                     entry["content"] = [
@@ -1055,6 +1057,10 @@ class AgentLoop:
                             and c.get("image_url", {}).get("url", "").startswith("data:image/")
                         ) else c for c in content
                     ]
+                # Inject original media paths (lost during base64 conversion)
+                if not _media_injected and turn_media:
+                    entry["media"] = turn_media
+                    _media_injected = True
             entry.setdefault("timestamp", datetime.now().isoformat())
             if role in ("user", "assistant", "system"):
                 session.messages.append(serialize_ui_message(entry))

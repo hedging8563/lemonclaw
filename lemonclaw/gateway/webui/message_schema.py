@@ -64,6 +64,8 @@ def extract_message_media_paths(raw: dict[str, Any]) -> list[str]:
 
 
 def media_url(path: str, session_key: str | None = None) -> str:
+    if path.startswith(("http://", "https://")):
+        return path
     from urllib.parse import quote
     encoded = quote(path, safe='')
     if session_key:

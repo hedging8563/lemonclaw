@@ -1,14 +1,10 @@
-import { useState } from 'preact/hooks';
 import { t, toggleLang, lang } from '../../stores/i18n';
 import { activeSessionKey } from '../../stores/sessions';
-import { mobileMenuOpen, sidebarTab } from '../../stores/ui';
-import { SettingsModal } from '../settings/SettingsModal';
+import { mobileMenuOpen, sidebarTab, showSettings } from '../../stores/ui';
 import { ActivityList } from '../sidebar/ActivityList';
 import { SessionList } from '../sidebar/SessionList';
 
 export function Sidebar() {
-  const [showSettings, setShowSettings] = useState(false);
-
   const handleNewChat = () => {
     sidebarTab.value = 'sessions';
     const newKey = `webui:${Math.random().toString(36).substring(2, 9)}`;
@@ -68,12 +64,11 @@ export function Sidebar() {
           }} style={{ width: '40px', padding: '8px 0', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }} title={t('toggle_theme')}>
             🌓
           </button>
-          <button onClick={() => setShowSettings(true)} style={{ flex: 1, minWidth: 0, padding: '8px', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', display: 'flex', justifyContent: 'center', gap: '8px', transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+          <button onClick={() => showSettings.value = true} style={{ flex: 1, minWidth: 0, padding: '8px', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', display: 'flex', justifyContent: 'center', gap: '8px', transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
             <span style={{ color: 'var(--purple)' }}>⚙</span> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('settings')}</span>
           </button>
         </div>
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </aside>
   );
 }

@@ -14,8 +14,11 @@ export const streamError = signal<string | null>(null);
 export const attachments = signal<{ path: string, filename: string, url?: string }[]>([]);
 export const inputText = signal('');
 export const isLoadingHistory = signal(false);
+export const hasMoreHistory = signal(false);
+export const isLoadingMore = signal(false);
 
 let currentAbortController: AbortController | null = null;
+let _nextBefore: number | null = null;
 
 export function abortStream() {
   if (currentAbortController) {
@@ -49,11 +52,13 @@ export async function loadHistory() {
   inputText.value = '';
   attachments.value = [];
   isLoadingHistory.value = true;
+  hasMoreHistory.value = false;
+  _nextBefore = null;
 
   try {
     let url = `/api/sessions/${encodeURIComponent(activeSessionKey.value)}/messages`;
     if (!activeSessionKey.value.startsWith('webui:')) {
-      url = `/api/activity/messages?session_key=${encodeURIComponent(activeSessionKey.value)}&limit=100`;
+      url = `/api/activity/messages?session_key=${encodeURIComponent(activeSessionKey.value)}&limit=50`;
     }
 
     const res = await apiFetch(url, { silent404: true });
@@ -61,10 +66,34 @@ export async function loadHistory() {
 
     const data = await res.json();
     messages.value = (data.messages || []).map((msg: any) => normalizeMessage(msg));
+    hasMoreHistory.value = !!data.has_more;
+    _nextBefore = data.next_before ?? null;
   } catch (err) {
     console.error('Failed to load history', err);
   } finally {
     isLoadingHistory.value = false;
+  }
+}
+
+export async function loadMoreHistory() {
+  if (isLoadingMore.value || !hasMoreHistory.value || _nextBefore == null || !activeSessionKey.value) return;
+  if (activeSessionKey.value.startsWith('webui:')) return;
+
+  isLoadingMore.value = true;
+  try {
+    const url = `/api/activity/messages?session_key=${encodeURIComponent(activeSessionKey.value)}&limit=50&before=${_nextBefore}`;
+    const res = await apiFetch(url, { silent404: true });
+    if (res.status === 404 || res.status === 403) return;
+
+    const data = await res.json();
+    const older = (data.messages || []).map((msg: any) => normalizeMessage(msg));
+    messages.value = [...older, ...messages.value];
+    hasMoreHistory.value = !!data.has_more;
+    _nextBefore = data.next_before ?? null;
+  } catch (err) {
+    console.error('Failed to load more history', err);
+  } finally {
+    isLoadingMore.value = false;
   }
 }
 

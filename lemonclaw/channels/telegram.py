@@ -403,6 +403,24 @@ class TelegramChannel(BaseChannel):
         # Send media files (with automatic splitting for large videos)
         for media_path in (msg.media or []):
             try:
+                # Remote URLs: send directly via Telegram Bot API (supports URL strings)
+                if media_path.startswith(("http://", "https://")):
+                    media_type = self._get_media_type(media_path)
+                    sender = {
+                        "photo": self._app.bot.send_photo,
+                        "video": self._app.bot.send_video,
+                        "voice": self._app.bot.send_voice,
+                        "audio": self._app.bot.send_audio,
+                    }.get(media_type, self._app.bot.send_document)
+                    param = media_type if media_type in ("photo", "video", "voice", "audio") else "document"
+                    await sender(
+                        chat_id=chat_id,
+                        **{param: media_path},
+                        reply_parameters=reply_params,
+                        **topic_kwargs,
+                    )
+                    continue
+
                 file_size = os.path.getsize(media_path)
                 media_type = self._get_media_type(media_path)
 

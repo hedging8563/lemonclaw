@@ -80,19 +80,41 @@ def get_activity_routes(
         except (ValueError, TypeError):
             limit = 50
 
+        before_raw = request.query_params.get("before")
+        try:
+            before_idx = int(before_raw) if before_raw else None
+        except (ValueError, TypeError):
+            before_idx = None
+
         session = session_manager._load(session_key)
         if not session:
             return JSONResponse({"error": "session not found"}, 404)
 
-        messages: list[dict[str, Any]] = []
-        for msg in session.messages[-limit:]:
+        # Filter first, then paginate (fixes tool messages eating limit quota)
+        filtered: list[tuple[int, dict[str, Any]]] = []
+        for idx, msg in enumerate(session.messages):
             role = msg.get("role", "")
             if role == "tool":
                 continue
             if role in ("user", "assistant", "system", "tool_call"):
-                messages.append(serialize_ui_message(msg, session_key=session_key))
+                filtered.append((idx, msg))
 
-        return JSONResponse({"messages": messages})
+        if before_idx is not None:
+            filtered = [(i, m) for i, m in filtered if i < before_idx]
+
+        page = filtered[-limit:]
+        has_more = len(filtered) > limit
+
+        messages: list[dict[str, Any]] = [
+            serialize_ui_message(m, session_key=session_key) for _, m in page
+        ]
+        next_before = page[0][0] if page and has_more else None
+
+        return JSONResponse({
+            "messages": messages,
+            "has_more": has_more,
+            "next_before": next_before,
+        })
 
     # ── WebSocket: /ws/activity ───────────────────────────────────────
 

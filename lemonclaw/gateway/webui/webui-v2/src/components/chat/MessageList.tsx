@@ -14,7 +14,7 @@ import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
 import { marked } from 'marked';
 import { activeSessionKey } from '../../stores/sessions';
-import { inputText, isLoadingHistory, isStreaming, loadHistory, messages } from '../../stores/chat';
+import { inputText, isLoadingHistory, isLoadingMore, isStreaming, loadHistory, loadMoreHistory, hasMoreHistory, messages } from '../../stores/chat';
 import type { UIBlock } from '../../models/messages';
 import { t } from '../../stores/i18n';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -112,6 +112,19 @@ export function MessageList() {
     const el = scrollRef.current;
     const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
     setShowScrollButton(!isAtBottom);
+
+    // Load more history when scrolling near the top
+    if (el.scrollTop < 50 && hasMoreHistory.value && !isLoadingMore.value) {
+      const prevHeight = el.scrollHeight;
+      loadMoreHistory().then(() => {
+        // Wait for DOM update before restoring scroll position
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
+          }
+        });
+      });
+    }
   };
 
   useEffect(() => {
@@ -175,8 +188,6 @@ export function MessageList() {
             fontSize: isMobile ? '11px' : '12px',
             lineHeight: 1.2,
             whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
           }}
           title={t('scroll_bottom')}
