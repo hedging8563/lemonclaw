@@ -442,7 +442,7 @@ class MatrixChannel(BaseChannel):
         if not allow_from or "*" in allow_from or event.sender in allow_from:
             await self.client.join(room.room_id)
             return
-        if self._pairing and self._is_direct_room(room):
+        if self._channel_allows_dm_pairing() and self._is_direct_room(room):
             await self.client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
@@ -656,6 +656,7 @@ class MatrixChannel(BaseChannel):
                 notify_target=room.room_id,
                 content=event.body,
                 display_name=event.sender,
+                policy=self.config.dm_policy,
             ):
                 return
         elif not self._should_process_message(room, event):
@@ -680,6 +681,7 @@ class MatrixChannel(BaseChannel):
                 notify_target=room.room_id,
                 content=body,
                 display_name=event.sender,
+                policy=self.config.dm_policy,
             ):
                 return
         elif not self._should_process_message(room, event):

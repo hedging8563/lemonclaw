@@ -643,6 +643,7 @@ class TelegramChannel(BaseChannel):
             content=message.text,
             metadata=metadata,
             session_key=session_key,
+            pairing_policy=self.config.dm_policy if not is_group else None,
         )
 
     # ── Inline keyboard for /model ────────────────────────────────────────

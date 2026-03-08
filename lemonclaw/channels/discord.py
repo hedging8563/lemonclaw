@@ -259,6 +259,7 @@ class DiscordChannel(BaseChannel):
                 "guild_id": payload.get("guild_id"),
                 "reply_to": reply_to,
             },
+            pairing_policy=self.config.dm_policy if not payload.get("guild_id") else None,
         )
 
     async def _start_typing(self, channel_id: str) -> None:

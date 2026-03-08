@@ -18,6 +18,7 @@ class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
     enabled: bool = True
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
@@ -27,6 +28,7 @@ class TelegramConfig(Base):
     """Telegram channel configuration."""
 
     enabled: bool = False
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
@@ -37,6 +39,7 @@ class FeishuConfig(Base):
     """Feishu/Lark channel configuration using WebSocket long connection."""
 
     enabled: bool = False
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     app_id: str = ""  # App ID from Feishu Open Platform
     app_secret: str = ""  # App Secret from Feishu Open Platform
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
@@ -58,6 +61,7 @@ class DiscordConfig(Base):
     """Discord channel configuration."""
 
     enabled: bool = False
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from Discord Developer Portal
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
@@ -68,6 +72,7 @@ class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
     enabled: bool = False
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     homeserver: str = "https://matrix.org"
     access_token: str = ""
     user_id: str = ""  # @bot:matrix.org

@@ -121,6 +121,7 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
+            is_group = bool(data.get("isGroup", False))
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
@@ -128,8 +129,9 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": data.get("id"),
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False)
-                }
+                    "is_group": is_group
+                },
+                pairing_policy=self.config.dm_policy if not is_group else None,
             )
         
         elif msg_type == "status":

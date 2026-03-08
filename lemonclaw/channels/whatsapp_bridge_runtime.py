@@ -202,7 +202,12 @@ def stop_bridge_process(timeout: float = 5.0) -> bool:
 
 
 def reset_whatsapp_pairing() -> None:
-    stop_bridge_process()
+    state = read_bridge_state()
+    had_running_pid = isinstance(state.get("pid"), int)
+    stopped = stop_bridge_process()
+    if had_running_pid and not stopped:
+        raise WhatsAppBridgeError("Failed to stop running WhatsApp bridge process.")
+
     auth_dir = get_whatsapp_auth_dir()
     if auth_dir.exists():
         shutil.rmtree(auth_dir)

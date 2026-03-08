@@ -432,8 +432,11 @@ def get_settings_routes(
         ok, err = _require_auth(request)
         if not ok:
             return err  # type: ignore[return-value]
-        state = await asyncio.to_thread(disconnect_whatsapp)
-        return _json(state)
+        try:
+            state = await asyncio.to_thread(disconnect_whatsapp)
+            return _json(state)
+        except WhatsAppBridgeError as exc:
+            return _json({"error": str(exc), "status": "error", "running": True, "qr": None, "account": None}, 400)
 
     # ── POST /api/settings/channels/whatsapp/repair ───────────────────
 

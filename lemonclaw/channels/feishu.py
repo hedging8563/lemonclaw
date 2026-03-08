@@ -730,7 +730,8 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
-                }
+                },
+                pairing_policy=self.config.dm_policy if chat_type != "group" else None,
             )
 
         except Exception as e:

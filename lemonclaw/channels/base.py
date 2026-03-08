@@ -107,6 +107,7 @@ class BaseChannel(ABC):
         notify_target: str,
         content: str,
         display_name: str | None = None,
+        policy: str | None = None,
     ) -> bool:
         """Run the standard auto-pairing gate.
 
@@ -115,6 +116,15 @@ class BaseChannel(ABC):
         or consumed as an approval command.
         """
         stripped = content.strip()
+        effective_policy = (policy or "").strip().lower() or None
+
+        if effective_policy == "open":
+            return True
+        if effective_policy == "disabled":
+            return False
+        if effective_policy == "allowlist":
+            return self.is_allowed(sender_id)
+
         if self._pairing and stripped.startswith(("/approve ", "/deny ")):
             reply = await self._handle_pairing_command(sender_id, stripped)
             if reply:
@@ -162,6 +172,7 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        pairing_policy: str | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -174,6 +185,7 @@ class BaseChannel(ABC):
             notify_target=str(chat_id),
             content=content,
             display_name=str(sender_id),
+            policy=pairing_policy,
         ):
             return
 

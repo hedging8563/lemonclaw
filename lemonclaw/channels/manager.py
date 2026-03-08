@@ -36,13 +36,21 @@ class ChannelManager:
 
         self._init_channels()
 
-        # Enable auto-pairing on all channels if configured
-        if config.channels.auto_pairing:
-            from lemonclaw.utils.helpers import get_data_path
-            data_dir = get_data_path()
-            for channel in self.channels.values():
+        # Enable auto-pairing per channel (global legacy toggle or per-channel dm_policy)
+        from lemonclaw.utils.helpers import get_data_path
+        data_dir = get_data_path()
+        for name, channel in self.channels.items():
+            if self._channel_pairing_enabled(name):
                 channel.enable_auto_pairing(data_dir)
     
+    def _channel_pairing_enabled(self, channel_name: str) -> bool:
+        if self.config.channels.auto_pairing:
+            return True
+        if channel_name == "slack":
+            return self.config.channels.slack.dm.policy == "pairing"
+        channel_cfg = getattr(self.config.channels, channel_name, None)
+        return getattr(channel_cfg, "dm_policy", None) == "pairing"
+
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
         

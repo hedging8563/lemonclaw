@@ -20,6 +20,13 @@ export const isLoadingMore = signal(false);
 let currentAbortController: AbortController | null = null;
 let _nextBefore: number | null = null;
 
+function historyMessageKey(msg: ChatMessage): string {
+  const media = msg.media.map((m) => `${m.kind}:${m.path}`).join('|');
+  const blocks = msg.blocks.map((b) => `${b.type}:${JSON.stringify(b)}`).join('|');
+  return `${msg.id || ''}::${msg.role}::${msg.timestamp || ''}::${msg.content}::${media}::${blocks}`;
+}
+
+
 export function abortStream() {
   if (currentAbortController) {
     currentAbortController.abort();
@@ -87,7 +94,9 @@ export async function loadMoreHistory() {
 
     const data = await res.json();
     const older = (data.messages || []).map((msg: any) => normalizeMessage(msg));
-    messages.value = [...older, ...messages.value];
+    const seen = new Set(messages.value.map(historyMessageKey));
+    const merged = [...older.filter((msg: ChatMessage) => !seen.has(historyMessageKey(msg))), ...messages.value];
+    messages.value = merged;
     hasMoreHistory.value = !!data.has_more;
     _nextBefore = data.next_before ?? null;
   } catch (err) {

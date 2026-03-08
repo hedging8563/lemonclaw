@@ -74,3 +74,18 @@ def test_whatsapp_disconnect_and_repair_routes(monkeypatch, tmp_path):
     resp = client.post('/api/settings/channels/whatsapp/repair')
     assert resp.status_code == 200
     assert resp.json()['status'] == 'qr'
+
+
+def test_whatsapp_disconnect_surfaces_stop_failure(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.whatsapp.enabled = True
+    save_config(cfg, config_path)
+
+    monkeypatch.setattr('lemonclaw.gateway.webui.settings.disconnect_whatsapp', lambda: (_ for _ in ()).throw(WhatsAppBridgeError('Failed to stop running WhatsApp bridge process.')))
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.post('/api/settings/channels/whatsapp/disconnect')
+    assert resp.status_code == 400
+    assert 'Failed to stop running WhatsApp bridge process.' in resp.json()['error']
