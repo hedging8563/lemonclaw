@@ -267,6 +267,23 @@ def get_webui_routes(
 
     # 7.1: Temp directory for uploaded files
     _upload_dir = Path(tempfile.mkdtemp(prefix="lemonclaw_uploads_"))
+    _session_media_grants: dict[str, set[str]] = {}
+
+    def _path_allowed_for_session(file_path: Path, session_key: str) -> bool:
+        granted = _session_media_grants.get(session_key, set())
+        if str(file_path) in granted:
+            return True
+        if not session_manager:
+            return False
+        session = session_manager._load(session_key)
+        if not session:
+            return False
+        for msg in session.messages:
+            ui_msg = serialize_ui_message(msg, session_key=session_key)
+            for media in ui_msg.get("media", []):
+                if isinstance(media, dict) and media.get("path") == str(file_path):
+                    return True
+        return False
 
     def _cleanup_uploads():
         """Remove uploaded files older than 1 hour."""
@@ -298,14 +315,18 @@ def get_webui_routes(
         except OSError:
             return _json({"error": "invalid path"}, 400)
 
-        allowed_roots = [_upload_dir.resolve(), _media_dir.resolve()]
-        if agent_loop and getattr(agent_loop, "workspace", None):
-            allowed_roots.append(Path(agent_loop.workspace).resolve())
-
+        upload_root = _upload_dir.resolve()
         try:
-            if not any(file_path == root or root in file_path.parents for root in allowed_roots):
-                return _json({"error": "access denied"}, 403)
+            if file_path == upload_root or upload_root in file_path.parents:
+                media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+                resp = FileResponse(file_path, media_type=media_type, filename=file_path.name, headers={"Cache-Control": "private, max-age=300"})
+                _maybe_refresh_cookie(request, resp)
+                return resp
         except RuntimeError:
+            return _json({"error": "access denied"}, 403)
+
+        session_key = request.query_params.get("session_key", "").strip()
+        if not session_key or not _path_allowed_for_session(file_path, session_key):
             return _json({"error": "access denied"}, 403)
 
         media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
@@ -422,7 +443,9 @@ def get_webui_routes(
             try:
                 # If model specified, temporarily set it via session metadata
                 async def outbound_sink(out_msg):
-                    event = {"type": "outbound", "data": serialize_ui_message({"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])})}
+                    if out_msg.media:
+                        _session_media_grants.setdefault(session_key, set()).update(out_msg.media)
+                    event = {"type": "outbound", "data": serialize_ui_message({"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])}, session_key=session_key)}
                     await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
                 final = await agent_loop.process_direct(
@@ -437,7 +460,7 @@ def get_webui_routes(
                     outbound_sink=outbound_sink,
                 )
                 # Send final response
-                event = {"type": "done", "data": serialize_ui_message({"role": "assistant", "content": final})}
+                event = {"type": "done", "data": serialize_ui_message({"role": "assistant", "content": final}, session_key=session_key)}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
                 # Set title for new sessions (instant, no LLM)
                 _set_session_title(session_key, message)

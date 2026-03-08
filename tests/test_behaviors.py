@@ -593,18 +593,27 @@ class TestWebUIMediaAndAttachments:
     """Media endpoint and outbound media[] persistence tests."""
 
     @pytest.mark.asyncio
-    async def test_media_endpoint_serves_workspace_file(self, make_agent_loop, tmp_path):
+    async def test_media_endpoint_serves_session_attachment_file(self, make_agent_loop, tmp_path):
         from pathlib import Path
         from starlette.testclient import TestClient
         from lemonclaw.gateway.server import create_app
+        from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 
         loop, bus = make_agent_loop()
         media_file = Path(loop.workspace) / 'preview.png'
         media_file.write_bytes(b'fakepng')
+        session = loop.sessions.get_or_create('webui:test-media')
+        session.messages.append(serialize_ui_message({
+            'role': 'assistant',
+            'content': '附件如下',
+            'media': [str(media_file)],
+            'timestamp': '2026-03-08T12:00:00',
+        }, session_key='webui:test-media'))
+        loop.sessions.save(session)
 
         app = create_app(auth_token=None, agent_loop=loop, session_manager=loop.sessions, webui_enabled=True)
         client = TestClient(app)
-        resp = client.get(f'/api/media?path={media_file}')
+        resp = client.get(f'/api/media?path={media_file}&session_key=webui:test-media')
         assert resp.status_code == 200
         assert resp.content == b'fakepng'
 

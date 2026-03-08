@@ -88,7 +88,7 @@ def get_activity_routes(
             if role == "tool":
                 continue
             if role in ("user", "assistant", "system", "tool_call"):
-                messages.append(serialize_ui_message(msg))
+                messages.append(serialize_ui_message(msg, session_key=session_key))
 
         return JSONResponse({"messages": messages})
 

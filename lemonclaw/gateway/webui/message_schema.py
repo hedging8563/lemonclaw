@@ -10,9 +10,12 @@ _MEDIA_TOKEN_RE = re.compile(r"\[(transcription|image|audio|voice|video|pdf|file
 _RUNTIME_PREFIX = "[Runtime Context"
 
 
-def media_url(path: str) -> str:
+def media_url(path: str, session_key: str | None = None) -> str:
     from urllib.parse import quote
-    return f"/api/media?path={quote(path, safe='')}"
+    encoded = quote(path, safe='')
+    if session_key:
+        return f"/api/media?path={encoded}&session_key={quote(session_key, safe='')}"
+    return f"/api/media?path={encoded}"
 
 
 def _extract_runtime_context(content: str) -> tuple[str | None, str]:
@@ -44,7 +47,7 @@ def _basename(path: str) -> str:
     return Path(path).name or path
 
 
-def _parse_content_blocks(content: str, raw_media: list[str] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, session_key: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     runtime, body = _extract_runtime_context(content or "")
     media: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
@@ -63,7 +66,7 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None) -> t
             "id": media_id,
             "kind": _infer_media_kind(path, hinted),
             "path": path,
-            "url": media_url(path),
+            "url": media_url(path, session_key),
             "filename": label or _basename(path),
         })
         return media_id
@@ -99,15 +102,20 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None) -> t
     return media, blocks
 
 
-def serialize_ui_message(raw: dict[str, Any]) -> dict[str, Any]:
+def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None) -> dict[str, Any]:
     # Pass through if already normalized
     if isinstance(raw.get("blocks"), list) and isinstance(raw.get("media"), list):
-        return raw
+        msg = dict(raw)
+        msg["media"] = [
+            {**m, "url": media_url(m.get("path", ""), session_key)} if isinstance(m, dict) else m
+            for m in raw.get("media", [])
+        ]
+        return msg
 
     role = raw.get("role", "assistant")
     content = raw.get("content", "") if isinstance(raw.get("content", ""), str) else ""
     raw_media = [m for m in raw.get("media", []) if isinstance(m, str)] if isinstance(raw.get("media"), list) else []
-    media, blocks = _parse_content_blocks(content, raw_media)
+    media, blocks = _parse_content_blocks(content, raw_media, session_key=session_key)
 
     message: dict[str, Any] = {
         "id": raw.get("id"),
