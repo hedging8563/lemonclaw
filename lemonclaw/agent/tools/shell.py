@@ -1,22 +1,18 @@
-"""Shell execution tool."""
+"""Shell execution tool — runs commands via /bin/sh."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import re
-import shlex
 from pathlib import Path
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
 
-_SHELL_OPERATORS = {"&&", "||", ";", "|", "&", "<", ">", "<<", ">>", "<<<"}
-_SHELL_BUILTINS = {".", "alias", "cd", "exec", "exit", "export", "source", "umask", "unset"}
-
 
 class ExecTool(Tool):
-    """Tool to execute local commands."""
+    """Tool to execute shell commands via /bin/sh -c."""
 
     def __init__(
         self,
@@ -27,6 +23,7 @@ class ExecTool(Tool):
         restrict_to_workspace: bool = False,
         home_dir: str | None = None,
         path_append: str = "",
+        max_output: int = 50_000,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -41,15 +38,11 @@ class ExecTool(Tool):
             r"\b(shutdown|reboot|poweroff)\b",
             r":\(\)\s*\{.*\};\s*:",
         ]
-        self._deny_arg_combos = {
-            "rm": {"-r", "-rf", "-fr", "-f", "--recursive", "--force"},
-        }
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
-        # home_dir: broader security boundary (e.g. ~/.lemonclaw/) for path checks.
-        # working_dir is still used as cwd; home_dir gates which paths are reachable.
         self.home_dir = home_dir
         self.path_append = path_append
+        self.max_output = max_output
 
     @property
     def name(self) -> str:
@@ -58,8 +51,11 @@ class ExecTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Execute a local command and return its output. "
-            "Shell operators and builtins are blocked; use `working_dir` instead of `cd`."
+            "Execute a shell command via /bin/sh and return stdout+stderr. "
+            "Supports pipes (|), chaining (&&, ||), redirects (>, >>), "
+            "environment variables ($VAR), subshells, and all standard shell features. "
+            "Use for: running scripts, curl, git, package managers, build tools. "
+            "Commands are subject to safety guards (rm -rf, mkfs, etc. are blocked)."
         )
 
     @property
@@ -69,7 +65,7 @@ class ExecTool(Tool):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The command to execute",
+                    "description": "The shell command to execute (passed to /bin/sh -c)",
                 },
                 "working_dir": {
                     "type": "string",
@@ -85,7 +81,7 @@ class ExecTool(Tool):
         if cwd_error:
             return cwd_error
 
-        guard_error, tokens = self._guard_command(command, cwd)
+        guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
 
@@ -94,8 +90,8 @@ class ExecTool(Tool):
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *tokens,
+            process = await asyncio.create_subprocess_shell(
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(cwd),
@@ -129,12 +125,9 @@ class ExecTool(Tool):
                 output_parts.append(f"\nExit code: {process.returncode}")
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
+            if len(result) > self.max_output:
+                result = result[:self.max_output] + f"\n... (truncated, {len(result) - self.max_output} more chars)"
             return result
-        except FileNotFoundError:
-            return f"Error executing command: command not found: {tokens[0]}"
         except Exception as exc:
             return f"Error executing command: {exc}"
 
@@ -146,71 +139,36 @@ class ExecTool(Tool):
         raw_target = Path(working_dir).expanduser()
         target = raw_target.resolve() if raw_target.is_absolute() else (base_dir / raw_target).resolve()
         if self.restrict_to_workspace:
-            # Use home_dir as the security boundary (e.g. ~/.lemonclaw/)
             boundary = Path(self.home_dir).resolve() if self.home_dir else base_dir
             if target != boundary and boundary not in target.parents:
                 return base_dir, "Error: working_dir is outside the allowed boundary"
         return target, None
 
-    def _guard_command(self, command: str, cwd: Path) -> tuple[str | None, list[str]]:
-        """Best-effort safety guard for potentially destructive commands."""
-        cmd = command.strip()
-        lower = cmd.lower()
+    def _guard_command(self, command: str, cwd: Path) -> str | None:
+        """Safety guard: deny_patterns + optional workspace boundary check."""
+        lower = command.strip().lower()
 
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
-                return "Error: Command blocked by safety guard (dangerous pattern detected)", []
+                return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns and not any(re.search(p, lower) for p in self.allow_patterns):
-            return "Error: Command blocked by safety guard (not in allowlist)", []
-
-        try:
-            lexer = shlex.shlex(cmd, posix=True, punctuation_chars=";&|<>")
-            lexer.whitespace_split = True
-            lexer.commenters = ""
-            tokens = list(lexer)
-        except ValueError:
-            return "Error: Command blocked by safety guard (malformed shell syntax)", []
-
-        if not tokens:
-            return "Error: empty command", []
-
-        if any(token in _SHELL_OPERATORS for token in tokens):
-            return (
-                "Error: Command blocked by safety guard (shell operators are not supported; run commands separately)",
-                [],
-            )
-
-        base_cmd = os.path.basename(tokens[0]).lower()
-        if base_cmd in _SHELL_BUILTINS:
-            if base_cmd == "cd":
-                return "Error: `cd` is not supported; use the working_dir parameter instead", []
-            return "Error: Command blocked by safety guard (shell builtins are not supported)", []
-
-        if base_cmd in self._deny_arg_combos:
-            dangerous_args = self._deny_arg_combos[base_cmd]
-            cmd_args = {token.lower() for token in tokens[1:] if token.startswith("-")}
-            if cmd_args & dangerous_args:
-                return "Error: Command blocked by safety guard (dangerous pattern detected)", []
-        elif base_cmd in {"dd", "mkfs", "diskpart", "shutdown", "reboot", "poweroff", "format", "rm", "rmdir"}:
-            return "Error: Command blocked by safety guard (dangerous pattern detected)", []
+            return "Error: Command blocked by safety guard (not in allowlist)"
 
         if self.restrict_to_workspace:
-            for token in tokens:
-                normalized = os.path.normpath(token)
-                if ".." in normalized.split(os.sep):
-                    return "Error: Command blocked by safety guard (path traversal detected)", []
-
-            # Use home_dir as boundary for absolute path checks
             boundary = Path(self.home_dir).resolve() if self.home_dir else cwd
-            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
-            posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", cmd)
-            for raw in win_paths + posix_paths:
+            # Check for path traversal via ..
+            posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command)
+            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", command)
+            for raw in posix_paths + win_paths:
+                normalized = os.path.normpath(raw.strip())
+                if ".." in normalized.split(os.sep):
+                    return "Error: Command blocked by safety guard (path traversal detected)"
                 try:
-                    path = Path(raw.strip()).resolve()
+                    path = Path(normalized).resolve()
                 except Exception:
                     continue
                 if path.is_absolute() and boundary not in path.parents and path != boundary:
-                    return "Error: Command blocked by safety guard (path outside allowed boundary)", []
+                    return "Error: Command blocked by safety guard (path outside allowed boundary)"
 
-        return None, tokens
+        return None

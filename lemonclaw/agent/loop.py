@@ -18,6 +18,8 @@ from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.cron import CronTool
 from lemonclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from lemonclaw.agent.tools.glob import GlobTool
+from lemonclaw.agent.tools.grep import GrepTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.agent.tools.shell import ExecTool
@@ -198,6 +200,8 @@ class AgentLoop:
             home_dir=str(self.home_dir) if self.home_dir else None,
             path_append=self.exec_config.path_append,
         ))
+        self.tools.register(GrepTool(workspace=self.workspace, allowed_dir=self.home_dir))
+        self.tools.register(GlobTool(workspace=self.workspace, allowed_dir=self.home_dir))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -372,53 +376,104 @@ class AgentLoop:
                     reasoning_content=response.reasoning_content,
                 )
 
-                for tool_call in response.tool_calls:
-                    # Cooperative stop: check between tool executions
-                    if stop_event and stop_event.is_set():
-                        final_content = t("task_stopped", _lang)
-                        break
+                # Cooperative stop: check before tool execution
+                if stop_event and stop_event.is_set():
+                    final_content = t("task_stopped", _lang)
 
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                if final_content is None:
+                    tool_ctx = {"_session_key": session_key} if session_key else None
 
-                    # 6.2: Send tool_start event with arguments
-                    if on_progress:
-                        await on_progress(json.dumps({
-                            "name": tool_call.name,
-                            "arguments": tool_call.arguments,
-                        }, ensure_ascii=False), tool_start=True)
+                    # Parallel execution when LLM returns multiple independent tool calls
+                    if len(response.tool_calls) > 1:
+                        # Log and send tool_start events for all calls
+                        for tc in response.tool_calls:
+                            tools_used.append(tc.name)
+                            args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                            logger.info("Tool call (parallel): {}({})", tc.name, args_str[:200])
+                            if on_progress:
+                                await on_progress(json.dumps({
+                                    "name": tc.name, "arguments": tc.arguments,
+                                }, ensure_ascii=False), tool_start=True)
 
-                    result = await self.tools.execute(
-                        tool_call.name,
-                        tool_call.arguments,
-                        context={"_session_key": session_key} if session_key else None,
-                    )
+                        # Execute all in parallel
+                        results = await asyncio.gather(*[
+                            self.tools.execute(tc.name, tc.arguments, context=tool_ctx)
+                            for tc in response.tool_calls
+                        ], return_exceptions=True)
 
-                    # 6.2: Send tool_result event
-                    if on_progress:
-                        result_preview = str(result)[:500] if result else ""
-                        is_error = isinstance(result, str) and result.startswith("Error")
-                        await on_progress(json.dumps({
-                            "name": tool_call.name,
-                            "result": result_preview,
-                            "error": is_error,
-                        }, ensure_ascii=False), tool_result=True)
+                        # Process results
+                        any_success = False
+                        for tc, result in zip(response.tool_calls, results):
+                            if isinstance(result, Exception):
+                                result = f"Error executing {tc.name}: {result}"
 
-                    # Detect repeated tool errors (e.g. LLM keeps calling read_file({}))
-                    if isinstance(result, str) and result.startswith("Error"):
-                        err_key = f"{tool_call.name}:{result[:80]}"
-                        _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
-                        if _consecutive_errors[err_key] >= max_consecutive_errors:
-                            logger.warning("Tool {} failed {} times with same error, breaking loop",
-                                           tool_call.name, max_consecutive_errors)
-                            final_content = t("tool_repeated_fail", _lang, name=tool_call.name)
+                            if on_progress:
+                                result_preview = str(result)[:500] if result else ""
+                                is_error = isinstance(result, str) and result.startswith("Error")
+                                await on_progress(json.dumps({
+                                    "name": tc.name, "result": result_preview, "error": is_error,
+                                }, ensure_ascii=False), tool_result=True)
+
+                            if isinstance(result, str) and result.startswith("Error"):
+                                err_key = f"{tc.name}:{result[:80]}"
+                                _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
+                                if _consecutive_errors[err_key] >= max_consecutive_errors:
+                                    logger.warning("Tool {} failed {} times with same error, breaking loop",
+                                                   tc.name, max_consecutive_errors)
+                                    final_content = t("tool_repeated_fail", _lang, name=tc.name)
+                            else:
+                                any_success = True
+
+                            messages = self.context.add_tool_result(
+                                messages, tc.id, tc.name, result
+                            )
+                        if any_success:
+                            _consecutive_errors.clear()
                     else:
-                        _consecutive_errors.clear()
+                        # Single tool call — sequential execution
+                        for tool_call in response.tool_calls:
+                            if stop_event and stop_event.is_set():
+                                final_content = t("task_stopped", _lang)
+                                break
 
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
+                            tools_used.append(tool_call.name)
+                            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                            logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+
+                            if on_progress:
+                                await on_progress(json.dumps({
+                                    "name": tool_call.name,
+                                    "arguments": tool_call.arguments,
+                                }, ensure_ascii=False), tool_start=True)
+
+                            result = await self.tools.execute(
+                                tool_call.name,
+                                tool_call.arguments,
+                                context=tool_ctx,
+                            )
+
+                            if on_progress:
+                                result_preview = str(result)[:500] if result else ""
+                                is_error = isinstance(result, str) and result.startswith("Error")
+                                await on_progress(json.dumps({
+                                    "name": tool_call.name,
+                                    "result": result_preview,
+                                    "error": is_error,
+                                }, ensure_ascii=False), tool_result=True)
+
+                            if isinstance(result, str) and result.startswith("Error"):
+                                err_key = f"{tool_call.name}:{result[:80]}"
+                                _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
+                                if _consecutive_errors[err_key] >= max_consecutive_errors:
+                                    logger.warning("Tool {} failed {} times with same error, breaking loop",
+                                                   tool_call.name, max_consecutive_errors)
+                                    final_content = t("tool_repeated_fail", _lang, name=tool_call.name)
+                            else:
+                                _consecutive_errors.clear()
+
+                            messages = self.context.add_tool_result(
+                                messages, tool_call.id, tool_call.name, result
+                            )
 
                 if final_content is not None:
                     break
