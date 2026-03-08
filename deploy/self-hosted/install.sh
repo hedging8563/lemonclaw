@@ -2,31 +2,45 @@
 # ============================================================
 # LemonClaw Self-Hosted Installer
 # ============================================================
-# Bootstrap script for environments without Python.
-# Downloads and installs Python 3.12+, then delegates to:
-#   pip install lemonclaw && lemonclaw init
+# Installs LemonClaw for a dedicated self-hosted machine.
 #
-# Usage:
-#   curl -O https://raw.githubusercontent.com/hedging8563/lemonclaw/main/deploy/self-hosted/install.sh
-#   sha256sum install.sh   # verify against GitHub Release page
-#   bash install.sh
+# Defaults:
+#   - Reuses Python >= 3.11 if available, otherwise installs it
+#   - Uses `uv tool install` when uv is available
+#   - Falls back to an isolated venv at ~/.local/share/lemonclaw/venv
+#   - Runs `lemonclaw init` at the end unless disabled
+#
+# Common usage:
+#   curl -fsSL https://raw.githubusercontent.com/hedging8563/lemonclaw/main/deploy/self-hosted/install.sh | bash
+#
+# Optional environment variables:
+#   LEMONCLAW_INSTALL_TARGET   Package or URL to install (default: lemonclaw)
+#   LEMONCLAW_SKIP_INIT=1      Skip the interactive init wizard
+#   LEMONCLAW_NO_UV=1          Force the venv-based installer path
+#   LEMONCLAW_BIN_DIR=...      Override binary dir (default: ~/.local/bin)
+#   LEMONCLAW_VENV_DIR=...     Override isolated venv dir
 # ============================================================
 
 set -euo pipefail
 
-# -- Colors --
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
 
-# -- Detect OS --
+INSTALL_TARGET="${LEMONCLAW_INSTALL_TARGET:-lemonclaw}"
+SKIP_INIT="${LEMONCLAW_SKIP_INIT:-0}"
+NO_UV="${LEMONCLAW_NO_UV:-0}"
+DEFAULT_BIN_DIR="$HOME/.local/bin"
+BIN_DIR="${LEMONCLAW_BIN_DIR:-$DEFAULT_BIN_DIR}"
+VENV_DIR="${LEMONCLAW_VENV_DIR:-$HOME/.local/share/lemonclaw/venv}"
+
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -38,7 +52,6 @@ esac
 
 info "Detected: $OS $ARCH ($OS_TYPE)"
 
-# -- Find Python >= 3.11 --
 find_python() {
     for cmd in python3.12 python3.11 python3 python; do
         if command -v "$cmd" >/dev/null 2>&1; then
@@ -54,10 +67,7 @@ find_python() {
     return 1
 }
 
-PYTHON=""
-if PYTHON=$(find_python); then
-    ok "Found Python: $PYTHON ($($PYTHON --version 2>&1))"
-else
+install_python() {
     warn "Python >= 3.11 not found. Attempting to install..."
 
     case "$OS_TYPE" in
@@ -85,8 +95,88 @@ else
             fi
             ;;
     esac
+}
 
-    # Re-check
+ensure_pip() {
+    if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
+        warn "pip not found, attempting to install..."
+        "$PYTHON" -m ensurepip --default-pip 2>/dev/null || true
+        if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
+            fail "pip not available. Install it manually for $PYTHON."
+        fi
+    fi
+}
+
+path_has_bin_dir() {
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+print_path_hint() {
+    if path_has_bin_dir; then
+        return 0
+    fi
+
+    warn "${BIN_DIR} is not on your PATH. Add it before using lemonclaw in new shells."
+    case "${SHELL:-}" in
+        */zsh)
+            echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc"
+            ;;
+        */bash)
+            echo "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc"
+            ;;
+        *)
+            echo "  export PATH=\"$BIN_DIR:\$PATH\""
+            ;;
+    esac
+}
+
+resolve_lemonclaw_cmd() {
+    if command -v lemonclaw >/dev/null 2>&1; then
+        command -v lemonclaw
+        return 0
+    fi
+    if [ -x "$BIN_DIR/lemonclaw" ]; then
+        echo "$BIN_DIR/lemonclaw"
+        return 0
+    fi
+    if [ -x "$DEFAULT_BIN_DIR/lemonclaw" ]; then
+        echo "$DEFAULT_BIN_DIR/lemonclaw"
+        return 0
+    fi
+    if [ -x "$VENV_DIR/bin/lemonclaw" ]; then
+        echo "$VENV_DIR/bin/lemonclaw"
+        return 0
+    fi
+    return 1
+}
+
+install_with_uv() {
+    info "Installing ${INSTALL_TARGET} with uv tool..."
+    mkdir -p "$BIN_DIR"
+    uv tool install --upgrade --force --python "$PYTHON" "$INSTALL_TARGET"
+    if [ "$BIN_DIR" != "$DEFAULT_BIN_DIR" ] && [ -x "$DEFAULT_BIN_DIR/lemonclaw" ]; then
+        ln -sf "$DEFAULT_BIN_DIR/lemonclaw" "$BIN_DIR/lemonclaw"
+    fi
+}
+
+install_with_venv() {
+    info "Installing ${INSTALL_TARGET} into isolated venv: $VENV_DIR"
+    mkdir -p "$BIN_DIR"
+    mkdir -p "$(dirname "$VENV_DIR")"
+    "$PYTHON" -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
+    "$VENV_DIR/bin/python" -m pip install --upgrade "$INSTALL_TARGET"
+    ln -sf "$VENV_DIR/bin/lemonclaw" "$BIN_DIR/lemonclaw"
+}
+
+PYTHON=""
+if PYTHON=$(find_python); then
+    ok "Found Python: $PYTHON ($($PYTHON --version 2>&1))"
+else
+    install_python
     if PYTHON=$(find_python); then
         ok "Python installed: $PYTHON ($($PYTHON --version 2>&1))"
     else
@@ -94,76 +184,38 @@ else
     fi
 fi
 
-# -- Ensure pip is available --
-if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
-    warn "pip not found, attempting to install..."
-    "$PYTHON" -m ensurepip --default-pip 2>/dev/null || true
-    if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
-        fail "pip not available. Install it: $PYTHON -m ensurepip"
-    fi
-fi
+ensure_pip
 
-# -- Check for uv (faster installs) --
 USE_UV=false
-if command -v uv >/dev/null 2>&1; then
-    ok "Found uv package manager (using for faster install)"
+if [ "$NO_UV" != "1" ] && command -v uv >/dev/null 2>&1; then
+    ok "Found uv package manager"
     USE_UV=true
 fi
 
-# -- Install lemonclaw --
-info "Installing lemonclaw..."
-
 if [ "$USE_UV" = true ]; then
-    uv pip install lemonclaw
+    install_with_uv
 else
-    "$PYTHON" -m pip install --user lemonclaw
+    install_with_venv
 fi
 
-# Verify installation
-if command -v lemonclaw >/dev/null 2>&1; then
-    ok "lemonclaw installed: $(lemonclaw --version 2>&1)"
-elif "$PYTHON" -m lemonclaw --version >/dev/null 2>&1; then
-    ok "lemonclaw installed (via python -m)"
-    # Create wrapper
-    warn "lemonclaw not on PATH. You may need to add ~/.local/bin to PATH."
-else
+LEMONCLAW_CMD="$(resolve_lemonclaw_cmd || true)"
+if [ -z "$LEMONCLAW_CMD" ]; then
     fail "lemonclaw installation failed."
 fi
 
-# -- Verify checksum (optional, if EXPECTED_SHA256 is set) --
-if [ -n "${EXPECTED_SHA256:-}" ]; then
-    LC_BIN="$(command -v lemonclaw 2>/dev/null || echo "")"
-    if [ -n "$LC_BIN" ]; then
-        if command -v sha256sum >/dev/null 2>&1; then
-            ACTUAL_SHA256="$(sha256sum "$LC_BIN" | awk '{print $1}')"
-        elif command -v shasum >/dev/null 2>&1; then
-            ACTUAL_SHA256="$(shasum -a 256 "$LC_BIN" | awk '{print $1}')"
-        else
-            warn "sha256sum/shasum not found, skipping checksum verification."
-            ACTUAL_SHA256=""
-        fi
+ok "Installed LemonClaw: $($LEMONCLAW_CMD --version 2>&1)"
+print_path_hint
 
-        if [ -n "$ACTUAL_SHA256" ]; then
-            if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
-                ok "Checksum verified: $ACTUAL_SHA256"
-            else
-                fail "Checksum mismatch!\n  Expected: $EXPECTED_SHA256\n  Actual:   $ACTUAL_SHA256\n  This may indicate a tampered package. Aborting."
-            fi
-        fi
-    else
-        warn "Cannot locate lemonclaw binary for checksum verification."
-    fi
-else
-    info "Tip: Set EXPECTED_SHA256=<hash> before running to verify package integrity."
+if [ "$SKIP_INIT" = "1" ]; then
+    info "Skipping init wizard because LEMONCLAW_SKIP_INIT=1"
+    echo ""
+    info "Next steps:"
+    echo "  $LEMONCLAW_CMD init"
+    echo "  $LEMONCLAW_CMD gateway"
+    exit 0
 fi
 
-# -- Run init wizard --
 echo ""
 info "Starting LemonClaw setup wizard..."
 echo ""
-
-if command -v lemonclaw >/dev/null 2>&1; then
-    lemonclaw init
-else
-    "$PYTHON" -m lemonclaw init
-fi
+"$LEMONCLAW_CMD" init
