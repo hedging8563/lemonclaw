@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import importlib.resources
+import mimetypes
 import tempfile
 import time
 import uuid
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from lemonclaw.gateway.webui.auth import (
@@ -24,6 +25,7 @@ from lemonclaw.gateway.webui.auth import (
     verify_token,
 )
 from lemonclaw.providers.catalog import MODEL_CATALOG
+from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
@@ -278,6 +280,39 @@ def get_webui_routes(
             except OSError:
                 pass
 
+    _media_dir = Path.home() / ".lemonclaw" / "media"
+
+    async def get_media(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        raw_path = request.query_params.get("path", "").strip()
+        if not raw_path:
+            return _json({"error": "path is required"}, 400)
+
+        try:
+            file_path = Path(raw_path).expanduser().resolve(strict=True)
+        except FileNotFoundError:
+            return _json({"error": "file not found"}, 404)
+        except OSError:
+            return _json({"error": "invalid path"}, 400)
+
+        allowed_roots = [_upload_dir.resolve(), _media_dir.resolve()]
+        if agent_loop and getattr(agent_loop, "workspace", None):
+            allowed_roots.append(Path(agent_loop.workspace).resolve())
+
+        try:
+            if not any(file_path == root or root in file_path.parents for root in allowed_roots):
+                return _json({"error": "access denied"}, 403)
+        except RuntimeError:
+            return _json({"error": "access denied"}, 403)
+
+        media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+        resp = FileResponse(file_path, media_type=media_type, filename=file_path.name, headers={"Cache-Control": "private, max-age=300"})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def upload_file(request: Request) -> Response:
         """7.1: Accept base64-encoded file, save to temp dir, return path."""
         _cleanup_uploads()
@@ -386,6 +421,10 @@ def get_webui_routes(
         async def run_agent() -> None:
             try:
                 # If model specified, temporarily set it via session metadata
+                async def outbound_sink(out_msg):
+                    event = {"type": "outbound", "data": serialize_ui_message({"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])})}
+                    await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
+
                 final = await agent_loop.process_direct(
                     content=message,
                     session_key=session_key,
@@ -395,9 +434,10 @@ def get_webui_routes(
                     on_chunk=on_chunk,
                     metadata={"timezone": user_timezone} if user_timezone else None,
                     media=media_files or None,
+                    outbound_sink=outbound_sink,
                 )
                 # Send final response
-                event = {"type": "done", "data": final}
+                event = {"type": "done", "data": serialize_ui_message({"role": "assistant", "content": final})}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
                 # Set title for new sessions (instant, no LLM)
                 _set_session_title(session_key, message)
@@ -556,18 +596,14 @@ def get_webui_routes(
             resp = _json({"messages": []})
             _maybe_refresh_cookie(request, resp)
             return resp
-        # Return messages with role and content only (safe for frontend)
+        # Return session messages in the UIMessage-compatible schema.
         messages = []
         for m in session.messages:
             role = m.get("role")
-            content = m.get("content", "")
-            if role in ("user", "assistant") and content:
-                # Skip tool_calls-only assistant messages (content is empty/null)
-                if isinstance(content, list):
-                    # Multimodal content — extract text parts
-                    content = " ".join(p.get("text", "") for p in content if p.get("type") == "text")
-                if content:
-                    messages.append({"role": role, "content": content})
+            if role == "tool":
+                continue
+            if role in ("user", "assistant", "system", "tool_call"):
+                messages.append(serialize_ui_message(m))
 
         resp = _json({
             "messages": messages,
@@ -861,6 +897,7 @@ def get_webui_routes(
         Route("/api/auth", auth_logout, methods=["DELETE"]),
         Route("/api/auth/check", auth_check, methods=["GET"]),
         Route("/api/chat/upload", upload_file, methods=["POST"]),
+        Route("/api/media", get_media, methods=["GET"]),
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
         Route("/api/memory", get_memory, methods=["GET"]),
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),

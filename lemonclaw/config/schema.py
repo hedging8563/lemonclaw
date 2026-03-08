@@ -371,8 +371,6 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     coding: CodingToolConfig = Field(default_factory=CodingToolConfig)
     browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
-    restrict_to_workspace: bool = True  # If true, restrict local tool access to home_dir boundary
-    home_dir: str = ""  # Explicit security boundary (e.g. ~/.lemonclaw/). Empty = auto-detect.
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 

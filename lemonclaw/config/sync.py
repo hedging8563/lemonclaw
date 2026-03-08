@@ -386,12 +386,6 @@ def _sync_model_config(config: Config) -> bool:
             coding.enabled = True
             changed = True
 
-    # v6: Ensure restrict_to_workspace defaults to True (security boundary)
-    if not config.tools.restrict_to_workspace:
-        config.tools.restrict_to_workspace = True
-        changed = True
-        logger.info("config-sync: enabled tools.restrict_to_workspace")
-
     # v7: Ensure coding.model has a default value
     if not config.tools.coding.model:
         config.tools.coding.model = "claude-sonnet-4-6"

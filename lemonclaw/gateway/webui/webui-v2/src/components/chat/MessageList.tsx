@@ -15,9 +15,11 @@ import 'highlight.js/styles/github-dark.css';
 import { marked } from 'marked';
 import { activeSessionKey } from '../../stores/sessions';
 import { inputText, isLoadingHistory, isStreaming, loadHistory, messages } from '../../stores/chat';
+import type { UIBlock } from '../../models/messages';
 import { t } from '../../stores/i18n';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolDetail } from './ToolDetail';
+import { StructuredMessageContent } from './StructuredMessageContent';
 
 const MOBILE_BREAKPOINT = 640;
 
@@ -208,22 +210,31 @@ export function MessageList() {
             }}>
               <MsgActions msg={msg} />
 
-              {msg.thinking && <ThinkingBlock content={msg.thinking} />}
-
-              {msg.tool_calls && msg.tool_calls.map((tool, ti) => (
-                <ToolDetail key={ti} tool={tool} />
+              {msg.blocks.filter((block) => block.type === 'thinking').map((block, bi) => (
+                <ThinkingBlock key={`thinking-${bi}`} content={(block as Extract<UIBlock, { type: 'thinking' }>).text} />
               ))}
 
-              {msg.content ? (
-                <div
-                  className="msg-content markdown-body"
-                  style={{ wordBreak: 'break-word', textAlign: 'left' }}
-                  dangerouslySetInnerHTML={{ __html: renderMd(msg.content, isStreaming.value && i === messages.value.length - 1) }}
+              {msg.blocks.filter((block) => block.type === 'tool').map((block, bi) => (
+                <ToolDetail key={`tool-${bi}`} tool={{ state: (block as Extract<UIBlock, { type: 'tool' }>).state, detail: (block as Extract<UIBlock, { type: 'tool' }>).detail, result: (block as Extract<UIBlock, { type: 'tool' }>).result }} />
+              ))}
+
+              {msg.blocks.filter((block) => block.type === 'error').map((block, bi) => (
+                <div key={`error-${bi}`} style={{ margin: '6px 0', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {(block as Extract<UIBlock, { type: 'error' }>).text}
+                </div>
+              ))}
+
+              {msg.blocks.some((block) => ['markdown', 'runtime_context', 'transcription', 'media'].includes(block.type)) ? (
+                <StructuredMessageContent
+                  content={msg.content}
+                  media={msg.media || []}
+                  blocks={msg.blocks}
+                  renderMarkdown={(value) => renderMd(value, isStreaming.value && i === messages.value.length - 1)}
                 />
               ) : (isStreaming.value && i === messages.value.length - 1 && !isUser) ? (
                 <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
                   <span class="pulse-dot" />
-                  {msg.tool_calls && msg.tool_calls.length > 0 ? t('processing_tools') : t('generating')}
+                  {msg.blocks.some((block) => block.type === 'tool' && (block as Extract<UIBlock, { type: 'tool' }>).state === 'running') ? t('processing_tools') : t('generating')}
                 </div>
               ) : null}
             </div>

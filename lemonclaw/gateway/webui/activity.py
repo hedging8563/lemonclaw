@@ -85,43 +85,10 @@ def get_activity_routes(
         messages: list[dict[str, Any]] = []
         for msg in session.messages[-limit:]:
             role = msg.get("role", "")
-            content = msg.get("content", "")
-
             if role == "tool":
-                continue  # tool results too verbose
-
-            # Multimodal content (images, runtime context) — extract text parts
-            if isinstance(content, list):
-                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
-
-            if role == "assistant" and not content and msg.get("tool_calls"):
-                # tool_call message — format as summary
-                calls = msg.get("tool_calls", [])
-                parts = []
-                for tc in calls:
-                    fn = tc.get("function", {})
-                    name = fn.get("name", "?")
-                    try:
-                        args = json.loads(fn.get("arguments", "{}"))
-                        first_val = next(iter(args.values()), "")
-                        if isinstance(first_val, str) and len(first_val) > 40:
-                            first_val = first_val[:40] + "..."
-                        parts.append(f'{name}("{first_val}")')
-                    except Exception:
-                        parts.append(name)
-                messages.append({
-                    "role": "tool_call",
-                    "content": ", ".join(parts),
-                    "timestamp": msg.get("timestamp", ""),
-                })
                 continue
-
-            if role in ("user", "assistant", "system"):
-                messages.append({
-                    "role": role,
-                    "content": content or "",
-                    "timestamp": msg.get("timestamp", ""),
-                })
+            if role in ("user", "assistant", "system", "tool_call"):
+                messages.append(serialize_ui_message(msg))
 
         return JSONResponse({"messages": messages})
 

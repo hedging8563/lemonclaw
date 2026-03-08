@@ -6,37 +6,38 @@ from lemonclaw.agent.tools.shell import ExecTool
 
 
 @pytest.mark.asyncio
-async def test_exec_blocks_shell_pipeline() -> None:
+async def test_exec_supports_shell_pipeline() -> None:
     tool = ExecTool(timeout=5)
 
     result = await tool.execute("printf hello | cat")
 
-    assert "shell operators are not supported" in result.lower()
+    assert "hello" in result
 
 
 @pytest.mark.asyncio
-async def test_exec_blocks_shell_redirection() -> None:
-    tool = ExecTool(timeout=5)
+async def test_exec_supports_shell_redirection(tmp_path) -> None:
+    tool = ExecTool(timeout=5, working_dir=str(tmp_path))
 
     result = await tool.execute("echo hello > out.txt")
 
-    assert "shell operators are not supported" in result.lower()
+    assert result == "(no output)"
+    assert (tmp_path / "out.txt").read_text().strip() == "hello"
 
 
 @pytest.mark.asyncio
-async def test_exec_rejects_cd_builtin() -> None:
+async def test_exec_allows_cd_builtin() -> None:
     tool = ExecTool(timeout=5)
 
-    result = await tool.execute("cd /tmp")
+    result = await tool.execute("cd /tmp && pwd")
 
-    assert "working_dir" in result
+    assert "/tmp" in result
 
 
 @pytest.mark.asyncio
 async def test_exec_honors_working_dir_parameter(tmp_path) -> None:
     nested = tmp_path / "nested"
     nested.mkdir()
-    tool = ExecTool(timeout=5, working_dir=str(tmp_path), restrict_to_workspace=True)
+    tool = ExecTool(timeout=5, working_dir=str(tmp_path))
 
     result = await tool.execute("pwd", working_dir="nested")
 

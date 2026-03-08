@@ -12,7 +12,7 @@ from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 
 
 @pytest.mark.asyncio
-async def test_connect_mcp_servers_uses_workspace_cwd_when_restricted(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+async def test_connect_mcp_servers_uses_workspace_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     import mcp
     import mcp.client.stdio as mcp_stdio
 
@@ -63,7 +63,6 @@ async def test_connect_mcp_servers_uses_workspace_cwd_when_restricted(monkeypatc
             registry,
             stack,
             workspace=tmp_path,
-            restrict_to_workspace=True,
         )
 
     params = captured["params"]
@@ -71,9 +70,5 @@ async def test_connect_mcp_servers_uses_workspace_cwd_when_restricted(monkeypatc
     assert registry.has("mcp_filesystem_ping")
 
 
-def test_tools_restrict_to_workspace_defaults_on() -> None:
-    assert ToolsConfig().restrict_to_workspace is True
-
-
-def test_workspace_restriction_requires_restart() -> None:
-    assert _RESTART_FIELDS.match("tools.restrict_to_workspace")
+def test_exec_settings_require_restart() -> None:
+    assert _RESTART_FIELDS.match("tools.exec")

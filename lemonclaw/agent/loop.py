@@ -31,6 +31,7 @@ from lemonclaw.providers.base import LLMProvider
 from lemonclaw.providers.catalog import format_model_list, fuzzy_match
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
+from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -78,8 +79,6 @@ class AgentLoop:
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
-        restrict_to_workspace: bool = False,
-        home_dir: Path | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -110,13 +109,6 @@ class AgentLoop:
         self.activity_bus = activity_bus
         self.orchestrator: Orchestrator | None = None
         self.cron_service = cron_service
-        self.restrict_to_workspace = restrict_to_workspace
-        # Explicit security boundary: defaults to ~/.lemonclaw/ when not configured.
-        # Never derive from workspace.parent — custom workspace paths would leak siblings.
-        self.home_dir: Path | None = None
-        if restrict_to_workspace:
-            self.home_dir = home_dir or Path.home() / ".lemonclaw"
-
         self.context = ContextBuilder(workspace, system_prompt=system_prompt, disabled_skills=disabled_skills)
         self.context.memory.set_provider(provider)
         self.sessions = session_manager or SessionManager(workspace)
@@ -130,8 +122,6 @@ class AgentLoop:
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
-            restrict_to_workspace=restrict_to_workspace,
-            home_dir=self.home_dir,
         )
 
         self._running = False
@@ -189,19 +179,15 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        # Security boundary: allow access to entire ~/.lemonclaw/ (media, config, etc.)
-        # while keeping workspace as the working directory (cwd).
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=self.home_dir))
+            self.tools.register(cls(workspace=self.workspace))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            home_dir=str(self.home_dir) if self.home_dir else None,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(GrepTool(workspace=self.workspace, allowed_dir=self.home_dir))
-        self.tools.register(GlobTool(workspace=self.workspace, allowed_dir=self.home_dir))
+        self.tools.register(GrepTool(workspace=self.workspace))
+        self.tools.register(GlobTool(workspace=self.workspace))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -215,8 +201,6 @@ class AgentLoop:
                 api_key=self.coding_config.api_key,
                 api_base=self.coding_config.api_base,
                 model=self.coding_config.model,
-                restrict_to_workspace=self.restrict_to_workspace,
-                home_dir=str(self.home_dir) if self.home_dir else None,
             ))
         if self.browser_config and self.browser_config.enabled:
             from lemonclaw.agent.tools.browser import BrowserTool
@@ -228,8 +212,6 @@ class AgentLoop:
                 content_boundaries=self.browser_config.content_boundaries,
                 max_output=self.browser_config.max_output,
                 workspace=self.workspace,
-                restrict_to_workspace=self.restrict_to_workspace,
-                home_dir=self.home_dir if self.home_dir else None,
             )
             if browser_tool.available:
                 self.tools.register(browser_tool)
@@ -250,7 +232,6 @@ class AgentLoop:
                 self.tools,
                 self._mcp_stack,
                 workspace=self.workspace,
-                restrict_to_workspace=self.restrict_to_workspace,
             )
             self._mcp_connected = True
         except Exception as e:
@@ -298,6 +279,7 @@ class AgentLoop:
         stop_event: asyncio.Event | None = None,
         session_model: str | None = None,
         lang: str = "en",
+        tool_context_extra: dict | None = None,
     ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
         _lang = lang
@@ -381,7 +363,11 @@ class AgentLoop:
                     final_content = t("task_stopped", _lang)
 
                 if final_content is None:
-                    tool_ctx = {"_session_key": session_key} if session_key else None
+                    tool_ctx = dict(tool_context_extra or {})
+                    if session_key:
+                        tool_ctx["_session_key"] = session_key
+                    if not tool_ctx:
+                        tool_ctx = None
 
                     # Parallel execution when LLM returns multiple independent tool calls
                     if len(response.tool_calls) > 1:
@@ -761,8 +747,9 @@ class AgentLoop:
 
         # Empty message guard — don't waste tokens on blank input
         if not msg.content.strip():
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=t("empty_message", lang))
+            reply = self._command_reply(msg, t("empty_message", lang), kind="empty_message", level="warning")
+            self._persist_simple_reply(session, msg.content, reply, kind="empty_message")
+            return reply
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -797,25 +784,27 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=t("new_session", lang))
+            return self._command_reply(msg, t("new_session", lang), kind="new_session")
         if cmd == "/usage":
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content=self.usage_tracker.format_session_usage(session.metadata),
-            )
+            reply = self._command_reply(msg, self.usage_tracker.format_session_usage(session.metadata), kind="usage")
+            self._persist_simple_reply(session, msg.content, reply, kind="usage")
+            return reply
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=t("help", lang))
+            reply = self._command_reply(msg, t("help", lang), kind="help")
+            self._persist_simple_reply(session, msg.content, reply, kind="help")
+            return reply
         if cmd == "/model" or cmd.startswith("/model "):
-            return self._handle_model_command(msg, session, lang)
+            reply = self._handle_model_command(msg, session, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="model_list")
+            return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
             known = ("/new", "/usage", "/help", "/model", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
-                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                      content=t("unknown_command", lang, cmd=first_word))
+                reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
+                self._persist_simple_reply(session, msg.content, reply, kind="unknown_command")
+                return reply
 
         # Orchestrator intercept: complex tasks get split & delegated
         if self.orchestrator and not msg.channel == "internal":
@@ -927,11 +916,15 @@ class AgentLoop:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
+        outbound_sink = (msg.metadata or {}).get("_outbound_sink")
+        tool_context_extra = {"_outbound_sink": outbound_sink} if outbound_sink else None
+
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, session_key=key, on_progress=on_progress or _bus_progress,
             on_chunk=on_chunk or _bus_chunk,
             on_tool_call=_activity_tool_call,
             stop_event=stop_event, session_model=session_model, lang=lang,
+            tool_context_extra=tool_context_extra,
         )
 
         if final_content is None:
@@ -952,6 +945,14 @@ class AgentLoop:
             ))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            for sent in mt._turn_messages:
+                session.messages.append(serialize_ui_message({
+                    "role": "assistant",
+                    "content": sent.content,
+                    "media": list(sent.media or []),
+                    "timestamp": datetime.now().isoformat(),
+                }))
+            self.sessions.save(session)
             return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
@@ -967,18 +968,11 @@ class AgentLoop:
 
         if not arg:
             current = session.metadata.get("current_model") or self.model
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content=format_model_list(current),
-                metadata={**(msg.metadata or {}), "_command": "model_list", "_current_model": current},
-            )
+            return self._command_reply(msg, format_model_list(current), kind="model_list", extra_meta={"_command": "model_list", "_current_model": current})
 
         match = fuzzy_match(arg)
         if not match:
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content=t("no_model_match", lang, arg=arg),
-            )
+            return self._command_reply(msg, t("no_model_match", lang, arg=arg), kind="model_error", level="warning")
 
         session.metadata["current_model"] = match.id
         self.sessions.save(session)
@@ -988,11 +982,35 @@ class AgentLoop:
         # Persist to config.json so it survives restart
         self._persist_model_default(match.id)
 
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id,
-            content=t("model_switched", lang, label=match.label, id=match.id, desc=match.description),
-            metadata={**(msg.metadata or {}), "_command": "model_switched", "_current_model": match.id},
-        )
+        return self._command_reply(msg, t("model_switched", lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
+
+    def _should_persist_control_reply(self, kind: str) -> bool:
+        """Decide whether a slash/system reply should be stored in session history."""
+        return kind not in {"new_session", "stop_tasks", "stop_none"}
+
+    def _persist_simple_reply(self, session: Session, user_content: str, reply: OutboundMessage, *, kind: str | None = None) -> None:
+        if kind and not self._should_persist_control_reply(kind):
+            return
+        session.messages.append(serialize_ui_message({
+            "role": "user",
+            "content": user_content,
+            "timestamp": datetime.now().isoformat(),
+        }))
+        session.messages.append(serialize_ui_message({
+            "role": "assistant",
+            "content": reply.content,
+            "media": list(reply.media or []),
+            "metadata": reply.metadata or {},
+            "timestamp": datetime.now().isoformat(),
+        }))
+        session.updated_at = datetime.now()
+        self.sessions.save(session)
+
+    def _command_reply(self, msg: InboundMessage, content: str, *, kind: str = "command", level: str = "info", extra_meta: dict | None = None) -> OutboundMessage:
+        metadata = {**(msg.metadata or {}), "_ui_notice_text": msg.content.strip() or kind, "_ui_notice_kind": kind, "_ui_notice_level": level}
+        if extra_meta:
+            metadata.update(extra_meta)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=metadata)
 
     def _persist_model_default(self, model: str) -> None:
         """Persist model change to config.json (D5: /model = same as Settings tab)."""
@@ -1033,7 +1051,10 @@ class AgentLoop:
                         ) else c for c in content
                     ]
             entry.setdefault("timestamp", datetime.now().isoformat())
-            session.messages.append(entry)
+            if role in ("user", "assistant", "system"):
+                session.messages.append(serialize_ui_message(entry))
+            else:
+                session.messages.append(entry)
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
@@ -1054,6 +1075,7 @@ class AgentLoop:
         on_chunk: Callable[..., Awaitable[None]] | None = None,
         metadata: dict | None = None,
         media: list[str] | None = None,
+        outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
@@ -1065,7 +1087,10 @@ class AgentLoop:
             self._session_lock_order.remove(session_key)
         self._session_lock_order.append(session_key)
         async with self._session_locks[session_key]:
+            direct_metadata = dict(metadata or {})
+            if outbound_sink:
+                direct_metadata["_outbound_sink"] = outbound_sink
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
-                                 metadata=metadata or {}, media=media or [])
+                                 metadata=direct_metadata, media=media or [])
             response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
         return response.content if response else ""

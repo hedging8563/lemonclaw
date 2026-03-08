@@ -51,9 +51,8 @@ def _should_skip(path: Path) -> bool:
 class GrepTool(Tool):
     """Search file contents using regex patterns."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(self, workspace: Path | None = None):
         self._workspace = workspace
-        self._allowed_dir = allowed_dir
 
     @property
     def name(self) -> str:
@@ -174,13 +173,6 @@ class GrepTool(Tool):
             p = p.resolve()
         else:
             p = (self._workspace or Path.cwd()).resolve()
-
-        if self._allowed_dir:
-            allowed = self._allowed_dir.resolve()
-            try:
-                p.relative_to(allowed)
-            except ValueError:
-                return f"Error: Path '{path}' is outside allowed directory"
 
         if not p.exists():
             return f"Error: Path not found: {path}"

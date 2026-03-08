@@ -12,7 +12,6 @@ interface MCPServer {
 
 interface Props {
   servers: Record<string, MCPServer>;
-  restrictToWorkspace: boolean;
   onChange: (servers: Record<string, MCPServer>) => void;
 }
 
@@ -185,7 +184,7 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
   );
 }
 
-export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Props) {
+export function MCPServersEditor({ servers, onChange }: Props) {
   const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -229,9 +228,6 @@ export function MCPServersEditor({ servers, restrictToWorkspace, onChange }: Pro
         <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
       </div>
 
-      <div style={S.notice(!restrictToWorkspace)}>
-        {t(restrictToWorkspace ? 'mcp_workspace_warning_on' : 'mcp_workspace_warning_off')}
-      </div>
 
       <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: isMobile ? '12px' : '14px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: '12px', marginBottom: '12px' }}>
         <div style={{ minWidth: 0 }}>

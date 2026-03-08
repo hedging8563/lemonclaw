@@ -165,8 +165,7 @@ browser: click @e1        # Use new refs
 - **Domain allowlist**: Configure `tools.browser.allowed_domains` to restrict navigation
 - **Content boundaries**: Enabled by default, wraps page output in markers to prevent prompt injection
 - **Output limits**: Configure `tools.browser.max_output` to prevent context flooding
-- **Workspace restriction**: With `tools.restrict_to_workspace=true`, relative files used by
-  `state save/load`, screenshots, and PDFs stay under the workspace directory
+- **Default file paths**: Relative files used by `state save/load`, screenshots, and PDFs resolve from the current workspace by default.
 
 ## Configuration
 

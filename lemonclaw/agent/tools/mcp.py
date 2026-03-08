@@ -60,7 +60,6 @@ async def connect_mcp_servers(
     stack: AsyncExitStack,
     *,
     workspace: Path | None = None,
-    restrict_to_workspace: bool = False,
 ) -> None:
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
@@ -73,7 +72,7 @@ async def connect_mcp_servers(
                     command=cfg.command,
                     args=cfg.args,
                     env=cfg.env or None,
-                    cwd=str(workspace) if restrict_to_workspace and workspace else None,
+                    cwd=str(workspace) if workspace else None,
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif cfg.url:

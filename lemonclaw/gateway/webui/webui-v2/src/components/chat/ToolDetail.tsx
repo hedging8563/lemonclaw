@@ -8,12 +8,14 @@ export function ToolDetail({ tool }: { tool: any }) {
   const toolName = match ? match[1] : 'tool_call';
   const toolArgs = match ? match[2] : tool.detail;
 
+  const stateTone = isRunning ? { bg: 'rgba(255,107,53,0.08)', color: 'var(--accent)', label: 'RUNNING', icon: '⚙️' } : tool.result ? { bg: 'rgba(76,175,80,0.08)', color: 'var(--success)', label: 'DONE', icon: '✅' } : { bg: 'rgba(148,163,184,0.08)', color: 'var(--text-secondary)', label: 'TOOL', icon: '🧰' };
+
   return (
-    <div style={{ margin: '6px 0', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', fontSize: '12px', textAlign: 'left', background: 'var(--bg-secondary)' }}>
+    <div style={{ margin: '8px 0', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', fontSize: '12px', textAlign: 'left', background: 'linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%)', boxShadow: '0 6px 18px rgba(0,0,0,0.14)' }}>
       <button 
         onClick={() => setExpanded(!expanded)}
         style={{ 
-          width: '100%', background: isRunning ? 'rgba(255, 107, 53, 0.05)' : 'transparent', padding: '6px 10px', 
+          width: '100%', background: stateTone.bg, padding: '8px 10px', 
           fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', 
           display: 'flex', alignItems: 'center', gap: '8px', border: 'none', borderBottom: expanded ? '1px solid var(--border)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s'
         }}
@@ -26,14 +28,14 @@ export function ToolDetail({ tool }: { tool: any }) {
         }}>
           ▶
         </span>
-        <span style={{ color: isRunning ? 'var(--accent)' : 'var(--success)' }}>{isRunning ? '⚙️' : '✅'}</span>
+        <span style={{ color: stateTone.color }}>{stateTone.icon}</span>
         <span style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border)', color: 'var(--teal)', fontWeight: 'bold' }}>{toolName}</span>
-        {isRunning && <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>executing...</span>}
+        <span style={{ padding: '2px 6px', borderRadius: '999px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: stateTone.color, fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{stateTone.label}</span>
       </button>
 
       {expanded && (
         <div>
-          <div style={{ padding: '8px 12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', fontSize: '11px', background: 'var(--bg-primary)', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+          <div style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto', fontSize: '11px', background: 'var(--bg-primary)', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
             <div style={{ color: 'var(--purple)', marginBottom: '4px' }}>// Arguments:</div>
             {toolArgs}
           </div>

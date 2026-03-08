@@ -116,10 +116,14 @@ class TestToolSafety:
         assert "ok" in result
 
     @pytest.mark.asyncio
-    async def test_path_traversal_blocked(self):
-        tool = ExecTool(timeout=5, restrict_to_workspace=True, working_dir="/tmp")
-        result = await tool.execute(command="cat ../../etc/passwd")
-        assert "blocked" in result.lower() or "Error" in result
+    async def test_relative_paths_allowed_in_full_power_mode(self, tmp_path):
+        outer = tmp_path / "outer.txt"
+        outer.write_text("hello", encoding="utf-8")
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        tool = ExecTool(timeout=5, working_dir=str(workspace))
+        result = await tool.execute(command="cat ../outer.txt")
+        assert "hello" in result
 
     @pytest.mark.asyncio
     async def test_rm_rf_extra_spaces_blocked(self):
@@ -143,11 +147,14 @@ class TestToolSafety:
         assert "blocked" in result.lower()
 
     @pytest.mark.asyncio
-    async def test_path_traversal_normpath_blocked(self):
-        """Path traversal via normpath: 'foo/../../etc/passwd' should be caught."""
-        tool = ExecTool(timeout=5, restrict_to_workspace=True, working_dir="/tmp")
-        result = await tool.execute(command="cat foo/../../etc/passwd")
-        assert "blocked" in result.lower()
+    async def test_parent_segments_allowed_in_full_power_mode(self, tmp_path):
+        nested = tmp_path / "workspace" / "foo"
+        nested.mkdir(parents=True)
+        outer = tmp_path / "workspace" / "outer.txt"
+        outer.write_text("ok", encoding="utf-8")
+        tool = ExecTool(timeout=5, working_dir=str(tmp_path / "workspace"))
+        result = await tool.execute(command="cat foo/../outer.txt")
+        assert "ok" in result
 
 
 # ── 2b. Session Management (nanobot #1255, #1318) ──
@@ -541,7 +548,124 @@ class TestWebUIAuth:
         assert valid is False
 
 
+class TestNativeBlockSchemaPersistence:
+    @pytest.mark.asyncio
+    async def test_slash_command_persists_system_notice_block(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/usage")
+        resp = await loop._process_message(msg)
+        assert resp is not None
+        session = loop.sessions.get_or_create("test:c1")
+        assistant = next(m for m in session.messages if m.get("role") == "assistant")
+        assert any(block["type"] == "system_notice" for block in assistant["blocks"])
+        assert any(block["type"] == "markdown" for block in assistant["blocks"])
+
+    @pytest.mark.asyncio
+    async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+        from lemonclaw.agent.loop import AgentLoop
+        from lemonclaw.bus.queue import MessageBus
+        from lemonclaw.providers.base import LLMResponse, ToolCallRequest
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10)
+
+        tool_call = ToolCallRequest(id="call1", name="message", arguments={"content": "Hello", "channel": "email", "chat_id": "a@b.com"})
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        await loop.process_direct("send mail", session_key="webui:test-tool", channel="webui", chat_id="webui")
+        session = loop.sessions.get_or_create("webui:test-tool")
+        tool_only = next(m for m in session.messages if m.get("role") == "assistant" and any(b["type"] == "tool" for b in m.get("blocks", [])))
+        assert any(block["type"] == "tool" for block in tool_only["blocks"])
+
+
 # ── 6b. WebUI Routes ──
+
+
+class TestWebUIMediaAndAttachments:
+    """Media endpoint and outbound media[] persistence tests."""
+
+    @pytest.mark.asyncio
+    async def test_media_endpoint_serves_workspace_file(self, make_agent_loop, tmp_path):
+        from pathlib import Path
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        media_file = Path(loop.workspace) / 'preview.png'
+        media_file.write_bytes(b'fakepng')
+
+        app = create_app(auth_token=None, agent_loop=loop, session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get(f'/api/media?path={media_file}')
+        assert resp.status_code == 200
+        assert resp.content == b'fakepng'
+
+    @pytest.mark.asyncio
+    async def test_media_endpoint_blocks_external_file(self, make_agent_loop, tmp_path):
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+        external = tmp_path.parent / 'outside.txt'
+        external.write_text('secret', encoding='utf-8')
+
+        app = create_app(auth_token=None, agent_loop=loop, session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get(f'/api/media?path={external}')
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_emits_outbound_media_event_and_persists_history(self, tmp_path: Path) -> None:
+        from starlette.testclient import TestClient
+        from unittest.mock import AsyncMock, MagicMock
+        from lemonclaw.gateway.server import create_app
+        from lemonclaw.agent.loop import AgentLoop
+        from lemonclaw.bus.queue import MessageBus
+        from lemonclaw.providers.base import LLMResponse, ToolCallRequest
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = 'test-model'
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model='test-model', memory_window=10)
+        tool_call = ToolCallRequest(
+            id='call1', name='message',
+            arguments={'content': 'Here is the file', 'channel': 'webui', 'chat_id': 'webui', 'media': ['/home/lemonclaw/.lemonclaw/media/demo.jpg']},
+        )
+        calls = iter([
+            LLMResponse(content='', tool_calls=[tool_call]),
+            LLMResponse(content='Done', tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        app = create_app(auth_token=None, agent_loop=loop, session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post('/api/chat/stream', json={'message': 'send file', 'session_key': 'webui:test'})
+        assert resp.status_code == 200
+        assert '"type": "outbound"' in resp.text or '"type":"outbound"' in resp.text
+        assert 'demo.jpg' in resp.text
+        assert 'mediaId' in resp.text
+        assert 'blocks' in resp.text
+
+        history = client.get('/api/sessions/webui%3Atest/messages')
+        assert history.status_code == 200
+        data = history.json()
+        assistant = next(m for m in data['messages'] if m['role'] == 'assistant' and m.get('media'))
+        assert assistant['media'][0]['filename'] == 'demo.jpg'
+        assert any(block['type'] == 'media' for block in assistant['blocks'])
+
+        raw_session = loop.sessions.get_or_create('webui:test')
+        raw_assistant = next(m for m in raw_session.messages if m.get('role') == 'assistant' and m.get('media'))
+        assert raw_assistant['media'][0]['filename'] == 'demo.jpg'
+        assert any(block['type'] == 'media' for block in raw_assistant['blocks'])
 
 
 class TestWebUIRoutes:

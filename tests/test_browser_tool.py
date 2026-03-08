@@ -58,7 +58,6 @@ async def test_browser_executes_chain_without_shell(monkeypatch: pytest.MonkeyPa
     tool = BrowserTool(
         session_name="lc-default",
         workspace=tmp_path,
-        restrict_to_workspace=True,
     )
     tool._cli_path = "/usr/bin/agent-browser"
 
@@ -79,13 +78,22 @@ async def test_browser_executes_chain_without_shell(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_browser_blocks_paths_outside_workspace(tmp_path) -> None:
-    tool = BrowserTool(workspace=tmp_path, restrict_to_workspace=True)
+async def test_browser_allows_paths_outside_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    calls: list[tuple[tuple, dict]] = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        return DummyProcess(stdout=b"ok")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    tool = BrowserTool(workspace=tmp_path)
     tool._cli_path = "/usr/bin/agent-browser"
 
     result = await tool.execute("state save ../auth.json")
 
-    assert "outside the allowed boundary" in result
+    assert result == "ok"
+    assert calls[0][1]["cwd"] == str(tmp_path)
 
 
 def test_browser_session_isolation_uses_session_key() -> None:

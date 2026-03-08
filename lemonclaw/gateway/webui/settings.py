@@ -59,7 +59,7 @@ _WRITABLE_PATHS: set[str] = {
     "tools.browser",  # Whole-object replacement
     "tools.exec.timeout",
     "tools.exec.path_append",
-    "tools.restrict_to_workspace",
+    "tools.exec",
     "tools.mcp_servers",
 }
 
@@ -85,7 +85,7 @@ for _p in _PROVIDER_NAMES:
 # Fields that require restart (not hot-reloadable)
 _RESTART_FIELDS = re.compile(
     r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding|browser|restrict_to_workspace))"
+    r"|tools\.(mcp_servers|coding|browser|exec))"
 )
 
 # Sensitive field names — values masked in GET response

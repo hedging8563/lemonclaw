@@ -21,16 +21,12 @@ class CodingTool(Tool):
         api_key: str = "",
         api_base: str = "",
         model: str = "",
-        restrict_to_workspace: bool = False,
-        home_dir: str | None = None,
     ):
         self._working_dir = working_dir
         self._timeout = timeout
         self._api_key = api_key
         self._api_base = api_base
         self._model = model
-        self._restrict_to_workspace = restrict_to_workspace
-        self._home_dir = home_dir
         self._cli_path = shutil.which("claude")
 
     @property
@@ -69,15 +65,6 @@ class CodingTool(Tool):
             return "Error: claude CLI is not installed. Install with: npm install -g @anthropic-ai/claude-code"
 
         cwd = working_dir or self._working_dir
-        if self._restrict_to_workspace:
-            from pathlib import Path
-            # Use home_dir as security boundary (e.g. ~/.lemonclaw/)
-            boundary = Path(self._home_dir).resolve() if self._home_dir else Path(self._working_dir).resolve()
-            # Resolve relative paths against workspace, not process cwd
-            ws = Path(self._working_dir).resolve()
-            target = (ws / cwd).resolve() if not Path(cwd).is_absolute() else Path(cwd).resolve()
-            if boundary not in target.parents and target != boundary:
-                return "Error: working_dir is outside the allowed boundary"
 
         env = os.environ.copy()
         if self._api_key:

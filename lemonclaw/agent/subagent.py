@@ -30,8 +30,6 @@ class SubagentManager:
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
-        restrict_to_workspace: bool = False,
-        home_dir: "Path | None" = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.provider = provider
@@ -42,10 +40,6 @@ class SubagentManager:
         self.max_tokens = max_tokens
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
-        self.restrict_to_workspace = restrict_to_workspace
-        self.home_dir: Path | None = None
-        if restrict_to_workspace:
-            self.home_dir = home_dir or Path.home() / ".lemonclaw"
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
     
@@ -94,16 +88,13 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            home_dir = self.home_dir
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=home_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=home_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=home_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=home_dir))
+            tools.register(ReadFileTool(workspace=self.workspace))
+            tools.register(WriteFileTool(workspace=self.workspace))
+            tools.register(EditFileTool(workspace=self.workspace))
+            tools.register(ListDirTool(workspace=self.workspace))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                home_dir=str(self.home_dir) if self.home_dir else None,
                 path_append=self.exec_config.path_append,
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))

@@ -135,13 +135,13 @@ class MatrixChannel(BaseChannel):
 
     name = "matrix"
 
-    def __init__(self, config: Any, bus, *, restrict_to_workspace: bool = False,
+    def __init__(self, config: Any, bus, *, limit_media_to_workspace: bool = False,
                  workspace: Path | None = None):
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
-        self._restrict_to_workspace = restrict_to_workspace
+        self._limit_media_to_workspace = limit_media_to_workspace
         self._workspace = workspace.expanduser().resolve() if workspace else None
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
@@ -201,7 +201,7 @@ class MatrixChannel(BaseChannel):
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
         """Check path is inside workspace (when restriction enabled)."""
-        if not self._restrict_to_workspace or not self._workspace:
+        if not self._limit_media_to_workspace or not self._workspace:
             return True
         try:
             path.resolve(strict=False).relative_to(self._workspace)

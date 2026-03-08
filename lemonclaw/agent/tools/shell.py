@@ -20,15 +20,13 @@ class ExecTool(Tool):
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
-        restrict_to_workspace: bool = False,
-        home_dir: str | None = None,
         path_append: str = "",
         max_output: int = 50_000,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",
+            r"\brm\b(?:\s+['\"]?-[rf]{1,2}['\"]?)+",
             r"\bdel\s+/[fq]\b",
             r"\brmdir\s+/s\b",
             r"(?:^|[;&|]\s*)format\b",
@@ -39,8 +37,6 @@ class ExecTool(Tool):
             r":\(\)\s*\{.*\};\s*:",
         ]
         self.allow_patterns = allow_patterns or []
-        self.restrict_to_workspace = restrict_to_workspace
-        self.home_dir = home_dir
         self.path_append = path_append
         self.max_output = max_output
 
@@ -138,14 +134,10 @@ class ExecTool(Tool):
 
         raw_target = Path(working_dir).expanduser()
         target = raw_target.resolve() if raw_target.is_absolute() else (base_dir / raw_target).resolve()
-        if self.restrict_to_workspace:
-            boundary = Path(self.home_dir).resolve() if self.home_dir else base_dir
-            if target != boundary and boundary not in target.parents:
-                return base_dir, "Error: working_dir is outside the allowed boundary"
         return target, None
 
     def _guard_command(self, command: str, cwd: Path) -> str | None:
-        """Safety guard: deny_patterns + optional workspace boundary check."""
+        """Safety guard: deny dangerous patterns; full-power mode does not sandbox paths."""
         lower = command.strip().lower()
 
         for pattern in self.deny_patterns:
@@ -154,21 +146,5 @@ class ExecTool(Tool):
 
         if self.allow_patterns and not any(re.search(p, lower) for p in self.allow_patterns):
             return "Error: Command blocked by safety guard (not in allowlist)"
-
-        if self.restrict_to_workspace:
-            boundary = Path(self.home_dir).resolve() if self.home_dir else cwd
-            # Check for path traversal via ..
-            posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command)
-            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", command)
-            for raw in posix_paths + win_paths:
-                normalized = os.path.normpath(raw.strip())
-                if ".." in normalized.split(os.sep):
-                    return "Error: Command blocked by safety guard (path traversal detected)"
-                try:
-                    path = Path(normalized).resolve()
-                except Exception:
-                    continue
-                if path.is_absolute() and boundary not in path.parents and path != boundary:
-                    return "Error: Command blocked by safety guard (path outside allowed boundary)"
 
         return None

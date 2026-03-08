@@ -43,7 +43,7 @@ function normalizeChangedPath(path: string[]): string {
     return `providers.${path[1]}`;
   }
   if (path[0] === 'tools') {
-    if (path[1] === 'restrict_to_workspace' || path[1] === 'mcp_servers') {
+    if (path[1] === 'mcp_servers') {
       return `tools.${path[1]}`;
     }
     if (path[1] === 'browser' || path[1] === 'coding') {
@@ -69,6 +69,47 @@ function omitKeys<T extends Record<string, any>>(value: T | null | undefined, ke
   for (const key of keys) delete clone[key];
   return clone as T;
 }
+
+const HIDDEN_AGENT_DEFAULT_KEYS = ['workspace', 'input_cost_per_1k_tokens', 'output_cost_per_1k_tokens'];
+
+const FIELD_HELP_KEYS: Record<string, string> = {
+  'agents.defaults.model': 'settings_help_model',
+  'agents.defaults.provider': 'settings_help_provider',
+  'agents.defaults.temperature': 'settings_help_temperature',
+  'agents.defaults.max_tokens': 'settings_help_max_tokens',
+  'agents.defaults.timezone': 'settings_help_timezone',
+  'agents.defaults.memory_window': 'settings_help_memory_window',
+  'agents.defaults.max_tool_iterations': 'settings_help_max_tool_iterations',
+  'agents.defaults.token_budget_per_session': 'settings_help_token_budget_per_session',
+  'agents.defaults.cost_budget_per_day': 'settings_help_cost_budget_per_day',
+  'agents.defaults.system_prompt': 'settings_help_system_prompt',
+  'agents.defaults.disabled_skills': 'settings_help_disabled_skills',
+  'channels.send_progress': 'settings_help_send_progress',
+  'channels.send_tool_hints': 'settings_help_send_tool_hints',
+  'channels.auto_pairing': 'settings_help_auto_pairing',
+  'tools.web.search.api_key': 'settings_help_search_api_key',
+  'tools.web.search.max_results': 'settings_help_search_max_results',
+  'tools.browser.timeout': 'settings_help_browser_timeout',
+  'tools.browser.allowed_domains': 'settings_help_browser_allowed_domains',
+  'tools.browser.headed': 'settings_help_browser_headed',
+  'tools.browser.content_boundaries': 'settings_help_browser_content_boundaries',
+  'tools.browser.max_output': 'settings_help_browser_max_output',
+  'tools.coding.enabled': 'settings_help_coding_enabled',
+  'tools.coding.timeout': 'settings_help_coding_timeout',
+  'tools.coding.api_key': 'settings_help_coding_api_key',
+  'tools.coding.api_base': 'settings_help_coding_api_base',
+  'tools.exec.timeout': 'settings_help_exec_timeout',
+  'tools.exec.path_append': 'settings_help_exec_path_append',
+};
+
+const FIELD_PLACEHOLDERS: Record<string, string> = {
+  'agents.defaults.provider': 'auto',
+  'agents.defaults.timezone': 'Asia/Shanghai',
+  'agents.defaults.disabled_skills': 'skill-a, skill-b',
+  'tools.browser.allowed_domains': '*.example.com, api.example.com',
+  'tools.coding.api_base': 'https://api.example.com',
+  'tools.exec.path_append': '/usr/local/bin:/app/.venv/bin',
+};
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<DraftData | null>(null);
@@ -156,25 +197,91 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (key === 'web.search') return t('tools_web_search_title');
     if (key === 'exec') return t('tools_exec_title');
     if (key === 'mcp_servers') return t('mcp_servers_title');
-    if (key === 'restrict_to_workspace') return t('tools_restrict_label');
     return humanizeLabel(key);
   };
 
-  const workspaceRestricted = Boolean(draft?.tools?.restrict_to_workspace);
   const activeTabData = draft?.[activeTab];
   const settingsDescKey = `settings_desc_${activeTab}` as keyof any;
   const settingsDesc = (t as any)(settingsDescKey) || t('settings_desc');
+  const getFieldHelp = (fullPath: string): string | null => {
+    const specificKey = FIELD_HELP_KEYS[fullPath];
+    if (specificKey) {
+      const value = (t as any)(specificKey);
+      if (value && value !== specificKey) return value;
+    }
+
+    const last = fullPath.split('.').pop() || '';
+    const genericMap: Record<string, string> = {
+      enabled: 'settings_help_generic_enabled',
+      api_key: 'settings_help_generic_api_key',
+      api_base: 'settings_help_generic_api_base',
+      base_url: 'settings_help_generic_url',
+      url: 'settings_help_generic_url',
+      token: 'settings_help_generic_token',
+      bot_token: 'settings_help_generic_token',
+      app_token: 'settings_help_generic_token',
+      access_token: 'settings_help_generic_token',
+      client_secret: 'settings_help_generic_secret',
+      app_secret: 'settings_help_generic_secret',
+      timeout: 'settings_help_generic_timeout',
+      tool_timeout: 'settings_help_generic_timeout',
+      connect_timeout_ms: 'settings_help_generic_timeout_ms',
+      watch_timeout_ms: 'settings_help_generic_timeout_ms',
+      reply_delay_ms: 'settings_help_generic_timeout_ms',
+      refresh_interval_ms: 'settings_help_generic_interval_ms',
+      socket_reconnect_delay_ms: 'settings_help_generic_interval_ms',
+      socket_max_reconnect_delay_ms: 'settings_help_generic_interval_ms',
+      allow_from: 'settings_help_generic_allow_from',
+      trusted_proxies: 'settings_help_generic_allow_from',
+      command: 'settings_help_generic_command',
+      args: 'settings_help_generic_args',
+      env: 'settings_help_generic_env',
+      headers: 'settings_help_generic_headers',
+      proxy: 'settings_help_generic_proxy',
+      mode: 'settings_help_generic_mode',
+      policy: 'settings_help_generic_policy',
+      webhook_path: 'settings_help_generic_path',
+      socket_path: 'settings_help_generic_path',
+      sessions: 'settings_help_generic_list',
+      panels: 'settings_help_generic_list',
+    };
+    const key = genericMap[last];
+    if (!key) return t('settings_help_generic_fallback');
+    const value = (t as any)(key);
+    return value && value !== key ? value : t('settings_help_generic_fallback');
+  };
+
+  const getFieldPlaceholder = (fullPath: string): string => {
+    if (FIELD_PLACEHOLDERS[fullPath]) return FIELD_PLACEHOLDERS[fullPath];
+    const last = fullPath.split('.').pop() || '';
+    const genericMap: Record<string, string> = {
+      api_base: 'https://api.example.com',
+      base_url: 'https://example.com',
+      url: 'https://example.com',
+      allow_from: 'user1, user2',
+      trusted_proxies: '127.0.0.1, 10.0.0.0/8',
+      command: 'npx',
+      args: 'arg1, arg2',
+      proxy: 'http://127.0.0.1:7890',
+      webhook_path: '/webhook/path',
+      socket_path: '/socket.io',
+      sessions: 'session-a, session-b',
+      panels: 'panel-a, panel-b',
+    };
+    return genericMap[last] || '';
+  };
+
   const contentData = activeTab === 'agents'
-    ? { ...activeTabData, defaults: omitKeys(activeTabData?.defaults, ['workspace']) }
+    ? { ...activeTabData, defaults: omitKeys(activeTabData?.defaults, HIDDEN_AGENT_DEFAULT_KEYS) }
     : activeTab === 'tools'
-      ? omitKeys(activeTabData, ['restrict_to_workspace'])
+      ? activeTabData
       : activeTabData;
   const dataKeys = activeTab !== 'skills' && contentData
     ? Object.keys(contentData).filter((key) => isGroup(contentData[key]))
     : [];
-  // Prepend tool status + safety cards for the tools tab (they render before contentData)
+  // Prepend tool status card for the tools tab
   const quickJumpKeys = activeTab === 'tools'
-    ? ['_tool_status', '_tool_safety', ...dataKeys]
+    ? ['_tool_status', ...dataKeys]
     : dataKeys;
 
   const renderWorkspaceCard = () => {
@@ -248,22 +355,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     );
   };
 
-  const renderToolSafetyCard = () => {
-    if (!draft?.tools) return null;
-    return (
-      <div id="setting-group-_tool_safety" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: 'var(--purple)' }}>#</span> {t('tools_safety_title')}
-        </div>
-        {renderNotice(t(workspaceRestricted ? 'tools_restrict_warning_on' : 'tools_restrict_warning_off'), workspaceRestricted ? 'info' : 'warning')}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-          <input type="checkbox" checked={workspaceRestricted} onChange={(e) => handleChange(['tools', 'restrict_to_workspace'], (e.target as HTMLInputElement).checked)} />
-          <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{t('tools_restrict_label')}</label>
-        </div>
-      </div>
-    );
-  };
-
   const renderFields = (data: any, path: string[]): any => {
     if (!data) return null;
 
@@ -273,7 +364,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (k === 'mcp_servers' && isGroup(v)) {
         return (
-          <MCPServersEditor key={k} servers={v as Record<string, any>} restrictToWorkspace={workspaceRestricted} onChange={(newVal) => handleChange(currentPath, newVal)} />
+          <MCPServersEditor key={k} servers={v as Record<string, any>} onChange={(newVal) => handleChange(currentPath, newVal)} />
         );
       }
 
@@ -281,7 +372,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-            <input type="text" value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
+            <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
           </div>
         );
       }
@@ -308,7 +400,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
-            {path[0] === 'tools' && displayKey === 'browser' && renderNotice(t(workspaceRestricted ? 'browser_workspace_warning_on' : 'browser_workspace_warning_off'), workspaceRestricted ? 'info' : 'warning')}
             {renderFields(currentObj, cPath)}
           </div>
         );
@@ -321,6 +412,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <input type="checkbox" checked={v} onChange={(e) => handleChange(currentPath, (e.target as HTMLInputElement).checked)} />
               <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
             </div>
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
           </div>
         );
       }
@@ -329,15 +421,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-            <input type="number" value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
+            <input type="number" placeholder={getFieldPlaceholder(fullPath)} value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
           </div>
         );
       }
 
+      const help = getFieldHelp(fullPath);
+      const commonLabel = <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>;
+      const helpText = help ? <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{help}</div> : null;
+      if (fullPath === 'agents.defaults.system_prompt') {
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            {commonLabel}
+            {helpText}
+            <textarea value={String(v ?? '')} placeholder={getFieldPlaceholder(fullPath)} onInput={(e) => handleChange(currentPath, (e.target as HTMLTextAreaElement).value)} style={{ width: '100%', minHeight: '120px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', resize: 'vertical' }} />
+          </div>
+        );
+      }
       return (
         <div key={fullPath} style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-          <input type="text" value={String(v ?? '')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+          {commonLabel}
+          {helpText}
+          <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={String(v ?? '')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
         </div>
       );
     });
@@ -373,7 +479,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
                   {activeTab === 'agents' && renderWorkspaceCard()}
                   {activeTab === 'tools' && renderToolStatusCard()}
-                  {activeTab === 'tools' && renderToolSafetyCard()}
                   {activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
                 </div>
 
@@ -383,9 +488,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {quickJumpKeys.map((key) => {
                       // Special cards rendered outside contentData
                       const isSpecial = key.startsWith('_');
-                      const isEnabled = key === '_tool_safety' ? workspaceRestricted
-                        : isSpecial ? undefined
-                        : contentData?.[key]?.enabled;
+                      const isEnabled = isSpecial ? undefined : contentData?.[key]?.enabled;
                       let displayKey = key;
                       if (!isSpecial) {
                         let obj = contentData?.[key];
@@ -399,9 +502,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           }
                         }
                       }
-                      const label = key === '_tool_status' ? t('tool_status_title')
-                        : key === '_tool_safety' ? t('tools_safety_title')
-                        : displayLabel(displayKey);
+                      const label = key === '_tool_status' ? t('tool_status_title') : displayLabel(displayKey);
                       return (
                         <button key={key} onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'), background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'), border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'), transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.2)'} onMouseLeave={(e) => e.currentTarget.style.filter = 'none'}>
                           <span style={{ opacity: 0.5 }}>#</span> {label}

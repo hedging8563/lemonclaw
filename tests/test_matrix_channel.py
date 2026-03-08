@@ -1018,7 +1018,7 @@ async def test_send_workspace_restriction_blocks_external_attachment(tmp_path) -
     channel = MatrixChannel(
         _make_config(),
         MessageBus(),
-        restrict_to_workspace=True,
+        limit_media_to_workspace=True,
         workspace=workspace,
     )
     client = _FakeAsyncClient("", "", "", None)

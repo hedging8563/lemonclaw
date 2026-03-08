@@ -36,8 +36,6 @@ class BrowserTool(Tool):
         content_boundaries: bool = True,
         max_output: int = 50000,
         workspace: Path | str | None = None,
-        restrict_to_workspace: bool = False,
-        home_dir: Path | str | None = None,
     ):
         self._timeout = timeout
         self._allowed_domains = [d.strip().lower() for d in (allowed_domains or []) if d.strip()]
@@ -46,9 +44,6 @@ class BrowserTool(Tool):
         self._content_boundaries = content_boundaries
         self._max_output = max_output
         self._workspace = Path(workspace).expanduser().resolve() if workspace else None
-        self._restrict_to_workspace = restrict_to_workspace
-        # home_dir: broader security boundary (e.g. ~/.lemonclaw/) for path validation
-        self._home_dir = Path(home_dir).expanduser().resolve() if home_dir else self._workspace
         self._cli_path = shutil.which("agent-browser")
         self._active_sessions: set[str] = set()
 
@@ -65,11 +60,7 @@ class BrowserTool(Tool):
     def description(self) -> str:
         available = "AVAILABLE" if self._cli_path else "NOT INSTALLED"
         domains = f" Allowed domains: {', '.join(self._allowed_domains)}." if self._allowed_domains else ""
-        workspace = (
-            f" Relative files stay under: {self._workspace}."
-            if self._restrict_to_workspace and self._workspace
-            else ""
-        )
+        workspace = f" Default working directory: {self._workspace}." if self._workspace else ""
         return (
             f"Browser automation via agent-browser CLI ({available}). "
             "Use for interacting with websites: navigating pages, filling forms, "
@@ -118,7 +109,7 @@ class BrowserTool(Tool):
         session_name = self._resolve_session_name(_session_key)
         self._active_sessions.add(session_name)
         env = self._build_env()
-        cwd = str(self._workspace) if self._restrict_to_workspace and self._workspace else None
+        cwd = str(self._workspace) if self._workspace else None
 
         logger.info("browser [{}]: {}", session_name, command)
         outputs: list[str] = []
@@ -295,45 +286,6 @@ class BrowserTool(Tool):
         return None
 
     def _check_workspace_paths(self, step_args: list[str]) -> str | None:
-        if not self._restrict_to_workspace or not self._workspace or not step_args:
-            return None
-
-        command = step_args[0]
-        candidate_indexes: set[int] = set()
-
-        if command == "state" and len(step_args) >= 3 and step_args[1] in {"save", "load"}:
-            candidate_indexes.add(2)
-        elif command in {"pdf", "screenshot"}:
-            index = self._first_positional_index(step_args, start=1)
-            if index is not None:
-                candidate_indexes.add(index)
-
-        for index, token in enumerate(step_args):
-            if token in {"--baseline", "--output", "-o"} and index + 1 < len(step_args):
-                candidate_indexes.add(index + 1)
-
-        for index in sorted(candidate_indexes):
-            violation = self._validate_workspace_path(step_args[index])
-            if violation:
-                return violation
-        return None
-
-    @staticmethod
-    def _first_positional_index(tokens: list[str], start: int = 0) -> int | None:
-        for index in range(start, len(tokens)):
-            token = tokens[index]
-            if token.startswith("-"):
-                continue
-            return index
-        return None
-
-    def _validate_workspace_path(self, raw_path: str) -> str | None:
-        path = Path(raw_path).expanduser()
-        resolved = path.resolve() if path.is_absolute() else (self._workspace / path).resolve()
-        # Use home_dir as the security boundary
-        boundary = self._home_dir or self._workspace
-        if boundary and resolved != boundary and boundary not in resolved.parents:
-            return f"Error: path '{raw_path}' is outside the allowed boundary"
         return None
 
     def _resolve_session_name(self, session_key: str | None) -> str:
@@ -370,7 +322,7 @@ class BrowserTool(Tool):
         if not self._cli_path:
             return
         env = self._build_env()
-        cwd = str(self._workspace) if self._restrict_to_workspace and self._workspace else None
+        cwd = str(self._workspace) if self._workspace else None
         for session_name in sorted(self._active_sessions):
             try:
                 process = await asyncio.create_subprocess_exec(

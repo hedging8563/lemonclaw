@@ -3,15 +3,10 @@ import { chatStream, apiFetch } from '../api/client';
 import { activeSessionKey, loadSessions } from './sessions';
 import { loadConductor } from './conductor';
 import { currentModel } from './models';
+import { appendThinkingBlock, normalizeMessage, resolveLastToolBlock, startToolBlock, withContentAndMedia, withErrorBlock } from '../models/messages';
+import type { UIMessage } from '../models/messages';
 
-export interface ChatMessage {
-  id?: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
-  thinking?: string;
-  tool_calls?: any[];
-  error?: string;
-}
+export type ChatMessage = UIMessage;
 
 export const messages = signal<ChatMessage[]>([]);
 export const isStreaming = signal(false);
@@ -41,7 +36,7 @@ export async function uploadFile(file: File) {
       const data = await res.json();
       attachments.value = [...attachments.value, { path: data.path, filename: file.name, url: base64 }];
     } catch (err) {
-      console.error("Upload failed", err);
+      console.error('Upload failed', err);
     }
   };
   reader.readAsDataURL(file);
@@ -49,12 +44,12 @@ export async function uploadFile(file: File) {
 
 export async function loadHistory() {
   if (!activeSessionKey.value) return;
-  
-  messages.value = []; 
+
+  messages.value = [];
   inputText.value = '';
   attachments.value = [];
   isLoadingHistory.value = true;
-  
+
   try {
     let url = `/api/sessions/${encodeURIComponent(activeSessionKey.value)}/messages`;
     if (!activeSessionKey.value.startsWith('webui:')) {
@@ -62,12 +57,12 @@ export async function loadHistory() {
     }
 
     const res = await apiFetch(url, { silent404: true });
-    if (res.status === 404 || res.status === 403) return; 
-    
+    if (res.status === 404 || res.status === 403) return;
+
     const data = await res.json();
-    messages.value = data.messages || [];
+    messages.value = (data.messages || []).map((msg: any) => normalizeMessage(msg));
   } catch (err) {
-    console.error("Failed to load history", err);
+    console.error('Failed to load history', err);
   } finally {
     isLoadingHistory.value = false;
   }
@@ -75,16 +70,16 @@ export async function loadHistory() {
 
 export async function sendMessage(content: string) {
   if (isStreaming.value) return;
-  
-  const mediaPaths = attachments.value.map(a => a.path);
-  attachments.value = []; // Clear attachments UI instantly
 
-  const userMsg: ChatMessage = { role: 'user', content };
+  const mediaPaths = attachments.value.map(a => a.path);
+  attachments.value = [];
+
+  const userMsg: ChatMessage = normalizeMessage({ role: 'user', content, media: mediaPaths });
   messages.value = [...messages.value, userMsg];
   isStreaming.value = true;
   streamError.value = null;
 
-  const assistantMsg: ChatMessage = { role: 'assistant', content: '', thinking: '', tool_calls: [] };
+  const assistantMsg: ChatMessage = normalizeMessage({ role: 'assistant', content: '' });
   messages.value = [...messages.value, assistantMsg];
 
   currentAbortController = new AbortController();
@@ -93,7 +88,7 @@ export async function sendMessage(content: string) {
       message: content,
       session_key: activeSessionKey.value,
       model: currentModel.value || undefined,
-      media: mediaPaths.length > 0 ? mediaPaths : undefined
+      media: mediaPaths.length > 0 ? mediaPaths : undefined,
     }, currentAbortController.signal);
 
     for await (const event of stream) {
@@ -102,26 +97,30 @@ export async function sendMessage(content: string) {
       const lastMsg = { ...currentMessages[lastIdx] };
 
       if (event.type === 'content') {
-        lastMsg.content += event.data;
+        Object.assign(lastMsg, withContentAndMedia(lastMsg, lastMsg.content + event.data, lastMsg.media.map((m) => m.path)));
       } else if (event.type === 'thinking') {
-        lastMsg.thinking = (lastMsg.thinking || '') + event.data;
+        Object.assign(lastMsg, appendThinkingBlock(lastMsg, event.data));
       } else if (event.type === 'tool_start') {
-        lastMsg.tool_calls = lastMsg.tool_calls || [];
-        lastMsg.tool_calls.push({ state: 'running', detail: event.data });
+        Object.assign(lastMsg, startToolBlock(lastMsg, event.data));
       } else if (event.type === 'tool_result') {
-         if (lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
-            lastMsg.tool_calls[lastMsg.tool_calls.length - 1].state = 'done';
-            lastMsg.tool_calls[lastMsg.tool_calls.length - 1].result = event.data;
-         }
+        Object.assign(lastMsg, resolveLastToolBlock(lastMsg, event.data));
+      } else if (event.type === 'outbound') {
+        const payload = normalizeMessage(event.data || {});
+        if (!lastMsg.content && lastMsg.media.length === 0 && lastMsg.role === 'assistant') {
+          Object.assign(lastMsg, payload);
+          currentMessages[lastIdx] = lastMsg;
+        } else {
+          currentMessages.push(payload);
+        }
       } else if (event.type === 'done') {
-        // Final complete response — replace any partial content
         if (event.data) {
-          lastMsg.content = event.data;
+          const payload = normalizeMessage(event.data);
+          Object.assign(lastMsg, { ...payload, blocks: [...lastMsg.blocks.filter((b) => ['thinking', 'tool', 'error'].includes(b.type)), ...payload.blocks.filter((b) => !['thinking', 'tool', 'error'].includes(b.type))] });
         }
       } else if (event.type === 'error') {
-        lastMsg.error = event.data;
+        Object.assign(lastMsg, withErrorBlock(lastMsg, event.data));
       }
-      
+
       currentMessages[lastIdx] = lastMsg;
       messages.value = currentMessages;
     }
@@ -129,13 +128,13 @@ export async function sendMessage(content: string) {
     if (err.name === 'AbortError') {
       console.log('Stream aborted by user');
     } else {
-      console.error("Stream error", err);
-      streamError.value = err.message || "Connection failed";
+      console.error('Stream error', err);
+      streamError.value = err.message || 'Connection failed';
     }
   } finally {
     currentAbortController = null;
     isStreaming.value = false;
-    loadSessions(); 
+    loadSessions();
     loadConductor();
   }
 }
