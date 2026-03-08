@@ -25,7 +25,7 @@ from lemonclaw.gateway.webui.auth import (
     verify_token,
 )
 from lemonclaw.providers.catalog import MODEL_CATALOG
-from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
@@ -267,11 +267,33 @@ def get_webui_routes(
 
     # 7.1: Temp directory for uploaded files
     _upload_dir = Path(tempfile.mkdtemp(prefix="lemonclaw_uploads_"))
-    _session_media_grants: dict[str, set[str]] = {}
+    _session_media_grants: dict[str, dict[str, Any]] = {}
+    _SESSION_MEDIA_GRANT_TTL_S = 6 * 60 * 60
+    _SESSION_MEDIA_GRANT_MAX = 512
+
+    def _touch_session_media_grants(session_key: str, paths: list[str] | None = None) -> None:
+        now = time.time()
+        entry = _session_media_grants.setdefault(session_key, {"paths": set(), "last_access": now})
+        entry["last_access"] = now
+        if paths:
+            entry["paths"].update(paths)
+
+    def _cleanup_session_media_grants() -> None:
+        now = time.time()
+        expired = [k for k, v in _session_media_grants.items() if now - float(v.get("last_access", now)) > _SESSION_MEDIA_GRANT_TTL_S]
+        for key in expired:
+            _session_media_grants.pop(key, None)
+        if len(_session_media_grants) > _SESSION_MEDIA_GRANT_MAX:
+            extra = len(_session_media_grants) - _SESSION_MEDIA_GRANT_MAX
+            oldest = sorted(_session_media_grants.items(), key=lambda item: float(item[1].get("last_access", 0)))[:extra]
+            for key, _ in oldest:
+                _session_media_grants.pop(key, None)
 
     def _path_allowed_for_session(file_path: Path, session_key: str) -> bool:
-        granted = _session_media_grants.get(session_key, set())
-        if str(file_path) in granted:
+        _cleanup_session_media_grants()
+        entry = _session_media_grants.get(session_key)
+        if entry and str(file_path) in entry.get("paths", set()):
+            _touch_session_media_grants(session_key)
             return True
         if not session_manager:
             return False
@@ -279,10 +301,10 @@ def get_webui_routes(
         if not session:
             return False
         for msg in session.messages:
-            ui_msg = serialize_ui_message(msg, session_key=session_key)
-            for media in ui_msg.get("media", []):
-                if isinstance(media, dict) and media.get("path") == str(file_path):
-                    return True
+            paths = extract_message_media_paths(msg)
+            if str(file_path) in paths:
+                _touch_session_media_grants(session_key, paths)
+                return True
         return False
 
     def _cleanup_uploads():
@@ -444,7 +466,7 @@ def get_webui_routes(
                 # If model specified, temporarily set it via session metadata
                 async def outbound_sink(out_msg):
                     if out_msg.media:
-                        _session_media_grants.setdefault(session_key, set()).update(out_msg.media)
+                        _touch_session_media_grants(session_key, list(out_msg.media))
                     event = {"type": "outbound", "data": serialize_ui_message({"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])}, session_key=session_key)}
                     await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 

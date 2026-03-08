@@ -388,7 +388,8 @@ class AgentLoop:
                         ], return_exceptions=True)
 
                         # Process results
-                        any_success = False
+                        successful_tool_names: set[str] = set()
+                        cancel_requested = bool(stop_event and stop_event.is_set())
                         for tc, result in zip(response.tool_calls, results):
                             if isinstance(result, Exception):
                                 result = f"Error executing {tc.name}: {result}"
@@ -408,13 +409,17 @@ class AgentLoop:
                                                    tc.name, max_consecutive_errors)
                                     final_content = t("tool_repeated_fail", _lang, name=tc.name)
                             else:
-                                any_success = True
+                                successful_tool_names.add(tc.name)
 
                             messages = self.context.add_tool_result(
                                 messages, tc.id, tc.name, result
                             )
-                        if any_success:
-                            _consecutive_errors.clear()
+                        if successful_tool_names:
+                            for key in list(_consecutive_errors.keys()):
+                                if any(key.startswith(f"{name}:") for name in successful_tool_names):
+                                    _consecutive_errors.pop(key, None)
+                        if cancel_requested and final_content is None:
+                            final_content = t("task_stopped", _lang)
                     else:
                         # Single tool call — sequential execution
                         for tool_call in response.tool_calls:

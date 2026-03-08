@@ -82,14 +82,20 @@ GATEWAY_TOKEN=your-secret-token
 
 ### 4. Shell Command Execution
 
-The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
+The `exec` tool can execute shell commands. In the current Full-Power deployment model, the real security boundary is the container / host, not a workspace sandbox.
 
+**Self-hosted dedicated machine:**
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
-- ✅ Use a dedicated user account with limited privileges
-- ✅ Never run LemonClaw as root
-- ❌ Don't disable security checks
-- ❌ Don't run on systems with sensitive data without careful review
+- ✅ Prefer a dedicated machine or dedicated user account for LemonClaw
+- ❌ Don't run on systems with unrelated sensitive data unless you accept full local access risk
+
+**K8s full-power deployment:**
+- ✅ Treat the Pod / container boundary as the primary control
+- ✅ Ensure no Docker / container runtime sockets are mounted
+- ✅ Ensure no broad hostPath mounts are exposed to the Pod
+- ✅ Review whether overlay mounts require elevated container privileges in your cluster
+- ❌ Don't assume application-level deny patterns are your main security boundary
 
 **Blocked patterns:**
 - `rm -rf /` — Root filesystem deletion
@@ -100,12 +106,12 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 ### 5. File System Access
 
-File operations have path traversal protection, but:
+LemonClaw now assumes a Full-Power local tools model in dedicated deployments.
 
-- ✅ Run LemonClaw with a dedicated user account
-- ✅ Use filesystem permissions to protect sensitive directories
+- ✅ Use deployment isolation (container / Pod / host separation) as the main boundary
+- ✅ Keep persistent data under controlled paths such as `~/.lemonclaw`
 - ✅ Regularly audit file operations in logs
-- ❌ Don't give unrestricted access to sensitive files
+- ❌ Don't colocate LemonClaw with unrelated high-value secrets unless you accept full local access risk
 
 ### 6. Network Security
 

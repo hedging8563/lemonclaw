@@ -27,6 +27,7 @@ class ExecTool(Tool):
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
             r"\brm\b(?:\s+['\"]?-[rf]{1,2}['\"]?)+",
+            r"\brm\b.*(?:--recursive|--force)\b",
             r"\bdel\s+/[fq]\b",
             r"\brmdir\s+/s\b",
             r"(?:^|[;&|]\s*)format\b",

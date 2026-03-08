@@ -252,3 +252,28 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+
+    @pytest.mark.asyncio
+    async def test_stop_event_after_parallel_tools_returns_stopped(self):
+        from lemonclaw.agent.loop import AgentLoop
+        from lemonclaw.providers.base import LLMResponse, ToolCallRequest
+
+        loop, _bus = _make_loop()
+        stop_event = asyncio.Event()
+        response = LLMResponse(content=None, tool_calls=[
+            ToolCallRequest(id='a', name='exec', arguments={'command': 'echo a'}),
+            ToolCallRequest(id='b', name='exec', arguments={'command': 'echo b'}),
+        ])
+        loop.provider.chat = AsyncMock(return_value=response)
+
+        async def fake_execute(name, params, context=None):
+            await asyncio.sleep(0.01)
+            stop_event.set()
+            return 'ok'
+
+        loop.tools.execute = fake_execute  # type: ignore[assignment]
+        final, _tools, _messages, _usage = await loop._run_agent_loop([
+            {'role': 'user', 'content': 'test'}
+        ], stop_event=stop_event)
+        assert final == '⏹ Task stopped.'

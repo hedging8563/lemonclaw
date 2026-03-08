@@ -140,6 +140,13 @@ class TestToolSafety:
         assert "blocked" in result.lower()
 
     @pytest.mark.asyncio
+    async def test_rm_long_flags_blocked(self):
+        """Long flags like --recursive/--force should also be blocked."""
+        tool = ExecTool(timeout=5)
+        result = await tool.execute(command="rm --recursive --force /tmp/test")
+        assert "blocked" in result.lower()
+
+    @pytest.mark.asyncio
     async def test_dd_standalone_blocked(self):
         """dd without if= should still be blocked at token level."""
         tool = ExecTool(timeout=5)
@@ -314,6 +321,35 @@ class TestRepeatedToolErrors:
         # Should have broken early, not reached 40 iterations
         assert "failed repeatedly" in response.content.lower() or "error" in response.content.lower()
 
+
+
+
+    @pytest.mark.asyncio
+    async def test_parallel_success_does_not_clear_other_tool_error_budget(self, make_agent_loop, echo_provider):
+        from lemonclaw.providers.base import ToolCallRequest, LLMResponse
+
+        call = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(id='err1', name='read_file', arguments={}),
+                ToolCallRequest(id='ok1', name='exec', arguments={'command': 'echo ok'}),
+            ],
+            usage={'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
+        )
+        echo_provider.responses = [call, call, call]
+        loop, _bus = make_agent_loop(max_iterations=10)
+
+        original_execute = loop.tools.execute
+        async def fake_execute(name, params, context=None):
+            if name == 'read_file':
+                return "Error: Invalid parameters for tool 'read_file': path is required"
+            return 'ok'
+        loop.tools.execute = fake_execute  # type: ignore[assignment]
+
+        msg = InboundMessage(channel='test', sender_id='u1', chat_id='c1', content='test')
+        response = await loop._process_message(msg)
+        assert response is not None
+        assert 'failed repeatedly' in response.content.lower() or 'error' in response.content.lower()
 
 # ── 2e. Gateway /api/chat Endpoint ──
 
@@ -548,6 +584,26 @@ class TestWebUIAuth:
         assert valid is False
 
 
+class TestLegacyToolCallCompatibility:
+    def test_serialize_ui_message_formats_old_tool_calls(self):
+        from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+
+        msg = serialize_ui_message({
+            'role': 'assistant',
+            'content': '',
+            'tool_calls': [
+                {
+                    'function': {
+                        'name': 'read_file',
+                        'arguments': '{"path":"/tmp/demo.txt"}',
+                    }
+                }
+            ],
+        })
+        tool_block = next(block for block in msg['blocks'] if block['type'] == 'tool')
+        assert 'read_file' in tool_block['detail']
+        assert '/tmp/demo.txt' in tool_block['detail']
+
 class TestNativeBlockSchemaPersistence:
     @pytest.mark.asyncio
     async def test_slash_command_persists_system_notice_block(self, make_agent_loop):
@@ -616,6 +672,36 @@ class TestWebUIMediaAndAttachments:
         resp = client.get(f'/api/media?path={media_file}&session_key=webui:test-media')
         assert resp.status_code == 200
         assert resp.content == b'fakepng'
+
+    @pytest.mark.asyncio
+    async def test_media_endpoint_uses_session_grant_cache(self, make_agent_loop, tmp_path, monkeypatch):
+        from pathlib import Path
+        from starlette.testclient import TestClient
+        from lemonclaw.gateway.server import create_app
+        from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+
+        loop, _bus = make_agent_loop()
+        media_file = Path(loop.workspace) / 'cached.png'
+        media_file.write_bytes(b'cached')
+        session = loop.sessions.get_or_create('webui:test-cache')
+        session.messages.append(serialize_ui_message({
+            'role': 'assistant',
+            'content': '附件如下',
+            'media': [str(media_file)],
+        }, session_key='webui:test-cache'))
+        loop.sessions.save(session)
+
+        app = create_app(auth_token=None, agent_loop=loop, session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        first = client.get(f'/api/media?path={media_file}&session_key=webui:test-cache')
+        assert first.status_code == 200
+
+        def bomb(_key):
+            raise AssertionError('session should not be reloaded after media grant cache warms')
+
+        monkeypatch.setattr(loop.sessions, '_load', bomb)
+        second = client.get(f'/api/media?path={media_file}&session_key=webui:test-cache')
+        assert second.status_code == 200
 
     @pytest.mark.asyncio
     async def test_media_endpoint_blocks_external_file(self, make_agent_loop, tmp_path):

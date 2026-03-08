@@ -10,6 +10,59 @@ _MEDIA_TOKEN_RE = re.compile(r"\[(transcription|image|audio|voice|video|pdf|file
 _RUNTIME_PREFIX = "[Runtime Context"
 
 
+def _format_tool_call_detail(tool: dict[str, Any]) -> str:
+    detail = tool.get("detail")
+    if isinstance(detail, str) and detail:
+        return detail
+    fn = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+    name = fn.get("name") or tool.get("name") or "tool_call"
+    args_raw = fn.get("arguments")
+    try:
+        args = args_raw if isinstance(args_raw, dict) else re.sub(r"\s+", " ", str(args_raw or "")).strip()
+        if isinstance(args, str):
+            import json as _json
+            args = _json.loads(args) if args else {}
+        first_val = next(iter(args.values()), "") if isinstance(args, dict) else ""
+        if isinstance(first_val, str):
+            preview = first_val[:40] + "..." if len(first_val) > 40 else first_val
+            return f'{name}("{preview}")' if preview else name
+        if first_val not in (None, ""):
+            return f"{name}({first_val})"
+    except Exception:
+        pass
+    return name
+
+
+def extract_message_media_paths(raw: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    media = raw.get("media")
+    if isinstance(media, list):
+        for item in media:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("path"), str) and item.get("path"):
+                paths.append(item["path"])
+    content = raw.get("content")
+    if isinstance(content, str):
+        for match in _MEDIA_TOKEN_RE.finditer(content):
+            kind = match.group(1).lower()
+            if kind == 'transcription':
+                continue
+            payload = match.group(2).strip()
+            file_match = re.match(r"^(.*?)(?:\s*\(([^()]+)\))?$", payload)
+            media_path = (file_match.group(1) if file_match else payload).strip()
+            if media_path:
+                paths.append(media_path)
+    # preserve order while deduping
+    seen: set[str] = set()
+    out: list[str] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
 def media_url(path: str, session_key: str | None = None) -> str:
     from urllib.parse import quote
     encoded = quote(path, safe='')
@@ -107,7 +160,7 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
     if isinstance(raw.get("blocks"), list) and isinstance(raw.get("media"), list):
         msg = dict(raw)
         msg["media"] = [
-            {**m, "url": media_url(m.get("path", ""), session_key)} if isinstance(m, dict) else m
+            {**m, **({"url": media_url(m.get("path", ""), session_key)} if m.get("path") else {})} if isinstance(m, dict) else m
             for m in raw.get("media", [])
         ]
         return msg
@@ -144,7 +197,7 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
                 message["blocks"].append({
                     "type": "tool",
                     "state": tool.get("state", "done"),
-                    "detail": tool.get("detail", ""),
+                    "detail": _format_tool_call_detail(tool),
                     "result": tool.get("result"),
                 })
 
