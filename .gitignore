@@ -23,5 +23,6 @@ botpy.log
 
 
 .DS_Store
+# Keep private K8s deployment assets out of the OSS repo
 deploy/k8s/
 .github/workflows/

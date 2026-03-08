@@ -4,8 +4,7 @@ All default models, providers, STT settings, and LemonData-specific constants
 are defined here. Other modules MUST import from this file instead of
 hardcoding values.
 
-Historical lesson: OpenClaw had STT provider names scattered across
-entrypoint.sh, config-sync.cjs, and install.sh — the same bug appeared 4 times.
+Historical lesson: OpenClaw had STT provider names scattered across multiple deployment bootstraps and installers — the same bug appeared repeatedly.
 """
 
 # ---------------------------------------------------------------------------

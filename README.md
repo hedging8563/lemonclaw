@@ -137,7 +137,7 @@ Default LemonData provider names used by the setup wizard:
 
 - single-container local build: `Dockerfile`
 - local compose example: `docker-compose.yml`
-- K8s deployment assets: `deploy/k8s/`
+- K8s deployment should be integrated through your own manifests / deployment repo
 
 ## Repository Layout
 
