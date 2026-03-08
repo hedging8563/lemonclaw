@@ -13,6 +13,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
+from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.session.manager import SessionManager
