@@ -89,3 +89,27 @@ def test_whatsapp_disconnect_surfaces_stop_failure(monkeypatch, tmp_path):
     resp = client.post('/api/settings/channels/whatsapp/disconnect')
     assert resp.status_code == 400
     assert 'Failed to stop running WhatsApp bridge process.' in resp.json()['error']
+
+
+from lemonclaw.session.manager import SessionManager
+
+
+def test_session_ws_streams_incremental_messages(tmp_path):
+    from lemonclaw.gateway.server import create_app
+
+    mgr = SessionManager(tmp_path)
+    session = mgr.get_or_create('telegram:123')
+    session.messages.append({'role': 'user', 'content': 'first'})
+    mgr.save(session)
+
+    from types import SimpleNamespace
+    app = create_app(auth_token=None, session_manager=mgr, agent_loop=SimpleNamespace(workspace=tmp_path), webui_enabled=True)
+    with TestClient(app).websocket_connect('/ws/session?session_key=telegram:123&known_count=1') as ws:
+        session = mgr.get_or_create('telegram:123')
+        session.messages.append({'role': 'assistant', 'content': 'second'})
+        mgr.save(session)
+        payload = ws.receive_json()
+        assert payload['type'] == 'messages'
+        assert payload['session_key'] == 'telegram:123'
+        assert len(payload['messages']) == 1
+        assert payload['messages'][0]['content'] == 'second'

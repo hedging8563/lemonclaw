@@ -29,10 +29,9 @@ export async function loadActivitySessions() {
 export function initActivityWS() {
   if (wsClient) return;
   wsClient = wsConnect('/ws/activity', (event) => {
-    if (event.type === 'message_in' || event.type === 'message_out' || event.type === 'tool_call') {
+    if (['message', 'message_in', 'message_out', 'tool_call', 'chunk', 'progress', 'done'].includes(event.type)) {
       loadActivitySessions();
-      // If we are currently viewing this session and not streaming, reload the history
-      if (activeSessionKey.value === event.session_key && !isStreaming.value) {
+      if (activeSessionKey.value === event.session_key && activeSessionKey.value.startsWith('webui:') && !isStreaming.value) {
         loadHistory();
       }
     }

@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
+from starlette.websockets import WebSocket
 
 from lemonclaw.gateway.webui.auth import (
     COOKIE_NAME,
@@ -111,6 +112,20 @@ def _get_static_file(name: str) -> bytes | None:
     if dev_path.exists():
         return dev_path.read_bytes()
     return None
+
+
+# ── Session message helpers ─────────────────────────────────────────────────
+
+
+def _visible_ui_messages(session, *, session_key: str | None = None) -> list[dict]:
+    messages = []
+    for m in session.messages:
+        role = m.get("role")
+        if role == "tool":
+            continue
+        if role in ("user", "assistant", "system", "tool_call"):
+            messages.append(serialize_ui_message(m, session_key=session_key))
+    return messages
 
 
 # ── Route factory ────────────────────────────────────────────────────────────
@@ -641,17 +656,9 @@ def get_webui_routes(
             resp = _json({"messages": []})
             _maybe_refresh_cookie(request, resp)
             return resp
-        # Return session messages in the UIMessage-compatible schema.
-        messages = []
-        for m in session.messages:
-            role = m.get("role")
-            if role == "tool":
-                continue
-            if role in ("user", "assistant", "system", "tool_call"):
-                messages.append(serialize_ui_message(m))
 
         resp = _json({
-            "messages": messages,
+            "messages": _visible_ui_messages(session, session_key=key),
             "system_prompt_override": session.metadata.get("system_prompt_override", ""),
         })
         _maybe_refresh_cookie(request, resp)
@@ -714,6 +721,53 @@ def get_webui_routes(
         )
         _maybe_refresh_cookie(request, resp)
         return resp
+
+    # ── WebSocket: /ws/session ─────────────────────────────────────────────
+
+    async def ws_session(websocket: WebSocket) -> None:
+        if auth_token:
+            cookie = websocket.cookies.get(COOKIE_NAME, "")
+            valid, _ = verify_session_cookie(cookie, auth_token)
+            if not valid:
+                await websocket.close(code=4001, reason="Unauthorized")
+                return
+
+        session_key = (websocket.query_params.get("session_key") or "").strip()
+        if not session_key:
+            await websocket.close(code=4400, reason="session_key is required")
+            return
+
+        known_count_raw = websocket.query_params.get("known_count")
+        try:
+            known_count = max(int(known_count_raw or "0"), 0)
+        except (TypeError, ValueError):
+            known_count = 0
+
+        await websocket.accept()
+
+        try:
+            while True:
+                session = session_manager._load(session_key)
+                visible = _visible_ui_messages(session, session_key=session_key) if session else []
+                if len(visible) > known_count:
+                    payload = {
+                        "type": "messages",
+                        "session_key": session_key,
+                        "messages": visible[known_count:],
+                        "count": len(visible),
+                    }
+                    await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+                    known_count = len(visible)
+
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+        except Exception:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
     # ── 9.2: Memory REST API ─────────────────────────────────────────────
 
@@ -954,6 +1008,7 @@ def get_webui_routes(
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/sessions/{key:path}/export", export_session, methods=["GET"]),
         Route("/api/sessions/{key:path}/messages", get_session_messages, methods=["GET"]),
+        WebSocketRoute("/ws/session", ws_session),
         Route("/api/sessions/{key:path}", update_session, methods=["PATCH"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
         Route("/api/models", list_models, methods=["GET"]),

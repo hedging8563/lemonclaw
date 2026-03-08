@@ -4,6 +4,8 @@ import { ChatArea } from './components/layout/ChatArea';
 import { Inspector } from './components/layout/Inspector';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { closeSessionStream, syncSessionStream } from './stores/chat';
+import { activeSessionKey } from './stores/sessions';
 import { checkAuth, isAuthenticated, authRequired } from './stores/auth';
 import { initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
@@ -18,7 +20,14 @@ export function App() {
       setLoading(false);
       if (data.ok) initActivityWS();
     });
+    return () => closeSessionStream();
   }, []);
+
+  useEffect(() => {
+    if (!loading && isAuthenticated.value) {
+      syncSessionStream();
+    }
+  }, [loading, isAuthenticated.value, activeSessionKey.value]);
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading')}</div>;

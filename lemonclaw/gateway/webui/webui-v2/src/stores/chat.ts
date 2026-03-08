@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals';
-import { chatStream, apiFetch } from '../api/client';
+import { chatStream, apiFetch, wsConnect } from '../api/client';
 import { activeSessionKey, loadSessions } from './sessions';
 import { loadConductor } from './conductor';
 import { currentModel } from './models';
@@ -19,6 +19,8 @@ export const isLoadingMore = signal(false);
 
 let currentAbortController: AbortController | null = null;
 let _nextBefore: number | null = null;
+let sessionWsClient: any = null;
+let sessionWsKey: string | null = null;
 
 function historyMessageKey(msg: ChatMessage): string {
   const media = msg.media.map((m) => `${m.kind}:${m.path}`).join('|');
@@ -26,6 +28,46 @@ function historyMessageKey(msg: ChatMessage): string {
   return `${msg.id || ''}::${msg.role}::${msg.timestamp || ''}::${msg.content}::${media}::${blocks}`;
 }
 
+
+function mergeSessionMessages(incoming: ChatMessage[]) {
+  const seen = new Set(messages.value.map(historyMessageKey));
+  const appended = incoming.filter((msg) => !seen.has(historyMessageKey(msg)));
+  if (appended.length > 0) {
+    messages.value = [...messages.value, ...appended];
+  }
+}
+
+export function syncSessionStream() {
+  const key = activeSessionKey.value;
+  if (sessionWsKey === key) return;
+
+  if (sessionWsClient) {
+    sessionWsClient.close();
+    sessionWsClient = null;
+    sessionWsKey = null;
+  }
+
+  if (!key || key.startsWith('webui:')) return;
+
+  const params = new URLSearchParams({
+    session_key: key,
+    known_count: String(messages.value.length),
+  });
+  sessionWsClient = wsConnect(`/ws/session?${params.toString()}`, (event) => {
+    if (event.type === 'messages' && event.session_key === activeSessionKey.value && !isStreaming.value) {
+      mergeSessionMessages((event.messages || []).map((msg: any) => normalizeMessage(msg)));
+    }
+  }, () => {});
+  sessionWsKey = key;
+}
+
+export function closeSessionStream() {
+  if (sessionWsClient) {
+    sessionWsClient.close();
+    sessionWsClient = null;
+    sessionWsKey = null;
+  }
+}
 
 export function abortStream() {
   if (currentAbortController) {
