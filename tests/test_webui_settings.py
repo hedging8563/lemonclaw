@@ -113,3 +113,4 @@ def test_session_ws_streams_incremental_messages(tmp_path):
         assert payload['session_key'] == 'telegram:123'
         assert len(payload['messages']) == 1
         assert payload['messages'][0]['content'] == 'second'
+

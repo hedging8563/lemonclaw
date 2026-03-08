@@ -32,6 +32,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    version: int = 0  # Incremented on every save to support lightweight live sync
     
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -154,6 +155,7 @@ class SessionManager:
             metadata = {}
             created_at = None
             last_consolidated = 0
+            version = 0
             truncated = False
 
             with open(path, encoding="utf-8") as f:
@@ -177,6 +179,7 @@ class SessionManager:
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
+                        version = data.get("version", 0)
                     else:
                         messages.append(data)
 
@@ -186,6 +189,7 @@ class SessionManager:
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated,
+                version=version,
             )
 
             # Re-save to remove the corrupt trailing line
@@ -211,6 +215,7 @@ class SessionManager:
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
                 "last_consolidated": session.last_consolidated,
+                "version": session.version,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -222,6 +227,7 @@ class SessionManager:
 
     def save(self, session: Session) -> None:
         """Save a session to disk (atomic write-then-rename)."""
+        session.version += 1
         path = self._get_session_path(session.key)
         self._atomic_save(path, session)
         self._cache[session.key] = session

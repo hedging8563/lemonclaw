@@ -734,7 +734,12 @@ def get_webui_routes(
 
         session_key = (websocket.query_params.get("session_key") or "").strip()
         if not session_key:
+            await websocket.accept()
             await websocket.close(code=4400, reason="session_key is required")
+            return
+        if session_key.startswith(("api:", "cron:")):
+            await websocket.accept()
+            await websocket.close(code=4403, reason="access denied")
             return
 
         known_count_raw = websocket.query_params.get("known_count")
@@ -745,19 +750,24 @@ def get_webui_routes(
 
         await websocket.accept()
 
+        last_version = -1
         try:
             while True:
                 session = session_manager._load(session_key)
-                visible = _visible_ui_messages(session, session_key=session_key) if session else []
-                if len(visible) > known_count:
-                    payload = {
-                        "type": "messages",
-                        "session_key": session_key,
-                        "messages": visible[known_count:],
-                        "count": len(visible),
-                    }
-                    await websocket.send_text(json.dumps(payload, ensure_ascii=False))
-                    known_count = len(visible)
+                current_version = session.version if session else -1
+                if current_version != last_version:
+                    visible = _visible_ui_messages(session, session_key=session_key) if session else []
+                    if len(visible) > known_count:
+                        payload = {
+                            "type": "messages",
+                            "session_key": session_key,
+                            "messages": visible[known_count:],
+                            "count": len(visible),
+                            "version": current_version,
+                        }
+                        await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+                        known_count = len(visible)
+                    last_version = current_version
 
                 try:
                     await asyncio.wait_for(websocket.receive_text(), timeout=0.5)
