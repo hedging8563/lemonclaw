@@ -384,9 +384,13 @@ class TelegramChannel(BaseChannel):
                 logger.debug("Stream edit failed: {}", e)
             return
 
-        # ── Final message: edit stream message or send new ──────────────
-        self._stop_typing(msg.chat_id)
-        stream = self._stream_states.pop(msg.chat_id, None)
+        # ── Final / regular outbound messages ─────────────────────────────
+        is_final = bool(msg.metadata.get("_final"))
+        if is_final:
+            self._stop_typing(msg.chat_id)
+            stream = self._stream_states.pop(msg.chat_id, None)
+        else:
+            stream = None
 
         reply_params = None
         if self.config.reply_to_message:
@@ -528,7 +532,17 @@ class TelegramChannel(BaseChannel):
                             reply_markup=reply_markup,
                         )
                     except Exception as e2:
-                        logger.warning("Telegram message delivery failed completely: {}", e2)
+                        logger.warning("Telegram final stream edit failed completely: {}", e2)
+                        try:
+                            await self._app.bot.send_message(
+                                chat_id=chat_id,
+                                text=chunks[0],
+                                reply_parameters=reply_params,
+                                reply_markup=reply_markup,
+                                **topic_kwargs,
+                            )
+                        except Exception as e3:
+                            logger.error("Telegram fallback send after failed final edit also failed: {}", e3)
                 remaining = chunks[1:]
                 reply_markup = None  # Only attach to first chunk
             else:

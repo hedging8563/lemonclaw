@@ -192,3 +192,67 @@ async def test_send_model_switched_ignores_keyboard_update_failure(telegram_chan
 
     bot.send_message.assert_awaited_once()
     bot.edit_message_reply_markup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tool_outbound_does_not_consume_existing_stream(telegram_channel: TelegramChannel) -> None:
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_document=AsyncMock(),
+        send_photo=AsyncMock(),
+        send_video=AsyncMock(),
+        send_voice=AsyncMock(),
+        send_audio=AsyncMock(),
+        edit_message_text=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
+    )
+    telegram_channel._app = SimpleNamespace(bot=bot)
+    stream = telegram_channel._get_or_create_stream('12345')
+    stream.message_id = 42
+    stream.text = 'partial'
+    stream.last_sent_text = 'partial'
+
+    await telegram_channel.send(
+        OutboundMessage(
+            channel='telegram',
+            chat_id='12345',
+            content='鲨鱼图片来了！',
+            media=['https://example.com/shark.jpg'],
+            metadata={},
+        )
+    )
+
+    assert '12345' in telegram_channel._stream_states
+    bot.edit_message_text.assert_not_awaited()
+    bot.send_photo.assert_awaited_once()
+    bot.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_final_edit_failure_falls_back_to_fresh_send(telegram_channel: TelegramChannel) -> None:
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_document=AsyncMock(),
+        send_photo=AsyncMock(),
+        send_video=AsyncMock(),
+        send_voice=AsyncMock(),
+        send_audio=AsyncMock(),
+        edit_message_text=AsyncMock(side_effect=[RuntimeError('html fail'), RuntimeError('plain fail')]),
+        edit_message_reply_markup=AsyncMock(),
+    )
+    telegram_channel._app = SimpleNamespace(bot=bot)
+    stream = telegram_channel._get_or_create_stream('12345')
+    stream.message_id = 77
+
+    await telegram_channel.send(
+        OutboundMessage(
+            channel='telegram',
+            chat_id='12345',
+            content='完整最终文本',
+            metadata={'_final': True},
+        )
+    )
+
+    assert bot.edit_message_text.await_count == 2
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.await_args.kwargs['text'] == '完整最终文本'
