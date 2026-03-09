@@ -84,7 +84,8 @@ class ReadAttachmentTool(Tool):
     def description(self) -> str:
         return (
             "Inspect an attachment by path. Supports text files, CSV/TSV, XLSX workbook previews, "
-            "and ZIP archive listings. For arbitrary binary files, returns metadata and guidance."
+            "DOCX paragraph previews, PDF text extraction, and ZIP archive listings. "
+            "For arbitrary binary files, returns metadata and guidance."
         )
 
     @property
