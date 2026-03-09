@@ -239,6 +239,27 @@ async def test_media_send_does_not_use_draft_streaming(telegram_channel: Telegra
 
 
 @pytest.mark.asyncio
+async def test_empty_final_message_does_not_emit_false_activity_error() -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub()
+    channel._app = SimpleNamespace(bot=bot)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="",
+            metadata={"_final": True},
+        )
+    )
+
+    bot.send_message_draft.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
+    activity_bus.broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_final_message_uses_send_message_draft_then_send_message() -> None:
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)

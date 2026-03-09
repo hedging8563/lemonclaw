@@ -412,6 +412,10 @@ class TelegramChannel(BaseChannel):
     ) -> None:
         thread_kwargs = thread_kwargs or {}
         text = msg.content or ""
+        if not text or text == "[empty message]":
+            self._stop_typing(msg.chat_id)
+            return
+
         preview_text = text[:4096]
         draft_id = int(time.time() * 1000) % (2**31) or 1
 
