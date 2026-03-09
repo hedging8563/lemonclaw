@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from loguru import logger
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
@@ -159,6 +160,7 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
+        self._cleanup_split_tempdirs()
 
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
@@ -232,6 +234,18 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
+
+
+
+    @staticmethod
+    def _cleanup_split_tempdirs() -> None:
+        """Best-effort cleanup for stale tg_split_* directories from crashed runs."""
+        tmp_root = Path(tempfile.gettempdir())
+        for stale in tmp_root.glob('tg_split_*'):
+            try:
+                shutil.rmtree(stale, ignore_errors=True)
+            except Exception:
+                pass
 
     @staticmethod
     def _get_media_type(path: str) -> str:

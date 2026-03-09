@@ -286,6 +286,12 @@ class BrowserTool(Tool):
         return None
 
     def _check_workspace_paths(self, step_args: list[str]) -> str | None:
+        """Reserved for future browser-side path policy hooks.
+
+        LemonClaw currently runs in full-power mode, so browser save/export
+        commands are not sandboxed to the workspace here. Container/runtime
+        isolation remains the intended boundary.
+        """
         return None
 
     def _resolve_session_name(self, session_key: str | None) -> str:
