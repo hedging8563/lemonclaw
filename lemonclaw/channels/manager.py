@@ -275,6 +275,13 @@ class ChannelManager:
                     await self.activity_bus.broadcast(event)
 
                 if msg.metadata.get("_progress"):
+                    # Never leak thinking/reasoning content to users
+                    if msg.metadata.get("_thinking"):
+                        continue
+                    # Never send raw LLM chunks to channels that can't edit messages
+                    # (Telegram handles this via draft streaming; all others would spam)
+                    if msg.metadata.get("_chunk"):
+                        continue
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
