@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from loguru import logger
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyParameters
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes
@@ -24,19 +24,6 @@ from lemonclaw.config.schema import TelegramConfig
 _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 # Target size per split segment (45MB, leave headroom)
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
-
-
-@dataclass
-class _StreamState:
-    """Per-chat streaming state for editMessageText approach."""
-    message_id: int = 0       # 0 = no message sent yet
-    text: str = ""
-    last_sent_at: float = 0.0
-    last_sent_text: str = ""
-
-
-_STREAM_MIN_INTERVAL = 0.5   # seconds between edits (Telegram rate limit friendly)
-_STREAM_MIN_CHARS = 20       # minimum new chars before editing
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -143,6 +130,7 @@ class TelegramChannel(BaseChannel):
         bus: MessageBus,
         api_key: str = "",
         api_base: str = "",
+        activity_bus = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
@@ -155,8 +143,7 @@ class TelegramChannel(BaseChannel):
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._seen_update_ids: set[int] = set()  # Dedup Telegram updates
         self._seen_update_ids_max = 500
-        # Stream state: chat_id -> _StreamState
-        self._stream_states: dict[str, _StreamState] = {}
+        self._activity_bus = activity_bus
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -231,7 +218,6 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
-        self._stream_states.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -310,13 +296,174 @@ class TelegramChannel(BaseChannel):
 
         return segments
 
-    # ── Streaming support (editMessageText approach) ────────────────────
 
-    def _get_or_create_stream(self, chat_id: str) -> _StreamState:
-        """Get or create a stream state for a chat."""
-        if chat_id not in self._stream_states:
-            self._stream_states[chat_id] = _StreamState()
-        return self._stream_states[chat_id]
+    def _activity_session_key(self, chat_id: str, thread_id: int | None = None) -> str:
+        if thread_id:
+            return f"{self.name}:{chat_id}:{thread_id}"
+        return f"{self.name}:{chat_id}"
+
+    async def _emit_activity_event(
+        self,
+        chat_id: str,
+        content: str,
+        *,
+        thread_id: int | None = None,
+        event_type: str,
+        first: bool = False,
+    ) -> None:
+        if not self._activity_bus or not content or content == "[empty message]":
+            return
+        event = {
+            "type": event_type,
+            "session_key": self._activity_session_key(chat_id, thread_id),
+            "channel": self.name,
+            "role": "assistant",
+            "content": content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if first:
+            event["first"] = True
+        await self._activity_bus.broadcast(event)
+
+    async def _update_model_switch_keyboard(self, chat_id: int, callback_msg_id: int | None, new_model: str | None) -> None:
+        if not callback_msg_id or not new_model:
+            return
+        try:
+            new_keyboard = self._build_model_keyboard(new_model)
+            await self._app.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=callback_msg_id,
+                reply_markup=new_keyboard,
+            )
+        except Exception as e:
+            logger.debug("Failed to update model keyboard: {}", e)
+
+    async def _send_text(
+        self,
+        msg: OutboundMessage,
+        chat_id: int,
+        *,
+        reply_params: ReplyParameters | None = None,
+        thread_kwargs: dict | None = None,
+    ) -> None:
+        if not msg.content or msg.content == "[empty message]":
+            await self._update_model_switch_keyboard(
+                chat_id,
+                msg.metadata.get("_callback_message_id"),
+                msg.metadata.get("_current_model"),
+            )
+            return
+
+        thread_kwargs = thread_kwargs or {}
+        chunks = _split_message(msg.content)
+
+        reply_markup = None
+        if msg.metadata.get("_command") == "model_list":
+            reply_markup = self._build_model_keyboard(msg.metadata.get("_current_model"))
+            from lemonclaw.providers.catalog import MODEL_MAP
+            current_id = msg.metadata.get("_current_model")
+            entry = MODEL_MAP.get(current_id) if current_id else None
+            label = entry.label if entry else (current_id or "—")
+            chunks = [f"🍋 *Select model*\nCurrent: `{label}`"]
+
+        for chunk in chunks:
+            html = _markdown_to_telegram_html(chunk)
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html,
+                    parse_mode="HTML",
+                    reply_parameters=reply_params,
+                    reply_markup=reply_markup,
+                    **thread_kwargs,
+                )
+            except Exception as e:
+                logger.warning("HTML parse failed, falling back to plain text: {}", e)
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        reply_parameters=reply_params,
+                        reply_markup=reply_markup,
+                        **thread_kwargs,
+                    )
+                except Exception as e2:
+                    logger.error("Error sending Telegram message: {}", e2)
+            reply_markup = None
+
+        await self._update_model_switch_keyboard(
+            chat_id,
+            msg.metadata.get("_callback_message_id"),
+            msg.metadata.get("_current_model"),
+        )
+
+    async def _send_with_streaming(
+        self,
+        msg: OutboundMessage,
+        chat_id: int,
+        *,
+        thread_id: int | None = None,
+        reply_params: ReplyParameters | None = None,
+        thread_kwargs: dict | None = None,
+    ) -> None:
+        thread_kwargs = thread_kwargs or {}
+        text = msg.content or ""
+        preview_text = text[:4096]
+        draft_id = int(time.time() * 1000) % (2**31) or 1
+
+        self._stop_typing(msg.chat_id)
+
+        try:
+            if preview_text.strip():
+                step = max(len(preview_text) // 8, 40)
+                first_event = True
+                for i in range(step, len(preview_text), step):
+                    partial = preview_text[: min(i, 4096)]
+                    await self._app.bot.send_message_draft(
+                        chat_id=chat_id,
+                        draft_id=draft_id,
+                        text=partial,
+                        **thread_kwargs,
+                    )
+                    await self._emit_activity_event(
+                        msg.chat_id,
+                        partial,
+                        thread_id=thread_id,
+                        event_type="chunk",
+                        first=first_event,
+                    )
+                    first_event = False
+                    await asyncio.sleep(0.04)
+
+                await self._app.bot.send_message_draft(
+                    chat_id=chat_id,
+                    draft_id=draft_id,
+                    text=preview_text,
+                    **thread_kwargs,
+                )
+                await self._emit_activity_event(
+                    msg.chat_id,
+                    preview_text,
+                    thread_id=thread_id,
+                    event_type="chunk",
+                    first=first_event,
+                )
+                await asyncio.sleep(0.15)
+        except Exception as e:
+            logger.debug("Telegram draft send failed: {}", e)
+
+        await self._send_text(
+            msg,
+            chat_id,
+            reply_params=reply_params,
+            thread_kwargs=thread_kwargs,
+        )
+        await self._emit_activity_event(
+            msg.chat_id,
+            text,
+            thread_id=thread_id,
+            event_type="done",
+        )
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -330,67 +477,11 @@ class TelegramChannel(BaseChannel):
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
 
-        is_progress = msg.metadata.get("_progress", False)
         thread_id = msg.metadata.get("message_thread_id")
+        is_progress = bool(msg.metadata.get("_progress", False))
 
-        # ── Progress/chunk messages: stream via editMessageText ──
         if is_progress:
-            if not msg.content or msg.content == "[empty message]":
-                return
-            stream = self._get_or_create_stream(msg.chat_id)
-
-            is_chunk = msg.metadata.get("_chunk", False)
-
-            # First chunk of a new LLM call resets the stream text
-            if is_chunk and msg.metadata.get("_chunk_first"):
-                stream.text = msg.content
-            elif is_chunk:
-                stream.text += msg.content
-            else:
-                # Status message (tool hints etc.) — append with newline
-                if stream.text and not stream.text.endswith("\n"):
-                    stream.text += "\n"
-                stream.text += msg.content
-
-            # Throttle: skip if too soon and too little new content
-            now = time.monotonic()
-            new_chars = len(stream.text) - len(stream.last_sent_text)
-            if (now - stream.last_sent_at < _STREAM_MIN_INTERVAL
-                    and new_chars < _STREAM_MIN_CHARS):
-                return
-
-            display = stream.text[:4096]
-            if not display.strip():
-                return
-
-            try:
-                if stream.message_id == 0:
-                    # First update: send a new message
-                    send_kwargs = {"chat_id": chat_id, "text": display + " ▍"}
-                    if thread_id:
-                        send_kwargs["message_thread_id"] = thread_id
-                    sent = await self._app.bot.send_message(**send_kwargs)
-                    stream.message_id = sent.message_id
-                else:
-                    # Subsequent updates: edit the existing message
-                    await self._app.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=stream.message_id,
-                        text=display + " ▍",
-                    )
-                stream.last_sent_at = now
-                stream.last_sent_text = display
-            except Exception as e:
-                logger.debug("Stream edit failed: {}", e)
             return
-
-        # ── Final / regular outbound messages ─────────────────────────────
-        is_final = bool(msg.metadata.get("_final"))
-        if is_final:
-            self._stop_typing(msg.chat_id)
-            stream = self._stream_states.pop(msg.chat_id, None)
-        else:
-            stream = None
 
         reply_params = None
         if self.config.reply_to_message:
@@ -398,16 +489,13 @@ class TelegramChannel(BaseChannel):
             if reply_to_message_id:
                 reply_params = ReplyParameters(
                     message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
+                    allow_sending_without_reply=True,
                 )
 
-        # Common kwargs for forum topic routing
         topic_kwargs = {"message_thread_id": thread_id} if thread_id else {}
 
-        # Send media files (with automatic splitting for large videos)
         for media_path in (msg.media or []):
             try:
-                # Remote URLs: send directly via Telegram Bot API (supports URL strings)
                 if media_path.startswith(("http://", "https://")):
                     media_type = self._get_media_type(media_path)
                     sender = {
@@ -428,7 +516,6 @@ class TelegramChannel(BaseChannel):
                 file_size = os.path.getsize(media_path)
                 media_type = self._get_media_type(media_path)
 
-                # Large video/audio: split into segments
                 if file_size > _TG_MAX_FILE_BYTES and media_type in ("video", "audio"):
                     filename = os.path.basename(media_path)
                     logger.info("File {} is {:.1f}MB, splitting for Telegram", filename, file_size / 1024 / 1024)
@@ -461,17 +548,14 @@ class TelegramChannel(BaseChannel):
                         finally:
                             shutil.rmtree(tmp_dir, ignore_errors=True)
                         continue
-                    else:
-                        # Split failed, notify user with file path
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=f"[File too large for Telegram ({file_size / 1024 / 1024:.0f}MB): {media_path}]",
-                            reply_parameters=reply_params,
-                            **topic_kwargs,
-                        )
-                        continue
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"[File too large for Telegram ({file_size / 1024 / 1024:.0f}MB): {media_path}]",
+                        reply_parameters=reply_params,
+                        **topic_kwargs,
+                    )
+                    continue
 
-                # Normal send
                 sender = {
                     "photo": self._app.bot.send_photo,
                     "video": self._app.bot.send_video,
@@ -496,98 +580,23 @@ class TelegramChannel(BaseChannel):
                     **topic_kwargs,
                 )
 
-        # Send text content
-        if msg.content and msg.content != "[empty message]":
-            chunks = _split_message(msg.content)
+        if msg.metadata.get("_final"):
+            await self._send_with_streaming(
+                msg,
+                chat_id,
+                thread_id=thread_id,
+                reply_params=reply_params,
+                thread_kwargs=topic_kwargs,
+            )
+            return
 
-            # Inline keyboard for /model list (Telegram-specific)
-            reply_markup = None
-            if msg.metadata.get("_command") == "model_list":
-                reply_markup = self._build_model_keyboard(msg.metadata.get("_current_model"))
-                # Replace verbose text list with compact header — keyboard is the UI
-                current_id = msg.metadata.get("_current_model")
-                from lemonclaw.providers.catalog import MODEL_MAP
-                entry = MODEL_MAP.get(current_id) if current_id else None
-                label = entry.label if entry else (current_id or "—")
-                chunks = [f"🍋 *Select model*\nCurrent: `{label}`"]
+        await self._send_text(
+            msg,
+            chat_id,
+            reply_params=reply_params,
+            thread_kwargs=topic_kwargs,
+        )
 
-            # If we have a stream message, edit the first chunk into it
-            if stream and stream.message_id and len(chunks) >= 1:
-                first_html = _markdown_to_telegram_html(chunks[0])
-                try:
-                    await self._app.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=stream.message_id,
-                        text=first_html,
-                        parse_mode="HTML",
-                        reply_markup=reply_markup,
-                    )
-                except Exception as e:
-                    logger.debug("Final edit failed, falling back to plain: {}", e)
-                    try:
-                        await self._app.bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=stream.message_id,
-                            text=chunks[0],
-                            reply_markup=reply_markup,
-                        )
-                    except Exception as e2:
-                        logger.warning("Telegram final stream edit failed completely: {}", e2)
-                        try:
-                            await self._app.bot.send_message(
-                                chat_id=chat_id,
-                                text=chunks[0],
-                                reply_parameters=reply_params,
-                                reply_markup=reply_markup,
-                                **topic_kwargs,
-                            )
-                        except Exception as e3:
-                            logger.error("Telegram fallback send after failed final edit also failed: {}", e3)
-                remaining = chunks[1:]
-                reply_markup = None  # Only attach to first chunk
-            else:
-                remaining = chunks
-
-            for chunk in remaining:
-                html = _markdown_to_telegram_html(chunk)
-                try:
-                    await self._app.bot.send_message(
-                        chat_id=chat_id,
-                        text=html,
-                        parse_mode="HTML",
-                        reply_parameters=reply_params,
-                        reply_markup=reply_markup,
-                        **topic_kwargs,
-                    )
-                except Exception as e:
-                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
-                    try:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=chunk,
-                            reply_parameters=reply_params,
-                            reply_markup=reply_markup,
-                            **topic_kwargs,
-                        )
-                    except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
-                reply_markup = None  # Only attach to first chunk
-
-            # After model switch, update the original keyboard to reflect new selection
-            if msg.metadata.get("_command") == "model_switched":
-                callback_msg_id = msg.metadata.get("_callback_message_id")
-                new_model = msg.metadata.get("_current_model")
-                if callback_msg_id and new_model:
-                    try:
-                        new_keyboard = self._build_model_keyboard(new_model)
-                        await self._app.bot.edit_message_reply_markup(
-                            chat_id=chat_id,
-                            message_id=callback_msg_id,
-                            reply_markup=new_keyboard,
-                        )
-                    except Exception as e:
-                        logger.debug("Failed to update model keyboard: {}", e)
-    
     def _dedup_update(self, update: Update) -> bool:
         """Return True if this update is new, False if duplicate."""
         uid = update.update_id

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -40,6 +41,22 @@ def _private_callback_update(data: str, *, message_id: int = 321):
         edit_message_reply_markup=AsyncMock(),
     )
     return SimpleNamespace(callback_query=query, effective_user=user)
+
+
+def _bot_stub(**overrides):
+    base = {
+        "send_message": AsyncMock(),
+        "send_message_draft": AsyncMock(),
+        "send_document": AsyncMock(),
+        "send_photo": AsyncMock(),
+        "send_video": AsyncMock(),
+        "send_voice": AsyncMock(),
+        "send_audio": AsyncMock(),
+        "edit_message_reply_markup": AsyncMock(),
+        "send_chat_action": AsyncMock(),
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
 
 
 @pytest.mark.asyncio
@@ -115,11 +132,7 @@ async def test_model_callback_forwards_private_chat_without_thread_metadata(tele
 
 @pytest.mark.asyncio
 async def test_send_model_list_attaches_inline_keyboard(telegram_channel: TelegramChannel) -> None:
-    bot = SimpleNamespace(
-        send_message=AsyncMock(),
-        edit_message_text=AsyncMock(),
-        edit_message_reply_markup=AsyncMock(),
-    )
+    bot = _bot_stub()
     telegram_channel._app = SimpleNamespace(bot=bot)
 
     await telegram_channel.send(
@@ -136,15 +149,12 @@ async def test_send_model_list_attaches_inline_keyboard(telegram_channel: Telegr
     assert kwargs["chat_id"] == 12345
     assert kwargs["reply_markup"] is not None
     assert "Select model" in kwargs["text"]
+    bot.send_message_draft.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_send_model_switched_updates_original_keyboard(telegram_channel: TelegramChannel) -> None:
-    bot = SimpleNamespace(
-        send_message=AsyncMock(),
-        edit_message_text=AsyncMock(),
-        edit_message_reply_markup=AsyncMock(),
-    )
+    bot = _bot_stub()
     telegram_channel._app = SimpleNamespace(bot=bot)
 
     await telegram_channel.send(
@@ -170,11 +180,7 @@ async def test_send_model_switched_updates_original_keyboard(telegram_channel: T
 
 @pytest.mark.asyncio
 async def test_send_model_switched_ignores_keyboard_update_failure(telegram_channel: TelegramChannel) -> None:
-    bot = SimpleNamespace(
-        send_message=AsyncMock(),
-        edit_message_text=AsyncMock(),
-        edit_message_reply_markup=AsyncMock(side_effect=RuntimeError("telegram error")),
-    )
+    bot = _bot_stub(edit_message_reply_markup=AsyncMock(side_effect=RuntimeError("telegram error")))
     telegram_channel._app = SimpleNamespace(bot=bot)
 
     await telegram_channel.send(
@@ -195,64 +201,127 @@ async def test_send_model_switched_ignores_keyboard_update_failure(telegram_chan
 
 
 @pytest.mark.asyncio
-async def test_tool_outbound_does_not_consume_existing_stream(telegram_channel: TelegramChannel) -> None:
-    bot = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_document=AsyncMock(),
-        send_photo=AsyncMock(),
-        send_video=AsyncMock(),
-        send_voice=AsyncMock(),
-        send_audio=AsyncMock(),
-        edit_message_text=AsyncMock(),
-        edit_message_reply_markup=AsyncMock(),
-    )
+async def test_progress_messages_are_noop_for_telegram_draft_mode(telegram_channel: TelegramChannel) -> None:
+    bot = _bot_stub()
     telegram_channel._app = SimpleNamespace(bot=bot)
-    stream = telegram_channel._get_or_create_stream('12345')
-    stream.message_id = 42
-    stream.text = 'partial'
-    stream.last_sent_text = 'partial'
 
     await telegram_channel.send(
         OutboundMessage(
-            channel='telegram',
-            chat_id='12345',
-            content='鲨鱼图片来了！',
-            media=['https://example.com/shark.jpg'],
+            channel="telegram",
+            chat_id="12345",
+            content="partial chunk",
+            metadata={"_progress": True, "_chunk": True},
+        )
+    )
+
+    bot.send_message.assert_not_awaited()
+    bot.send_message_draft.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_media_send_does_not_use_draft_streaming(telegram_channel: TelegramChannel) -> None:
+    bot = _bot_stub()
+    telegram_channel._app = SimpleNamespace(bot=bot)
+
+    await telegram_channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="鲨鱼图片来了！",
+            media=["https://example.com/shark.jpg"],
             metadata={},
         )
     )
 
-    assert '12345' in telegram_channel._stream_states
-    bot.edit_message_text.assert_not_awaited()
     bot.send_photo.assert_awaited_once()
     bot.send_message.assert_awaited_once()
+    bot.send_message_draft.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_final_edit_failure_falls_back_to_fresh_send(telegram_channel: TelegramChannel) -> None:
-    bot = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_document=AsyncMock(),
-        send_photo=AsyncMock(),
-        send_video=AsyncMock(),
-        send_voice=AsyncMock(),
-        send_audio=AsyncMock(),
-        edit_message_text=AsyncMock(side_effect=[RuntimeError('html fail'), RuntimeError('plain fail')]),
-        edit_message_reply_markup=AsyncMock(),
-    )
-    telegram_channel._app = SimpleNamespace(bot=bot)
-    stream = telegram_channel._get_or_create_stream('12345')
-    stream.message_id = 77
+async def test_final_message_uses_send_message_draft_then_send_message() -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub()
+    channel._app = SimpleNamespace(bot=bot)
 
-    await telegram_channel.send(
+    await channel.send(
         OutboundMessage(
-            channel='telegram',
-            chat_id='12345',
-            content='完整最终文本',
-            metadata={'_final': True},
+            channel="telegram",
+            chat_id="12345",
+            content="x" * 100,
+            metadata={"_final": True},
         )
     )
 
-    assert bot.edit_message_text.await_count == 2
+    assert bot.send_message_draft.await_count >= 1
     bot.send_message.assert_awaited_once()
-    assert bot.send_message.await_args.kwargs['text'] == '完整最终文本'
+    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
+    assert events[-1]["type"] == "done"
+    assert events[0]["type"] == "chunk"
+
+
+@pytest.mark.asyncio
+async def test_draft_preview_is_truncated_to_4096_and_draft_id_is_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub()
+    channel._app = SimpleNamespace(bot=bot)
+    monkeypatch.setattr(time, "time", lambda: 0)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="a" * 5000,
+            metadata={"_final": True},
+        )
+    )
+
+    for call in bot.send_message_draft.await_args_list:
+        assert len(call.kwargs["text"]) <= 4096
+        assert call.kwargs["draft_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_draft_failure_still_falls_back_to_final_send() -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub(send_message_draft=AsyncMock(side_effect=RuntimeError("draft unavailable")))
+    channel._app = SimpleNamespace(bot=bot)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="完整最终文本",
+            metadata={"_final": True},
+        )
+    )
+
+    bot.send_message.assert_awaited_once()
+    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_draft_and_final_propagate_message_thread_id_to_telegram_and_activity() -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub()
+    channel._app = SimpleNamespace(bot=bot)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="-100123",
+            content="topic reply",
+            metadata={"_final": True, "message_thread_id": 456},
+        )
+    )
+
+    for call in bot.send_message_draft.await_args_list:
+        assert call.kwargs["message_thread_id"] == 456
+    assert bot.send_message.await_args.kwargs["message_thread_id"] == 456
+    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
+    assert all(event["session_key"] == "telegram:-100123:456" for event in events)

@@ -63,6 +63,7 @@ class ChannelManager:
                     self.bus,
                     api_key=self.config.lemondata.api_key,
                     api_base=self.config.lemondata.api_base_url,
+                    activity_bus=self.activity_bus,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
@@ -227,6 +228,18 @@ class ChannelManager:
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
     
+    @staticmethod
+    def _activity_session_key(msg: OutboundMessage) -> str:
+        thread_id = (msg.metadata or {}).get("message_thread_id")
+        if thread_id:
+            return f"{msg.channel}:{msg.chat_id}:{thread_id}"
+        return f"{msg.channel}:{msg.chat_id}"
+
+    @staticmethod
+    def _should_skip_activity_broadcast(msg: OutboundMessage) -> bool:
+        meta = msg.metadata or {}
+        return msg.channel == "telegram" and bool(meta.get("_progress") or meta.get("_final"))
+
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
@@ -239,7 +252,7 @@ class ChannelManager:
                 )
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
-                if msg.channel != "webui" and self.activity_bus:
+                if msg.channel != "webui" and self.activity_bus and not self._should_skip_activity_broadcast(msg):
                     meta = msg.metadata or {}
                     if meta.get("_final"):
                         event_type = "done"
@@ -251,7 +264,7 @@ class ChannelManager:
                         event_type = "message"
                     event: dict[str, Any] = {
                         "type": event_type,
-                        "session_key": f"{msg.channel}:{msg.chat_id}",
+                        "session_key": self._activity_session_key(msg),
                         "channel": msg.channel,
                         "role": "assistant",
                         "content": msg.content,
