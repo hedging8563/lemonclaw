@@ -106,17 +106,24 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
     runtime, body = _extract_runtime_context(content or "")
     media: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
-    media_ids: dict[tuple[str, str], str] = {}
+    media_ids: dict[str, str] = {}
     media_counter = 0
 
     def register_media(path: str, hinted: str | None = None, label: str | None = None) -> str:
         nonlocal media_counter
-        key = (hinted or "", path)
-        if key in media_ids:
-            return media_ids[key]
+        if path in media_ids:
+            media_id = media_ids[path]
+            existing = next((item for item in media if item["id"] == media_id), None)
+            if existing is not None:
+                inferred = _infer_media_kind(path, hinted)
+                if existing.get("kind") == "file" and inferred != "file":
+                    existing["kind"] = inferred
+                if label and existing.get("filename") == _basename(path):
+                    existing["filename"] = label
+            return media_id
         media_counter += 1
         media_id = f"m{media_counter}"
-        media_ids[key] = media_id
+        media_ids[path] = media_id
         media.append({
             "id": media_id,
             "kind": _infer_media_kind(path, hinted),
@@ -143,16 +150,24 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
             media_path = (file_match.group(1) if file_match else payload).strip()
             label = file_match.group(2).strip() if file_match and file_match.group(2) else None
             media_id = register_media(media_path, kind, label)
-            blocks.append({"type": "media", "mediaId": media_id})
+            if not blocks or blocks[-1].get("type") != "media" or blocks[-1].get("mediaId") != media_id:
+                blocks.append({"type": "media", "mediaId": media_id})
         last_index = match.end()
 
     tail = body[last_index:].strip()
     if tail:
         blocks.append({"type": "markdown", "text": tail})
 
+    existing_media_ids = {
+        block.get("mediaId") for block in blocks
+        if isinstance(block, dict) and block.get("type") == "media"
+    }
     for path in raw_media or []:
         media_id = register_media(path)
+        if media_id in existing_media_ids:
+            continue
         blocks.append({"type": "media", "mediaId": media_id})
+        existing_media_ids.add(media_id)
 
     return media, blocks
 

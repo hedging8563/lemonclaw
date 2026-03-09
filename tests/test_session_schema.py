@@ -101,3 +101,18 @@ def test_serialize_ui_message_handles_multimodal_content_list() -> None:
     })
     assert 'Here is the analysis.' in msg['content'] and 'And more details.' in msg['content']
     assert any(block['type'] == 'markdown' and 'analysis' in block['text'] for block in msg['blocks'])
+
+
+def test_serialize_ui_message_dedupes_same_media_from_content_and_media_array() -> None:
+    path = '/home/lemonclaw/.lemonclaw/workspace/attachments/telegram_5693302436/01_AgACAgEAAxkBAAIC.jpg'
+    msg = serialize_ui_message({
+        'role': 'user',
+        'content': f'[image: {path} (AgACAgEAAxkBAAIC.jpg)]',
+        'media': [path],
+    })
+
+    assert len(msg['media']) == 1
+    media_blocks = [block for block in msg['blocks'] if block['type'] == 'media']
+    assert len(media_blocks) == 1
+    assert msg['media'][0]['path'] == path
+
