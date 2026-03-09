@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -394,4 +396,26 @@ async def test_split_video_uses_async_to_thread(monkeypatch: pytest.MonkeyPatch,
     segments = await TelegramChannel._split_video(str(source))
     assert segments
     assert calls
+
+
+
+def test_cleanup_split_tempdirs_only_removes_stale_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    stale = tmp_path / 'tg_split_old'
+    fresh = tmp_path / 'tg_split_new'
+    stale.mkdir()
+    fresh.mkdir()
+    (stale / 'part1.mp4').write_text('old', encoding='utf-8')
+    (fresh / 'part1.mp4').write_text('new', encoding='utf-8')
+
+    monkeypatch.setattr(tempfile, 'gettempdir', lambda: str(tmp_path))
+    now = time.time()
+    stale_mtime = now - (7 * 60 * 60)
+    fresh_mtime = now - 60
+    os.utime(stale, (stale_mtime, stale_mtime))
+    os.utime(fresh, (fresh_mtime, fresh_mtime))
+
+    TelegramChannel._cleanup_split_tempdirs()
+
+    assert not stale.exists()
+    assert fresh.exists()
 

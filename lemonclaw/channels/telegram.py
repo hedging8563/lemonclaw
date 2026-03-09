@@ -35,6 +35,7 @@ _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 # Target size per split segment (45MB, leave headroom)
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
 _TG_DRAFT_PREVIEW_CHARS = 4000
+_TG_SPLIT_STALE_MAX_AGE_S = 6 * 60 * 60
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -238,11 +239,16 @@ class TelegramChannel(BaseChannel):
 
 
     @staticmethod
-    def _cleanup_split_tempdirs() -> None:
+    def _cleanup_split_tempdirs(max_age_s: int = _TG_SPLIT_STALE_MAX_AGE_S) -> None:
         """Best-effort cleanup for stale tg_split_* directories from crashed runs."""
+        cutoff = time.time() - max_age_s
         tmp_root = Path(tempfile.gettempdir())
         for stale in tmp_root.glob('tg_split_*'):
             try:
+                if not stale.is_dir():
+                    continue
+                if stale.stat().st_mtime >= cutoff:
+                    continue
                 shutil.rmtree(stale, ignore_errors=True)
             except Exception:
                 pass
