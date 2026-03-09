@@ -20,13 +20,13 @@ if TYPE_CHECKING:
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
-    
+
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
     - Route outbound messages
     """
-    
+
     def __init__(self, config: Config, bus: MessageBus, activity_bus: ActivityBus | None = None):
         self.config = config
         self.bus = bus
@@ -42,7 +42,7 @@ class ChannelManager:
         for name, channel in self.channels.items():
             if self._channel_pairing_enabled(name):
                 channel.enable_auto_pairing(data_dir)
-    
+
     def _channel_pairing_enabled(self, channel_name: str) -> bool:
         if self.config.channels.auto_pairing:
             return True
@@ -53,7 +53,7 @@ class ChannelManager:
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
-        
+
         # Telegram channel
         if self.config.channels.telegram.enabled:
             try:
@@ -68,7 +68,7 @@ class ChannelManager:
                 logger.info("Telegram channel enabled")
             except ImportError as e:
                 logger.warning("Telegram channel not available: {}", e)
-        
+
         # WhatsApp channel
         if self.config.channels.whatsapp.enabled:
             try:
@@ -90,7 +90,7 @@ class ChannelManager:
                 logger.info("Discord channel enabled")
             except ImportError as e:
                 logger.warning("Discord channel not available: {}", e)
-        
+
         # Feishu channel
         if self.config.channels.feishu.enabled:
             try:
@@ -158,7 +158,7 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
-        
+
         # Matrix channel
         if self.config.channels.matrix.enabled:
             try:
@@ -181,7 +181,7 @@ class ChannelManager:
                 logger.info("WeCom channel enabled")
             except ImportError as e:
                 logger.warning("WeCom channel not available: {}", e)
-    
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
@@ -195,23 +195,23 @@ class ChannelManager:
         if not self.channels:
             logger.warning("No channels enabled")
             return
-        
+
         # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
-        
+
         # Start channels
         tasks = []
         for name, channel in self.channels.items():
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
-        
+
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
         logger.info("Stopping all channels...")
-        
+
         # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
@@ -219,7 +219,7 @@ class ChannelManager:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
-        
+
         # Stop all channels
         for name, channel in self.channels.items():
             try:
@@ -227,7 +227,7 @@ class ChannelManager:
                 logger.info("Stopped {} channel", name)
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
-    
+
     @staticmethod
     def _activity_session_key(msg: OutboundMessage) -> str:
         thread_id = (msg.metadata or {}).get("message_thread_id")
@@ -238,6 +238,8 @@ class ChannelManager:
     @staticmethod
     def _should_skip_activity_broadcast(msg: OutboundMessage) -> bool:
         meta = msg.metadata or {}
+        if meta.get("_thinking"):
+            return True
         return msg.channel == "telegram" and bool(meta.get("_progress") or meta.get("_final"))
 
     async def _dispatch_outbound(self) -> None:
@@ -300,11 +302,11 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
-    
+
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
         return self.channels.get(name)
-    
+
     def get_status(self) -> dict[str, Any]:
         """Get status of all channels."""
         return {
@@ -314,7 +316,7 @@ class ChannelManager:
             }
             for name, channel in self.channels.items()
         }
-    
+
     @property
     def enabled_channels(self) -> list[str]:
         """Get list of enabled channel names."""

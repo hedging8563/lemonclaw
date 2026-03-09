@@ -36,3 +36,14 @@ def test_telegram_progress_and_final_are_skipped_from_manager_broadcast() -> Non
     assert ChannelManager._should_skip_activity_broadcast(progress) is True
     assert ChannelManager._should_skip_activity_broadcast(final) is True
     assert ChannelManager._should_skip_activity_broadcast(regular) is False
+
+
+def test_thinking_is_skipped_from_manager_broadcast() -> None:
+    thinking = OutboundMessage(
+        channel="feishu",
+        chat_id="ou_xxx",
+        content="internal reasoning",
+        metadata={"_progress": True, "_thinking": True},
+    )
+
+    assert ChannelManager._should_skip_activity_broadcast(thinking) is True
