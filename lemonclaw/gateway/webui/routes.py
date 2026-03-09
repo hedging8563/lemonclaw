@@ -977,17 +977,31 @@ def get_webui_routes(
                     entries.append(block)
 
         # Also include today's log (timezone-aware staleness check)
-        today_log = ""
+        # Parse today.md into entries matching the same format as yesterday
+        today_entries: list[str] = []
         if _memory.today._file.exists():
             raw = _memory.today._read_raw()
             if raw:
                 first_line = raw.split("\n", 1)[0].strip()
                 if first_line.startswith(f"# {today_str}"):
-                    today_log = raw
+                    # Split by ## sections, each is one entry
+                    sections = re.split(r"(?=^## )", raw, flags=re.MULTILINE)
+                    for sec in sections:
+                        sec = sec.strip()
+                        if not sec or sec.startswith("# 20"):
+                            continue  # skip date header
+                        # Convert "## HH:MM — Title\n- detail" to plain text
+                        lines = sec.split("\n")
+                        title = lines[0].lstrip("# ").strip()
+                        details = [ln.lstrip("- ").strip() for ln in lines[1:] if ln.strip()]
+                        entry = f"[{today_str} {title}]" if " — " not in title else f"[{today_str} {title.split(' — ')[0]}] {title.split(' — ', 1)[1]}"
+                        if details:
+                            entry += "\n" + "\n".join(f"  - {d}" for d in details)
+                        today_entries.append(entry)
 
         resp = _json({
             "yesterday": entries,
-            "today": today_log,
+            "today": today_entries,
             "date": yesterday,
         })
         _maybe_refresh_cookie(request, resp)

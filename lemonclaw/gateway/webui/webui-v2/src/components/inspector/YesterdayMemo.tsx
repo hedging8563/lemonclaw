@@ -21,16 +21,13 @@ export function YesterdayMemo() {
       .catch(() => setLoading(false));
   }, []);
 
-  const hasContent = Boolean(memo && (memo.yesterday?.length || memo.today));
+  const hasContent = Boolean(memo && (memo.yesterday?.length || memo.today?.length));
   const contentLineEstimate = useMemo(() => {
     if (!hasContent) return 0;
-    const yesterdayLines = Array.isArray(memo.yesterday)
-      ? memo.yesterday.reduce(
-          (sum: number, item: string) => sum + Math.max(String(item || '').split('\n').length, 1),
-          0,
-        )
-      : 0;
-    const todayLines = memo.today ? String(memo.today).split('\n').length : 0;
+    const countLines = (arr: string[]) =>
+      arr.reduce((sum: number, item: string) => sum + Math.max(String(item || '').split('\n').length, 1), 0);
+    const yesterdayLines = Array.isArray(memo.yesterday) ? countLines(memo.yesterday) : 0;
+    const todayLines = Array.isArray(memo.today) ? countLines(memo.today) : 0;
     return yesterdayLines + todayLines;
   }, [hasContent, memo]);
 
@@ -86,10 +83,14 @@ export function YesterdayMemo() {
           </div>
         )}
 
-        {memo.today && (
+        {memo.today && memo.today.length > 0 && (
           <div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_today')}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{memo.today}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              {memo.today.map((item: string, i: number) => (
+                <div key={i} style={{ marginBottom: i < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>{item}</div>
+              ))}
+            </div>
           </div>
         )}
       </div>
