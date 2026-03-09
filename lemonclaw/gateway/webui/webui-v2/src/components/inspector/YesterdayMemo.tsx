@@ -78,9 +78,11 @@ export function YesterdayMemo() {
         {memo.yesterday && memo.yesterday.length > 0 && (
           <div style={{ marginBottom: memo.today ? '12px' : '0' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_yesterday')}</div>
-            <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55 }}>
-              {memo.yesterday.map((item: string, i: number) => <li key={i}>{item}</li>)}
-            </ul>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              {memo.yesterday.map((item: string, i: number) => (
+                <div key={i} style={{ marginBottom: i < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>{item}</div>
+              ))}
+            </div>
           </div>
         )}
 

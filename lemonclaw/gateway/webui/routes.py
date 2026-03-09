@@ -946,18 +946,44 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
-        from datetime import date, timedelta
-        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        entries = []
+        import re
+        from datetime import datetime, timedelta, timezone as tz
+        from zoneinfo import ZoneInfo
+
+        # Use configured timezone (container may be UTC)
+        tz_name = agent_loop.default_timezone
+        try:
+            zi = ZoneInfo(tz_name) if tz_name else None
+        except (KeyError, ValueError):
+            zi = None
+        now = datetime.now(zi or tz.utc)
+        yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        today_str = now.strftime("%Y-%m-%d")
+
+        entries: list[str] = []
         if _memory.history_file.exists():
             text = _memory.history_file.read_text(encoding="utf-8")
-            for entry in text.split("\n\n"):
-                entry = entry.strip()
-                if entry and yesterday in entry:
-                    entries.append(entry)
+            # HISTORY.md has two entry formats:
+            # 1. Archived today.md: "# YYYY-MM-DD\n## HH:MM — Title\n- detail\n\n## ..."
+            # 2. Consolidation: "[YYYY-MM-DD HH:MM] paragraph\n\n"
+            # Split by date headers (# YYYY-MM-DD or [YYYY-MM-DD) to get day-level blocks
+            date_pattern = re.compile(r"(?=^# \d{4}-\d{2}-\d{2}$|^\[\d{4}-\d{2}-\d{2})", re.MULTILINE)
+            blocks = date_pattern.split(text)
+            for block in blocks:
+                block = block.strip()
+                if not block:
+                    continue
+                if yesterday in block:
+                    entries.append(block)
 
-        # Also include today's log
-        today_log = _memory.today.read() or ""
+        # Also include today's log (timezone-aware staleness check)
+        today_log = ""
+        if _memory.today._file.exists():
+            raw = _memory.today._read_raw()
+            if raw:
+                first_line = raw.split("\n", 1)[0].strip()
+                if first_line.startswith(f"# {today_str}"):
+                    today_log = raw
 
         resp = _json({
             "yesterday": entries,
