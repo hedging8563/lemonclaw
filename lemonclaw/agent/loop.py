@@ -17,7 +17,13 @@ from lemonclaw.agent.locale import detect_lang, session_lang, t
 from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.cron import CronTool
-from lemonclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from lemonclaw.agent.tools.filesystem import (
+    EditFileTool,
+    ListDirTool,
+    ReadAttachmentTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from lemonclaw.agent.tools.glob import GlobTool
 from lemonclaw.agent.tools.grep import GrepTool
 from lemonclaw.agent.tools.message import MessageTool
@@ -27,11 +33,12 @@ from lemonclaw.agent.tools.spawn import SpawnTool
 from lemonclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
+from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 from lemonclaw.providers.base import LLMProvider
 from lemonclaw.providers.catalog import format_model_list, fuzzy_match
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
-from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+from lemonclaw.utils.attachments import rewrite_text_paths
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -179,7 +186,7 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+        for cls in (ReadFileTool, ReadAttachmentTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -268,6 +275,11 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    def _persist_inbound_media(self, session_key: str, content: str, media: list[str] | None) -> tuple[str, list[str]]:
+        """Copy inbound attachments into the session-native attachment directory."""
+        persisted_media, path_map = self.sessions.persist_attachments(session_key, media)
+        return rewrite_text_paths(content, path_map), persisted_media
 
     async def _run_agent_loop(
         self,
@@ -727,21 +739,23 @@ class AgentLoop:
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or t("bg_task_done", session_lang(session)))
 
+        key = session_key or msg.session_key
+        if msg.media:
+            msg.content, msg.media = self._persist_inbound_media(key, msg.content, list(msg.media or []))
+
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        # Broadcast inbound user message to Activity Feed
         if msg.channel != "webui" and self.activity_bus:
             await self.activity_bus.broadcast({
                 "type": "message",
-                "session_key": msg.session_key,
+                "session_key": key,
                 "channel": msg.channel,
                 "role": "user",
                 "content": msg.content,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
-        key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
         # Auto-detect language from first message if not set
@@ -1040,24 +1054,20 @@ class AgentLoop:
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip runtime context prefix — save only the user's actual message.
-                    # build_messages() stores original text in _original_text key.
-                    original = m.get("_original_text")
-                    if original:
-                        entry["content"] = original
-                        entry.pop("_original_text", None)
-                    else:
-                        _media_injected = True  # skip this msg, don't inject to later ones
-                        continue
-                if isinstance(content, list):
+                original = m.get("_original_text")
+                if isinstance(original, str):
+                    entry["content"] = original
+                    entry.pop("_original_text", None)
+                elif isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                    _media_injected = True
+                    continue
+                elif isinstance(content, list):
                     entry["content"] = [
                         {"type": "text", "text": "[image]"} if (
                             c.get("type") == "image_url"
                             and c.get("image_url", {}).get("url", "").startswith("data:image/")
                         ) else c for c in content
                     ]
-                # Inject original media paths (lost during base64 conversion)
                 if not _media_injected and turn_media:
                     entry["media"] = turn_media
                     _media_injected = True

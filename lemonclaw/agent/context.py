@@ -1,16 +1,20 @@
 """Context builder for assembling agent prompts."""
 
 import base64
-import mimetypes
 import platform
 import time
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from lemonclaw.agent.memory import MemoryStore
 from lemonclaw.agent.skills import SkillsLoader
+from lemonclaw.utils.attachments import (
+    attachment_metadata,
+    attachment_trigger_text,
+    format_attachment_inventory,
+)
 
 
 class ContextBuilder:
@@ -25,7 +29,7 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=disabled_skills)
         self._triggered_skills: list[str] = []
-    
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
@@ -77,13 +81,13 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
-    
+
     def _get_identity(self) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+
         return f"""# LemonClaw 🍋
 
 You are LemonClaw, a helpful AI assistant powered by LemonData.
@@ -125,19 +129,19 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
-    
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
-        
+
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-        
+
         return "\n\n".join(parts) if parts else ""
-    
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -161,14 +165,19 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         prompt so the LLM has processing guidance without needing to read
         SKILL.md manually.
         """
-        # Auto-trigger: match skills by keywords in user message (reset each turn)
-        self._triggered_skills = self.skills.match_skills(current_message)
+        # Auto-trigger: match skills by keywords in user message and attachment names.
+        trigger_text = current_message
+        if media:
+            extra_trigger_text = attachment_trigger_text(media)
+            if extra_trigger_text:
+                trigger_text = f"{current_message}\n{extra_trigger_text}"
+        self._triggered_skills = self.skills.match_skills(trigger_text)
 
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
 
         # Keyword trigger: match LTM entity cards against user message
-        from lemonclaw.memory.trigger import MemoryTrigger
         from lemonclaw.memory.reflect import ProceduralMemory
+        from lemonclaw.memory.trigger import MemoryTrigger
         matched_cards = self.memory.trigger.match(current_message)
         memory_ctx = MemoryTrigger.format_for_context(matched_cards)
 
@@ -193,10 +202,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             if rules_ctx:
                 text_prefix += "\n\n" + rules_ctx
             user_content = [{"type": "text", "text": text_prefix}, *user_content]
-        user_msg: dict[str, Any] = {"role": "user", "content": user_content}
-        # Preserve original user text so _save_turn can strip runtime context
-        if isinstance(user_content, str) and user_content.startswith(self._RUNTIME_CONTEXT_TAG):
-            user_msg["_original_text"] = current_message
+        user_msg: dict[str, Any] = {"role": "user", "content": user_content, "_original_text": current_message}
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
@@ -204,23 +210,34 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with attachment inventory and optional image blocks."""
         if not media:
             return text
-        
-        images = []
+
+        inventory = format_attachment_inventory(media)
+        inventory_note = (
+            inventory + "\nUse read_attachment for spreadsheets, text files, archives, and other non-image files.\n\n"
+            if inventory else ""
+        )
+        text_block = inventory_note + text
+
+        images: list[dict[str, Any]] = []
         for path in media:
-            p = Path(path)
-            mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+            meta = attachment_metadata(path)
+            resolved = Path(str(meta.get("path") or path))
+            mime = meta.get("mime")
+            if not meta.get("exists") or not mime or not str(mime).startswith("image/"):
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
+            try:
+                b64 = base64.b64encode(resolved.read_bytes()).decode()
+            except OSError:
+                continue
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
+
         if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
-    
+            return text_block
+        return [{"type": "text", "text": text_block}, *images]
+
     def add_tool_result(
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
@@ -228,7 +245,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         """Add a tool result to the message list."""
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
-    
+
     def add_assistant_message(
         self, messages: list[dict[str, Any]],
         content: str | None,

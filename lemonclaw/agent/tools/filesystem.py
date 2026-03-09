@@ -1,10 +1,11 @@
-"""File system tools: read, write, edit."""
+"""File system tools: read, inspect attachments, write, edit."""
 
 import difflib
 from pathlib import Path
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
+from lemonclaw.utils.attachments import inspect_attachment
 
 
 def _resolve_path(path: str, workspace: Path | None = None) -> Path:
@@ -25,7 +26,7 @@ class ReadFileTool(Tool):
     @property
     def name(self) -> str:
         return "read_file"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -33,7 +34,7 @@ class ReadFileTool(Tool):
             "Returns text content up to 512KB (truncated for larger files). "
             "Use this to inspect code, configs, and logs."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -46,7 +47,7 @@ class ReadFileTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     _MAX_READ_BYTES = 512 * 1024  # 512KB
 
     async def execute(self, path: str, **kwargs: Any) -> str:
@@ -69,6 +70,45 @@ class ReadFileTool(Tool):
             return f"Error reading file: {str(e)}"
 
 
+class ReadAttachmentTool(Tool):
+    """Tool to inspect common attachment formats."""
+
+    def __init__(self, workspace: Path | None = None):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str:
+        return "read_attachment"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Inspect an attachment by path. Supports text files, CSV/TSV, XLSX workbook previews, "
+            "and ZIP archive listings. For arbitrary binary files, returns metadata and guidance."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The attachment path to inspect"},
+                "max_rows": {"type": "integer", "description": "Preview rows for CSV/XLSX", "minimum": 1, "maximum": 100},
+                "max_chars": {"type": "integer", "description": "Maximum characters to return", "minimum": 200, "maximum": 50000},
+            },
+            "required": ["path"],
+        }
+
+    async def execute(self, path: str, max_rows: int = 20, max_chars: int = 12000, **kwargs: Any) -> str:
+        try:
+            file_path = _resolve_path(path, self._workspace)
+            return inspect_attachment(str(file_path), max_rows=max_rows, max_chars=max_chars)
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error reading attachment: {str(e)}"
+
+
 class WriteFileTool(Tool):
     """Tool to write content to a file."""
 
@@ -78,14 +118,14 @@ class WriteFileTool(Tool):
     @property
     def name(self) -> str:
         return "write_file"
-    
+
     @property
     def description(self) -> str:
         return (
             "Write content to a file, creating parent directories if needed. "
             "Overwrites existing content entirely. For partial edits, use edit_file instead."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -102,7 +142,7 @@ class WriteFileTool(Tool):
             },
             "required": ["path", "content"]
         }
-    
+
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace)
@@ -124,7 +164,7 @@ class EditFileTool(Tool):
     @property
     def name(self) -> str:
         return "edit_file"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -132,7 +172,7 @@ class EditFileTool(Tool):
             "(including whitespace and indentation). If old_text appears multiple times, "
             "provide more surrounding context to make it unique. Shows a diff on mismatch."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -153,7 +193,7 @@ class EditFileTool(Tool):
             },
             "required": ["path", "old_text", "new_text"]
         }
-    
+
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace)
@@ -211,14 +251,14 @@ class ListDirTool(Tool):
     @property
     def name(self) -> str:
         return "list_dir"
-    
+
     @property
     def description(self) -> str:
         return (
             "List files and directories at the given path. "
             "For recursive file search by pattern, use the glob tool instead."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -231,7 +271,7 @@ class ListDirTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             dir_path = _resolve_path(path, self._workspace)

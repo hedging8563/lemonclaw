@@ -82,10 +82,11 @@ def test_session_get_history_remains_llm_friendly_with_native_blocks(tmp_path: P
     }))
 
     history = session.get_history()
-    assert history == [
-        {'role': 'user', 'content': '先看图片'},
-        {'role': 'assistant', 'content': '好的'},
-    ]
+    assert history[0]['role'] == 'user'
+    assert history[0]['content'].startswith('先看图片')
+    assert '[Attached files]' in history[0]['content']
+    assert 'demo.jpg' in history[0]['content']
+    assert history[1] == {'role': 'assistant', 'content': '好的'}
 
 
 def test_serialize_ui_message_handles_multimodal_content_list() -> None:
