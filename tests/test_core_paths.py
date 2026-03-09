@@ -339,3 +339,42 @@ class TestMemorySearchUpsert:
                 idx.upsert_entity("test", "body", AsyncMock())
             )
             assert result is False
+
+
+@pytest.mark.asyncio
+async def test_base_channel_rate_limits_repeated_messages():
+    from lemonclaw.channels.base import BaseChannel
+
+    class _Bus:
+        def __init__(self):
+            self.inbound = []
+
+        async def publish_inbound(self, msg):
+            self.inbound.append(msg)
+
+        async def publish_outbound(self, msg):
+            return None
+
+    class _Cfg:
+        allow_from = ['*']
+
+    class _Channel:
+        def __init__(self):
+            self.config = _Cfg()
+            self.name = 'test'
+            self.bus = _Bus()
+            self._pairing = None
+            self._rate_limit_window_s = 30.0
+            self._rate_limit_max_messages = 3
+            self._rate_limit_hits = {}
+
+        is_allowed = BaseChannel.is_allowed
+        _is_rate_limited = BaseChannel._is_rate_limited
+        _run_pairing_flow = BaseChannel._run_pairing_flow
+        _handle_message = BaseChannel._handle_message
+
+    ch = _Channel()
+    for i in range(5):
+        await ch._handle_message('u1', 'c1', f'msg-{i}')
+
+    assert len(ch.bus.inbound) == 3

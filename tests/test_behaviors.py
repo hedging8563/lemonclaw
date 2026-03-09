@@ -244,6 +244,20 @@ class TestAPIKeySanitization:
         result = _sanitize_error(err)
         assert result == "Connection timeout after 30s"
 
+    def test_sanitize_slack_token(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception('bot token xoxb-1234567890-secret-value leaked')
+        result = _sanitize_error(err)
+        assert 'xoxb-1234' not in result
+        assert '[REDACTED]' in result
+
+    def test_sanitize_jwt_token(self):
+        from lemonclaw.providers.litellm_provider import _sanitize_error
+        err = Exception('Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc.def failed')
+        result = _sanitize_error(err)
+        assert 'eyJhbGci' not in result
+        assert '[REDACTED]' in result
+
 
 # ── 2c-orig. Token Tracking (P2-A) ──
 
@@ -581,6 +595,26 @@ class TestWebUIAuth:
         future = time_mod.time() + IDLE_TIMEOUT + 60
         with mock_patch("lemonclaw.gateway.webui.auth.time.time", return_value=future):
             valid, _ = verify_session_cookie(cookie, "tok")
+        assert valid is False
+
+
+    def test_cookie_rejects_future_created_timestamp(self):
+        import base64
+        from lemonclaw.gateway.webui.auth import _compute_hmac, verify_session_cookie
+        future_created = '9999999999'
+        last = '9999999999'
+        nonce = 'abc123'
+        payload = f"{future_created}:{last}:{nonce}"
+        cookie = base64.urlsafe_b64encode(f"{payload}:{_compute_hmac(payload, 'tok')}".encode()).decode()
+        valid, _ = verify_session_cookie(cookie, 'tok')
+        assert valid is False
+
+    def test_cookie_rejects_last_before_created(self):
+        import base64
+        from lemonclaw.gateway.webui.auth import _compute_hmac, verify_session_cookie
+        payload = '200:100:abc123'
+        cookie = base64.urlsafe_b64encode(f"{payload}:{_compute_hmac(payload, 'tok')}".encode()).decode()
+        valid, _ = verify_session_cookie(cookie, 'tok')
         assert valid is False
 
 

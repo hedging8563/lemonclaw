@@ -1,7 +1,9 @@
 """Base channel interface for chat platforms."""
 
+from collections import deque
 from abc import ABC, abstractmethod
 from pathlib import Path
+import time
 from typing import Any
 
 from loguru import logger
@@ -32,6 +34,9 @@ class BaseChannel(ABC):
         self.bus = bus
         self._running = False
         self._pairing: "AutoPairing | None" = None
+        self._rate_limit_window_s = 30.0
+        self._rate_limit_max_messages = 12
+        self._rate_limit_hits: dict[str, deque[float]] = {}
     
     @abstractmethod
     async def start(self) -> None:
@@ -95,6 +100,18 @@ class BaseChannel(ABC):
                     return True
         return False
     
+    def _is_rate_limited(self, sender_id: str) -> bool:
+        now = time.monotonic()
+        window_start = now - self._rate_limit_window_s
+        dq = self._rate_limit_hits.setdefault(str(sender_id), deque())
+        while dq and dq[0] < window_start:
+            dq.popleft()
+        if len(dq) >= self._rate_limit_max_messages:
+            logger.warning("Rate limit exceeded for sender {} on channel {}", sender_id, self.name)
+            return True
+        dq.append(now)
+        return False
+
     def enable_auto_pairing(self, data_dir: Path) -> None:
         """Enable auto-pairing for this channel."""
         from lemonclaw.channels.auto_pairing import AutoPairing
@@ -180,6 +197,10 @@ class BaseChannel(ABC):
         This method checks permissions (static allow_from + auto-pairing)
         and forwards to the bus.
         """
+        stripped = content.strip()
+        if not stripped.startswith(("/approve ", "/deny ")) and self._is_rate_limited(str(sender_id)):
+            return
+
         if not await self._run_pairing_flow(
             sender_id=str(sender_id),
             notify_target=str(chat_id),

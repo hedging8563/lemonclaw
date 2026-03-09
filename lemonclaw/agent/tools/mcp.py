@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +13,17 @@ from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.registry import ToolRegistry
 
 
+@dataclass
+class _MCPBinding:
+    session: Any
+    reconnect: Any
+
+
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a lemonclaw Tool."""
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
-        self._session = session
+    def __init__(self, binding: _MCPBinding, server_name: str, tool_def, tool_timeout: int = 30):
+        self._binding = binding
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
@@ -39,11 +46,15 @@ class MCPToolWrapper(Tool):
         from mcp import types
         try:
             result = await asyncio.wait_for(
-                self._session.call_tool(self._original_name, arguments=kwargs),
+                self._binding.session.call_tool(self._original_name, arguments=kwargs),
                 timeout=self._tool_timeout,
             )
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
+            try:
+                await self._binding.reconnect()
+            except Exception as reconnect_err:
+                logger.warning("MCP tool '{}': reconnect after timeout failed: {}", self._name, reconnect_err)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
         parts = []
         for block in result.content:
@@ -67,42 +78,61 @@ async def connect_mcp_servers(
 
     for name, cfg in mcp_servers.items():
         try:
-            if cfg.command:
-                params = StdioServerParameters(
-                    command=cfg.command,
-                    args=cfg.args,
-                    env=cfg.env or None,
-                    cwd=str(workspace) if workspace else None,
-                )
-                read, write = await stack.enter_async_context(stdio_client(params))
-            elif cfg.url:
-                from mcp.client.streamable_http import streamable_http_client
-                # Always provide an explicit httpx client so MCP HTTP transport does not
-                # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
-                # Use a generous but finite timeout to prevent infinite hangs.
-                http_client = await stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        follow_redirects=True,
-                        timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+            async def _open_session():
+                if cfg.command:
+                    params = StdioServerParameters(
+                        command=cfg.command,
+                        args=cfg.args,
+                        env=cfg.env or None,
+                        cwd=str(workspace) if workspace else None,
                     )
-                )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
-            else:
-                logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    read, write = await stack.enter_async_context(stdio_client(params))
+                elif cfg.url:
+                    from mcp.client.streamable_http import streamable_http_client
+                    http_client = await stack.enter_async_context(
+                        httpx.AsyncClient(
+                            headers=cfg.headers or None,
+                            follow_redirects=True,
+                            timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+                        )
+                    )
+                    read, write, _ = await stack.enter_async_context(
+                        streamable_http_client(cfg.url, http_client=http_client)
+                    )
+                else:
+                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    return None
+
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+                return session
+
+            session = await _open_session()
+            if session is None:
                 continue
 
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
+            binding = _MCPBinding(session=session, reconnect=None)
+
+            async def _reconnect(binding: _MCPBinding = binding):
+                close_fn = getattr(binding.session, 'aclose', None) or getattr(binding.session, 'close', None)
+                if close_fn:
+                    maybe = close_fn()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                new_session = await _open_session()
+                if new_session is None:
+                    raise RuntimeError(f"MCP server '{name}' is no longer available")
+                binding.session = new_session
+
+            binding.reconnect = _reconnect
 
             tools = await session.list_tools()
             for tool_def in tools.tools:
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(binding, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
             logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)
+

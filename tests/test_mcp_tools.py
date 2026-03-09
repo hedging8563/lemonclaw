@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
 
@@ -72,3 +73,32 @@ async def test_connect_mcp_servers_uses_workspace_cwd(monkeypatch: pytest.Monkey
 
 def test_exec_settings_require_restart() -> None:
     assert _RESTART_FIELDS.match("tools.exec")
+
+
+@pytest.mark.asyncio
+async def test_mcp_timeout_reconnects_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
+
+    class SlowSession:
+        def __init__(self):
+            self.closed = False
+
+        async def call_tool(self, name, arguments=None):
+            await asyncio.sleep(0.05)
+
+        async def aclose(self):
+            self.closed = True
+
+    session = SlowSession()
+    reconnected = []
+
+    async def _reconnect():
+        reconnected.append(True)
+
+    binding = _MCPBinding(session=session, reconnect=_reconnect)
+    tool_def = SimpleNamespace(name='ping', description='Ping', inputSchema={'type': 'object', 'properties': {}})
+    wrapper = MCPToolWrapper(binding, 'filesystem', tool_def, tool_timeout=0.01)
+
+    result = await wrapper.execute()
+    assert 'timed out' in result
+    assert reconnected == [True]

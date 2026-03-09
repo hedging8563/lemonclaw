@@ -21,6 +21,7 @@ import time
 
 IDLE_TIMEOUT = 4 * 60 * 60  # 4 hours
 ABSOLUTE_TIMEOUT = 7 * 24 * 60 * 60  # 7 days
+FUTURE_SKEW_TOLERANCE = 5 * 60  # 5 minutes
 COOKIE_NAME = "lc_session"
 
 
@@ -68,13 +69,21 @@ def verify_session_cookie(
 
         now = int(time.time())
 
-        # Check absolute timeout
+        # Check timestamp sanity
         created = int(created_ts)
+        last = int(last_ts)
+        if created > now + FUTURE_SKEW_TOLERANCE:
+            return False, None
+        if last > now + FUTURE_SKEW_TOLERANCE:
+            return False, None
+        if last < created:
+            return False, None
+
+        # Check absolute timeout
         if now - created > ABSOLUTE_TIMEOUT:
             return False, None
 
         # Check idle timeout
-        last = int(last_ts)
         if now - last > IDLE_TIMEOUT:
             return False, None
 

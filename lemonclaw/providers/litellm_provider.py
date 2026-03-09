@@ -30,14 +30,25 @@ _SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "pa
 def _sanitize_error(error: Exception) -> str:
     """Return error message with sensitive values redacted."""
     msg = str(error)
-    # Redact anything that looks like an API key (sk-xxx, key-xxx, long hex strings)
     import re
-    # Redact Bearer tokens
-    msg = re.sub(r'Bearer\s+\S+', 'Bearer [REDACTED]', msg)
-    # Redact common API key patterns (sk-..., key-..., etc.)
-    msg = re.sub(r'\b(sk-|key-|api-)[A-Za-z0-9_-]{8,}\b', '[REDACTED]', msg)
-    # Redact long hex strings (32+ chars, likely tokens)
+
+    # Authorization header values / Bearer tokens
+    msg = re.sub(r'Bearer\s+[^\s,;]+', 'Bearer [REDACTED]', msg, flags=re.I)
+    msg = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)([^\"'\s,;]+)", r'\1[REDACTED]', msg)
+
+    # Structured key=value style leaks for common credential fields
+    msg = re.sub(r"(?i)((?:api[_-]?key|token|secret|password)[\"']?\s*[:=]\s*[\"']?)([^\"'\s,;]+)", r'\1[REDACTED]', msg)
+
+    # Common provider token prefixes
+    msg = re.sub(r'\b(?:sk|key|api|xoxb|xapp|ghp|gho|ghu|ghs|github_pat|sk-or)-[A-Za-z0-9._-]{8,}\b', '[REDACTED]', msg)
+
+    # JWT-like tokens
+    msg = re.sub(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b', '[REDACTED]', msg)
+
+    # Long hex or base64url-ish random strings
     msg = re.sub(r'\b[0-9a-fA-F]{32,}\b', '[REDACTED]', msg)
+    msg = re.sub(r'\b[A-Za-z0-9_-]{40,}\b', '[REDACTED]', msg)
+
     return msg
 
 
