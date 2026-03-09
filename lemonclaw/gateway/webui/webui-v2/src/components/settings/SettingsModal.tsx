@@ -499,6 +499,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const help = getFieldHelp(fullPath);
       const commonLabel = <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>;
       const helpText = help ? <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{help}</div> : null;
+
+      // Auto-generated readonly fields with copy button (Feishu encrypt_key, verification_token)
+      if ((k === 'encrypt_key' || k === 'verification_token') && path.includes('feishu')) {
+        const val = String(v ?? '');
+        const fieldLabel = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
+        const feishuTarget = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{fieldLabel}</label>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>
+              {t('feishu_token_help').replace('{target}', feishuTarget)}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input type="text" readOnly value={val} style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', opacity: 0.8 }} />
+              <button
+                onClick={() => { navigator.clipboard.writeText(val); }}
+                style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--accent)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                {t('copy')}
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       if (fullPath === 'agents.defaults.system_prompt') {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -230,6 +231,31 @@ def get_settings_routes(
         # Remove platform-level fields that users shouldn't see/edit
         data.pop("lemondata", None)
         data.pop("gateway", None)
+
+        # Auto-generate Feishu encrypt_key and verification_token if empty
+        feishu_cfg = data.get("channels", {}).get("feishu", {})
+        feishu_generated = False
+        if isinstance(feishu_cfg, dict):
+            if not feishu_cfg.get("encrypt_key"):
+                feishu_cfg["encrypt_key"] = secrets.token_hex(16)
+                feishu_generated = True
+            if not feishu_cfg.get("verification_token"):
+                feishu_cfg["verification_token"] = secrets.token_hex(16)
+                feishu_generated = True
+        if feishu_generated:
+            # Persist generated values to config.json
+            try:
+                from lemonclaw.config.loader import load_config, save_config
+                from lemonclaw.config.schema import Config
+                cfg = load_config(config_path)
+                cfg_data = cfg.model_dump(by_alias=False)
+                cfg_data.setdefault("channels", {}).setdefault("feishu", {}).update({
+                    "encrypt_key": feishu_cfg["encrypt_key"],
+                    "verification_token": feishu_cfg["verification_token"],
+                })
+                save_config(Config.model_validate(cfg_data), config_path)
+            except Exception as exc:
+                logger.warning("Failed to persist auto-generated Feishu tokens: {}", exc)
 
         # For env-injected LemonData providers: if config.json has no api_key
         # but env var API_KEY is set, show a placeholder so users know keys are active.
