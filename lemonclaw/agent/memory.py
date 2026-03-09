@@ -85,6 +85,7 @@ class MemoryStore:
         # Bionic memory layers
         self.search_index = MemorySearchIndex(self.memory_dir)
         self.entities = EntityStore(self.memory_dir, on_write=self._on_entity_write)
+        self.entities.init_defaults()
         self.today = TodayLog(self.memory_dir)
         self.trigger = MemoryTrigger(self.entities, search_index=self.search_index)
         self.procedural = ProceduralMemory(self.memory_dir)

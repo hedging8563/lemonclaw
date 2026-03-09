@@ -707,3 +707,11 @@ def test_memory_cron_is_memory_event():
     assert is_memory_event("memory:monthly_cleanup")
     assert not is_memory_event("some:other:event")
     assert not is_memory_event("")
+
+
+def test_memory_store_auto_initializes_default_entities(tmp_path):
+    from lemonclaw.agent.memory import MemoryStore
+    from lemonclaw.memory.entities import DEFAULT_CARDS
+
+    store = MemoryStore(tmp_path)
+    assert len(store.entities.list_cards()) == len(DEFAULT_CARDS)
