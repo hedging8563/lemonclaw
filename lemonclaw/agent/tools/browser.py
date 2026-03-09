@@ -337,6 +337,13 @@ class BrowserTool(Tool):
                 )
                 await asyncio.wait_for(process.communicate(), timeout=10.0)
                 logger.info("browser [{}]: session closed", session_name)
+            except asyncio.TimeoutError:
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except Exception:
+                    pass
+                logger.debug("browser [{}]: cleanup timed out; process killed", session_name)
             except Exception as e:
                 logger.debug("browser [{}]: cleanup error (non-fatal): {}", session_name, e)
         self._active_sessions.clear()

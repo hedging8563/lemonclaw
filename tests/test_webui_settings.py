@@ -132,3 +132,34 @@ def test_feishu_settings_returns_unmasked_subscription_tokens(tmp_path):
     assert settings['channels']['feishu']['encrypt_key'] == '39de1234567890abcdef79c7'
     assert settings['channels']['feishu']['verification_token'] == '95aa1234567890abcdefefdb'
 
+
+
+def test_install_skill_rejects_non_allowlisted_hosts(tmp_path):
+    from types import SimpleNamespace
+
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+    fake_agent = SimpleNamespace(context=SimpleNamespace(skills=SimpleNamespace(workspace_skills=tmp_path / 'skills')))
+
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=fake_agent)
+    client = TestClient(app)
+    resp = client.post('/api/settings/skills', json={'url': 'https://127.0.0.1:5000/owner/repo.git'})
+    assert resp.status_code == 400
+    assert 'Only ' in resp.json()['error']
+
+
+def test_feishu_tokens_are_initialized_before_first_get(tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+
+    from lemonclaw.config.loader import load_config
+    cfg = load_config(config_path)
+    assert cfg.channels.feishu.encrypt_key
+    assert cfg.channels.feishu.verification_token
+
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+

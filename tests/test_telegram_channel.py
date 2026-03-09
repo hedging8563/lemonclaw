@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -300,7 +302,7 @@ async def test_draft_preview_is_truncated_to_4096_and_draft_id_is_nonzero(monkey
     )
 
     for call in bot.send_message_draft.await_args_list:
-        assert len(call.kwargs["text"]) <= 4096
+        assert len(call.kwargs["text"]) <= 4000
         assert call.kwargs["draft_id"] == 1
 
 
@@ -370,3 +372,26 @@ async def test_draft_and_final_propagate_message_thread_id_to_telegram_and_activ
     assert bot.send_message.await_args.kwargs["message_thread_id"] == 456
     events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
     assert all(event["session_key"] == "telegram:-100123:456" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_split_video_uses_async_to_thread(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    calls: list[list[str]] = []
+    source = tmp_path / 'clip.mp4'
+    source.write_bytes(b'x' * (60 * 1024 * 1024))
+
+    async def fake_to_thread(func, *args, **kwargs):
+        cmd = args[0]
+        if cmd[0] == 'ffprobe':
+            return SimpleNamespace(returncode=0, stdout='12.0\n')
+        out_path = cmd[-1]
+        Path(out_path).write_bytes(b'segment')
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+    monkeypatch.setattr(asyncio, 'to_thread', fake_to_thread)
+
+    segments = await TelegramChannel._split_video(str(source))
+    assert segments
+    assert calls
+

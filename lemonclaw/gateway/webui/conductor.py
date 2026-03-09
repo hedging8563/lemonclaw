@@ -27,7 +27,8 @@ def get_conductor_routes(
         if not auth_token:
             return True
         cookie = request.cookies.get(COOKIE_NAME, "")
-        return verify_session_cookie(cookie, auth_token)
+        valid, _ = verify_session_cookie(cookie, auth_token)
+        return valid
 
     async def api_agents(request: Request) -> JSONResponse:
         if not _check_auth(request):

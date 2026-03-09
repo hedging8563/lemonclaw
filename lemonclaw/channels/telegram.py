@@ -10,20 +10,30 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
+
 from loguru import logger
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyParameters
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.utils import split_message as _split_message_impl
 from lemonclaw.config.schema import TelegramConfig
 
 # Telegram Bot API file size limit (50MB)
 _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 # Target size per split segment (45MB, leave headroom)
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
+_TG_DRAFT_PREVIEW_CHARS = 4000
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -32,21 +42,21 @@ def _markdown_to_telegram_html(text: str) -> str:
     """
     if not text:
         return ""
-    
+
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
-    
+
     text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
-    
+
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
-    
+
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
     # 3. Extract and protect markdown links (before HTML escaping)
@@ -95,11 +105,8 @@ def _markdown_to_telegram_html(text: str) -> str:
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
-    
+
     return text
-
-
-from lemonclaw.channels.utils import split_message as _split_message_impl
 
 
 def _split_message(content: str, max_len: int = 4000) -> list[str]:
@@ -109,12 +116,12 @@ def _split_message(content: str, max_len: int = 4000) -> list[str]:
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
-    
+
     Simple and reliable - no webhook/public IP needed.
     """
-    
+
     name = "telegram"
-    
+
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
@@ -123,7 +130,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("model", "List or switch AI models"),
         BotCommand("help", "Show available commands"),
     ]
-    
+
     def __init__(
         self,
         config: TelegramConfig,
@@ -144,7 +151,7 @@ class TelegramChannel(BaseChannel):
         self._seen_update_ids: set[int] = set()  # Dedup Telegram updates
         self._seen_update_ids_max = 500
         self._activity_bus = activity_bus
-    
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -152,7 +159,7 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
-        
+
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
         builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
@@ -160,7 +167,7 @@ class TelegramChannel(BaseChannel):
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
-        
+
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
@@ -170,42 +177,42 @@ class TelegramChannel(BaseChannel):
         # Inline keyboard callback handler (for /model buttons)
         self._app.add_handler(CallbackQueryHandler(self._on_model_callback, pattern=r"^model:"))
         self._app.add_handler(CallbackQueryHandler(self._on_noop_callback, pattern=r"^noop$"))
-        
+
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
-                & ~filters.COMMAND, 
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                & ~filters.COMMAND,
                 self._on_message
             )
         )
-        
+
         logger.info("Starting Telegram bot (polling mode)...")
-        
+
         # Initialize and start polling
         await self._app.initialize()
         await self._app.start()
-        
+
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
         logger.info("Telegram bot @{} connected", bot_info.username)
-        
+
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
-        
+
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
-        
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
-    
+
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
@@ -225,7 +232,7 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
-    
+
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
@@ -241,10 +248,11 @@ class TelegramChannel(BaseChannel):
         return "document"
 
     @staticmethod
-    def _get_video_duration(path: str) -> float | None:
-        """Get video duration in seconds using ffprobe."""
+    async def _get_video_duration(path: str) -> float | None:
+        """Get video duration in seconds using ffprobe without blocking the event loop."""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
                  "-of", "default=noprint_wrappers=1:nokey=1", path],
                 capture_output=True, text=True, timeout=10,
@@ -254,13 +262,13 @@ class TelegramChannel(BaseChannel):
             return None
 
     @staticmethod
-    def _split_video(path: str, target_bytes: int = _TG_SPLIT_TARGET_BYTES) -> list[str]:
+    async def _split_video(path: str, target_bytes: int = _TG_SPLIT_TARGET_BYTES) -> list[str]:
         """Split a video into segments that fit within Telegram's file size limit.
 
         Returns a list of file paths for the segments, or an empty list on failure.
         """
         file_size = os.path.getsize(path)
-        duration = TelegramChannel._get_video_duration(path)
+        duration = await TelegramChannel._get_video_duration(path)
         if not duration or duration <= 0:
             logger.warning("Cannot determine video duration for {}", path)
             return []
@@ -283,7 +291,7 @@ class TelegramChannel(BaseChannel):
                     "-t", str(segment_duration), "-c", "copy",
                     "-avoid_negative_ts", "make_zero", out_path,
                 ]
-                result = subprocess.run(cmd, capture_output=True, timeout=120)
+                result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, timeout=120)
                 if result.returncode != 0 or not os.path.exists(out_path):
                     logger.error("ffmpeg split failed for segment {}", i + 1)
                     shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -416,7 +424,7 @@ class TelegramChannel(BaseChannel):
             self._stop_typing(msg.chat_id)
             return
 
-        preview_text = text[:4096]
+        preview_text = text[:_TG_DRAFT_PREVIEW_CHARS]
         draft_id = int(time.time() * 1000) % (2**31) or 1
 
         self._stop_typing(msg.chat_id)
@@ -426,7 +434,7 @@ class TelegramChannel(BaseChannel):
                 step = max(len(preview_text) // 8, 40)
                 first_event = True
                 for i in range(step, len(preview_text), step):
-                    partial = preview_text[: min(i, 4096)]
+                    partial = preview_text[: min(i, _TG_DRAFT_PREVIEW_CHARS)]
                     await self._app.bot.send_message_draft(
                         chat_id=chat_id,
                         draft_id=draft_id,
@@ -527,7 +535,7 @@ class TelegramChannel(BaseChannel):
                 if file_size > _TG_MAX_FILE_BYTES and media_type in ("video", "audio"):
                     filename = os.path.basename(media_path)
                     logger.info("File {} is {:.1f}MB, splitting for Telegram", filename, file_size / 1024 / 1024)
-                    segments = self._split_video(media_path)
+                    segments = await self._split_video(media_path)
                     if segments:
                         tmp_dir = os.path.dirname(segments[0])
                         try:
@@ -683,11 +691,11 @@ class TelegramChannel(BaseChannel):
         """Build a compact inline keyboard with model buttons grouped by tier."""
         from lemonclaw.providers.catalog import get_model_tiers
 
-        TIER_EMOJI = {"Flagship": "👑", "Standard": "⚡", "Economy": "💡", "Specialist": "🔬"}
+        tier_emoji = {"Flagship": "👑", "Standard": "⚡", "Economy": "💡", "Specialist": "🔬"}
 
         buttons: list[list[InlineKeyboardButton]] = []
         for tier_label, models in get_model_tiers():
-            emoji = TIER_EMOJI.get(tier_label, "▸")
+            emoji = tier_emoji.get(tier_label, "▸")
             # Tier header (non-clickable, full width)
             buttons.append([InlineKeyboardButton(f"{emoji} {tier_label}", callback_data="noop")])
             # Model buttons — compact labels, 2 per row
@@ -784,11 +792,11 @@ class TelegramChannel(BaseChannel):
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
-        
+
         # Handle media files
         media_file = None
         media_type = None
-        
+
         if message.photo:
             media_file = message.photo[-1]  # Largest photo
             media_type = "image"
@@ -801,7 +809,7 @@ class TelegramChannel(BaseChannel):
         elif message.document:
             media_file = message.document
             media_type = "file"
-        
+
         # Download media if present
         if media_file and self._app:
             try:
@@ -840,12 +848,12 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[{media_type}: {file_path} ({label})]")
                 else:
                     content_parts.append(f"[{media_type}: {file_path} ({label})]")
-                    
+
                 logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
                 logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
-        
+
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
@@ -895,7 +903,7 @@ class TelegramChannel(BaseChannel):
             metadata=base_metadata,
             session_key=session_key,
         )
-    
+
     async def _flush_media_group(self, key: str) -> None:
         """Wait briefly, then forward buffered media-group as one turn."""
         try:
@@ -917,13 +925,13 @@ class TelegramChannel(BaseChannel):
         # Cancel any existing typing task for this chat
         self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
-    
+
     def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
-    
+
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
@@ -934,7 +942,7 @@ class TelegramChannel(BaseChannel):
             pass
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
-    
+
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
@@ -948,6 +956,6 @@ class TelegramChannel(BaseChannel):
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
-        
+
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")

@@ -104,3 +104,27 @@ def test_browser_session_isolation_uses_session_key() -> None:
 
     assert session_a != session_b
     assert session_a.startswith("lc-default-")
+
+
+@pytest.mark.asyncio
+async def test_browser_cleanup_kills_process_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    class HangingProcess(DummyProcess):
+        async def communicate(self):
+            await asyncio.sleep(3600)
+
+    process = HangingProcess()
+
+    async def fake_exec(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', fake_exec)
+
+    tool = BrowserTool(workspace=tmp_path)
+    tool._cli_path = '/usr/bin/agent-browser'
+    tool._active_sessions.add('sess-1')
+
+    await tool.cleanup()
+
+    assert process.killed is True
+    assert tool._active_sessions == set()
+

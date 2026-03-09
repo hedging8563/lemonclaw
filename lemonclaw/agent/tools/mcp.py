@@ -60,6 +60,13 @@ class MCPToolWrapper(Tool):
         for block in result.content:
             if isinstance(block, types.TextContent):
                 parts.append(block.text)
+            elif hasattr(types, "ImageContent") and isinstance(block, types.ImageContent):
+                mime = getattr(block, "mimeType", None) or getattr(block, "mime_type", None) or "image/*"
+                parts.append(f"[image content: {mime}]")
+            elif hasattr(types, "ResourceContent") and isinstance(block, types.ResourceContent):
+                uri = getattr(block, "uri", None) or getattr(block, "resource", None) or "resource"
+                text_hint = getattr(block, "text", None)
+                parts.append(f"[resource content: {uri}]" + (f"\n{text_hint}" if text_hint else ""))
             else:
                 parts.append(str(block))
         return "\n".join(parts) or "(no output)"
@@ -78,7 +85,7 @@ async def connect_mcp_servers(
 
     for name, cfg in mcp_servers.items():
         try:
-            async def _open_session():
+            async def _open_session(name=name, cfg=cfg):
                 if cfg.command:
                     params = StdioServerParameters(
                         command=cfg.command,
@@ -113,15 +120,15 @@ async def connect_mcp_servers(
 
             binding = _MCPBinding(session=session, reconnect=None)
 
-            async def _reconnect(binding: _MCPBinding = binding):
+            async def _reconnect(binding: _MCPBinding = binding, open_session=_open_session, server_name=name):
                 close_fn = getattr(binding.session, 'aclose', None) or getattr(binding.session, 'close', None)
                 if close_fn:
                     maybe = close_fn()
                     if asyncio.iscoroutine(maybe):
                         await maybe
-                new_session = await _open_session()
+                new_session = await open_session()
                 if new_session is None:
-                    raise RuntimeError(f"MCP server '{name}' is no longer available")
+                    raise RuntimeError(f"MCP server '{server_name}' is no longer available")
                 binding.session = new_session
 
             binding.reconnect = _reconnect

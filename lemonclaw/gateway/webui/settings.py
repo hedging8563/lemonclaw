@@ -8,6 +8,7 @@ import re
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from loguru import logger
 from starlette.requests import Request
@@ -102,6 +103,7 @@ _SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key
                    "encrypt_key", "verification_token"}
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+_ALLOWED_SKILL_REPO_HOSTS = {"github.com", "www.github.com", "gitlab.com", "www.gitlab.com", "bitbucket.org", "www.bitbucket.org"}
 _VISIBLE_SENSITIVE_PATHS = {
     "channels.feishu.encrypt_key",
     "channels.feishu.verification_token",
@@ -179,6 +181,38 @@ def _json(data: dict, status_code: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status_code, headers=_NO_CACHE)
 
 
+def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
+    """Ensure Feishu subscription tokens exist before serving settings UI."""
+    import json as _json_mod
+
+    from lemonclaw.config.loader import save_config
+    from lemonclaw.config.schema import Config
+
+    try:
+        if config_path.exists():
+            with open(config_path, encoding="utf-8") as f:
+                raw = _json_mod.load(f)
+            config = Config.model_validate(raw)
+        else:
+            config = Config()
+    except Exception as exc:
+        logger.warning("Failed to initialize Feishu subscription tokens: {}", exc)
+        return
+
+    changed = False
+    if not config.channels.feishu.encrypt_key:
+        config.channels.feishu.encrypt_key = secrets.token_hex(16)
+        changed = True
+    if not config.channels.feishu.verification_token:
+        config.channels.feishu.verification_token = secrets.token_hex(16)
+        changed = True
+    if changed:
+        try:
+            save_config(config, config_path)
+        except Exception as exc:
+            logger.warning("Failed to persist auto-generated Feishu tokens: {}", exc)
+
+
 def get_settings_routes(
     *,
     auth_token: str | None,
@@ -187,6 +221,9 @@ def get_settings_routes(
     agent_loop: Any | None = None,
 ) -> list[Route]:
     """Build Settings API routes."""
+
+    # Initialize Feishu event subscription tokens once at startup.
+    _ensure_feishu_subscription_tokens(config_path)
 
     # Serialize load→modify→save to prevent lost updates
     _config_lock = asyncio.Lock()
@@ -242,31 +279,6 @@ def get_settings_routes(
         # Remove platform-level fields that users shouldn't see/edit
         data.pop("lemondata", None)
         data.pop("gateway", None)
-
-        # Auto-generate Feishu encrypt_key and verification_token if empty
-        feishu_cfg = data.get("channels", {}).get("feishu", {})
-        feishu_generated = False
-        if isinstance(feishu_cfg, dict):
-            if not feishu_cfg.get("encrypt_key"):
-                feishu_cfg["encrypt_key"] = secrets.token_hex(16)
-                feishu_generated = True
-            if not feishu_cfg.get("verification_token"):
-                feishu_cfg["verification_token"] = secrets.token_hex(16)
-                feishu_generated = True
-        if feishu_generated:
-            # Persist generated values to config.json
-            try:
-                from lemonclaw.config.loader import load_config, save_config
-                from lemonclaw.config.schema import Config
-                cfg = load_config(config_path)
-                cfg_data = cfg.model_dump(by_alias=False)
-                cfg_data.setdefault("channels", {}).setdefault("feishu", {}).update({
-                    "encrypt_key": feishu_cfg["encrypt_key"],
-                    "verification_token": feishu_cfg["verification_token"],
-                })
-                save_config(Config.model_validate(cfg_data), config_path)
-            except Exception as exc:
-                logger.warning("Failed to persist auto-generated Feishu tokens: {}", exc)
 
         # For env-injected LemonData providers: if config.json has no api_key
         # but env var API_KEY is set, show a placeholder so users know keys are active.
@@ -426,7 +438,7 @@ def get_settings_routes(
             # Schedule graceful shutdown after response is sent (SIGTERM triggers drain sequence)
             import os
             import signal
-            asyncio.get_event_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+            asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
             return resp
 
         return _maybe_refresh(request, _json({"reloaded": True, "restart_required": False}))
@@ -673,6 +685,10 @@ def get_settings_routes(
         # Standard GitHub URL install (existing logic)
         if not url.startswith(("https://", "http://")):
             return _json({"error": "URL must start with https:// or http://, or use owner/repo/skill format"}, 400)
+        parsed = urlparse(url)
+        if parsed.hostname not in _ALLOWED_SKILL_REPO_HOSTS:
+            allowed_hosts = ", ".join(sorted(_ALLOWED_SKILL_REPO_HOSTS))
+            return _json({"error": f"Only {allowed_hosts} are allowed"}, 400)
 
         # Extract skill name from URL (last path segment) with strict validation
         skill_name = url.rstrip("/").split("/")[-1]

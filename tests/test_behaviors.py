@@ -8,16 +8,15 @@ Run: pytest tests/test_behaviors.py -v
 
 from __future__ import annotations
 
-import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from lemonclaw.agent.tools.shell import ExecTool
-from lemonclaw.bus.events import InboundMessage, OutboundMessage
+from lemonclaw.bus.events import InboundMessage
 from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
-
 
 # ── 1. SSRF Protection (web.py) ──
 
@@ -55,6 +54,7 @@ class TestSSRFProtection:
 
     def test_validate_url_allows_public(self):
         from unittest.mock import patch as mock_patch
+
         from lemonclaw.agent.tools.web import _validate_url
         # Mock DNS to return a known public IP (avoid local DNS proxy interference)
         fake_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
@@ -63,9 +63,10 @@ class TestSSRFProtection:
         assert valid is True
 
     def test_unresolvable_host_blocked(self):
-        from lemonclaw.agent.tools.web import _resolve_to_safe_ip
-        from unittest.mock import patch as mock_patch
         import socket
+        from unittest.mock import patch as mock_patch
+
+        from lemonclaw.agent.tools.web import _resolve_to_safe_ip
         # Simulate DNS resolution failure — fail-closed
         with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", side_effect=socket.gaierror("not found")):
             ip, err = _resolve_to_safe_ip("this-domain-does-not-exist-xyz123.invalid")
@@ -340,7 +341,7 @@ class TestRepeatedToolErrors:
 
     @pytest.mark.asyncio
     async def test_parallel_success_does_not_clear_other_tool_error_budget(self, make_agent_loop, echo_provider):
-        from lemonclaw.providers.base import ToolCallRequest, LLMResponse
+        from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 
         call = LLMResponse(
             content=None,
@@ -353,7 +354,6 @@ class TestRepeatedToolErrors:
         echo_provider.responses = [call, call, call]
         loop, _bus = make_agent_loop(max_iterations=10)
 
-        original_execute = loop.tools.execute
         async def fake_execute(name, params, context=None):
             if name == 'read_file':
                 return "Error: Invalid parameters for tool 'read_file': path is required"
@@ -374,6 +374,7 @@ class TestChatEndpoint:
     @pytest.mark.asyncio
     async def test_chat_returns_response(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -389,6 +390,7 @@ class TestChatEndpoint:
     @pytest.mark.asyncio
     async def test_chat_requires_message(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -401,6 +403,7 @@ class TestChatEndpoint:
     @pytest.mark.asyncio
     async def test_chat_auth_required(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -449,8 +452,9 @@ class TestWeComCrypto:
 
     def test_decrypt_invalid_padding_fails(self):
         """Tampered ciphertext should raise ValueError on padding validation."""
-        from lemonclaw.channels.wecom import WeComCrypto
         import base64
+
+        from lemonclaw.channels.wecom import WeComCrypto
 
         crypto = WeComCrypto(self.ENCODING_AES_KEY, self.CORP_ID)
         encrypted = crypto.encrypt("test message")
@@ -479,6 +483,7 @@ class TestWeComCrypto:
     def test_signature_timing_safe(self):
         """Signature comparison must use hmac.compare_digest (timing-safe)."""
         import hmac as hmac_mod
+
         from lemonclaw.channels.wecom import verify_signature
         sig = verify_signature("tok", "123", "abc", "enc")
         # Verify hmac.compare_digest works with the output
@@ -523,6 +528,7 @@ class TestWeComWebhook:
     @pytest.mark.asyncio
     async def test_webhook_get_returns_404_without_channel(self):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         app = create_app(auth_token=None, channel_manager=None)
@@ -533,6 +539,7 @@ class TestWeComWebhook:
     @pytest.mark.asyncio
     async def test_webhook_post_returns_404_without_channel(self):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         app = create_app(auth_token=None, channel_manager=None)
@@ -570,11 +577,14 @@ class TestWebUIAuth:
         assert refreshed is None
 
     def test_cookie_expired_absolute(self):
-        from unittest.mock import patch as mock_patch
-        from lemonclaw.gateway.webui.auth import (
-            create_session_cookie, verify_session_cookie, ABSOLUTE_TIMEOUT,
-        )
         import time as time_mod
+        from unittest.mock import patch as mock_patch
+
+        from lemonclaw.gateway.webui.auth import (
+            ABSOLUTE_TIMEOUT,
+            create_session_cookie,
+            verify_session_cookie,
+        )
 
         cookie = create_session_cookie("tok")
         # Advance time past absolute timeout
@@ -584,11 +594,14 @@ class TestWebUIAuth:
         assert valid is False
 
     def test_cookie_expired_idle(self):
-        from unittest.mock import patch as mock_patch
-        from lemonclaw.gateway.webui.auth import (
-            create_session_cookie, verify_session_cookie, IDLE_TIMEOUT,
-        )
         import time as time_mod
+        from unittest.mock import patch as mock_patch
+
+        from lemonclaw.gateway.webui.auth import (
+            IDLE_TIMEOUT,
+            create_session_cookie,
+            verify_session_cookie,
+        )
 
         cookie = create_session_cookie("tok")
         # Advance time past idle timeout but within absolute
@@ -600,6 +613,7 @@ class TestWebUIAuth:
 
     def test_cookie_rejects_future_created_timestamp(self):
         import base64
+
         from lemonclaw.gateway.webui.auth import _compute_hmac, verify_session_cookie
         future_created = '9999999999'
         last = '9999999999'
@@ -611,6 +625,7 @@ class TestWebUIAuth:
 
     def test_cookie_rejects_last_before_created(self):
         import base64
+
         from lemonclaw.gateway.webui.auth import _compute_hmac, verify_session_cookie
         payload = '200:100:abc123'
         cookie = base64.urlsafe_b64encode(f"{payload}:{_compute_hmac(payload, 'tok')}".encode()).decode()
@@ -653,6 +668,7 @@ class TestNativeBlockSchemaPersistence:
     @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
+
         from lemonclaw.agent.loop import AgentLoop
         from lemonclaw.bus.queue import MessageBus
         from lemonclaw.providers.base import LLMResponse, ToolCallRequest
@@ -685,7 +701,9 @@ class TestWebUIMediaAndAttachments:
     @pytest.mark.asyncio
     async def test_media_endpoint_serves_session_attachment_file(self, make_agent_loop, tmp_path):
         from pathlib import Path
+
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
         from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 
@@ -710,7 +728,9 @@ class TestWebUIMediaAndAttachments:
     @pytest.mark.asyncio
     async def test_media_endpoint_uses_session_grant_cache(self, make_agent_loop, tmp_path, monkeypatch):
         from pathlib import Path
+
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
         from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 
@@ -740,6 +760,7 @@ class TestWebUIMediaAndAttachments:
     @pytest.mark.asyncio
     async def test_media_endpoint_blocks_external_file(self, make_agent_loop, tmp_path):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -753,11 +774,13 @@ class TestWebUIMediaAndAttachments:
 
     @pytest.mark.asyncio
     async def test_chat_stream_emits_outbound_media_event_and_persists_history(self, tmp_path: Path) -> None:
-        from starlette.testclient import TestClient
         from unittest.mock import AsyncMock, MagicMock
-        from lemonclaw.gateway.server import create_app
+
+        from starlette.testclient import TestClient
+
         from lemonclaw.agent.loop import AgentLoop
         from lemonclaw.bus.queue import MessageBus
+        from lemonclaw.gateway.server import create_app
         from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 
         bus = MessageBus()
@@ -803,6 +826,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_index_returns_html(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -817,6 +841,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_auth_correct_token(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -830,6 +855,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_auth_wrong_token(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -842,6 +868,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_sessions_requires_auth(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -854,6 +881,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_models_returns_list(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -874,6 +902,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_chat_stream_returns_sse(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -889,6 +918,7 @@ class TestWebUIRoutes:
     @pytest.mark.asyncio
     async def test_webui_disabled(self, make_agent_loop):
         from starlette.testclient import TestClient
+
         from lemonclaw.gateway.server import create_app
 
         loop, bus = make_agent_loop()
@@ -898,3 +928,25 @@ class TestWebUIRoutes:
         resp = client.get("/")
         # When webui disabled, / is not registered → 404 from Starlette
         assert resp.status_code in (404, 405)
+
+
+def test_conductor_routes_require_valid_cookie(tmp_path):
+    from types import SimpleNamespace
+
+    from starlette.testclient import TestClient
+
+    from lemonclaw.gateway.server import create_app
+    from lemonclaw.gateway.webui.auth import create_session_cookie
+
+    registry = SimpleNamespace(list_agents=lambda: [SimpleNamespace(agent_id='a1', role='worker', model='m', status=SimpleNamespace(value='idle'), skills=[], task_count=0, success_rate=1.0, last_active_ms=0, created_at_ms=0)])
+    orchestrator = SimpleNamespace(active_plans=[])
+    app = create_app(auth_token='secret-token', orchestrator=orchestrator, registry=registry)
+    client = TestClient(app)
+
+    assert client.get('/api/conductor/agents').status_code == 401
+    cookie = create_session_cookie('secret-token')
+    client.cookies.set('lc_session', cookie)
+    resp = client.get('/api/conductor/agents')
+    assert resp.status_code == 200
+    assert resp.json()['agents'][0]['id'] == 'a1'
+
