@@ -17,6 +17,63 @@ export const isLoadingHistory = signal(false);
 export const hasMoreHistory = signal(false);
 export const isLoadingMore = signal(false);
 
+const ACTIVITY_STREAM_ID_PREFIX = 'activity-stream:';
+
+function activityStreamMessageId(sessionKey: string): string {
+  return `${ACTIVITY_STREAM_ID_PREFIX}${sessionKey}`;
+}
+
+function upsertActivityStreamMessage(content: string, timestamp?: string) {
+  const sessionKey = activeSessionKey.value;
+  if (!sessionKey) return;
+  const streamId = activityStreamMessageId(sessionKey);
+  const payload = normalizeMessage({ id: streamId, role: 'assistant', content, timestamp });
+  const current = [...messages.value];
+  const index = current.findIndex((msg) => msg.id === streamId);
+  if (index >= 0) {
+    current[index] = payload;
+  } else {
+    current.push(payload);
+  }
+  messages.value = current;
+}
+
+function upsertActivityErrorMessage(content: string, timestamp?: string) {
+  const sessionKey = activeSessionKey.value;
+  if (!sessionKey) return;
+  const streamId = activityStreamMessageId(sessionKey);
+  const payload = normalizeMessage({ id: streamId, role: 'assistant', content: '', timestamp, error: content });
+  const current = [...messages.value];
+  const index = current.findIndex((msg) => msg.id === streamId);
+  if (index >= 0) {
+    current[index] = payload;
+  } else {
+    current.push(payload);
+  }
+  messages.value = current;
+}
+
+export function applyActivityEvent(event: any) {
+  const sessionKey = activeSessionKey.value;
+  if (!sessionKey || sessionKey.startsWith('webui:') || isStreaming.value) return;
+  if (event.session_key !== sessionKey) return;
+
+  if (event.type === 'chunk' || event.type === 'progress') {
+    upsertActivityStreamMessage(String(event.content || ''), event.timestamp);
+    return;
+  }
+
+  if (event.type === 'done') {
+    void loadHistory();
+    return;
+  }
+
+  if (event.type === 'error') {
+    upsertActivityErrorMessage(String(event.content || 'Activity stream failed'), event.timestamp);
+    return;
+  }
+}
+
 let currentAbortController: AbortController | null = null;
 let _nextBefore: number | null = null;
 let sessionWsClient: any = null;

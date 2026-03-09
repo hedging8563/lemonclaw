@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import { apiFetch, wsConnect } from '../api/client';
 import { activeSessionKey } from './sessions';
-import { loadHistory, isStreaming } from './chat';
+import { applyActivityEvent, isStreaming } from './chat';
 
 export interface ActivitySession {
   key: string;
@@ -29,10 +29,10 @@ export async function loadActivitySessions() {
 export function initActivityWS() {
   if (wsClient) return;
   wsClient = wsConnect('/ws/activity', (event) => {
-    if (['message', 'message_in', 'message_out', 'tool_call', 'chunk', 'progress', 'done'].includes(event.type)) {
+    if (['message', 'message_in', 'message_out', 'tool_call', 'chunk', 'progress', 'done', 'error'].includes(event.type)) {
       loadActivitySessions();
-      if (activeSessionKey.value === event.session_key && activeSessionKey.value.startsWith('webui:') && !isStreaming.value) {
-        loadHistory();
+      if (!isStreaming.value) {
+        applyActivityEvent(event);
       }
     }
   }, (connected) => {

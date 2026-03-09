@@ -345,19 +345,20 @@ class TelegramChannel(BaseChannel):
         *,
         reply_params: ReplyParameters | None = None,
         thread_kwargs: dict | None = None,
-    ) -> None:
+    ) -> bool:
         if not msg.content or msg.content == "[empty message]":
             await self._update_model_switch_keyboard(
                 chat_id,
                 msg.metadata.get("_callback_message_id"),
                 msg.metadata.get("_current_model"),
             )
-            return
+            return False
 
         thread_kwargs = thread_kwargs or {}
         chunks = _split_message(msg.content)
 
         reply_markup = None
+        sent_any = False
         if msg.metadata.get("_command") == "model_list":
             reply_markup = self._build_model_keyboard(msg.metadata.get("_current_model"))
             from lemonclaw.providers.catalog import MODEL_MAP
@@ -377,6 +378,7 @@ class TelegramChannel(BaseChannel):
                     reply_markup=reply_markup,
                     **thread_kwargs,
                 )
+                sent_any = True
             except Exception as e:
                 logger.warning("HTML parse failed, falling back to plain text: {}", e)
                 try:
@@ -387,6 +389,7 @@ class TelegramChannel(BaseChannel):
                         reply_markup=reply_markup,
                         **thread_kwargs,
                     )
+                    sent_any = True
                 except Exception as e2:
                     logger.error("Error sending Telegram message: {}", e2)
             reply_markup = None
@@ -396,6 +399,7 @@ class TelegramChannel(BaseChannel):
             msg.metadata.get("_callback_message_id"),
             msg.metadata.get("_current_model"),
         )
+        return sent_any
 
     async def _send_with_streaming(
         self,
@@ -452,7 +456,7 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug("Telegram draft send failed: {}", e)
 
-        await self._send_text(
+        sent_ok = await self._send_text(
             msg,
             chat_id,
             reply_params=reply_params,
@@ -460,9 +464,9 @@ class TelegramChannel(BaseChannel):
         )
         await self._emit_activity_event(
             msg.chat_id,
-            text,
+            text if sent_ok else "[Telegram final send failed]",
             thread_id=thread_id,
-            event_type="done",
+            event_type="done" if sent_ok else "error",
         )
 
     async def send(self, msg: OutboundMessage) -> None:

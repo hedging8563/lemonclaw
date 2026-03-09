@@ -305,6 +305,30 @@ async def test_draft_failure_still_falls_back_to_final_send() -> None:
 
 
 @pytest.mark.asyncio
+async def test_final_send_failure_emits_activity_error() -> None:
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
+    bot = _bot_stub(
+        send_message=AsyncMock(side_effect=[RuntimeError("html fail"), RuntimeError("plain fail")]),
+        send_message_draft=AsyncMock(side_effect=RuntimeError("draft unavailable")),
+    )
+    channel._app = SimpleNamespace(bot=bot)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="完整最终文本",
+            metadata={"_final": True},
+        )
+    )
+
+    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
+    assert events[-1]["type"] == "error"
+    assert events[-1]["content"] == "[Telegram final send failed]"
+
+
+@pytest.mark.asyncio
 async def test_draft_and_final_propagate_message_thread_id_to_telegram_and_activity() -> None:
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
