@@ -165,11 +165,9 @@ class EntityStore:
                 logger.debug("Entity on_write callback failed for {}: {}", name, e)
 
     def init_defaults(self) -> int:
-        """Create default entity cards if entities/ is empty. Returns count created."""
+        """Ensure all default entity cards exist. Returns count created."""
         self._ensure_dir()
         cards = self._load_all()
-        if cards:
-            return 0
         created = 0
         for name, info in DEFAULT_CARDS.items():
             if name not in cards:

@@ -129,6 +129,18 @@ def rewrite_text_paths(text: str, mapping: dict[str, str]) -> str:
     return updated
 
 
+def rewrite_payload_paths(payload: Any, mapping: dict[str, str]) -> Any:
+    if not mapping:
+        return payload
+    if isinstance(payload, str):
+        return rewrite_text_paths(payload, mapping)
+    if isinstance(payload, list):
+        return [rewrite_payload_paths(item, mapping) for item in payload]
+    if isinstance(payload, dict):
+        return {key: rewrite_payload_paths(value, mapping) for key, value in payload.items()}
+    return payload
+
+
 def session_attachment_dir(workspace: Path, session_key: str, *, ensure: bool = True) -> Path:
     safe_key = safe_filename(session_key.replace(":", "_")) or "session"
     path = workspace / "attachments" / safe_key

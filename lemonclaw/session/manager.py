@@ -15,6 +15,7 @@ from loguru import logger
 from lemonclaw.utils.attachments import (
     append_attachment_inventory,
     persist_session_attachments,
+    rewrite_payload_paths,
     session_attachment_dir,
 )
 from lemonclaw.utils.helpers import ensure_dir, safe_filename
@@ -261,13 +262,21 @@ class SessionManager:
         ts = datetime.now().strftime("%Y%m%dT%H%M%S")
         archived_key = f"{key}:{ts}"
         session = self._load(key)
+        attachments_src = self.get_attachment_dir(key, ensure=False)
+        attachments_dst = self.get_attachment_dir(archived_key, ensure=False)
+        path_map: dict[str, str] = {}
+        if attachments_src.exists():
+            for source in attachments_src.rglob('*'):
+                if source.is_file():
+                    relative = source.relative_to(attachments_src)
+                    path_map[str(source)] = str(attachments_dst / relative)
+
         if session:
             session.key = archived_key
+            session.messages = [rewrite_payload_paths(message, path_map) for message in session.messages]
             archived_path = self._get_session_path(archived_key)
             self._atomic_save(archived_path, session)
 
-        attachments_src = self.get_attachment_dir(key, ensure=False)
-        attachments_dst = self.get_attachment_dir(archived_key, ensure=False)
         if attachments_src.exists():
             attachments_dst.parent.mkdir(parents=True, exist_ok=True)
             if attachments_dst.exists():

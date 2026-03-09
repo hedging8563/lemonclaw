@@ -30,8 +30,8 @@ WORKDIR /app/bridge
 RUN npm install && npm run build
 WORKDIR /app
 
-# Install Playwright and Chromium for browser automation tool
-RUN pip install playwright && playwright install chromium --with-deps
+# Install browser automation runtime (agent-browser CLI + Chromium)
+RUN npx playwright install --with-deps chromium && npm install -g agent-browser
 
 # Create config directory
 RUN mkdir -p /root/.lemonclaw

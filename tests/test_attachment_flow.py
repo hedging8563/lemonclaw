@@ -212,3 +212,33 @@ def test_read_attachment_supports_pdf_and_docx(tmp_path: Path, monkeypatch) -> N
     assert '[Page 1]' in pdf_output
     assert 'Hello PDF' in pdf_output
 
+
+
+def test_archive_session_rewrites_attachment_paths(tmp_path: Path) -> None:
+    from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+    from lemonclaw.session.manager import SessionManager
+
+    mgr = SessionManager(tmp_path)
+    source = tmp_path / 'demo.txt'
+    source.write_text('hello', encoding='utf-8')
+    media, _mapping = mgr.persist_attachments('webui:test-archive', [str(source)])
+    original_persisted_path = media[0]
+    session = mgr.get_or_create('webui:test-archive')
+    session.messages.append(serialize_ui_message({
+        'role': 'assistant',
+        'content': f'[file: {media[0]} (demo.txt)]',
+        'media': media,
+    }, session_key='webui:test-archive'))
+    mgr.save(session)
+
+    assert mgr.archive_session('webui:test-archive') is True
+
+    archived = next(item for item in mgr.list_sessions() if item['key'].startswith('webui:test-archive:'))
+    archived_session = mgr.get_or_create(archived['key'])
+    message = archived_session.messages[0]
+    archived_path = message['media'][0]['path']
+    assert archived_path.startswith(str(mgr.get_attachment_dir(archived['key'])))
+    assert archived_path in message['content']
+    assert original_persisted_path not in message['content']
+    assert Path(archived_path).is_file()
+

@@ -1,10 +1,8 @@
 """Tests for bionic memory system — P3-D Step 1."""
 
 from datetime import date
-from pathlib import Path
 
 import pytest
-
 
 # ── Entity Cards ─────────────────────────────────────────────────────────────
 
@@ -91,7 +89,7 @@ def test_entity_store_crud(tmp_path):
 
 
 def test_entity_store_init_defaults(tmp_path):
-    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+    from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
 
     store = EntityStore(tmp_path / "memory")
     created = store.init_defaults()
@@ -342,8 +340,9 @@ async def test_procedural_format_for_context(tmp_path):
 def test_procedural_reflect_fallback(tmp_path):
     """Test reflect fallback when LLM is unavailable — returns None, no low-quality rule."""
     import asyncio
-    from lemonclaw.memory.reflect import ProceduralMemory
     from unittest.mock import AsyncMock
+
+    from lemonclaw.memory.reflect import ProceduralMemory
 
     pm = ProceduralMemory(tmp_path / "memory")
     mock_provider = AsyncMock()
@@ -407,7 +406,7 @@ def test_core_promoter_add_and_remove(tmp_path):
 
 def test_core_promoter_size_limit(tmp_path):
     from lemonclaw.memory.entities import EntityStore
-    from lemonclaw.memory.promote import CorePromoter, CORE_MAX_CHARS
+    from lemonclaw.memory.promote import CORE_MAX_CHARS, CorePromoter
 
     store = EntityStore(tmp_path / "memory")
     promoter = CorePromoter(tmp_path / "memory", store)
@@ -419,7 +418,7 @@ def test_core_promoter_size_limit(tmp_path):
 
 def test_core_promoter_run_promotion(tmp_path):
     from lemonclaw.memory.entities import EntityStore
-    from lemonclaw.memory.promote import CorePromoter, PROMOTE_ACCESS_THRESHOLD
+    from lemonclaw.memory.promote import PROMOTE_ACCESS_THRESHOLD, CorePromoter
 
     store = EntityStore(tmp_path / "memory")
     card = store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
@@ -471,6 +470,7 @@ def test_core_promoter_run_demotion(tmp_path):
 
 def test_core_promoter_no_demotion_recent(tmp_path):
     from datetime import date
+
     from lemonclaw.memory.entities import EntityStore
     from lemonclaw.memory.promote import CorePromoter
 
@@ -492,7 +492,8 @@ def test_core_promoter_no_demotion_recent(tmp_path):
 def test_migrate_no_memory_file(tmp_path):
     """No MEMORY.md → just init defaults."""
     import asyncio
-    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+
+    from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
     store = EntityStore(tmp_path / "memory")
@@ -506,7 +507,8 @@ def test_migrate_no_memory_file(tmp_path):
 def test_migrate_empty_memory_file(tmp_path):
     """Empty MEMORY.md → init defaults."""
     import asyncio
-    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+
+    from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
     memory_dir = tmp_path / "memory"
@@ -524,7 +526,8 @@ def test_migrate_empty_memory_file(tmp_path):
 def test_migrate_fallback_no_llm(tmp_path):
     """MEMORY.md with content but no LLM → fallback to preferences card."""
     import asyncio
-    from lemonclaw.memory.entities import EntityStore, DEFAULT_CARDS
+
+    from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
     memory_dir = tmp_path / "memory"
@@ -549,6 +552,7 @@ def test_migrate_fallback_llm_fails(tmp_path):
     """LLM available but fails → fallback to preferences card."""
     import asyncio
     from unittest.mock import AsyncMock
+
     from lemonclaw.memory.entities import EntityStore
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
@@ -571,6 +575,7 @@ def test_migrate_fallback_llm_fails(tmp_path):
 def test_migrate_idempotent(tmp_path):
     """Already migrated → skip."""
     import asyncio
+
     from lemonclaw.memory.entities import EntityStore
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
@@ -613,7 +618,8 @@ def test_context_builder_no_match_no_injection(tmp_path):
 
 def test_memory_cron_daily_archive(tmp_path):
     import asyncio
-    from lemonclaw.memory.cron import run_memory_event, EVENT_DAILY_ARCHIVE
+
+    from lemonclaw.memory.cron import EVENT_DAILY_ARCHIVE, run_memory_event
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -633,7 +639,8 @@ def test_memory_cron_daily_archive(tmp_path):
 
 def test_memory_cron_daily_archive_empty(tmp_path):
     import asyncio
-    from lemonclaw.memory.cron import run_memory_event, EVENT_DAILY_ARCHIVE
+
+    from lemonclaw.memory.cron import EVENT_DAILY_ARCHIVE, run_memory_event
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -646,7 +653,8 @@ def test_memory_cron_daily_archive_empty(tmp_path):
 
 def test_memory_cron_weekly_promote(tmp_path):
     import asyncio
-    from lemonclaw.memory.cron import run_memory_event, EVENT_WEEKLY_PROMOTE
+
+    from lemonclaw.memory.cron import EVENT_WEEKLY_PROMOTE, run_memory_event
     from lemonclaw.memory.promote import PROMOTE_ACCESS_THRESHOLD
 
     workspace = tmp_path / "workspace"
@@ -669,7 +677,8 @@ def test_memory_cron_weekly_promote(tmp_path):
 
 def test_memory_cron_monthly_cleanup(tmp_path):
     import asyncio
-    from lemonclaw.memory.cron import run_memory_event, EVENT_MONTHLY_CLEANUP
+
+    from lemonclaw.memory.cron import EVENT_MONTHLY_CLEANUP, run_memory_event
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -715,3 +724,17 @@ def test_memory_store_auto_initializes_default_entities(tmp_path):
 
     store = MemoryStore(tmp_path)
     assert len(store.entities.list_cards()) == len(DEFAULT_CARDS)
+
+
+def test_entity_store_init_defaults_backfills_missing_defaults(tmp_path):
+    from lemonclaw.memory.entities import DEFAULT_CARDS, EntityStore
+
+    store = EntityStore(tmp_path / "memory")
+    store.create_card("user-profile", "person", ["用户"], body="# Existing\n")
+
+    created = store.init_defaults()
+
+    assert created == len(DEFAULT_CARDS) - 1
+    names = {card.name for card in store.list_cards()}
+    assert set(DEFAULT_CARDS) <= names
+
