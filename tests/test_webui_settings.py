@@ -1,9 +1,10 @@
 from starlette.testclient import TestClient
 
+from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import save_config
 from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
-from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
+from lemonclaw.session.manager import SessionManager
 
 
 def test_whatsapp_pairing_settings_routes(monkeypatch, tmp_path):
@@ -91,8 +92,6 @@ def test_whatsapp_disconnect_surfaces_stop_failure(monkeypatch, tmp_path):
     assert 'Failed to stop running WhatsApp bridge process.' in resp.json()['error']
 
 
-from lemonclaw.session.manager import SessionManager
-
 
 def test_session_ws_streams_incremental_messages(tmp_path):
     from lemonclaw.gateway.server import create_app
@@ -113,4 +112,23 @@ def test_session_ws_streams_incremental_messages(tmp_path):
         assert payload['session_key'] == 'telegram:123'
         assert len(payload['messages']) == 1
         assert payload['messages'][0]['content'] == 'second'
+
+
+
+def test_feishu_settings_returns_unmasked_subscription_tokens(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.feishu.enabled = True
+    cfg.channels.feishu.encrypt_key = '39de1234567890abcdef79c7'
+    cfg.channels.feishu.verification_token = '95aa1234567890abcdefefdb'
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    settings = resp.json()['settings']
+    assert settings['channels']['feishu']['encrypt_key'] == '39de1234567890abcdef79c7'
+    assert settings['channels']['feishu']['verification_token'] == '95aa1234567890abcdefefdb'
 

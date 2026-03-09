@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
 import { MCPServersEditor } from './MCPServersEditor';
@@ -170,6 +170,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const copyResetTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const updateViewport = () => {
@@ -195,6 +197,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => () => {
+    if (copyResetTimer.current) window.clearTimeout(copyResetTimer.current);
+  }, []);
 
   const handleChange = (path: string[], value: any) => {
     if (!draft) return;
@@ -242,6 +248,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const renderNotice = (message: string, tone: NoticeTone = 'info') => (
     <div style={noticeStyle(tone)}>{message}</div>
   );
+
+  const copyValue = async (fieldPath: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(fieldPath);
+      if (copyResetTimer.current) window.clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = window.setTimeout(() => setCopiedField((current) => current === fieldPath ? null : current), 1800);
+    } catch (err) {
+      console.error('Copy failed', err);
+    }
+  };
 
   const displayLabel = (key: string): string => {
     if (key === 'browser') return t('tools_browser_title');
@@ -514,10 +531,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input type="text" readOnly value={val} style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', opacity: 0.8 }} />
               <button
-                onClick={() => { navigator.clipboard.writeText(val); }}
-                style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--accent)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                onClick={() => { void copyValue(fullPath, val); }}
+                style={{ padding: '8px 12px', background: copiedField === fullPath ? 'rgba(45, 212, 191, 0.14)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', color: copiedField === fullPath ? 'var(--teal)' : 'var(--accent)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
               >
-                {t('copy')}
+                {copiedField === fullPath ? t('copied') : t('copy')}
               </button>
             </div>
           </div>

@@ -14,13 +14,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 from lemonclaw.channels.whatsapp_bridge_runtime import (
     WhatsAppBridgeError,
     disconnect_whatsapp,
     get_whatsapp_pairing_state,
     restart_whatsapp_pairing,
 )
+from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 
 if TYPE_CHECKING:
     from lemonclaw.config.watcher import ConfigWatcher
@@ -102,6 +102,17 @@ _SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key
                    "encrypt_key", "verification_token"}
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+_VISIBLE_SENSITIVE_PATHS = {
+    "channels.feishu.encrypt_key",
+    "channels.feishu.verification_token",
+}
+
+
+def _should_mask(path: tuple[str, ...], key: str, value: Any) -> bool:
+    if not isinstance(value, str) or not value or key not in _SENSITIVE_KEYS:
+        return False
+    full_path = ".".join((*path, key))
+    return full_path not in _VISIBLE_SENSITIVE_PATHS
 
 
 def _mask(value: str) -> str:
@@ -114,15 +125,15 @@ def _mask(value: str) -> str:
     return value[:4] + "****" + value[-4:]
 
 
-def _mask_dict(d: dict, depth: int = 0) -> dict:
+def _mask_dict(d: dict, depth: int = 0, path: tuple[str, ...] = ()) -> dict:
     """Recursively mask sensitive string values in a dict."""
     if depth > 5:
         return d
     out = {}
     for k, v in d.items():
         if isinstance(v, dict):
-            out[k] = _mask_dict(v, depth + 1)
-        elif isinstance(v, str) and k in _SENSITIVE_KEYS and v:
+            out[k] = _mask_dict(v, depth + 1, (*path, k))
+        elif _should_mask(path, k, v):
             out[k] = _mask(v)
         else:
             out[k] = v
