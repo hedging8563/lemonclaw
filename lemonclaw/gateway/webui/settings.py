@@ -201,11 +201,23 @@ def _derive_channel_runtime(config) -> dict[str, dict[str, object]]:
         pairing = AutoPairing(channel_name, data_dir)
         approved = pairing.approved
         pending = pairing.pending
+
+        def _mask_id(entry: str) -> str:
+            """Mask user identity: '1234567890|alice' → '123***7890|ali***'."""
+            parts = entry.split('|', 1)
+            uid = parts[0]
+            masked_uid = uid[:3] + '***' + uid[-4:] if len(uid) > 7 else uid[:2] + '***'
+            if len(parts) > 1 and parts[1]:
+                name = parts[1]
+                masked_name = name[:3] + '***' if len(name) > 3 else name[0] + '***'
+                return f"{masked_uid}|{masked_name}"
+            return masked_uid
+
         return {
-            'owner': pairing.owner,
+            'owner': _mask_id(pairing.owner) if pairing.owner else None,
             'approved_count': len(approved),
             'pending_count': len(pending),
-            'approved_preview': approved[:3],
+            'approved_preview': [_mask_id(e) for e in approved[:3]],
         }
 
     # Channels using BaseChannel dm_policy + allow_from semantics.

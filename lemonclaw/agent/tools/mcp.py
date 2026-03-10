@@ -86,8 +86,10 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
 
     bindings: dict[str, _MCPBinding] = {}
+    _reconnect_locks: dict[str, asyncio.Lock] = {}
 
     for name, cfg in mcp_servers.items():
+        _reconnect_locks[name] = asyncio.Lock()
         try:
             async def _open_session(name=name, cfg=cfg):
                 if cfg.command:
@@ -126,16 +128,17 @@ async def connect_mcp_servers(
             bindings[name] = binding
 
             async def _reconnect(open_session=_open_session, server_name=name):
-                current = bindings[server_name]
-                close_fn = getattr(current.session, 'aclose', None) or getattr(current.session, 'close', None)
-                if close_fn:
-                    maybe = close_fn()
-                    if asyncio.iscoroutine(maybe):
-                        await maybe
-                new_session = await open_session()
-                if new_session is None:
-                    raise RuntimeError(f"MCP server '{server_name}' is no longer available")
-                bindings[server_name] = _MCPBinding(session=new_session, reconnect=_reconnect)
+                async with _reconnect_locks[server_name]:
+                    current = bindings[server_name]
+                    close_fn = getattr(current.session, 'aclose', None) or getattr(current.session, 'close', None)
+                    if close_fn:
+                        maybe = close_fn()
+                        if asyncio.iscoroutine(maybe):
+                            await maybe
+                    new_session = await open_session()
+                    if new_session is None:
+                        raise RuntimeError(f"MCP server '{server_name}' is no longer available")
+                    bindings[server_name] = _MCPBinding(session=new_session, reconnect=_reconnect)
 
             binding.reconnect = _reconnect
 
