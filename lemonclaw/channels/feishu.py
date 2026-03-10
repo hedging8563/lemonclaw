@@ -268,6 +268,7 @@ class FeishuChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
         self._bot_open_id: str | None = None  # Bot's own open_id for precise mention detection
+        self._mention_warned = False  # Only warn once about mention mode limitation
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -726,11 +727,17 @@ class FeishuChannel(BaseChannel):
                         # Bot open_id known but no mentions in message
                         return
                     else:
-                        # Bot open_id unknown (API call failed at startup),
-                        # fall back to approximate detection via @_user_ placeholders
-                        raw_content = message.content or ""
-                        if not ("@_user_" in raw_content or "@_all" in raw_content):
-                            return
+                        # Bot open_id unknown (API call failed at startup).
+                        # Cannot do precise mention detection — degrade to disabled
+                        # to avoid false positives (any @mention triggering the bot).
+                        if not self._mention_warned:
+                            logger.warning(
+                                "Feishu group_policy='mention' requires bot open_id "
+                                "(failed to fetch at startup). All group messages will "
+                                "be ignored until bot open_id is available or policy is changed.",
+                            )
+                            self._mention_warned = True
+                        return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
