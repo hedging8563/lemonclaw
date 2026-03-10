@@ -669,6 +669,22 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            # Group policy gate: check early to avoid unnecessary media downloads and reactions
+            is_group = chat_type == "group"
+            if is_group:
+                policy = self.config.group_policy
+                if policy == "disabled":
+                    return
+                if policy == "allowlist" and chat_id not in self.config.group_allow_from:
+                    return
+                if policy == "mention":
+                    # Check if bot is @mentioned in raw content before parsing.
+                    # Feishu text messages contain @_user_1 placeholders for mentions,
+                    # and post messages have "at" tags.
+                    raw_content = message.content or ""
+                    if not ("@_user_" in raw_content or "@_all" in raw_content):
+                        return
+
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 
@@ -720,7 +736,8 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Forward to message bus
-            reply_to = chat_id if chat_type == "group" else sender_id
+            reply_to = chat_id if is_group else sender_id
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
@@ -731,7 +748,7 @@ class FeishuChannel(BaseChannel):
                     "chat_type": chat_type,
                     "msg_type": msg_type,
                 },
-                pairing_policy=self.config.dm_policy if chat_type != "group" else None,
+                pairing_policy=self.config.dm_policy if not is_group else None,
             )
 
         except Exception as e:

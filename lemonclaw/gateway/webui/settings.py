@@ -276,6 +276,39 @@ def _derive_channel_runtime(config) -> dict[str, dict[str, object]]:
             runtime['whatsapp'].update(summarize_pairing('whatsapp'))
 
     return runtime
+
+
+def _derive_group_runtime(config) -> dict[str, dict[str, object]]:
+    """Derive effective group policy runtime state from config.
+
+    Returns a dict keyed by channel name with group_policy and group_allow_from_count.
+    Only includes channels that have group_policy configured.
+    """
+    runtime: dict[str, dict[str, object]] = {}
+
+    group_channels = {
+        'telegram': config.channels.telegram,
+        'discord': config.channels.discord,
+        'feishu': config.channels.feishu,
+        'whatsapp': config.channels.whatsapp,
+        'slack': config.channels.slack,
+        'matrix': config.channels.matrix,
+    }
+    for channel_name, channel_cfg in group_channels.items():
+        if not getattr(channel_cfg, 'enabled', False):
+            continue
+        group_policy = getattr(channel_cfg, 'group_policy', None)
+        if group_policy is None:
+            continue
+        group_allow_from = list(getattr(channel_cfg, 'group_allow_from', []) or [])
+        runtime[channel_name] = {
+            'effective_group_policy': group_policy,
+            'group_allow_from_count': len(group_allow_from),
+        }
+
+    return runtime
+
+
 def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
     """Ensure Feishu subscription tokens exist before serving settings UI."""
     import fcntl
@@ -402,6 +435,7 @@ def get_settings_routes(
         result = {
             "settings": _mask_dict(data),
             "channel_runtime": _derive_channel_runtime(config),
+            "group_runtime": _derive_group_runtime(config),
             "tool_status": {
                 "browser": {"installed": bool(browser_bin), "binary": browser_bin},
                 "coding": {"installed": bool(coding_bin), "binary": coding_bin},

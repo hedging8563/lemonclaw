@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        self._bot_user_id: str | None = None
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -155,7 +157,9 @@ class DiscordChannel(BaseChannel):
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
             elif op == 0 and event_type == "READY":
-                logger.info("Discord gateway READY")
+                user = (payload or {}).get("user", {})
+                self._bot_user_id = str(user.get("id", "")) or None
+                logger.info("Discord gateway READY (bot_user_id={})", self._bot_user_id)
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
@@ -216,9 +220,30 @@ class DiscordChannel(BaseChannel):
         sender_id = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
+        guild_id = payload.get("guild_id")
+        is_group = bool(guild_id)
 
         if not sender_id or not channel_id:
             return
+
+        # Group policy gate
+        if is_group:
+            policy = self.config.group_policy
+            if policy == "disabled":
+                return
+            if policy == "allowlist" and channel_id not in self.config.group_allow_from:
+                return
+            if policy == "mention":
+                # Check if bot is mentioned via Discord's mentions array
+                mentions = payload.get("mentions") or []
+                bot_mentioned = any(
+                    str(m.get("id")) == self._bot_user_id for m in mentions
+                ) if self._bot_user_id else False
+                if not bot_mentioned:
+                    return
+                # Strip <@bot_id> from content for cleaner agent input
+                if self._bot_user_id and content:
+                    content = re.sub(rf"<@!?{re.escape(self._bot_user_id)}>\s*", "", content).strip()
 
         content_parts = [content] if content else []
         media_paths: list[str] = []

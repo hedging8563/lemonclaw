@@ -10,6 +10,7 @@ type NoticeTone = 'info' | 'warning';
 type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
+type GroupRuntimeMap = Record<string, { effective_group_policy?: string; group_allow_from_count?: number }>;
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
@@ -168,6 +169,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<DraftData | null>(null);
   const [toolStatus, setToolStatus] = useState<ToolStatusMap | null>(null);
   const [channelRuntime, setChannelRuntime] = useState<ChannelRuntimeMap | null>(null);
+  const [groupRuntime, setGroupRuntime] = useState<GroupRuntimeMap | null>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -193,6 +195,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setDraft(JSON.parse(JSON.stringify(data.settings)));
       setToolStatus(data.tool_status || null);
       setChannelRuntime(data.channel_runtime || null);
+      setGroupRuntime(data.group_runtime || null);
       setChangedPaths(new Set());
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -320,6 +323,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       socket_reconnect_delay_ms: 'settings_help_generic_interval_ms',
       socket_max_reconnect_delay_ms: 'settings_help_generic_interval_ms',
       allow_from: 'settings_help_generic_allow_from',
+      group_policy: 'settings_help_generic_group_policy',
+      group_allow_from: 'settings_help_generic_group_allow_from',
       trusted_proxies: 'settings_help_generic_allow_from',
       command: 'settings_help_generic_command',
       args: 'settings_help_generic_args',
@@ -446,33 +451,42 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const renderChannelRuntimeNotice = (channelKey: string) => {
     const runtime = channelRuntime?.[channelKey];
-    if (!runtime) return null;
+    const group = groupRuntime?.[channelKey];
+    if (!runtime && !group) return null;
 
     const parts: string[] = [];
-    if (runtime.effective_dm_policy) {
+    if (runtime?.effective_dm_policy) {
       parts.push(`${t('channel_effective_dm_policy')}: ${String(runtime.effective_dm_policy).toUpperCase()}`);
     }
-    if (runtime.source === 'auto_pairing') {
+    if (runtime?.source === 'auto_pairing') {
       parts.push(t('channel_runtime_source_auto_pairing'));
-    } else if (runtime.source === 'config') {
+    } else if (runtime?.source === 'config') {
       parts.push(t('channel_runtime_source_config'));
-    } else if (runtime.source === 'raw_empty') {
+    } else if (runtime?.source === 'raw_empty') {
       parts.push(t('channel_runtime_source_raw_empty'));
     }
-    if (typeof runtime.owner === 'string' && runtime.owner) {
+    if (typeof runtime?.owner === 'string' && runtime.owner) {
       parts.push(`${t('channel_runtime_owner')}: ${runtime.owner}`);
     }
-    if (typeof runtime.approved_count === 'number') {
+    if (typeof runtime?.approved_count === 'number') {
       parts.push(`${t('channel_runtime_approved')}: ${runtime.approved_count}`);
     }
-    if (typeof runtime.pending_count === 'number' && runtime.pending_count > 0) {
+    if (typeof runtime?.pending_count === 'number' && runtime.pending_count > 0) {
       parts.push(`${t('channel_runtime_pending')}: ${runtime.pending_count}`);
     }
-    if (typeof runtime.raw_allow_from_count === 'number' && runtime.raw_allow_from_count > 0) {
+    if (typeof runtime?.raw_allow_from_count === 'number' && runtime.raw_allow_from_count > 0) {
       parts.push(`${t('channel_runtime_allow_from_count')}: ${runtime.raw_allow_from_count}`);
     }
+    if (group?.effective_group_policy) {
+      parts.push(`${t('channel_effective_group_policy')}: ${String(group.effective_group_policy).toUpperCase()}`);
+    }
+    if (typeof group?.group_allow_from_count === 'number' && group.group_allow_from_count > 0) {
+      parts.push(`${t('channel_group_allow_from_count')}: ${group.group_allow_from_count}`);
+    }
 
-    return renderNotice(parts.join(' · '), runtime.source === 'raw_empty' ? 'warning' : 'info');
+    if (parts.length === 0) return null;
+    const tone = runtime?.source === 'raw_empty' ? 'warning' : 'info';
+    return renderNotice(parts.join(' · '), tone);
   };
 
   const renderFields = (data: any, path: string[]): any => {

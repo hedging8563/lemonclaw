@@ -22,6 +22,8 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group JIDs if allowlist
 
 
 class TelegramConfig(Base):
@@ -31,6 +33,8 @@ class TelegramConfig(Base):
     dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group/chat IDs if allowlist
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
 
@@ -45,6 +49,8 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group chat_ids if allowlist
     react_emoji: str = "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
 
 
@@ -64,6 +70,8 @@ class DiscordConfig(Base):
     dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from Discord Developer Portal
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Guild channel response policy
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed guild channel IDs if allowlist
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 

@@ -685,6 +685,11 @@ class TelegramChannel(BaseChannel):
             return
         message = update.message
         is_group = message.chat.type != "private"
+
+        # Group policy gate for commands too
+        if is_group and not self._should_respond_in_group(message.text or "", str(message.chat_id)):
+            return
+
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
         str_chat_id = str(message.chat_id)
         session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
@@ -786,6 +791,34 @@ class TelegramChannel(BaseChannel):
                 session_key=session_key,
             )
 
+    def _should_respond_in_group(self, text: str, chat_id: str) -> bool:
+        """Check if the bot should respond to a group message based on group_policy."""
+        policy = self.config.group_policy
+
+        if policy == "disabled":
+            return False
+        if policy == "open":
+            return True
+        if policy == "allowlist":
+            return chat_id in self.config.group_allow_from
+        # "mention" (default): only respond when @mentioned
+        if policy == "mention":
+            if self._app and self._app.bot:
+                bot_username = self._app.bot.username
+                if bot_username and f"@{bot_username}" in (text or ""):
+                    return True
+            return False
+        return False
+
+    def _strip_bot_mention(self, text: str) -> str:
+        """Remove @bot_username from message text."""
+        if not text or not self._app or not self._app.bot:
+            return text or ""
+        bot_username = self._app.bot.username
+        if not bot_username:
+            return text
+        return re.sub(rf"@{re.escape(bot_username)}\s*", "", text).strip()
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
@@ -799,6 +832,10 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         is_group = message.chat.type != "private"
 
+        # Group policy gate: check before any processing
+        if is_group and not self._should_respond_in_group(message.text or message.caption or "", str(chat_id)):
+            return
+
         # Forum topic support: use message_thread_id for topic-scoped sessions
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
 
@@ -809,11 +846,11 @@ class TelegramChannel(BaseChannel):
         content_parts = []
         media_paths = []
 
-        # Text content
+        # Text content (strip @mention for cleaner agent input)
         if message.text:
-            content_parts.append(message.text)
+            content_parts.append(self._strip_bot_mention(message.text) if is_group else message.text)
         if message.caption:
-            content_parts.append(message.caption)
+            content_parts.append(self._strip_bot_mention(message.caption) if is_group else message.caption)
 
         # Handle media files
         media_file = None

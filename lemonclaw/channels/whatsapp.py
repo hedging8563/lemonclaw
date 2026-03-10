@@ -122,6 +122,26 @@ class WhatsAppChannel(BaseChannel):
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
             is_group = bool(data.get("isGroup", False))
+            # In group messages, `sender` is the group JID (e.g. xxx@g.us)
+            group_jid = sender if is_group else None
+
+            # Group policy gate
+            if is_group:
+                policy = self.config.group_policy
+                if policy == "disabled":
+                    return
+                if policy == "allowlist" and group_jid not in self.config.group_allow_from:
+                    return
+                if policy == "mention":
+                    # Bridge does not expose bot's own JID, so we cannot do
+                    # precise bot-mention detection. Degrade to disabled and warn.
+                    logger.warning(
+                        "WhatsApp group_policy='mention' requires bot JID from bridge "
+                        "(not yet supported). Ignoring group message from {}.",
+                        group_jid,
+                    )
+                    return
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
