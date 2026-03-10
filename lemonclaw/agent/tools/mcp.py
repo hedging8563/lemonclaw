@@ -22,8 +22,9 @@ class _MCPBinding:
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a lemonclaw Tool."""
 
-    def __init__(self, binding: _MCPBinding, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(self, binding: _MCPBinding, server_name: str, tool_def, tool_timeout: int = 30, binding_getter=None):
         self._binding = binding
+        self._binding_getter = binding_getter or (lambda: self._binding)
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
@@ -45,14 +46,15 @@ class MCPToolWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
         try:
+            binding = self._binding_getter()
             result = await asyncio.wait_for(
-                self._binding.session.call_tool(self._original_name, arguments=kwargs),
+                binding.session.call_tool(self._original_name, arguments=kwargs),
                 timeout=self._tool_timeout,
             )
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
             try:
-                await self._binding.reconnect()
+                await binding.reconnect()
             except Exception as reconnect_err:
                 logger.warning("MCP tool '{}': reconnect after timeout failed: {}", self._name, reconnect_err)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
@@ -82,6 +84,8 @@ async def connect_mcp_servers(
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
+
+    bindings: dict[str, _MCPBinding] = {}
 
     for name, cfg in mcp_servers.items():
         try:
@@ -119,9 +123,11 @@ async def connect_mcp_servers(
                 continue
 
             binding = _MCPBinding(session=session, reconnect=None)
+            bindings[name] = binding
 
-            async def _reconnect(binding: _MCPBinding = binding, open_session=_open_session, server_name=name):
-                close_fn = getattr(binding.session, 'aclose', None) or getattr(binding.session, 'close', None)
+            async def _reconnect(open_session=_open_session, server_name=name):
+                current = bindings[server_name]
+                close_fn = getattr(current.session, 'aclose', None) or getattr(current.session, 'close', None)
                 if close_fn:
                     maybe = close_fn()
                     if asyncio.iscoroutine(maybe):
@@ -129,13 +135,19 @@ async def connect_mcp_servers(
                 new_session = await open_session()
                 if new_session is None:
                     raise RuntimeError(f"MCP server '{server_name}' is no longer available")
-                binding.session = new_session
+                bindings[server_name] = _MCPBinding(session=new_session, reconnect=_reconnect)
 
             binding.reconnect = _reconnect
 
             tools = await session.list_tools()
             for tool_def in tools.tools:
-                wrapper = MCPToolWrapper(binding, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(
+                    binding,
+                    name,
+                    tool_def,
+                    tool_timeout=cfg.tool_timeout,
+                    binding_getter=lambda server_name=name: bindings[server_name],
+                )
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 

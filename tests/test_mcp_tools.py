@@ -216,3 +216,65 @@ async def test_mcp_wrapper_formats_resource_and_image_content(monkeypatch: pytes
     assert 'resource body' in result
     assert '[image content: image/png]' in result
 
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_reconnect_uses_latest_binding_lookup(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import mcp
+    import mcp.client.stdio as mcp_stdio
+
+    sessions = []
+
+    class FakeParams:
+        def __init__(self, **kwargs):
+            self.command = kwargs.get('command')
+            self.args = tuple(kwargs.get('args') or [])
+
+    @asynccontextmanager
+    async def fake_stdio_client(params):
+        yield ('read', 'write')
+
+    class FakeSession:
+        def __init__(self, read, write):
+            self.label = f'session-{len(sessions)+1}'
+            sessions.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(tools=[SimpleNamespace(name='ping', description='Ping', inputSchema={'type': 'object', 'properties': {}})])
+
+        async def call_tool(self, name, arguments=None):
+            if self.label == 'session-1':
+                await asyncio.sleep(0.05)
+            return SimpleNamespace(content=[])
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(mcp, 'StdioServerParameters', FakeParams)
+    monkeypatch.setattr(mcp, 'ClientSession', FakeSession)
+    monkeypatch.setattr(mcp_stdio, 'stdio_client', fake_stdio_client)
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers(
+            {'alpha': SimpleNamespace(command='cmd-a', args=['--a'], env={}, tool_timeout=0.01, url='', headers={})},
+            registry,
+            stack,
+            workspace=tmp_path,
+        )
+
+        wrapper = registry.get('mcp_alpha_ping')
+        assert wrapper is not None
+        result = await wrapper.execute()
+        assert 'timed out' in result
+        assert len(sessions) == 2
+        assert wrapper._binding_getter().session is sessions[-1]
