@@ -126,6 +126,29 @@ function omitKeys<T extends Record<string, any>>(value: T | null | undefined, ke
 
 const HIDDEN_AGENT_DEFAULT_KEYS = ['workspace', 'input_cost_per_1k_tokens', 'output_cost_per_1k_tokens'];
 
+// Enum fields rendered as <select> dropdowns instead of text inputs.
+// Key: field name (last segment of path). Value: options array.
+// Empty string option = "inherit / not set".
+const SELECT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  dm_policy: [
+    { value: '', label: '— (inherit)' },
+    { value: 'pairing', label: 'pairing' },
+    { value: 'allowlist', label: 'allowlist' },
+    { value: 'open', label: 'open' },
+    { value: 'disabled', label: 'disabled' },
+  ],
+  group_policy: [
+    { value: 'open', label: 'open' },
+    { value: 'mention', label: 'mention' },
+    { value: 'allowlist', label: 'allowlist' },
+    { value: 'disabled', label: 'disabled' },
+  ],
+  reply_delay_mode: [
+    { value: 'off', label: 'off' },
+    { value: 'non-mention', label: 'non-mention' },
+  ],
+};
+
 const FIELD_HELP_KEYS: Record<string, string> = {
   'agents.defaults.model': 'settings_help_model',
   'agents.defaults.provider': 'settings_help_provider',
@@ -337,6 +360,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       socket_path: 'settings_help_generic_path',
       sessions: 'settings_help_generic_list',
       panels: 'settings_help_generic_list',
+      dm_policy: 'settings_help_generic_dm_policy',
+      bridge_url: 'settings_help_generic_bridge_url',
+      bridge_token: 'settings_help_generic_bridge_token',
+      app_id: 'settings_help_generic_app_id',
+      client_id: 'settings_help_generic_client_id',
+      encrypt_key: 'settings_help_generic_encrypt_key',
+      verification_token: 'settings_help_generic_verification_token',
+      react_emoji: 'settings_help_generic_react_emoji',
+      reply_to_message: 'settings_help_generic_reply_to_message',
+      reply_in_thread: 'settings_help_generic_reply_in_thread',
+      homeserver: 'settings_help_generic_homeserver',
+      user_id: 'settings_help_generic_user_id',
+      device_id: 'settings_help_generic_device_id',
+      e2ee_enabled: 'settings_help_generic_e2ee_enabled',
+      allow_room_mentions: 'settings_help_generic_allow_room_mentions',
+      consent_granted: 'settings_help_generic_consent_granted',
+      from_address: 'settings_help_generic_from_address',
+      auto_reply_enabled: 'settings_help_generic_auto_reply_enabled',
+      corp_id: 'settings_help_generic_corp_id',
+      agent_id: 'settings_help_generic_agent_id',
+      encoding_aes_key: 'settings_help_generic_encoding_aes_key',
+      gateway_url: 'settings_help_generic_gateway_url',
+      intents: 'settings_help_generic_intents',
+      reply_delay_mode: 'settings_help_generic_reply_delay_mode',
+      poll_interval_seconds: 'settings_help_generic_poll_interval_seconds',
+      secret: 'settings_help_generic_secret',
     };
     const key = genericMap[last];
     if (!key) return t('settings_help_generic_fallback');
@@ -616,6 +665,21 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         );
       }
+
+      // Enum fields → <select> dropdown
+      const selectOpts = SELECT_OPTIONS[k];
+      if (selectOpts && (typeof v === 'string' || v === null || v === undefined)) {
+        return (
+          <div key={fullPath} style={{ marginBottom: '12px' }}>
+            {commonLabel}
+            {helpText}
+            <select value={String(v ?? '')} onChange={(e) => handleChange(currentPath, (e.target as HTMLSelectElement).value || null)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', cursor: 'pointer', appearance: 'auto' }}>
+              {selectOpts.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+          </div>
+        );
+      }
+
       return (
         <div key={fullPath} style={{ marginBottom: '12px' }}>
           {commonLabel}

@@ -225,6 +225,7 @@ def _derive_channel_runtime(config) -> dict[str, dict[str, object]]:
         'telegram': config.channels.telegram,
         'discord': config.channels.discord,
         'feishu': config.channels.feishu,
+        'matrix': config.channels.matrix,
     }
     for channel_name, channel_cfg in dm_channels.items():
         if not getattr(channel_cfg, 'enabled', False):
