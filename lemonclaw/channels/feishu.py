@@ -267,6 +267,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str | None = None  # Bot's own open_id for precise mention detection
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -288,6 +289,9 @@ class FeishuChannel(BaseChannel):
             .log_level(lark.LogLevel.INFO) \
             .build()
         
+        # Fetch bot's own open_id for precise mention detection
+        await self._fetch_bot_open_id()
+
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
@@ -319,7 +323,9 @@ class FeishuChannel(BaseChannel):
         
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
-        
+        if self._bot_open_id:
+            logger.info("Feishu bot open_id: {}", self._bot_open_id)
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
@@ -333,6 +339,35 @@ class FeishuChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Error stopping WebSocket client: {}", e)
         logger.info("Feishu bot stopped")
+
+    async def _fetch_bot_open_id(self) -> None:
+        """Fetch bot's own open_id via /open-apis/bot/v3/info for precise mention detection."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as http:
+                # Get tenant access token
+                token_r = await http.post(
+                    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                    json={"app_id": self.config.app_id, "app_secret": self.config.app_secret},
+                )
+                token_data = token_r.json()
+                tenant_token = token_data.get("tenant_access_token")
+                if not tenant_token:
+                    logger.warning("Failed to get Feishu tenant access token: {}", token_data)
+                    return
+
+                # Get bot info
+                bot_r = await http.get(
+                    "https://open.feishu.cn/open-apis/bot/v3/info",
+                    headers={"Authorization": f"Bearer {tenant_token}"},
+                )
+                bot_data = bot_r.json()
+                bot_info = bot_data.get("bot") or {}
+                self._bot_open_id = bot_info.get("open_id") or None
+                if not self._bot_open_id:
+                    logger.warning("Feishu bot info missing open_id: {}", bot_data)
+        except Exception as e:
+            logger.warning("Failed to fetch Feishu bot open_id: {}", e)
     
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -678,12 +713,24 @@ class FeishuChannel(BaseChannel):
                 if policy == "allowlist" and chat_id not in self.config.group_allow_from:
                     return
                 if policy == "mention":
-                    # Check if bot is @mentioned in raw content before parsing.
-                    # Feishu text messages contain @_user_1 placeholders for mentions,
-                    # and post messages have "at" tags.
-                    raw_content = message.content or ""
-                    if not ("@_user_" in raw_content or "@_all" in raw_content):
+                    # Precise bot mention detection using message.mentions
+                    # Each MentionEvent has id.open_id matching the @mentioned user
+                    if self._bot_open_id and message.mentions:
+                        bot_mentioned = any(
+                            getattr(getattr(m, "id", None), "open_id", None) == self._bot_open_id
+                            for m in message.mentions
+                        )
+                        if not bot_mentioned:
+                            return
+                    elif self._bot_open_id:
+                        # Bot open_id known but no mentions in message
                         return
+                    else:
+                        # Bot open_id unknown (API call failed at startup),
+                        # fall back to approximate detection via @_user_ placeholders
+                        raw_content = message.content or ""
+                        if not ("@_user_" in raw_content or "@_all" in raw_content):
+                            return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
