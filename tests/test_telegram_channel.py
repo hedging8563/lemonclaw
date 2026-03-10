@@ -383,6 +383,8 @@ async def test_split_video_uses_async_to_thread(monkeypatch: pytest.MonkeyPatch,
     source.write_bytes(b'x' * (60 * 1024 * 1024))
 
     async def fake_to_thread(func, *args, **kwargs):
+        if func is os.path.getsize:
+            return source.stat().st_size
         cmd = args[0]
         if cmd[0] == 'ffprobe':
             return SimpleNamespace(returncode=0, stdout='12.0\n')
@@ -390,7 +392,6 @@ async def test_split_video_uses_async_to_thread(monkeypatch: pytest.MonkeyPatch,
         Path(out_path).write_bytes(b'segment')
         calls.append(cmd)
         return SimpleNamespace(returncode=0, stdout='', stderr='')
-
     monkeypatch.setattr(asyncio, 'to_thread', fake_to_thread)
 
     segments = await TelegramChannel._split_video(str(source))
@@ -400,8 +401,8 @@ async def test_split_video_uses_async_to_thread(monkeypatch: pytest.MonkeyPatch,
 
 
 def test_cleanup_split_tempdirs_only_removes_stale_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    stale = tmp_path / 'tg_split_old'
-    fresh = tmp_path / 'tg_split_new'
+    stale = tmp_path / 'lemonclaw_tg_split_old'
+    fresh = tmp_path / 'lemonclaw_tg_split_new'
     stale.mkdir()
     fresh.mkdir()
     (stale / 'part1.mp4').write_text('old', encoding='utf-8')

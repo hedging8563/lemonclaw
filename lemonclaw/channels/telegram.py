@@ -36,6 +36,8 @@ _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
 _TG_DRAFT_PREVIEW_CHARS = 4000
 _TG_SPLIT_STALE_MAX_AGE_S = 6 * 60 * 60
+_TG_SPLIT_TEMP_PREFIX = "lemonclaw_tg_split_"
+_EMPTY_MESSAGE = "[empty message]"
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -240,10 +242,10 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _cleanup_split_tempdirs(max_age_s: int = _TG_SPLIT_STALE_MAX_AGE_S) -> None:
-        """Best-effort cleanup for stale tg_split_* directories from crashed runs."""
+        """Best-effort cleanup for stale LemonClaw split temp directories from crashed runs."""
         cutoff = time.time() - max_age_s
         tmp_root = Path(tempfile.gettempdir())
-        for stale in tmp_root.glob('tg_split_*'):
+        for stale in tmp_root.glob(f'{_TG_SPLIT_TEMP_PREFIX}*'):
             try:
                 if not stale.is_dir():
                     continue
@@ -287,7 +289,7 @@ class TelegramChannel(BaseChannel):
 
         Returns a list of file paths for the segments, or an empty list on failure.
         """
-        file_size = os.path.getsize(path)
+        file_size = await asyncio.to_thread(os.path.getsize, path)
         duration = await TelegramChannel._get_video_duration(path)
         if not duration or duration <= 0:
             logger.warning("Cannot determine video duration for {}", path)
@@ -299,7 +301,7 @@ class TelegramChannel(BaseChannel):
 
         ext = path.rsplit(".", 1)[-1] if "." in path else "mp4"
         basename = os.path.basename(path).rsplit(".", 1)[0]
-        tmp_dir = tempfile.mkdtemp(prefix="tg_split_")
+        tmp_dir = tempfile.mkdtemp(prefix=_TG_SPLIT_TEMP_PREFIX)
         segments = []
 
         try:
@@ -339,7 +341,7 @@ class TelegramChannel(BaseChannel):
         event_type: str,
         first: bool = False,
     ) -> None:
-        if not self._activity_bus or not content or content == "[empty message]":
+        if not self._activity_bus or not content or content == _EMPTY_MESSAGE:
             return
         event = {
             "type": event_type,
@@ -374,7 +376,7 @@ class TelegramChannel(BaseChannel):
         reply_params: ReplyParameters | None = None,
         thread_kwargs: dict | None = None,
     ) -> bool:
-        if not msg.content or msg.content == "[empty message]":
+        if not msg.content or msg.content == _EMPTY_MESSAGE:
             await self._update_model_switch_keyboard(
                 chat_id,
                 msg.metadata.get("_callback_message_id"),
@@ -440,7 +442,7 @@ class TelegramChannel(BaseChannel):
     ) -> None:
         thread_kwargs = thread_kwargs or {}
         text = msg.content or ""
-        if not text or text == "[empty message]":
+        if not text or text == _EMPTY_MESSAGE:
             self._stop_typing(msg.chat_id)
             return
 
@@ -874,7 +876,7 @@ class TelegramChannel(BaseChannel):
                 logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
 
-        content = "\n".join(content_parts) if content_parts else "[empty message]"
+        content = "\n".join(content_parts) if content_parts else _EMPTY_MESSAGE
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
 
@@ -904,7 +906,7 @@ class TelegramChannel(BaseChannel):
                 }
                 self._start_typing(str_chat_id)
             buf = self._media_group_buffers[key]
-            if content and content != "[empty message]":
+            if content and content != _EMPTY_MESSAGE:
                 buf["contents"].append(content)
             buf["media"].extend(media_paths)
             if key not in self._media_group_tasks:
@@ -930,7 +932,7 @@ class TelegramChannel(BaseChannel):
             await asyncio.sleep(0.6)
             if not (buf := self._media_group_buffers.pop(key, None)):
                 return
-            content = "\n".join(buf["contents"]) or "[empty message]"
+            content = "\n".join(buf["contents"]) or _EMPTY_MESSAGE
             await self._handle_message(
                 sender_id=buf["sender_id"], chat_id=buf["chat_id"],
                 content=content, media=list(dict.fromkeys(buf["media"])),
