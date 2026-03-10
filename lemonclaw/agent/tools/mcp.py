@@ -82,14 +82,16 @@ async def _probe_http_endpoint(url: str, headers: dict[str, str] | None, timeout
             follow_redirects=True,
             timeout=httpx.Timeout(connect=timeout, read=timeout, write=timeout, pool=timeout),
         ) as client:
-            resp = await client.get(url)
-            if resp.status_code == 401:
-                return f"401 Unauthorized (check credentials/headers)"
-            if resp.status_code == 403:
-                return f"403 Forbidden"
-            # Other status codes (404, 405, etc.) are OK — the MCP endpoint
-            # may only accept POST, so non-2xx on GET is expected.
-            return None
+            # Only inspect response headers so SSE endpoints do not look "timed out"
+            # just because they keep the stream open.
+            async with client.stream("GET", url) as response:
+                if response.status_code == 401:
+                    return "401 Unauthorized (check credentials/headers)"
+                if response.status_code == 403:
+                    return "403 Forbidden"
+                # Other status codes (404, 405, etc.) are OK — the MCP endpoint
+                # may only accept POST, so non-2xx on GET is expected.
+                return None
     except httpx.ConnectError as e:
         return f"connection failed: {e}"
     except httpx.TimeoutException:
@@ -115,17 +117,6 @@ async def connect_mcp_servers(
     for name, cfg in mcp_servers.items():
         _reconnect_locks[name] = asyncio.Lock()
         try:
-            # For HTTP endpoints, probe reachability before entering
-            # streamable_http_client. This avoids a known anyio bug where
-            # a failed streamable_http_client async generator causes
-            # "Attempted to exit cancel scope in a different task" RuntimeError
-            # during cleanup, which crashes the entire process.
-            if cfg.url and not cfg.command:
-                probe_err = await _probe_http_endpoint(cfg.url, cfg.headers)
-                if probe_err:
-                    logger.error("MCP server '{}': endpoint unreachable ({}), skipping", name, probe_err)
-                    continue
-
             async def _open_session(name=name, cfg=cfg):
                 if cfg.command:
                     params = StdioServerParameters(
@@ -136,6 +127,14 @@ async def connect_mcp_servers(
                     )
                     read, write = await stack.enter_async_context(stdio_client(params))
                 elif cfg.url:
+                    # Probe before every HTTP connect attempt, including reconnects.
+                    # This avoids entering streamable_http_client when auth/connectivity
+                    # failures would trigger the anyio cleanup bug.
+                    probe_err = await _probe_http_endpoint(cfg.url, cfg.headers)
+                    if probe_err:
+                        logger.error("MCP server '{}': HTTP pre-flight failed ({}), skipping", name, probe_err)
+                        return None
+
                     from mcp.client.streamable_http import streamable_http_client
                     http_client = await stack.enter_async_context(
                         httpx.AsyncClient(

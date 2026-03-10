@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lemonclaw.agent.tools.mcp import connect_mcp_servers
+from lemonclaw.agent.tools.mcp import _probe_http_endpoint, connect_mcp_servers
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 
@@ -278,3 +278,210 @@ async def test_connect_mcp_servers_reconnect_uses_latest_binding_lookup(monkeypa
         assert 'timed out' in result
         assert len(sessions) == 2
         assert wrapper._binding_getter().session is sessions[-1]
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_skips_http_server_on_probe_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    import mcp.client.streamable_http as mcp_stream_http
+    import lemonclaw.agent.tools.mcp as mcp_tools
+
+    events: list[object] = []
+    streamable_called = {'value': False}
+
+    class FakeResponseStream:
+        def __init__(self, status_code: int):
+            self.status_code = status_code
+
+        async def __aenter__(self):
+            events.append('response_enter')
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append('response_exit')
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            events.append(('client_init', kwargs))
+
+        async def __aenter__(self):
+            events.append('client_enter')
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append('client_exit')
+            return False
+
+        def stream(self, method, url):
+            events.append(('stream', method, url))
+            return FakeResponseStream(401)
+
+        async def get(self, url):
+            raise AssertionError('probe should use stream(), not get()')
+
+    @asynccontextmanager
+    async def fake_streamable_http_client(url, http_client=None):
+        streamable_called['value'] = True
+        yield ('read', 'write', lambda: None)
+
+    monkeypatch.setattr(mcp_tools.httpx, 'AsyncClient', FakeAsyncClient)
+    monkeypatch.setattr(mcp_stream_http, 'streamable_http_client', fake_streamable_http_client)
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers(
+            {
+                'remote': SimpleNamespace(
+                    command='',
+                    args=[],
+                    env={},
+                    tool_timeout=30,
+                    url='https://example.com/mcp',
+                    headers={'Authorization': 'Bearer bad'},
+                )
+            },
+            registry,
+            stack,
+        )
+
+    assert len(registry) == 0
+    assert streamable_called['value'] is False
+    assert ('stream', 'GET', 'https://example.com/mcp') in events
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_http_reconnect_probes_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    import mcp
+    import mcp.client.streamable_http as mcp_stream_http
+    import lemonclaw.agent.tools.mcp as mcp_tools
+
+    probe_calls: list[tuple[str, dict[str, str] | None, float]] = []
+    sessions = []
+    opened_urls: list[str] = []
+
+    async def fake_probe(url: str, headers: dict[str, str] | None, timeout: float = 10.0) -> str | None:
+        probe_calls.append((url, headers, timeout))
+        return None
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    @asynccontextmanager
+    async def fake_streamable_http_client(url, http_client=None):
+        opened_urls.append(url)
+        yield ('read', 'write', lambda: None)
+
+    class FakeSession:
+        def __init__(self, read, write):
+            self.label = f'session-{len(sessions) + 1}'
+            sessions.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(
+                tools=[SimpleNamespace(name='ping', description='Ping', inputSchema={'type': 'object', 'properties': {}})]
+            )
+
+        async def call_tool(self, name, arguments=None):
+            if self.label == 'session-1':
+                await asyncio.sleep(0.05)
+            return SimpleNamespace(content=[])
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(mcp_tools, '_probe_http_endpoint', fake_probe)
+    monkeypatch.setattr(mcp_tools.httpx, 'AsyncClient', FakeAsyncClient)
+    monkeypatch.setattr(mcp, 'ClientSession', FakeSession)
+    monkeypatch.setattr(mcp_stream_http, 'streamable_http_client', fake_streamable_http_client)
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers(
+            {
+                'remote': SimpleNamespace(
+                    command='',
+                    args=[],
+                    env={},
+                    tool_timeout=0.01,
+                    url='https://example.com/mcp',
+                    headers={'Authorization': 'Bearer ok'},
+                )
+            },
+            registry,
+            stack,
+        )
+
+        wrapper = registry.get('mcp_remote_ping')
+        assert wrapper is not None
+        result = await wrapper.execute()
+        assert 'timed out' in result
+        assert len(sessions) == 2
+        assert wrapper._binding_getter().session is sessions[-1]
+
+    assert len(probe_calls) == 2
+    assert opened_urls == ['https://example.com/mcp', 'https://example.com/mcp']
+
+
+@pytest.mark.asyncio
+async def test_probe_http_endpoint_uses_stream_without_reading_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    import lemonclaw.agent.tools.mcp as mcp_tools
+
+    events: list[object] = []
+
+    class FakeResponseStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            events.append('response_enter')
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append('response_exit')
+            return False
+
+        async def aread(self):
+            events.append('body_read')
+            raise AssertionError('probe should not read the response body')
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            events.append(('client_init', kwargs))
+
+        async def __aenter__(self):
+            events.append('client_enter')
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append('client_exit')
+            return False
+
+        def stream(self, method, url):
+            events.append(('stream', method, url))
+            return FakeResponseStream()
+
+        async def get(self, url):
+            raise AssertionError('probe should use stream(), not get()')
+
+    monkeypatch.setattr(mcp_tools.httpx, 'AsyncClient', FakeAsyncClient)
+
+    result = await _probe_http_endpoint('https://example.com/mcp', {'Authorization': 'Bearer ok'})
+
+    assert result is None
+    assert ('stream', 'GET', 'https://example.com/mcp') in events
+    assert 'body_read' not in events
