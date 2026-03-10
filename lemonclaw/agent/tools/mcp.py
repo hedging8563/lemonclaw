@@ -81,7 +81,12 @@ async def connect_mcp_servers(
     *,
     workspace: Path | None = None,
 ) -> None:
-    """Connect to configured MCP servers and register their tools."""
+    """Connect to configured MCP servers and register their tools.
+
+    Each server connection uses an isolated AsyncExitStack to prevent one
+    server's failure (especially anyio BaseExceptionGroup from streamable HTTP)
+    from tearing down the entire process.
+    """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -91,38 +96,58 @@ async def connect_mcp_servers(
     for name, cfg in mcp_servers.items():
         _reconnect_locks[name] = asyncio.Lock()
         try:
-            async def _open_session(name=name, cfg=cfg):
-                if cfg.command:
-                    params = StdioServerParameters(
-                        command=cfg.command,
-                        args=cfg.args,
-                        env=cfg.env or None,
-                        cwd=str(workspace) if workspace else None,
-                    )
-                    read, write = await stack.enter_async_context(stdio_client(params))
-                elif cfg.url:
-                    from mcp.client.streamable_http import streamable_http_client
-                    http_client = await stack.enter_async_context(
-                        httpx.AsyncClient(
-                            headers=cfg.headers or None,
-                            follow_redirects=True,
-                            timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+            # Each server gets its own stack so failures are isolated.
+            # On success the per-server stack is transferred to the parent.
+            server_stack = AsyncExitStack()
+            await server_stack.__aenter__()
+
+            try:
+                async def _open_session(name=name, cfg=cfg, _stack=server_stack):
+                    if cfg.command:
+                        params = StdioServerParameters(
+                            command=cfg.command,
+                            args=cfg.args,
+                            env=cfg.env or None,
+                            cwd=str(workspace) if workspace else None,
                         )
-                    )
-                    read, write, _ = await stack.enter_async_context(
-                        streamable_http_client(cfg.url, http_client=http_client)
-                    )
-                else:
-                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
-                    return None
+                        read, write = await _stack.enter_async_context(stdio_client(params))
+                    elif cfg.url:
+                        from mcp.client.streamable_http import streamable_http_client
+                        http_client = await _stack.enter_async_context(
+                            httpx.AsyncClient(
+                                headers=cfg.headers or None,
+                                follow_redirects=True,
+                                timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+                            )
+                        )
+                        read, write, _ = await _stack.enter_async_context(
+                            streamable_http_client(cfg.url, http_client=http_client)
+                        )
+                    else:
+                        logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                        return None
 
-                session = await stack.enter_async_context(ClientSession(read, write))
-                await session.initialize()
-                return session
+                    session = await _stack.enter_async_context(ClientSession(read, write))
+                    await session.initialize()
+                    return session
 
-            session = await _open_session()
-            if session is None:
-                continue
+                session = await _open_session()
+                if session is None:
+                    await server_stack.aclose()
+                    continue
+
+            except BaseException:
+                # Connection failed — tear down this server's resources cleanly.
+                # Use BaseException to catch anyio's BaseExceptionGroup from
+                # streamable_http_client failures (e.g. 401 Unauthorized).
+                try:
+                    await server_stack.aclose()
+                except Exception:
+                    pass  # suppress cleanup errors
+                raise
+
+            # Success — transfer ownership to the parent stack
+            stack.push_async_callback(server_stack.aclose)
 
             binding = _MCPBinding(session=session, reconnect=None)
             bindings[name] = binding
@@ -155,6 +180,5 @@ async def connect_mcp_servers(
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
             logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
-        except (Exception, BaseExceptionGroup) as e:  # BaseExceptionGroup: anyio TaskGroup wraps MCP HTTP errors
+        except (Exception, BaseExceptionGroup) as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)
-
