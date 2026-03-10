@@ -181,36 +181,127 @@ def _json(data: dict, status_code: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status_code, headers=_NO_CACHE)
 
 
+
+
+def _derive_channel_runtime(config) -> dict[str, dict[str, object]]:
+    """Derive effective IM runtime state from config + pairing store.
+
+    The settings UI edits raw config.json, but channels like Telegram may behave as
+    `pairing` at runtime because auto-pairing state is stored separately under
+    ~/.lemonclaw/pairing/*.json. This helper exposes the effective state so the UI
+    can explain why raw fields may look empty while the bot is already paired.
+    """
+    from lemonclaw.channels.auto_pairing import AutoPairing
+    from lemonclaw.utils.helpers import get_data_path
+
+    data_dir = get_data_path()
+    runtime: dict[str, dict[str, object]] = {}
+
+    def summarize_pairing(channel_name: str) -> dict[str, object]:
+        pairing = AutoPairing(channel_name, data_dir)
+        approved = pairing.approved
+        pending = pairing.pending
+        return {
+            'owner': pairing.owner,
+            'approved_count': len(approved),
+            'pending_count': len(pending),
+            'approved_preview': approved[:3],
+        }
+
+    # Channels using BaseChannel dm_policy + allow_from semantics.
+    dm_channels = {
+        'telegram': config.channels.telegram,
+        'discord': config.channels.discord,
+        'feishu': config.channels.feishu,
+    }
+    for channel_name, channel_cfg in dm_channels.items():
+        if not getattr(channel_cfg, 'enabled', False):
+            continue
+        raw_policy = getattr(channel_cfg, 'dm_policy', None)
+        allow_from = list(getattr(channel_cfg, 'allow_from', []) or [])
+        if raw_policy:
+            effective = raw_policy
+            source = 'config'
+        elif config.channels.auto_pairing:
+            effective = 'pairing'
+            source = 'auto_pairing'
+        elif allow_from:
+            effective = 'allowlist'
+            source = 'allow_from'
+        else:
+            effective = 'unset'
+            source = 'raw_empty'
+        entry: dict[str, object] = {
+            'effective_dm_policy': effective,
+            'source': source,
+            'raw_dm_policy': raw_policy,
+            'raw_allow_from_count': len(allow_from),
+        }
+        if effective == 'pairing':
+            entry.update(summarize_pairing(channel_name))
+        runtime[channel_name] = entry
+
+    # Slack stores DM policy separately and does not use the generic BaseChannel dm_policy field.
+    if config.channels.slack.enabled:
+        slack_dm = config.channels.slack.dm
+        runtime['slack'] = {
+            'effective_dm_policy': getattr(slack_dm, 'policy', 'open') or 'open',
+            'source': 'config',
+            'raw_dm_policy': getattr(slack_dm, 'policy', 'open') or 'open',
+            'raw_allow_from_count': len(getattr(slack_dm, 'allow_from', []) or []),
+        }
+
+    # WhatsApp pairing/login is runtime-driven, but access still depends on allow_from.
+    if config.channels.whatsapp.enabled:
+        allow_from = list(config.channels.whatsapp.allow_from or [])
+        runtime['whatsapp'] = {
+            'effective_dm_policy': 'pairing' if config.channels.auto_pairing else 'allowlist',
+            'source': 'auto_pairing' if config.channels.auto_pairing else 'allow_from',
+            'raw_dm_policy': config.channels.whatsapp.dm_policy,
+            'raw_allow_from_count': len(allow_from),
+        }
+        if config.channels.auto_pairing:
+            runtime['whatsapp'].update(summarize_pairing('whatsapp'))
+
+    return runtime
 def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
     """Ensure Feishu subscription tokens exist before serving settings UI."""
+    import fcntl
     import json as _json_mod
 
     from lemonclaw.config.loader import save_config
     from lemonclaw.config.schema import Config
 
+    lock_path = config_path.with_suffix(config_path.suffix + '.feishu.lock')
     try:
-        if config_path.exists():
-            with open(config_path, encoding="utf-8") as f:
-                raw = _json_mod.load(f)
-            config = Config.model_validate(raw)
-        else:
-            config = Config()
-    except Exception as exc:
-        logger.warning("Failed to initialize Feishu subscription tokens: {}", exc)
-        return
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, 'w', encoding='utf-8') as lock_handle:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)
+            try:
+                if config_path.exists():
+                    with open(config_path, encoding="utf-8") as f:
+                        raw = _json_mod.load(f)
+                    config = Config.model_validate(raw)
+                else:
+                    config = Config()
+            except Exception as exc:
+                logger.warning("Failed to initialize Feishu subscription tokens: {}", exc)
+                return
 
-    changed = False
-    if not config.channels.feishu.encrypt_key:
-        config.channels.feishu.encrypt_key = secrets.token_hex(16)
-        changed = True
-    if not config.channels.feishu.verification_token:
-        config.channels.feishu.verification_token = secrets.token_hex(16)
-        changed = True
-    if changed:
-        try:
-            save_config(config, config_path)
-        except Exception as exc:
-            logger.warning("Failed to persist auto-generated Feishu tokens: {}", exc)
+            changed = False
+            if not config.channels.feishu.encrypt_key:
+                config.channels.feishu.encrypt_key = secrets.token_hex(16)
+                changed = True
+            if not config.channels.feishu.verification_token:
+                config.channels.feishu.verification_token = secrets.token_hex(16)
+                changed = True
+            if changed:
+                try:
+                    save_config(config, config_path)
+                except Exception as exc:
+                    logger.warning("Failed to persist auto-generated Feishu tokens: {}", exc)
+    except Exception as exc:
+        logger.warning("Failed to lock Feishu token initialization: {}", exc)
 
 
 def get_settings_routes(
@@ -298,6 +389,7 @@ def get_settings_routes(
         coding_bin = _shutil.which("claude") or ""
         result = {
             "settings": _mask_dict(data),
+            "channel_runtime": _derive_channel_runtime(config),
             "tool_status": {
                 "browser": {"installed": bool(browser_bin), "binary": browser_bin},
                 "coding": {"installed": bool(coding_bin), "binary": coding_bin},
@@ -686,6 +778,8 @@ def get_settings_routes(
         if not url.startswith(("https://", "http://")):
             return _json({"error": "URL must start with https:// or http://, or use owner/repo/skill format"}, 400)
         parsed = urlparse(url)
+        # Exact hostname matching rejects crafted URLs such as github.com@evil.example
+        # because urlparse() resolves the actual hostname to evil.example.
         if parsed.hostname not in _ALLOWED_SKILL_REPO_HOSTS:
             allowed_hosts = ", ".join(sorted(_ALLOWED_SKILL_REPO_HOSTS))
             return _json({"error": f"Only {allowed_hosts} are allowed"}, 400)

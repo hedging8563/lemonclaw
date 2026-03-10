@@ -163,3 +163,32 @@ def test_feishu_tokens_are_initialized_before_first_get(tmp_path):
     resp = client.get('/api/settings')
     assert resp.status_code == 200
 
+
+
+def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': '5693302436|kksharp_cam',
+        'owner_notify_target': '5693302436',
+        'approved': ['5693302436|kksharp_cam'],
+        'pending': {},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    runtime = resp.json()['channel_runtime']['telegram']
+    assert runtime['effective_dm_policy'] == 'pairing'
+    assert runtime['source'] == 'auto_pairing'
+    assert runtime['approved_count'] == 1
+

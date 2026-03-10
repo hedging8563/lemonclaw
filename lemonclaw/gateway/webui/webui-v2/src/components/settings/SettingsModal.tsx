@@ -9,6 +9,7 @@ import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 type NoticeTone = 'info' | 'warning';
 type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
+type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
@@ -166,6 +167,7 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<DraftData | null>(null);
   const [toolStatus, setToolStatus] = useState<ToolStatusMap | null>(null);
+  const [channelRuntime, setChannelRuntime] = useState<ChannelRuntimeMap | null>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -190,6 +192,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const data = await res.json();
       setDraft(JSON.parse(JSON.stringify(data.settings)));
       setToolStatus(data.tool_status || null);
+      setChannelRuntime(data.channel_runtime || null);
       setChangedPaths(new Set());
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -256,7 +259,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       if (copyResetTimer.current) window.clearTimeout(copyResetTimer.current);
       copyResetTimer.current = window.setTimeout(() => setCopiedField((current) => current === fieldPath ? null : current), 1800);
     } catch (err) {
-      console.error('Copy failed', err);
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (!ok) throw err;
+        setCopiedField(fieldPath);
+        if (copyResetTimer.current) window.clearTimeout(copyResetTimer.current);
+        copyResetTimer.current = window.setTimeout(() => setCopiedField((current) => current === fieldPath ? null : current), 1800);
+      } catch (fallbackErr) {
+        console.error('Copy failed', fallbackErr);
+      }
     }
   };
 
@@ -424,6 +443,38 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     );
   };
 
+
+  const renderChannelRuntimeNotice = (channelKey: string) => {
+    const runtime = channelRuntime?.[channelKey];
+    if (!runtime) return null;
+
+    const parts: string[] = [];
+    if (runtime.effective_dm_policy) {
+      parts.push(`${t('channel_effective_dm_policy')}: ${String(runtime.effective_dm_policy).toUpperCase()}`);
+    }
+    if (runtime.source === 'auto_pairing') {
+      parts.push(t('channel_runtime_source_auto_pairing'));
+    } else if (runtime.source === 'config') {
+      parts.push(t('channel_runtime_source_config'));
+    } else if (runtime.source === 'raw_empty') {
+      parts.push(t('channel_runtime_source_raw_empty'));
+    }
+    if (typeof runtime.owner === 'string' && runtime.owner) {
+      parts.push(`${t('channel_runtime_owner')}: ${runtime.owner}`);
+    }
+    if (typeof runtime.approved_count === 'number') {
+      parts.push(`${t('channel_runtime_approved')}: ${runtime.approved_count}`);
+    }
+    if (typeof runtime.pending_count === 'number' && runtime.pending_count > 0) {
+      parts.push(`${t('channel_runtime_pending')}: ${runtime.pending_count}`);
+    }
+    if (typeof runtime.raw_allow_from_count === 'number' && runtime.raw_allow_from_count > 0) {
+      parts.push(`${t('channel_runtime_allow_from_count')}: ${runtime.raw_allow_from_count}`);
+    }
+
+    return renderNotice(parts.join(' · '), runtime.source === 'raw_empty' ? 'warning' : 'info');
+  };
+
   const renderFields = (data: any, path: string[]): any => {
     if (!data) return null;
 
@@ -478,6 +529,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
+            {path[0] === 'channels' && renderChannelRuntimeNotice(displayKey)}
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
             {renderFields(currentObj, cPath)}
