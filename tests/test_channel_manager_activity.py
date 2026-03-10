@@ -47,3 +47,19 @@ def test_thinking_is_skipped_from_manager_broadcast() -> None:
     )
 
     assert ChannelManager._should_skip_activity_broadcast(thinking) is True
+
+
+def test_thinking_and_chunk_are_internal_messages() -> None:
+    thinking = OutboundMessage(channel="discord", chat_id="1", content="thinking", metadata={"_progress": True, "_thinking": True})
+    chunk = OutboundMessage(channel="discord", chat_id="1", content="chunk", metadata={"_progress": True, "_chunk": True})
+
+    assert ChannelManager._is_internal_message(thinking) is True
+    assert ChannelManager._is_internal_message(chunk) is True
+
+
+def test_tool_start_and_result_are_internal_messages() -> None:
+    tool_start = OutboundMessage(channel="feishu", chat_id="ou_xxx", content='{"name":"web_search"}', metadata={"_progress": True, "_tool_start": True})
+    tool_result = OutboundMessage(channel="feishu", chat_id="ou_xxx", content='{"name":"web_search","result":"ok"}', metadata={"_progress": True, "_tool_result": True})
+
+    assert ChannelManager._is_internal_message(tool_start) is True
+    assert ChannelManager._is_internal_message(tool_result) is True

@@ -236,10 +236,22 @@ class ChannelManager:
         return f"{msg.channel}:{msg.chat_id}"
 
     @staticmethod
+    def _is_internal_message(msg: OutboundMessage) -> bool:
+        meta = msg.metadata or {}
+        return bool(
+            meta.get("_thinking")
+            or meta.get("_chunk")
+            or meta.get("_tool_start")
+            or meta.get("_tool_result")
+        )
+
+    @staticmethod
     def _should_skip_activity_broadcast(msg: OutboundMessage) -> bool:
         meta = msg.metadata or {}
         if meta.get("_thinking"):
             return True
+        # Telegram emits synthetic chunk/done activity events during draft streaming,
+        # so we skip raw progress/final bus messages here to avoid duplicate timelines.
         return msg.channel == "telegram" and bool(meta.get("_progress") or meta.get("_final"))
 
     async def _dispatch_outbound(self) -> None:
@@ -277,12 +289,8 @@ class ChannelManager:
                     await self.activity_bus.broadcast(event)
 
                 if msg.metadata.get("_progress"):
-                    # Never leak thinking/reasoning content to users
-                    if msg.metadata.get("_thinking"):
-                        continue
-                    # Never send raw LLM chunks to channels that can't edit messages
-                    # (Telegram handles this via draft streaming; all others would spam)
-                    if msg.metadata.get("_chunk"):
+                    # Never leak internal reasoning or raw transport chunks to end-user channels.
+                    if self._is_internal_message(msg):
                         continue
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
