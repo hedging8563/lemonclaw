@@ -70,11 +70,36 @@ function renderMd(content: string, skipHighlight = false) {
 
 function MsgActions({ msg }: { msg: any }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(msg.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      setCopyFailed(false);
+    } catch (error) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = msg.content;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (!ok) throw error;
+        setCopied(true);
+        setCopyFailed(false);
+      } catch (fallbackError) {
+        console.error('Copy failed', fallbackError);
+        setCopyFailed(true);
+      }
+    }
+    setTimeout(() => {
+      setCopied(false);
+      setCopyFailed(false);
+    }, 2000);
   };
 
   const handleEdit = () => {
@@ -84,7 +109,7 @@ function MsgActions({ msg }: { msg: any }) {
 
   return (
     <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} className="msg-actions-bar">
-      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : t('copy')}</button>
+      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
       {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
   );
