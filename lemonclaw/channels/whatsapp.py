@@ -27,6 +27,7 @@ class WhatsAppChannel(BaseChannel):
         self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False
+        self._mention_warned = False  # Only warn once about mention mode limitation
     
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -134,12 +135,14 @@ class WhatsAppChannel(BaseChannel):
                     return
                 if policy == "mention":
                     # Bridge does not expose bot's own JID, so we cannot do
-                    # precise bot-mention detection. Degrade to disabled and warn.
-                    logger.warning(
-                        "WhatsApp group_policy='mention' requires bot JID from bridge "
-                        "(not yet supported). Ignoring group message from {}.",
-                        group_jid,
-                    )
+                    # precise bot-mention detection. Degrade to disabled and warn once.
+                    if not self._mention_warned:
+                        logger.warning(
+                            "WhatsApp group_policy='mention' requires bot JID from bridge "
+                            "(not yet supported). All group messages will be ignored until "
+                            "bridge adds bot JID support or policy is changed.",
+                        )
+                        self._mention_warned = True
                     return
 
             await self._handle_message(
