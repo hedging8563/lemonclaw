@@ -792,23 +792,19 @@ class TelegramChannel(BaseChannel):
             )
 
     def _should_respond_in_group(self, text: str, chat_id: str) -> bool:
-        """Check if the bot should respond to a group message based on group_policy."""
-        policy = self.config.group_policy
-
-        if policy == "disabled":
-            return False
-        if policy == "open":
-            return True
-        if policy == "allowlist":
-            return chat_id in self.config.group_allow_from
-        # "mention" (default): only respond when @mentioned
-        if policy == "mention":
-            if self._app and self._app.bot:
-                bot_username = self._app.bot.username
-                if bot_username and f"@{bot_username}" in (text or ""):
-                    return True
-            return False
-        return False
+        """Check if the bot should respond to a group message based on normalized group settings."""
+        policy, require_mention = self._resolve_group_gate()
+        in_allowlist = chat_id in (self.config.group_allow_from or [])
+        mentioned = False
+        if require_mention and self._app and self._app.bot:
+            bot_username = self._app.bot.username
+            mentioned = bool(bot_username and f"@{bot_username}" in (text or ""))
+        return self._group_policy_allows(
+            policy,
+            in_allowlist=in_allowlist,
+            require_mention=require_mention,
+            was_mentioned=mentioned,
+        )
 
     def _strip_bot_mention(self, text: str) -> str:
         """Remove @bot_username from message text."""

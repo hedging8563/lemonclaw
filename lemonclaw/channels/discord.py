@@ -228,22 +228,21 @@ class DiscordChannel(BaseChannel):
 
         # Group policy gate
         if is_group:
-            policy = self.config.group_policy
-            if policy == "disabled":
+            policy, require_mention = self._resolve_group_gate()
+            mentions = payload.get("mentions") or []
+            bot_mentioned = any(
+                str(m.get("id")) == self._bot_user_id for m in mentions
+            ) if (require_mention and self._bot_user_id) else False
+            if not self._group_policy_allows(
+                policy,
+                in_allowlist=channel_id in (self.config.group_allow_from or []),
+                require_mention=require_mention,
+                was_mentioned=bot_mentioned,
+            ):
                 return
-            if policy == "allowlist" and channel_id not in self.config.group_allow_from:
-                return
-            if policy == "mention":
-                # Check if bot is mentioned via Discord's mentions array
-                mentions = payload.get("mentions") or []
-                bot_mentioned = any(
-                    str(m.get("id")) == self._bot_user_id for m in mentions
-                ) if self._bot_user_id else False
-                if not bot_mentioned:
-                    return
-                # Strip <@bot_id> from content for cleaner agent input
-                if self._bot_user_id and content:
-                    content = re.sub(rf"<@!?{re.escape(self._bot_user_id)}>\s*", "", content).strip()
+            # Strip <@bot_id> from content for cleaner agent input
+            if self._bot_user_id and content and bot_mentioned:
+                content = re.sub(rf"<@!?{re.escape(self._bot_user_id)}>\s*", "", content).strip()
 
         content_parts = [content] if content else []
         media_paths: list[str] = []

@@ -708,12 +708,9 @@ class FeishuChannel(BaseChannel):
             # Group policy gate: check early to avoid unnecessary media downloads and reactions
             is_group = chat_type == "group"
             if is_group:
-                policy = self.config.group_policy
-                if policy == "disabled":
-                    return
-                if policy == "allowlist" and chat_id not in self.config.group_allow_from:
-                    return
-                if policy == "mention":
+                policy, require_mention = self._resolve_group_gate()
+                bot_mentioned = False
+                if require_mention:
                     # Precise bot mention detection using message.mentions
                     # Each MentionEvent has id.open_id matching the @mentioned user
                     if self._bot_open_id and message.mentions:
@@ -721,23 +718,26 @@ class FeishuChannel(BaseChannel):
                             getattr(getattr(m, "id", None), "open_id", None) == self._bot_open_id
                             for m in message.mentions
                         )
-                        if not bot_mentioned:
-                            return
                     elif self._bot_open_id:
-                        # Bot open_id known but no mentions in message
-                        return
+                        bot_mentioned = False
                     else:
                         # Bot open_id unknown (API call failed at startup).
-                        # Cannot do precise mention detection — degrade to disabled
-                        # to avoid false positives (any @mention triggering the bot).
+                        # Cannot do precise mention detection — be safe and ignore.
                         if not self._mention_warned:
                             logger.warning(
-                                "Feishu group_policy='mention' requires bot open_id "
-                                "(failed to fetch at startup). All group messages will "
-                                "be ignored until bot open_id is available or policy is changed.",
+                                "Feishu group mention requirement needs bot open_id "
+                                "(failed to fetch at startup). Group messages will be ignored "
+                                "until bot open_id is available or mention requirement is disabled.",
                             )
                             self._mention_warned = True
                         return
+                if not self._group_policy_allows(
+                    policy,
+                    in_allowlist=chat_id in (self.config.group_allow_from or []),
+                    require_mention=require_mention,
+                    was_mentioned=bot_mentioned,
+                ):
+                    return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)

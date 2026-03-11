@@ -468,14 +468,13 @@ class MatrixChannel(BaseChannel):
             return False
         if self._is_direct_room(room):
             return True
-        policy = self.config.group_policy
-        if policy == "open":
-            return True
-        if policy == "allowlist":
-            return room.room_id in (self.config.group_allow_from or [])
-        if policy == "mention":
-            return self._is_bot_mentioned(event)
-        return False
+        policy, require_mention = self._resolve_group_gate()
+        return self._group_policy_allows(
+            policy,
+            in_allowlist=room.room_id in (self.config.group_allow_from or []),
+            require_mention=require_mention,
+            was_mentioned=self._is_bot_mentioned(event) if require_mention else False,
+        )
 
     def _media_dir(self) -> Path:
         d = get_data_dir() / "media" / "matrix"

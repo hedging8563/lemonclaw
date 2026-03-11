@@ -190,6 +190,30 @@ class TestEntityStoreOnWrite:
         assert card is not None
 
 
+class TestGroupPolicySemantics:
+    def test_legacy_mention_alias_normalizes_to_open_with_require_mention(self):
+        from types import SimpleNamespace
+        from lemonclaw.channels.base import BaseChannel
+
+        class DummyChannel(BaseChannel):
+            async def start(self):
+                return None
+            async def stop(self):
+                return None
+            async def send(self, msg):
+                return None
+
+        channel = DummyChannel(SimpleNamespace(group_policy='mention', group_require_mention=False, allow_from=[]), None)
+        assert channel._resolve_group_gate() == ('open', True)
+
+    def test_allowlist_and_require_mention_are_composable(self):
+        from lemonclaw.channels.base import BaseChannel
+
+        assert BaseChannel._group_policy_allows('allowlist', in_allowlist=True, require_mention=True, was_mentioned=True) is True
+        assert BaseChannel._group_policy_allows('allowlist', in_allowlist=True, require_mention=True, was_mentioned=False) is False
+        assert BaseChannel._group_policy_allows('allowlist', in_allowlist=False, require_mention=True, was_mentioned=True) is False
+
+
 # ── 4. Session get_history Alignment ─────────────────────────────────────
 
 

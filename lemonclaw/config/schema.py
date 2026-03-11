@@ -22,7 +22,8 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"  # Group chat response policy (legacy "mention" still accepted)
+    group_require_mention: bool = True  # If true, bot only responds in groups when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed group JIDs if allowlist
 
 
@@ -33,7 +34,8 @@ class TelegramConfig(Base):
     dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"  # Group chat response policy (legacy "mention" still accepted)
+    group_require_mention: bool = True  # If true, bot only responds in groups when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed group/chat IDs if allowlist
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
@@ -49,7 +51,8 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Group chat response policy
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"  # Group chat response policy (legacy "mention" still accepted)
+    group_require_mention: bool = True  # If true, bot only responds in groups when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed group chat_ids if allowlist
     react_emoji: str = "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
 
@@ -70,7 +73,8 @@ class DiscordConfig(Base):
     dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     token: str = ""  # Bot token from Discord Developer Portal
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
-    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "mention"  # Guild channel response policy
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"  # Guild/channel response policy (legacy "mention" still accepted)
+    group_require_mention: bool = True  # If true, bot only responds in channels when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed guild channel IDs if allowlist
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
@@ -89,7 +93,8 @@ class MatrixConfig(Base):
     sync_stop_grace_seconds: int = 2 # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
     max_media_bytes: int = 20 * 1024 * 1024 # Max attachment size accepted for Matrix media handling (inbound + outbound).
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"
+    group_policy: Literal["open", "mention", "allowlist", "disabled"] = "open"  # Legacy "mention" still accepted
+    group_require_mention: bool = True  # If true, bot only responds in rooms when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
@@ -184,7 +189,8 @@ class SlackConfig(Base):
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
-    group_policy: str = "mention"  # "mention", "open", "allowlist"
+    group_policy: str = "open"  # "open", "allowlist", "disabled" (legacy "mention" still accepted)
+    group_require_mention: bool = True  # If true, bot only responds in channels when explicitly mentioned
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 

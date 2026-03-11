@@ -128,21 +128,23 @@ class WhatsAppChannel(BaseChannel):
 
             # Group policy gate
             if is_group:
-                policy = self.config.group_policy
-                if policy == "disabled":
-                    return
-                if policy == "allowlist" and group_jid not in self.config.group_allow_from:
-                    return
-                if policy == "mention":
+                policy, require_mention = self._resolve_group_gate()
+                if require_mention:
                     # Bridge does not expose bot's own JID, so we cannot do
                     # precise bot-mention detection. Degrade to disabled and warn once.
                     if not self._mention_warned:
                         logger.warning(
-                            "WhatsApp group_policy='mention' requires bot JID from bridge "
-                            "(not yet supported). All group messages will be ignored until "
-                            "bridge adds bot JID support or policy is changed.",
+                            "WhatsApp group mention requirement needs bot JID from bridge "
+                            "(not yet supported). Group messages will be ignored until bridge adds bot JID support or mention requirement is disabled.",
                         )
                         self._mention_warned = True
+                    return
+                if not self._group_policy_allows(
+                    policy,
+                    in_allowlist=group_jid in (self.config.group_allow_from or []),
+                    require_mention=False,
+                    was_mentioned=False,
+                ):
                     return
 
             await self._handle_message(

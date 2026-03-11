@@ -10,7 +10,7 @@ type NoticeTone = 'info' | 'warning';
 type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
-type GroupRuntimeMap = Record<string, { effective_group_policy?: string; group_allow_from_count?: number }>;
+type GroupRuntimeMap = Record<string, { effective_group_policy?: string; effective_group_require_mention?: boolean; group_allow_from_count?: number }>;
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
@@ -126,29 +126,36 @@ function omitKeys<T extends Record<string, any>>(value: T | null | undefined, ke
 
 const HIDDEN_AGENT_DEFAULT_KEYS = ['workspace', 'input_cost_per_1k_tokens', 'output_cost_per_1k_tokens'];
 
+function getSelectOptions(fieldKey: string) {
+  const map: Record<string, { value: string; label: string }[]> = {
+    dm_policy: [
+      { value: '', label: t('settings_inherit_option') },
+      { value: 'pairing', label: 'pairing' },
+      { value: 'allowlist', label: 'allowlist' },
+      { value: 'open', label: 'open' },
+      { value: 'disabled', label: 'disabled' },
+    ],
+    group_policy: [
+      { value: 'open', label: 'open' },
+      { value: 'allowlist', label: 'allowlist' },
+      { value: 'disabled', label: 'disabled' },
+    ],
+    reply_delay_mode: [
+      { value: 'off', label: 'off' },
+      { value: 'non-mention', label: 'non-mention' },
+    ],
+  };
+  return map[fieldKey];
+}
+
+function renderRuntimeList(items: string[] | undefined): string {
+  if (!items || items.length === 0) return t('channel_runtime_none');
+  return items.join(', ');
+}
+
 // Enum fields rendered as <select> dropdowns instead of text inputs.
 // Key: field name (last segment of path). Value: options array.
 // Empty string option = "inherit / not set".
-const SELECT_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  dm_policy: [
-    { value: '', label: '— (inherit)' },
-    { value: 'pairing', label: 'pairing' },
-    { value: 'allowlist', label: 'allowlist' },
-    { value: 'open', label: 'open' },
-    { value: 'disabled', label: 'disabled' },
-  ],
-  group_policy: [
-    { value: 'open', label: 'open' },
-    { value: 'mention', label: 'mention' },
-    { value: 'allowlist', label: 'allowlist' },
-    { value: 'disabled', label: 'disabled' },
-  ],
-  reply_delay_mode: [
-    { value: 'off', label: 'off' },
-    { value: 'non-mention', label: 'non-mention' },
-  ],
-};
-
 const FIELD_HELP_KEYS: Record<string, string> = {
   'agents.defaults.model': 'settings_help_model',
   'agents.defaults.provider': 'settings_help_provider',
@@ -311,6 +318,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (key === 'web.search') return t('tools_web_search_title');
     if (key === 'exec') return t('tools_exec_title');
     if (key === 'mcp_servers') return t('mcp_servers_title');
+    if (key === 'group_require_mention') return t('settings_group_require_mention_label');
     return humanizeLabel(key);
   };
 
@@ -347,6 +355,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       socket_max_reconnect_delay_ms: 'settings_help_generic_interval_ms',
       allow_from: 'settings_help_generic_allow_from',
       group_policy: 'settings_help_generic_group_policy',
+      group_require_mention: 'settings_help_generic_group_require_mention',
       group_allow_from: 'settings_help_generic_group_allow_from',
       trusted_proxies: 'settings_help_generic_allow_from',
       command: 'settings_help_generic_command',
@@ -529,6 +538,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (group?.effective_group_policy) {
       parts.push(`${t('channel_effective_group_policy')}: ${String(group.effective_group_policy).toUpperCase()}`);
     }
+    if (typeof group?.effective_group_require_mention === 'boolean') {
+      parts.push(`${t('channel_group_require_mention')}: ${group.effective_group_require_mention ? t('common_yes') : t('common_no')}`);
+    }
     if (typeof group?.group_allow_from_count === 'number' && group.group_allow_from_count > 0) {
       parts.push(`${t('channel_group_allow_from_count')}: ${group.group_allow_from_count}`);
     }
@@ -536,6 +548,44 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (parts.length === 0) return null;
     const tone = runtime?.source === 'raw_empty' ? 'warning' : 'info';
     return renderNotice(parts.join(' · '), tone);
+  };
+
+  const renderChannelPairingCard = (channelKey: string) => {
+    const runtime = channelRuntime?.[channelKey];
+    if (!runtime) return null;
+    const effective = String(runtime.effective_dm_policy || '');
+    const hasPairingState = Boolean(runtime.owner) || (runtime.approved_count || 0) > 0 || (runtime.pending_count || 0) > 0;
+    const shouldExplainStaticAllowlist = effective === 'pairing' || runtime.source === 'auto_pairing' || runtime.source === 'raw_empty';
+    if (!hasPairingState && !shouldExplainStaticAllowlist) return null;
+
+    return (
+      <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '6px', border: '1px solid rgba(45, 212, 191, 0.18)', background: 'rgba(45, 212, 191, 0.08)' }}>
+        <div style={{ fontSize: '11px', color: 'var(--teal)', marginBottom: '8px', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>
+          {t('channel_paired_users_title')}
+        </div>
+        {typeof runtime.owner === 'string' && runtime.owner ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '6px' }}>
+            {t('channel_runtime_owner')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{runtime.owner}</span>
+          </div>
+        ) : null}
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          {t('channel_runtime_approved')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{typeof runtime.approved_count === 'number' ? runtime.approved_count : 0}</span>
+        </div>
+        {typeof runtime.pending_count === 'number' && runtime.pending_count > 0 ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            {t('channel_runtime_pending')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{runtime.pending_count}</span>
+          </div>
+        ) : null}
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: '6px' }}>
+          {t('channel_paired_users_preview')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{renderRuntimeList(runtime.approved_preview)}</span>
+        </div>
+        {shouldExplainStaticAllowlist ? (
+          <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            {t('channel_allow_from_static_note')}
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   const renderFields = (data: any, path: string[]): any => {
@@ -593,6 +643,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
             {path[0] === 'channels' && renderChannelRuntimeNotice(displayKey)}
+            {path[0] === 'channels' && renderChannelPairingCard(displayKey)}
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
             {renderFields(currentObj, cPath)}
@@ -667,7 +718,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       }
 
       // Enum fields → <select> dropdown
-      const selectOpts = SELECT_OPTIONS[k];
+      const selectOpts = getSelectOptions(k);
       if (selectOpts && (typeof v === 'string' || v === null || v === undefined)) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>

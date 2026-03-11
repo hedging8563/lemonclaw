@@ -216,20 +216,24 @@ class SlackChannel(BaseChannel):
             return True
 
         # Group / channel messages
-        if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
+        policy, _require_mention = self._resolve_group_gate()
+        if policy == "disabled":
+            return False
+        if policy == "allowlist":
+            return chat_id in (self.config.group_allow_from or [])
         return True
 
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
-        if self.config.group_policy == "open":
-            return True
-        if self.config.group_policy == "mention":
-            if event_type == "app_mention":
-                return True
-            return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
-        if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
-        return False
+        policy, require_mention = self._resolve_group_gate()
+        mentioned = False
+        if require_mention:
+            mentioned = event_type == "app_mention" or (self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text)
+        return self._group_policy_allows(
+            policy,
+            in_allowlist=chat_id in (self.config.group_allow_from or []),
+            require_mention=require_mention,
+            was_mentioned=mentioned,
+        )
 
     def _strip_bot_mention(self, text: str) -> str:
         if not text or not self._bot_user_id:

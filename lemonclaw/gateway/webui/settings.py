@@ -298,12 +298,19 @@ def _derive_group_runtime(config) -> dict[str, dict[str, object]]:
     for channel_name, channel_cfg in group_channels.items():
         if not getattr(channel_cfg, 'enabled', False):
             continue
-        group_policy = getattr(channel_cfg, 'group_policy', None)
-        if group_policy is None:
+        raw_policy = getattr(channel_cfg, 'group_policy', None)
+        if raw_policy is None:
             continue
+        require_mention = bool(getattr(channel_cfg, 'group_require_mention', True))
+        if raw_policy == 'mention':
+            group_policy = 'open'
+            require_mention = True
+        else:
+            group_policy = raw_policy
         group_allow_from = list(getattr(channel_cfg, 'group_allow_from', []) or [])
         runtime[channel_name] = {
             'effective_group_policy': group_policy,
+            'effective_group_require_mention': require_mention,
             'group_allow_from_count': len(group_allow_from),
         }
 
@@ -413,6 +420,17 @@ def get_settings_routes(
             return _json({"error": "Failed to load config"}, 500)
 
         data = config.model_dump(by_alias=False)
+
+        # Normalize legacy group_policy="mention" for the modern WebUI:
+        # present it as group_policy="open" + group_require_mention=true.
+        for channel_name in ("telegram", "discord", "feishu", "whatsapp", "slack", "matrix"):
+            channel_data = data.get("channels", {}).get(channel_name)
+            if isinstance(channel_data, dict):
+                if channel_data.get("group_policy") == "mention":
+                    channel_data["group_policy"] = "open"
+                    channel_data["group_require_mention"] = True
+                else:
+                    channel_data.setdefault("group_require_mention", True)
         # Remove platform-level fields that users shouldn't see/edit
         data.pop("lemondata", None)
         data.pop("gateway", None)

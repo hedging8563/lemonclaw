@@ -24,7 +24,7 @@ from lemonclaw.config.schema import (
 # ─── Telegram ────────────────────────────────────────────────────────────
 
 
-def _tg_channel(*, group_policy="mention", group_allow_from=None):
+def _tg_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True):
     from lemonclaw.channels.telegram import TelegramChannel
 
     config = TelegramConfig(
@@ -32,6 +32,7 @@ def _tg_channel(*, group_policy="mention", group_allow_from=None):
         token="test-token",
         group_policy=group_policy,
         group_allow_from=group_allow_from or [],
+        group_require_mention=group_require_mention,
     )
     ch = TelegramChannel(config, MessageBus())
     # Stub bot with username for mention detection
@@ -40,8 +41,13 @@ def _tg_channel(*, group_policy="mention", group_allow_from=None):
 
 
 class TestTelegramGroupPolicy:
-    def test_open_allows_all(self):
+    def test_open_requires_mention_by_default(self):
         ch = _tg_channel(group_policy="open")
+        assert ch._should_respond_in_group("hello", "-100123") is False
+        assert ch._should_respond_in_group("@testbot hello", "-100123") is True
+
+    def test_open_allows_all(self):
+        ch = _tg_channel(group_policy="open", group_require_mention=False)
         assert ch._should_respond_in_group("hello", "-100123") is True
 
     def test_disabled_blocks_all(self):
@@ -49,7 +55,7 @@ class TestTelegramGroupPolicy:
         assert ch._should_respond_in_group("hello", "-100123") is False
 
     def test_allowlist_allows_listed_group(self):
-        ch = _tg_channel(group_policy="allowlist", group_allow_from=["-100123"])
+        ch = _tg_channel(group_policy="allowlist", group_allow_from=["-100123"], group_require_mention=False)
         assert ch._should_respond_in_group("hello", "-100123") is True
 
     def test_allowlist_blocks_unlisted_group(self):
@@ -72,7 +78,7 @@ class TestTelegramGroupPolicy:
 # ─── Discord ─────────────────────────────────────────────────────────────
 
 
-def _discord_channel(*, group_policy="mention", group_allow_from=None):
+def _discord_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True):
     from lemonclaw.channels.discord import DiscordChannel
 
     config = DiscordConfig(
@@ -80,6 +86,7 @@ def _discord_channel(*, group_policy="mention", group_allow_from=None):
         token="test-token",
         group_policy=group_policy,
         group_allow_from=group_allow_from or [],
+        group_require_mention=group_require_mention,
     )
     ch = DiscordChannel(config, MessageBus())
     ch._bot_user_id = "BOT123"
@@ -90,7 +97,7 @@ def _discord_channel(*, group_policy="mention", group_allow_from=None):
 class TestDiscordGroupPolicy:
     @pytest.mark.asyncio
     async def test_open_allows_group_message(self):
-        ch = _discord_channel(group_policy="open")
+        ch = _discord_channel(group_policy="open", group_require_mention=False)
         ch._handle_message = AsyncMock()
         payload = {
             "author": {"id": "USER1", "bot": False},
@@ -119,7 +126,7 @@ class TestDiscordGroupPolicy:
 
     @pytest.mark.asyncio
     async def test_allowlist_allows_listed_channel(self):
-        ch = _discord_channel(group_policy="allowlist", group_allow_from=["CH1"])
+        ch = _discord_channel(group_policy="allowlist", group_allow_from=["CH1"], group_require_mention=False)
         ch._handle_message = AsyncMock()
         payload = {
             "author": {"id": "USER1", "bot": False},
@@ -212,12 +219,13 @@ class TestDiscordGroupPolicy:
 # ─── WhatsApp ────────────────────────────────────────────────────────────
 
 
-def _whatsapp_channel(*, group_policy="mention", group_allow_from=None):
+def _whatsapp_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True):
     config = WhatsAppConfig(
         enabled=True,
         bridge_url="ws://localhost:3001",
         group_policy=group_policy,
         group_allow_from=group_allow_from or [],
+        group_require_mention=group_require_mention,
     )
     from lemonclaw.channels.whatsapp import WhatsAppChannel
 
@@ -228,7 +236,7 @@ def _whatsapp_channel(*, group_policy="mention", group_allow_from=None):
 class TestWhatsAppGroupPolicy:
     @pytest.mark.asyncio
     async def test_open_allows_group_message(self):
-        ch = _whatsapp_channel(group_policy="open")
+        ch = _whatsapp_channel(group_policy="open", group_require_mention=False)
         ch._handle_message = AsyncMock()
         raw = json.dumps({
             "type": "message",
@@ -261,6 +269,7 @@ class TestWhatsAppGroupPolicy:
         ch = _whatsapp_channel(
             group_policy="allowlist",
             group_allow_from=["120363xxx@g.us"],
+            group_require_mention=False,
         )
         ch._handle_message = AsyncMock()
         raw = json.dumps({
@@ -347,13 +356,14 @@ class TestWhatsAppGroupPolicy:
 # ─── Feishu ──────────────────────────────────────────────────────────────
 
 
-def _feishu_channel(*, group_policy="mention", group_allow_from=None, bot_open_id=None):
+def _feishu_channel(*, group_policy="mention", group_allow_from=None, bot_open_id=None, group_require_mention=True):
     config = FeishuConfig(
         enabled=True,
         app_id="test-app-id",
         app_secret="test-app-secret",
         group_policy=group_policy,
         group_allow_from=group_allow_from or [],
+        group_require_mention=group_require_mention,
     )
     from lemonclaw.channels.feishu import FeishuChannel
 
@@ -398,7 +408,7 @@ def _feishu_message_event(
 class TestFeishuGroupPolicy:
     @pytest.mark.asyncio
     async def test_open_allows_group_message(self):
-        ch = _feishu_channel(group_policy="open", bot_open_id="ou_bot1")
+        ch = _feishu_channel(group_policy="open", bot_open_id="ou_bot1", group_require_mention=False)
         ch._handle_message = AsyncMock()
         ch._add_reaction = AsyncMock()
         data = _feishu_message_event(chat_type="group")
@@ -420,6 +430,7 @@ class TestFeishuGroupPolicy:
             group_policy="allowlist",
             group_allow_from=["oc_test123"],
             bot_open_id="ou_bot1",
+            group_require_mention=False,
         )
         ch._handle_message = AsyncMock()
         ch._add_reaction = AsyncMock()

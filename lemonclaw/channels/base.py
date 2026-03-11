@@ -117,6 +117,38 @@ class BaseChannel(ABC):
         from lemonclaw.channels.auto_pairing import AutoPairing
         self._pairing = AutoPairing(self.name, data_dir)
 
+
+    def _resolve_group_gate(self) -> tuple[str, bool]:
+        """Resolve normalized group policy + mention requirement.
+
+        Legacy configs may still store group_policy="mention". Treat that as
+        group_policy="open" + group_require_mention=true for backward compatibility.
+        """
+        raw_policy = str(getattr(self.config, "group_policy", "disabled") or "disabled").strip().lower()
+        require_mention = bool(getattr(self.config, "group_require_mention", True))
+        if raw_policy == "mention":
+            return "open", True
+        if raw_policy == "disabled":
+            return "disabled", False
+        return raw_policy, require_mention
+
+    @staticmethod
+    def _group_policy_allows(policy: str, *, in_allowlist: bool = True, require_mention: bool = False, was_mentioned: bool = False) -> bool:
+        """Evaluate normalized group access semantics.
+
+        policy controls scope (all groups vs allowlist), while require_mention controls
+        trigger behavior within the allowed scope.
+        """
+        if policy == "disabled":
+            return False
+        if policy == "allowlist" and not in_allowlist:
+            return False
+        if policy not in {"open", "allowlist"}:
+            return False
+        if require_mention and not was_mentioned:
+            return False
+        return True
+
     async def _run_pairing_flow(
         self,
         *,
