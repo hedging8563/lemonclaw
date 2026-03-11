@@ -203,6 +203,13 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
         "timestamp": raw.get("timestamp"),
     }
 
+    # Preserve tool_calls for LLM history reconstruction.
+    # Without this, get_history() sees an empty assistant followed by
+    # tool-result messages, causing "unexpected tool_use_id" errors.
+    tool_calls_raw = raw.get("tool_calls")
+    if isinstance(tool_calls_raw, list) and tool_calls_raw:
+        message["tool_calls"] = tool_calls_raw
+
     thinking = raw.get("thinking")
     if isinstance(thinking, str) and thinking:
         message["blocks"].append({"type": "thinking", "text": thinking})
