@@ -207,8 +207,9 @@ Skill creation involves these steps:
 2. Plan reusable skill contents (scripts, references, assets)
 3. Initialize the skill (run init_skill.py)
 4. Edit the skill (implement resources and write SKILL.md)
-5. Package the skill (run package_skill.py)
-6. Iterate based on real usage
+5. Validate the skill (run quick_validate.py)
+6. Package the skill (run package_skill.py)
+7. Iterate based on real usage
 
 Follow these steps in order, skipping only if there is a clear reason why they are not applicable.
 
@@ -300,8 +301,8 @@ When editing the (newly-generated or existing) skill, remember that the skill is
 
 Consult these helpful guides based on your skill's needs:
 
-- **Multi-step processes**: See references/workflows.md for sequential workflows and conditional logic
-- **Specific output formats or quality standards**: See references/output-patterns.md for template and example patterns
+- **Multi-step processes**: See [references/workflows.md](references/workflows.md) for sequential workflows and conditional logic
+- **Specific output formats or quality standards**: See [references/output-patterns.md](references/output-patterns.md) for template and example patterns
 
 These files contain established best practices for effective skill design.
 
@@ -319,7 +320,7 @@ If you used `--examples`, delete any placeholder files that are not needed for t
 
 ##### Frontmatter
 
-Write the YAML frontmatter with `name` and `description`:
+Write the YAML frontmatter with `name` and `description` at minimum:
 
 - `name`: The skill name
 - `description`: This is the primary triggering mechanism for your skill, and helps the agent understand when to use the skill.
@@ -327,13 +328,28 @@ Write the YAML frontmatter with `name` and `description`:
   - Include all "when to use" information here - Not in the body. The body is only loaded after triggering, so "When to Use This Skill" sections in the body are not helpful to the agent.
   - Example description for a `docx` skill: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when the agent needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
 
-Do not include any other fields in YAML frontmatter.
+Add extra frontmatter fields only when the runtime or distribution model needs them. Common optional fields in LemonClaw are `metadata`, `triggers`, `homepage`, and `always`; official catalog skills may also use `version`, `author`, `tier`, `dependencies`, and `tested_on`.
 
 ##### Body
 
 Write instructions for using the skill and its bundled resources.
 
-### Step 5: Packaging a Skill
+### Step 5: Validate the Skill
+
+Run the validator before packaging so missing files or malformed frontmatter are caught early:
+
+```bash
+scripts/quick_validate.py <path/to/skill-folder>
+```
+
+The validator checks:
+
+- Required frontmatter fields (`name`, `description`)
+- Folder name vs skill name alignment
+- Unsupported frontmatter keys
+- Referenced `scripts/`, `references/`, and `assets/` paths
+
+### Step 6: Packaging a Skill
 
 Once development of the skill is complete, it must be packaged into a distributable .skill file that gets shared with the user. The packaging process automatically validates the skill first to ensure it meets all requirements:
 
@@ -360,7 +376,7 @@ The packaging script will:
 
 If validation fails, the script will report the errors and exit without creating a package. Fix any validation errors and run the packaging command again.
 
-### Step 6: Iterate
+### Step 7: Iterate
 
 After testing the skill, users may request improvements. Often this happens right after using the skill, with fresh context of how the skill performed.
 

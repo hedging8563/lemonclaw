@@ -1,6 +1,7 @@
 ---
 name: yt-dlp
 description: "Download videos and extract audio from various platforms using yt-dlp. Use when user provides a video URL, asks to download a video, or when conversation contains video links from YouTube, Twitter/X, Vimeo, TikTok, Instagram, etc. Also triggers on 下载视频、下视频、下片、提取音频、视频下载、音频提取、下载YouTube、下载B站."
+metadata: {"lemonclaw":{"emoji":"🎬","requires":{"bins":["yt-dlp","ffmpeg"]}}}
 triggers: "youtube.com,youtu.be,bilibili.com,twitter.com,x.com,tiktok.com,instagram.com,vimeo.com,下载视频,下视频,下片,提取音频,视频下载,音频提取,下载youtube,下载b站,yt-dlp"
 ---
 
