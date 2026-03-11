@@ -3,12 +3,27 @@
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from quick_validate import validate_skill
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _load_validate_skill():
+    """Load the sibling quick_validate module without depending on cwd/sys.path."""
+    module_path = SCRIPT_DIR / "quick_validate.py"
+    spec = importlib.util.spec_from_file_location("lc_skill_quick_validate", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load validator module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.validate_skill
+
+
+validate_skill = _load_validate_skill()
 
 
 def package_skill(skill_dir: Path, output_dir: Path) -> Path:

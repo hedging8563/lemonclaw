@@ -55,6 +55,7 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self._disabled: set[str] = set(disabled_skills or [])
+        # TODO: Consider an LRU or size cap if workspace skill counts grow materially.
         self._skill_cache: dict[str, _SkillCacheEntry] = {}
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
@@ -273,6 +274,7 @@ class SkillsLoader:
         """Get normalized skill metadata used by the availability checks."""
         meta = self.get_skill_metadata(name) or {}
         normalized = self._parse_skill_metadata(meta.get("metadata", {}))
+        # Runtime-specific metadata.lemonclaw values win over top-level frontmatter.
         for key in ("always", "requires", "os", "install", "tier", "dependencies", "tested_on"):
             if key in meta and key not in normalized:
                 normalized[key] = meta[key]
