@@ -25,7 +25,7 @@ from lemonclaw.gateway.webui.auth import (
     verify_session_cookie,
     verify_token,
 )
-from lemonclaw.providers.catalog import MODEL_CATALOG
+from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, runtime_policy_active
 from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 
 if TYPE_CHECKING:
@@ -617,7 +617,7 @@ def get_webui_routes(
             return err  # type: ignore[return-value]
 
         models = [
-            {"id": m.id, "label": m.label, "tier": m.tier, "description": m.description}
+            {"id": m.id, "label": m.label, "tier": m.tier, "description": m.description, **get_model_runtime_meta(m.id, scene="chat")}
             for m in MODEL_CATALOG
             if not m.hidden
         ]
@@ -636,7 +636,7 @@ def get_webui_routes(
             logger.debug("Failed to read current model from config")
         if not current:
             current = agent_loop.model if hasattr(agent_loop, "model") else ""
-        resp = _json({"models": models, "current": current})
+        resp = _json({"models": models, "current": current, "currentMeta": get_model_runtime_meta(current, scene="chat") if current else None, "runtimePolicyActive": runtime_policy_active()})
         _maybe_refresh_cookie(request, resp)
         return resp
 

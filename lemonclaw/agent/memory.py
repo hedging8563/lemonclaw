@@ -22,7 +22,7 @@ CONSOLIDATION_TIMEOUT = 30  # seconds
 HISTORY_MAX_ENTRIES = 200
 HISTORY_KEEP_ENTRIES = 150
 
-# Max models to try when tool call fails (walk fallback chain).
+# Max models to try when tool call fails (walk runtime-aware fallback chain).
 _MAX_CONSOLIDATION_FALLBACKS = 3
 
 
@@ -175,8 +175,8 @@ class MemoryStore:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
-        If the model fails or doesn't call save_memory, walks the fallback
-        chain from MODEL_MAP before giving up.
+        If the model fails or doesn't call save_memory, walks the runtime-aware
+        fallback chain for the consolidation scene before giving up.
 
         Uses a per-workspace lock to prevent concurrent writes to MEMORY.md/HISTORY.md.
         """
@@ -223,8 +223,8 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                 {"role": "user", "content": prompt},
             ]
 
-            # Walk fallback chain: try current model, then its fallbacks
-            from lemonclaw.providers.catalog import MODEL_MAP
+            # Walk fallback chain using runtime-aware policy.
+            from lemonclaw.providers.catalog import get_fallback_chain
             current_model = model
             visited: set[str] = set()
 
@@ -241,8 +241,8 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                     )
 
                     if not response.has_tool_calls:
-                        entry = MODEL_MAP.get(current_model)
-                        next_model = entry.fallback if entry else None
+                        chain = get_fallback_chain(current_model, scene='consolidation')
+                        next_model = next((m for m in chain if m not in visited), None)
                         if next_model and next_model not in visited:
                             logger.warning(
                                 "Memory consolidation: {} did not call save_memory, trying {}",
@@ -286,8 +286,8 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                     return True
 
                 except asyncio.TimeoutError:
-                    entry = MODEL_MAP.get(current_model)
-                    next_model = entry.fallback if entry else None
+                    chain = get_fallback_chain(current_model, scene='consolidation')
+                    next_model = next((m for m in chain if m not in visited), None)
                     if next_model and next_model not in visited:
                         logger.warning(
                             "Memory consolidation: {} timed out after {}s, trying {}",
@@ -298,8 +298,8 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                     logger.warning("Memory consolidation timed out after {}s, giving up", timeout)
                     return False
                 except Exception:
-                    entry = MODEL_MAP.get(current_model)
-                    next_model = entry.fallback if entry else None
+                    chain = get_fallback_chain(current_model, scene='consolidation')
+                    next_model = next((m for m in chain if m not in visited), None)
                     if next_model and next_model not in visited:
                         logger.warning(
                             "Memory consolidation: {} failed, trying {}",

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
-from lemonclaw.config.defaults import DEFAULT_VISION_MODEL
 from lemonclaw.utils.attachments import attachment_metadata, inspect_attachment
 
 
@@ -134,9 +133,12 @@ class ReadAttachmentTool(Tool):
 class AnalyzeImageTool(Tool):
     """Tool to analyze image attachments with a vision-capable model."""
 
-    def __init__(self, provider: Any, workspace: Path | None = None, default_model: str = DEFAULT_VISION_MODEL):
+    def __init__(self, provider: Any, workspace: Path | None = None, default_model: str | None = None):
         self._provider = provider
         self._workspace = workspace
+        if default_model is None:
+            from lemonclaw.providers.catalog import get_runtime_default_model
+            default_model = get_runtime_default_model('vision')
         self._default_model = default_model
 
     @property

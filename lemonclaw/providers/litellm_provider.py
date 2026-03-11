@@ -18,7 +18,7 @@ from litellm.exceptions import (
 from loguru import logger
 
 from lemonclaw.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from lemonclaw.providers.catalog import MODEL_MAP
+from lemonclaw.providers.catalog import get_fallback_chain
 from lemonclaw.providers.registry import find_by_model, find_gateway
 
 
@@ -103,7 +103,7 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5",
+        default_model: str = "claude-sonnet-4-6",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
     ):
@@ -445,7 +445,7 @@ class LiteLLMProvider(LLMProvider):
         Retry logic:
         - AuthenticationError: never retry, never fallback
         - RateLimitError / APIConnectionError / APIError: retry up to _MAX_RETRIES
-        - All retries exhausted: walk MODEL_MAP fallback chain (A→B→C→…)
+        - All retries exhausted: walk the runtime-aware fallback chain for the active scene
         """
         last_error: Exception | None = None
 
@@ -504,14 +504,7 @@ class LiteLLMProvider(LLMProvider):
             )
 
         # ── Fallback chain ────────────────────────────────────────────────
-        visited = {original_model}
-        fb_model_id = original_model
-        while True:
-            entry = MODEL_MAP.get(fb_model_id)
-            if not entry or not entry.fallback or entry.fallback in visited:
-                break
-            fb_model_id = entry.fallback
-            visited.add(fb_model_id)
+        for fb_model_id in get_fallback_chain(original_model, scene='chat')[1:]:
             logger.info("Falling back {} → {}", original_model, fb_model_id)
             fb_gw = self._resolve_gateway_for_model(fb_model_id) or self._gateway
             fb_resolved = self._resolve_model(fb_model_id, gateway=fb_gw)
