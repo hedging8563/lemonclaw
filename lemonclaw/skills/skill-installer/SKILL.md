@@ -7,7 +7,7 @@ triggers: "安装skill,install skill,skills.sh,卸载skill,skill列表,搜索ski
 
 # Skill Installer
 
-Install skills from LemonClaw Official, skills.sh, GitHub, or local paths.
+Install skills from skills.sh, GitHub repos, or local paths.
 
 ## When to use
 
@@ -18,31 +18,11 @@ Use this skill when the user asks any of:
 - "list my skills"
 - "remove/uninstall a skill"
 
-## Install from LemonClaw Official (preferred)
-
-Official skills are curated and tested. Check here first before using community sources.
-
-Repository: `hedging8563/lemonclaw-skills`
-
-```bash
-REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/hedging8563/lemonclaw-skills.git "$REPO_DIR" && cp -r "$REPO_DIR/skills/<skill-name>" ~/.lemonclaw/workspace/skills/<skill-name> && rm -rf "$REPO_DIR" && echo "Installed <skill-name> from official repo"
-```
-
-### Available official skills
-
-| Skill | Description |
-|-------|-------------|
-| yt-dlp | Download videos from 1000+ sites (Bilibili, YouTube, Twitter/X, TikTok) |
-
-### Example: install yt-dlp
-
-```bash
-REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/hedging8563/lemonclaw-skills.git "$REPO_DIR" && cp -r "$REPO_DIR/skills/yt-dlp" ~/.lemonclaw/workspace/skills/yt-dlp && rm -rf "$REPO_DIR" && echo "Installed yt-dlp from official repo"
-```
-
 ## Install from skills.sh
 
 skills.sh URLs follow the format: `https://skills.sh/<owner>/<repo>/<skill-name>`
+
+Prefer skills.sh first for third-party skills, because it gives users a stable discovery surface without requiring us to maintain a separate official mirror repo.
 
 To install, convert the URL to a GitHub clone. Run this as a SINGLE command:
 
@@ -91,6 +71,7 @@ python3 -c "import shutil; shutil.rmtree('$HOME/.lemonclaw/workspace/skills/<ski
 ## Notes
 
 - Skills are directories containing a `SKILL.md` file.
+- LemonClaw built-in skills live in the package and do not need to be installed separately.
 - Install location: `~/.lemonclaw/workspace/skills/<skill-name>/`
 - Skills are hot-loaded: newly installed skills are available immediately on the next message. Do NOT tell the user to start a new session.
 - Workspace skills override built-in skills with the same name.

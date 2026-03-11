@@ -374,7 +374,7 @@ class TestMemorySearchUpsert:
 
         # Directly mock _lancedb_available to return False
         with patch("lemonclaw.memory.search._lancedb_available", return_value=False):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 idx.upsert_entity("test", "body", AsyncMock())
             )
             assert result is False

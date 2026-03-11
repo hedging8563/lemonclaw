@@ -22,12 +22,12 @@ def test_search_index_graceful_when_unavailable(tmp_path):
     idx = MemorySearchIndex(tmp_path / "memory")
 
     with patch("lemonclaw.memory.search._lancedb_available", return_value=False):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             idx.rebuild(AsyncMock())
         )
         assert result == 0
 
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             idx.search("test", AsyncMock())
         )
         assert results == []
@@ -43,7 +43,7 @@ def test_trigger_hybrid_fallback_to_keyword(tmp_path):
 
     # No search index
     trigger = MemoryTrigger(store, search_index=None)
-    cards, rules = asyncio.get_event_loop().run_until_complete(
+    cards, rules = asyncio.run(
         trigger.hybrid_match("python version?", AsyncMock())
     )
     assert len(cards) == 1

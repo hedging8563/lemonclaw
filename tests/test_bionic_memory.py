@@ -348,7 +348,7 @@ def test_procedural_reflect_fallback(tmp_path):
     mock_provider = AsyncMock()
     mock_provider.chat.side_effect = Exception("LLM unavailable")
 
-    rid = asyncio.get_event_loop().run_until_complete(
+    rid = asyncio.run(
         pm.reflect(mock_provider, "deploy to K8s", "pod crash loop", model="test")
     )
     assert rid is None
@@ -497,7 +497,7 @@ def test_migrate_no_memory_file(tmp_path):
     from lemonclaw.memory.migrate import migrate_memory_to_entities
 
     store = EntityStore(tmp_path / "memory")
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         migrate_memory_to_entities(tmp_path / "memory", store)
     )
     assert result is True
@@ -516,7 +516,7 @@ def test_migrate_empty_memory_file(tmp_path):
     (memory_dir / "MEMORY.md").write_text("", encoding="utf-8")
 
     store = EntityStore(memory_dir)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         migrate_memory_to_entities(memory_dir, store)
     )
     assert result is True
@@ -537,7 +537,7 @@ def test_migrate_fallback_no_llm(tmp_path):
     )
 
     store = EntityStore(memory_dir)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         migrate_memory_to_entities(memory_dir, store)
     )
     assert result is True
@@ -564,7 +564,7 @@ def test_migrate_fallback_llm_fails(tmp_path):
     mock_provider.chat.side_effect = Exception("LLM down")
 
     store = EntityStore(memory_dir)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         migrate_memory_to_entities(memory_dir, store, provider=mock_provider, model="test")
     )
     assert result is True
@@ -583,7 +583,7 @@ def test_migrate_idempotent(tmp_path):
     store = EntityStore(memory_dir)
     store.create_card("existing", "test", ["test"], body="# Existing\n")
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         migrate_memory_to_entities(memory_dir, store)
     )
     assert result is False  # No migration needed
@@ -629,7 +629,7 @@ def test_memory_cron_daily_archive(tmp_path):
     # Write some today.md content
     (memory_dir / "today.md").write_text("# 2020-01-01\n\n## 10:00 — Test\n- Detail\n", encoding="utf-8")
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         run_memory_event(EVENT_DAILY_ARCHIVE, workspace)
     )
     assert "Archived" in result
@@ -645,7 +645,7 @@ def test_memory_cron_daily_archive_empty(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         run_memory_event(EVENT_DAILY_ARCHIVE, workspace)
     )
     assert "Nothing" in result
@@ -669,7 +669,7 @@ def test_memory_cron_weekly_promote(tmp_path):
     card.meta["access_count"] = PROMOTE_ACCESS_THRESHOLD
     card.save()
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         run_memory_event(EVENT_WEEKLY_PROMOTE, workspace)
     )
     assert "Promoted 1" in result
@@ -683,7 +683,7 @@ def test_memory_cron_monthly_cleanup(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         run_memory_event(EVENT_MONTHLY_CLEANUP, workspace)
     )
     assert "truncated" in result.lower() or "cleared" in result.lower()
@@ -737,4 +737,3 @@ def test_entity_store_init_defaults_backfills_missing_defaults(tmp_path):
     assert created == len(DEFAULT_CARDS) - 1
     names = {card.name for card in store.list_cards()}
     assert set(DEFAULT_CARDS) <= names
-
