@@ -141,6 +141,21 @@ class TestSessionImmutableHistory:
         assert len(session.messages) == original_len
 
 
+def test_find_safe_split_skips_orphaned_tool_results() -> None:
+    from lemonclaw.session.compaction import _find_safe_split
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "inspect", "tool_calls": [{"id": "call1"}]},
+        {"role": "tool", "tool_call_id": "call1", "name": "read_attachment", "content": "binary"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+
+    assert _find_safe_split(messages, 3) == 1
+
+
 class TestSessionPersistence:
     """Test Session persistence and reload."""
 

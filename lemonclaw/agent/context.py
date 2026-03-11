@@ -216,7 +216,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         inventory = format_attachment_inventory(media)
         inventory_note = (
-            inventory + "\nUse read_attachment for spreadsheets, text files, archives, and other non-image files.\n\n"
+            inventory + (
+                "\nImages are already attached as vision input for the model. "
+                "Do not use read_file or read_attachment on image files. "
+                "Use analyze_image when you need detailed text extraction or careful image inspection. "
+                "Use read_attachment for spreadsheets, text files, archives, PDFs, and other non-image files.\n\n"
+            )
             if inventory else ""
         )
         text_block = inventory_note + text

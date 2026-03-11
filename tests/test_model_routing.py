@@ -167,6 +167,31 @@ class TestFallbackRetry:
         assert result.finish_reason == "error"
 
     @pytest.mark.asyncio
+    async def test_invalid_request_returns_user_message_without_retry(self, provider):
+        """Invalid request payload errors should not retry or fallback."""
+        from litellm.exceptions import InvalidRequestError
+
+        call_count = 0
+
+        async def mock_acompletion(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise InvalidRequestError(
+                message="unexpected `tool_use_id` in request",
+                model="test",
+                llm_provider="openai",
+            )
+
+        with patch("lemonclaw.providers.litellm_provider.acompletion", mock_acompletion):
+            result = await provider._chat_with_retry(
+                {"model": "test", "messages": [], "stream": True},
+                "claude-sonnet-4-6",
+            )
+        assert call_count == 1
+        assert result.finish_reason == "error"
+        assert "/new" in result.content
+
+    @pytest.mark.asyncio
     async def test_retry_then_succeed(self, provider):
         """Transient error on first attempt, success on retry."""
         from litellm.exceptions import APIConnectionError

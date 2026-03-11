@@ -113,6 +113,60 @@ def test_context_builder_includes_attachment_inventory_and_triggers_xlsx(tmp_pat
     assert 'read_attachment' in user_content
 
 
+def test_read_file_rejects_image_attachments(tmp_path: Path) -> None:
+    from lemonclaw.agent.tools.filesystem import ReadFileTool
+
+    workspace = _make_workspace(tmp_path)
+    image = workspace / 'scan.jpg'
+    image.write_bytes(b'fake-jpeg-bytes')
+
+    tool = ReadFileTool(workspace=workspace)
+    output = asyncio.run(tool.execute(path=str(image)))
+
+    assert 'image attachment' in output
+    assert 'analyze_image' in output
+
+
+def test_read_attachment_rejects_image_attachments(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    image = workspace / 'scan.jpg'
+    image.write_bytes(b'fake-jpeg-bytes')
+
+    tool = ReadAttachmentTool(workspace=workspace)
+    output = asyncio.run(tool.execute(path=str(image)))
+
+    assert 'image attachment' in output
+    assert 'analyze_image' in output
+
+
+def test_analyze_image_uses_vision_model(tmp_path: Path) -> None:
+    from lemonclaw.agent.tools.filesystem import AnalyzeImageTool
+    from lemonclaw.providers.base import LLMResponse
+
+    class DummyProvider:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            return LLMResponse(content='识别出的文字')
+
+    workspace = _make_workspace(tmp_path)
+    image = workspace / 'scan.jpg'
+    image.write_bytes(b'fake-jpeg-bytes')
+    provider = DummyProvider()
+    tool = AnalyzeImageTool(provider=provider, workspace=workspace)
+
+    output = asyncio.run(tool.execute(path=str(image), instruction='提取图片文字'))
+
+    assert output == '识别出的文字'
+    assert provider.calls
+    assert provider.calls[0]['model'] == 'gpt-4.1-mini'
+    content = provider.calls[0]['messages'][1]['content']
+    assert isinstance(content, list)
+    assert any(item.get('type') == 'image_url' for item in content if isinstance(item, dict))
+
+
 def test_read_attachment_supports_xlsx_and_zip(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     spreadsheet = workspace / 'report.xlsx'

@@ -1,11 +1,13 @@
 """File system tools: read, inspect attachments, write, edit."""
 
+import base64
 import difflib
 from pathlib import Path
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
-from lemonclaw.utils.attachments import inspect_attachment
+from lemonclaw.config.defaults import DEFAULT_VISION_MODEL
+from lemonclaw.utils.attachments import attachment_metadata, inspect_attachment
 
 
 def _resolve_path(path: str, workspace: Path | None = None) -> Path:
@@ -15,6 +17,19 @@ def _resolve_path(path: str, workspace: Path | None = None) -> Path:
         p = workspace / p
     resolved = p.resolve()
     return resolved
+
+
+def _is_image_attachment(path: Path) -> bool:
+    meta = attachment_metadata(path)
+    mime = str(meta.get("mime") or "")
+    return mime.startswith("image/")
+
+
+def _image_tool_hint(path: str) -> str:
+    return (
+        f"Error: {path} is an image attachment. "
+        "Use analyze_image for screenshots/photos, or rely on the model's built-in vision input instead."
+    )
 
 
 class ReadFileTool(Tool):
@@ -30,9 +45,10 @@ class ReadFileTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file at the given path. "
+            "Read the contents of a text file at the given path. "
             "Returns text content up to 512KB (truncated for larger files). "
-            "Use this to inspect code, configs, and logs."
+            "Use this for code, configs, and logs. Do not use it for screenshots, photos, or image attachments; "
+            "use analyze_image for images and read_attachment for PDFs/docs/spreadsheets."
         )
 
     @property
@@ -57,6 +73,8 @@ class ReadFileTool(Tool):
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
+            if _is_image_attachment(file_path):
+                return _image_tool_hint(path)
 
             size = file_path.stat().st_size
             if size > self._MAX_READ_BYTES:
@@ -83,8 +101,9 @@ class ReadAttachmentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Inspect an attachment by path. Supports text files, CSV/TSV, XLSX workbook previews, "
+            "Inspect a non-image attachment by path. Supports text files, CSV/TSV, XLSX workbook previews, "
             "DOCX paragraph previews, PDF text extraction, and ZIP archive listings. "
+            "Image files are not OCRed here; use analyze_image for screenshots/photos. "
             "For arbitrary binary files, returns metadata and guidance."
         )
 
@@ -103,11 +122,99 @@ class ReadAttachmentTool(Tool):
     async def execute(self, path: str, max_rows: int = 20, max_chars: int = 12000, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace)
+            if _is_image_attachment(file_path):
+                return _image_tool_hint(path)
             return inspect_attachment(str(file_path), max_rows=max_rows, max_chars=max_chars)
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error reading attachment: {str(e)}"
+
+
+class AnalyzeImageTool(Tool):
+    """Tool to analyze image attachments with a vision-capable model."""
+
+    def __init__(self, provider: Any, workspace: Path | None = None, default_model: str = DEFAULT_VISION_MODEL):
+        self._provider = provider
+        self._workspace = workspace
+        self._default_model = default_model
+
+    @property
+    def name(self) -> str:
+        return "analyze_image"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Analyze an image attachment by path using a vision-capable model. "
+            "Use this for screenshots, scanned documents, photos, and extracting visible text from images. "
+            "Prefer this over read_file/read_attachment for image files."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The image path to inspect"},
+                "instruction": {"type": "string", "description": "Optional analysis instruction (e.g. extract all text, summarize the screenshot)"},
+                "model": {"type": "string", "description": "Optional vision model override"},
+                "max_tokens": {"type": "integer", "description": "Maximum tokens in the analysis result", "minimum": 100, "maximum": 8000},
+            },
+            "required": ["path"],
+        }
+
+    async def execute(
+        self,
+        path: str,
+        instruction: str = "",
+        model: str | None = None,
+        max_tokens: int = 2000,
+        **kwargs: Any,
+    ) -> str:
+        try:
+            file_path = _resolve_path(path, self._workspace)
+            if not file_path.exists():
+                return f"Error: File not found: {path}"
+            if not file_path.is_file():
+                return f"Error: Not a file: {path}"
+            if not _is_image_attachment(file_path):
+                return f"Error: {path} is not an image attachment. Use read_attachment for non-image files."
+
+            meta = attachment_metadata(file_path)
+            mime = str(meta.get("mime") or "application/octet-stream")
+            data_url = f"data:{mime};base64,{base64.b64encode(file_path.read_bytes()).decode()}"
+            prompt = (instruction or "").strip() or (
+                "Read the image carefully. First extract all clearly visible text verbatim in reading order. "
+                "Then provide a short summary if helpful."
+            )
+            response = await self._provider.chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a precise vision assistant. Extract visible text faithfully before summarizing. "
+                            "If part of the text is unreadable, say so instead of inventing it."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    },
+                ],
+                model=model or self._default_model,
+                max_tokens=max_tokens,
+                temperature=0.1,
+            )
+            content = (response.content or "").strip()
+            return content or "No readable text or image analysis result was produced."
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error analyzing image: {str(e)}"
 
 
 class WriteFileTool(Tool):

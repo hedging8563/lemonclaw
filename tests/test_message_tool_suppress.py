@@ -75,6 +75,28 @@ class TestMessageToolSuppressLogic:
         assert result.channel == "feishu"
 
     @pytest.mark.asyncio
+    async def test_tool_call_preamble_is_not_reused_as_final_reply(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1",
+            name="read_file",
+            arguments={"path": "image.jpg"},
+        )
+        calls = iter([
+            LLMResponse(content="我来帮你识别图片中的文字内容。", tool_calls=[tool_call]),
+            LLMResponse(content=None, tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="请识别图片里的文字")
+        result = await loop._process_message(msg)
+
+        assert result is not None
+        assert result.content == "处理完成，但没有需要回复的内容。"
+        assert "我来帮你识别图片中的文字内容" not in result.content
+
+    @pytest.mark.asyncio
     async def test_not_suppress_when_no_message_tool_used(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="Hello!", tool_calls=[]))

@@ -206,6 +206,21 @@ class TestSessionGetHistory:
         assert history[0]["role"] == "user"
         assert len(history) == 2
 
+    def test_skips_orphaned_tool_boundary_messages(self):
+        from lemonclaw.session.manager import Session
+
+        s = Session(key="test")
+        s.messages = [
+            {"role": "assistant", "content": "I will inspect it", "tool_calls": [{"id": "call1"}]},
+            {"role": "tool", "tool_call_id": "call1", "name": "read_attachment", "content": "binary"},
+            {"role": "user", "content": "real question"},
+            {"role": "assistant", "content": "real answer"},
+        ]
+
+        history = s.get_history(max_messages=3)
+        assert [m["role"] for m in history] == ["user", "assistant"]
+        assert history[0]["content"] == "real question"
+
     def test_empty_when_no_user_message(self):
         from lemonclaw.session.manager import Session
 

@@ -20,6 +20,7 @@ from lemonclaw.agent.tools.cron import CronTool
 from lemonclaw.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
+    AnalyzeImageTool,
     ReadAttachmentTool,
     ReadFileTool,
     WriteFileTool,
@@ -188,6 +189,7 @@ class AgentLoop:
         """Register the default set of tools."""
         for cls in (ReadFileTool, ReadAttachmentTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace))
+        self.tools.register(AnalyzeImageTool(provider=self.provider, workspace=self.workspace))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
@@ -516,7 +518,7 @@ class AgentLoop:
         # without setting final_content (e.g. last iteration was tool_calls only)
         if final_content is None:
             for m in reversed(messages):
-                if m.get("role") == "assistant" and m.get("content"):
+                if m.get("role") == "assistant" and m.get("content") and not m.get("tool_calls"):
                     candidate = self._strip_think(m["content"])
                     if candidate:
                         final_content = candidate
