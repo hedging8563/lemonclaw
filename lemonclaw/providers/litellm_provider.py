@@ -423,6 +423,16 @@ class LiteLLMProvider(LLMProvider):
                 )
             except (RateLimitError, APIConnectionError, APIError) as e:
                 last_error = e
+                # Detect invalid_request_error wrapped in other error types.
+                # The request payload itself is broken (e.g. orphaned tool_result);
+                # retrying or falling back to another model won't help.
+                err_str = str(e)
+                if "invalid_request_error" in err_str or "unexpected `tool_use_id`" in err_str:
+                    logger.error("Request payload error (not retryable): {}", _sanitize_error(e))
+                    return LLMResponse(
+                        content="消息历史格式异常，请发送 /new 开始新对话。",
+                        finish_reason="error",
+                    )
                 if attempt < self._MAX_RETRIES:
                     delay = self._RETRY_DELAYS[min(attempt, len(self._RETRY_DELAYS) - 1)]
                     logger.warning(

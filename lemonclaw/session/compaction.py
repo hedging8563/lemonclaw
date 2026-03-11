@@ -77,13 +77,20 @@ def needs_compaction(messages: list[dict[str, Any]], model: str) -> bool:
 def _find_safe_split(messages: list[dict[str, Any]], target_idx: int) -> int:
     """Find a safe split point that doesn't break a tool-call sequence.
 
-    Walks backward from target_idx to find a boundary right before a 'user'
-    or 'system' message (i.e., not splitting assistant+tool groups).
+    A safe boundary is right before a 'user' message that is NOT a tool
+    result (role="tool" or role="user" with tool_call_id).  This ensures
+    we never orphan tool_result messages from their preceding
+    assistant(tool_use) message.
     """
     for i in range(target_idx, 0, -1):
         role = messages[i].get("role")
-        if role in ("user", "system"):
+        if role == "system":
             return i
+        if role == "user" and "tool_call_id" not in messages[i]:
+            # Genuine user message — safe to split here
+            return i
+        # role == "tool" or role == "assistant" or user-with-tool_call_id:
+        # keep walking backward to avoid orphaning tool pairs
     return target_idx
 
 

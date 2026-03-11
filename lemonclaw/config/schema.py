@@ -17,7 +17,7 @@ class Base(BaseModel):
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
-    enabled: bool = True
+    enabled: bool = False
     dm_policy: Literal["pairing", "allowlist", "open", "disabled"] | None = None
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)

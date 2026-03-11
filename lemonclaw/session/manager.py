@@ -53,12 +53,21 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a user turn.
+
+        Ensures we never start with orphaned tool-result messages whose
+        parent assistant(tool_use) was truncated by the window boundary.
+        """
         unconsolidated = self.messages[self.last_consolidated :]
         sliced = unconsolidated[-max_messages:]
 
         for index, message in enumerate(sliced):
-            if message.get("role") == "user":
+            role = message.get("role")
+            # Skip tool messages — they belong to a preceding assistant turn
+            # that may have been truncated by the window boundary.
+            if role == "tool" or (role == "user" and "tool_call_id" in message):
+                continue
+            if role == "user":
                 sliced = sliced[index:]
                 break
         else:
