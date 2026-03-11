@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import os
+
+import httpx
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -105,6 +107,7 @@ def run_config_sync(config: Config) -> SyncReport:
         ("sync_api_key", _sync_api_key),
         ("inject_defaults", _inject_defaults),
         ("sync_gateway_token", _sync_gateway_token),
+        ("sync_runtime_model_policy", _sync_runtime_model_policy),
         ("sync_trusted_proxies", _sync_trusted_proxies),
         ("migrate_base_urls", _migrate_base_urls),
         ("validate_providers", _validate_providers),
@@ -187,6 +190,120 @@ def _inject_defaults(config: Config) -> bool:
         config.agents.defaults.model = DEFAULT_MODEL
         changed = True
         logger.info(f"config-sync: model default → {DEFAULT_MODEL}")
+
+    return changed
+
+
+# ============================================================================
+# Operation 2.5: Sync hosted runtime model policy
+# ============================================================================
+
+_RUNTIME_POLICY_FILE_NAME = "runtime-model-policy.json"
+_MANAGED_CHAT_DEFAULT_FILE = ".managed-runtime-default-model"
+
+
+def _runtime_policy_url(api_base: str) -> str:
+    base = api_base.rstrip("/")
+    return f"{base}/claw/runtime-policy" if base.endswith('/v1') else f"{base}/v1/claw/runtime-policy"
+
+
+def _clear_runtime_model_policy(config: Config, *, config_dir: Path) -> bool:
+    from lemonclaw.providers.catalog import apply_runtime_model_policy, get_runtime_default_model, runtime_policy_active
+
+    policy_path = config_dir / _RUNTIME_POLICY_FILE_NAME
+    managed_default_path = config_dir / _MANAGED_CHAT_DEFAULT_FILE
+
+    previous_managed = ""
+    try:
+        previous_managed = managed_default_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        previous_managed = ""
+
+    changed = runtime_policy_active()
+    if policy_path.exists():
+        policy_path.unlink()
+        changed = True
+    if managed_default_path.exists():
+        managed_default_path.unlink()
+        changed = True
+
+    apply_runtime_model_policy(None)
+    builtin_default = get_runtime_default_model("chat")
+
+    current_model = config.agents.defaults.model
+    if current_model in {"", DEFAULT_MODEL, previous_managed} and current_model != builtin_default:
+        config.agents.defaults.model = builtin_default
+        changed = True
+
+    if config.lemondata.default_model in {"", DEFAULT_MODEL, previous_managed} and config.lemondata.default_model != builtin_default:
+        config.lemondata.default_model = builtin_default
+        changed = True
+
+    return changed
+
+
+def _sync_runtime_model_policy(config: Config) -> bool:
+    from lemonclaw.config.loader import get_config_path
+    from lemonclaw.providers.catalog import apply_runtime_model_policy, get_runtime_default_model
+
+    config_dir = get_config_path().parent
+    policy_path = config_dir / _RUNTIME_POLICY_FILE_NAME
+    managed_default_path = config_dir / _MANAGED_CHAT_DEFAULT_FILE
+
+    api_base = (config.lemondata.api_base_url or os.environ.get("API_BASE_URL", "")).strip()
+    api_key = (config.providers.lemondata.api_key or os.environ.get("API_KEY", "")).strip()
+    if not api_base or not api_key:
+        return _clear_runtime_model_policy(config, config_dir=config_dir)
+
+    try:
+        response = httpx.get(
+            _runtime_policy_url(api_base),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning(f"config-sync: runtime policy fetch failed: {exc}")
+        return False
+
+    policy = payload.get("policy") if isinstance(payload, dict) else None
+    changed = False
+
+    if isinstance(policy, dict):
+        serialized = json.dumps(policy, ensure_ascii=False, indent=2) + "\n"
+        existing = ""
+        try:
+            existing = policy_path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+        if existing != serialized:
+            policy_path.write_text(serialized, encoding="utf-8")
+            changed = True
+        apply_runtime_model_policy(policy)
+    else:
+        if policy_path.exists():
+            policy_path.unlink()
+            changed = True
+        apply_runtime_model_policy(None)
+
+    managed_default = get_runtime_default_model("chat")
+    previous_managed = ""
+    try:
+        previous_managed = managed_default_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        previous_managed = ""
+
+    current_model = config.agents.defaults.model
+    if current_model in {"", DEFAULT_MODEL, previous_managed}:
+        if current_model != managed_default:
+            config.agents.defaults.model = managed_default
+            changed = True
+    if config.lemondata.default_model != managed_default:
+        config.lemondata.default_model = managed_default
+        changed = True
+    if previous_managed != managed_default:
+        managed_default_path.write_text(managed_default, encoding="utf-8")
 
     return changed
 
@@ -329,7 +446,7 @@ def _validate_providers(config: Config) -> bool:
 
 # Bump this version when model defaults change. Config-sync only re-applies
 # if the stored version is lower, preventing unnecessary config churn.
-MODEL_CONFIG_VERSION = 7
+MODEL_CONFIG_VERSION = 8
 
 _VERSION_FILE_NAME = ".managed-model-version"
 
@@ -358,18 +475,20 @@ def _sync_model_config(config: Config) -> bool:
     changed = True
     api_key = config.providers.lemondata.api_key or os.environ.get("API_KEY", "")
 
-    # Ensure all 4 providers have correct api_base (always set, not conditional,
-    # because _apply_env_overrides may have set in-memory values that mask
-    # missing disk values — we need to persist them)
+    api_base = (config.lemondata.api_base_url or os.environ.get("API_BASE_URL", "") or LEMONDATA_API_BASE).strip()
+    api_base_v1 = f"{api_base}/v1" if not api_base.endswith("/v1") else api_base
+    api_base_no_v1 = api_base.removesuffix("/v1")
+
+    # Persist LemonData provider bases only when missing; do not clobber custom endpoints.
     if api_key:
         expected = [
-            (config.providers.lemondata, LEMONDATA_API_BASE_V1),
-            (config.providers.lemondata_claude, LEMONDATA_API_BASE),
-            (config.providers.lemondata_minimax, LEMONDATA_API_BASE),
-            (config.providers.lemondata_gemini, LEMONDATA_API_BASE),
+            (config.providers.lemondata, api_base_v1),
+            (config.providers.lemondata_claude, api_base_no_v1),
+            (config.providers.lemondata_minimax, api_base_no_v1),
+            (config.providers.lemondata_gemini, api_base_no_v1),
         ]
         for prov, expected_base in expected:
-            if prov.api_base != expected_base:
+            if not prov.api_base:
                 prov.api_base = expected_base
                 changed = True
 
@@ -380,21 +499,24 @@ def _sync_model_config(config: Config) -> bool:
             coding.api_key = api_key
             changed = True
         if not coding.api_base:
-            coding.api_base = LEMONDATA_API_BASE
+            coding.api_base = api_base_no_v1
             changed = True
         if not coding.enabled:
             coding.enabled = True
             changed = True
 
-    # v7: Ensure coding.model has a default value
-    if not config.tools.coding.model:
-        config.tools.coding.model = "claude-sonnet-4-6"
-        changed = True
-        logger.info("config-sync: set coding.model → claude-sonnet-4-6")
+    # v8: Ensure coding.model follows runtime-aware default policy
+    from lemonclaw.providers.catalog import get_runtime_default_model
+    coding_default = get_runtime_default_model("coding")
+    if not config.tools.coding.model or config.tools.coding.model == "claude-sonnet-4-6":
+        if config.tools.coding.model != coding_default:
+            config.tools.coding.model = coding_default
+            changed = True
+            logger.info(f"config-sync: set coding.model → {coding_default}")
 
     # Ensure LemonData platform config
     if api_key and not config.lemondata.api_base_url:
-        config.lemondata.api_base_url = LEMONDATA_API_BASE
+        config.lemondata.api_base_url = api_base_no_v1
         changed = True
 
     # Write version file (even if nothing else changed, to avoid re-running)

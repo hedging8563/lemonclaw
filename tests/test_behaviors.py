@@ -898,6 +898,42 @@ class TestWebUIRoutes:
         for m in data["models"]:
             assert "id" in m
             assert "label" in m
+            assert "source" in m
+            assert "profile" in m
+
+    @pytest.mark.asyncio
+    async def test_models_returns_runtime_current_meta(self, make_agent_loop, monkeypatch, tmp_path: Path):
+        from starlette.testclient import TestClient
+
+        from lemonclaw.gateway.server import create_app
+        from lemonclaw.providers.catalog import apply_runtime_model_policy
+
+        loop, bus = make_agent_loop()
+        loop.model = 'gpt-4.1-mini'
+        fake_config_path = tmp_path / 'config.json'
+        monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+        apply_runtime_model_policy({
+            'defaults': {'chat': 'gpt-4.1-mini'},
+            'catalog': [
+                {'id': 'gpt-4.1-mini', 'label': 'GPT-4.1 Mini', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'runtime'},
+            ],
+            'profiles': {'standard_chat': ['gpt-4.1-mini']},
+            'sceneProfiles': {'chat': 'standard_chat'},
+            'modelProfileOverrides': {},
+        })
+        try:
+            app = create_app(auth_token=None, agent_loop=loop,
+                             session_manager=loop.sessions, webui_enabled=True)
+            client = TestClient(app)
+            resp = client.get('/api/models')
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data['runtimePolicyActive'] is True
+            assert data['current'] == 'gpt-4.1-mini'
+            assert data['currentMeta']['source'] == 'runtime-policy'
+            assert data['currentMeta']['profile'] == 'standard_chat'
+        finally:
+            apply_runtime_model_policy(None)
 
     @pytest.mark.asyncio
     async def test_chat_stream_returns_sse(self, make_agent_loop):

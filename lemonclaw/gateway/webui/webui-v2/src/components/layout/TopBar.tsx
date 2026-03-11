@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { logout } from '../../stores/auth';
-import { currentModel, globalDefaultModel, loadModels, models } from '../../stores/models';
+import { currentModel, globalDefaultModel, getCurrentModelMeta, loadModels, models } from '../../stores/models';
 import { activeSessionKey, loadSessions, sessions } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector } from '../../stores/ui';
@@ -20,6 +20,7 @@ export function TopBar() {
 
   const isWebUI = activeSessionKey.value.startsWith('webui:');
   const currentSession = sessions.value.find((session) => session.key === activeSessionKey.value);
+  const currentModelMeta = getCurrentModelMeta();
 
   useEffect(() => {
     loadModels();
@@ -140,14 +141,21 @@ export function TopBar() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px', flexShrink: 0 }}>
           {!isMobile && isWebUI && (
-            <select
-              value={currentModel.value}
-              onChange={(e) => currentModel.value = (e.target as HTMLSelectElement).value}
-              style={{ maxWidth: '240px', textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
-            >
-              {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
-              {models.value.map((model) => <option key={model.id} value={model.id}>{model.id.split('/').pop()}</option>)}
-            </select>
+            <>
+              <select
+                value={currentModel.value}
+                onChange={(e) => currentModel.value = (e.target as HTMLSelectElement).value}
+                style={{ maxWidth: '240px', textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
+              >
+                {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
+                {models.value.map((model) => <option key={model.id} value={model.id}>{model.id.split('/').pop()}{model.source === "runtime-policy" ? ` · ${model.profile || "runtime"}` : ""}</option>)}
+              </select>
+              {currentModelMeta && (
+                <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                  {currentModelMeta.source === "runtime-policy" ? `runtime · ${currentModelMeta.profile || "default"}` : "builtin"}
+                </span>
+              )}
+            </>
           )}
 
           <div ref={exportRef} style={{ position: 'relative' }}>
@@ -176,8 +184,9 @@ export function TopBar() {
             style={{ width: '100%', minWidth: 0, textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px 10px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
           >
             {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
-            {models.value.map((model) => <option key={model.id} value={model.id}>{model.id}</option>)}
+            {models.value.map((model) => <option key={model.id} value={model.id}>{model.id}{model.source === "runtime-policy" ? ` · ${model.profile || "runtime"}` : ""}</option>)}
           </select>
+          {currentModelMeta && <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{currentModelMeta.source === "runtime-policy" ? `runtime · ${currentModelMeta.profile || "default"}` : "builtin"}</span>}
         </div>
       )}
 
