@@ -9,6 +9,8 @@ import litellm
 from litellm import acompletion
 from litellm.exceptions import (
     AuthenticationError,
+    BadRequestError,
+    InvalidRequestError,
     RateLimitError,
     APIConnectionError,
     APIError,
@@ -50,6 +52,21 @@ def _sanitize_error(error: Exception) -> str:
     msg = re.sub(r'\b[A-Za-z0-9_-]{40,}\b', '[REDACTED]', msg)
 
     return msg
+
+
+# Patterns that indicate the request payload itself is broken
+# (e.g. orphaned tool_result). Retrying or falling back won't help.
+_PAYLOAD_ERROR_PATTERNS = (
+    "invalid_request_error",
+    "unexpected `tool_use_id`",
+    "must be a response to a preceeding message with 'tool_calls'",
+)
+
+
+def _is_payload_error(error: Exception) -> bool:
+    """Check if an error indicates a broken request payload."""
+    err_str = str(error)
+    return any(p in err_str for p in _PAYLOAD_ERROR_PATTERNS)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -418,21 +435,16 @@ class LiteLLMProvider(LLMProvider):
             except AuthenticationError as e:
                 logger.error("Authentication failed: {}", _sanitize_error(e))
                 return LLMResponse(
-                    content="API key 无效或已过期，请检查配置。",
+                    content="API key invalid or expired. Please check your configuration.",
                     finish_reason="error",
                 )
+            except (BadRequestError, InvalidRequestError) as e:
+                last_error = e
+                break  # Payload error — handled by unified check below
             except (RateLimitError, APIConnectionError, APIError) as e:
                 last_error = e
-                # Detect invalid_request_error wrapped in other error types.
-                # The request payload itself is broken (e.g. orphaned tool_result);
-                # retrying or falling back to another model won't help.
-                err_str = str(e)
-                if "invalid_request_error" in err_str or "unexpected `tool_use_id`" in err_str:
-                    logger.error("Request payload error (not retryable): {}", _sanitize_error(e))
-                    return LLMResponse(
-                        content="消息历史格式异常，请发送 /new 开始新对话。",
-                        finish_reason="error",
-                    )
+                if _is_payload_error(e):
+                    break  # Payload error wrapped in other type — stop immediately
                 if attempt < self._MAX_RETRIES:
                     delay = self._RETRY_DELAYS[min(attempt, len(self._RETRY_DELAYS) - 1)]
                     logger.warning(
@@ -449,7 +461,19 @@ class LiteLLMProvider(LLMProvider):
                 logger.error("Unexpected LLM error: {}", _sanitize_error(e))
                 break  # Don't retry unexpected errors
 
-        # All retries exhausted — walk fallback chain
+        # ── Unified payload-error gate ────────────────────────────────────
+        # If the error is a broken request payload (orphaned tool_result,
+        # malformed messages), no amount of retrying or model-switching
+        # will help. The gateway may wrap 400 as 429/500 after channel
+        # failover, so we check the error string, not the status code.
+        if last_error and _is_payload_error(last_error):
+            logger.error("Payload error, skipping fallback: {}", _sanitize_error(last_error))
+            return LLMResponse(
+                content="Message history is corrupted. Please send /new to start a new conversation.",
+                finish_reason="error",
+            )
+
+        # ── Fallback chain ────────────────────────────────────────────────
         visited = {original_model}
         fb_model_id = original_model
         while True:
@@ -471,13 +495,19 @@ class LiteLLMProvider(LLMProvider):
                 response = await acompletion(**fb_kwargs)
                 return await self._collect_stream(response, on_chunk=on_chunk)
             except Exception as fb_err:
+                if _is_payload_error(fb_err):
+                    logger.error("Payload error in fallback, stopping: {}", _sanitize_error(fb_err))
+                    return LLMResponse(
+                        content="Message history is corrupted. Please send /new to start a new conversation.",
+                        finish_reason="error",
+                    )
                 logger.warning("Fallback model {} failed: {}", fb_model_id, _sanitize_error(fb_err))
                 last_error = fb_err
 
         # Everything failed
         error_msg = _sanitize_error(last_error) if last_error else "Unknown error"
         return LLMResponse(
-            content=f"LLM 服务暂时不可用: {error_msg}",
+            content=f"LLM service temporarily unavailable: {error_msg}",
             finish_reason="error",
         )
     
