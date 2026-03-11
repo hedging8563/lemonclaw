@@ -56,16 +56,37 @@ def _sanitize_error(error: Exception) -> str:
 
 # Patterns that indicate the request payload itself is broken
 # (e.g. orphaned tool_result). Retrying or falling back won't help.
+# NOTE: Do NOT use broad patterns like "invalid_request_error" here —
+# that type covers billing errors, auth errors, etc. that are NOT payload issues.
 _PAYLOAD_ERROR_PATTERNS = (
-    "invalid_request_error",
     "unexpected `tool_use_id`",
     "must be a response to a preceeding message with 'tool_calls'",
+    "tool_use block with id",
+    "tool_result block(s) that do not have a corresponding tool_use",
+    "messages: roles must alternate",
+    "content blocks must be non-empty",
 )
+
+# Patterns that indicate insufficient balance — should NOT be treated as payload error
+_BALANCE_ERROR_PATTERNS = (
+    "Insufficient organization balance",
+    "Insufficient balance",
+    "balance_usd",
+)
+
+
+def _is_balance_error(error: Exception) -> bool:
+    """Check if an error indicates insufficient API balance."""
+    err_str = str(error)
+    return any(p in err_str for p in _BALANCE_ERROR_PATTERNS)
 
 
 def _is_payload_error(error: Exception) -> bool:
     """Check if an error indicates a broken request payload."""
     err_str = str(error)
+    # Balance errors are NOT payload errors — they need a different user message
+    if _is_balance_error(error):
+        return False
     return any(p in err_str for p in _PAYLOAD_ERROR_PATTERNS)
 
 
@@ -460,6 +481,15 @@ class LiteLLMProvider(LLMProvider):
                 last_error = e
                 logger.error("Unexpected LLM error: {}", _sanitize_error(e))
                 break  # Don't retry unexpected errors
+
+        # ── Balance error gate ────────────────────────────────────────────
+        # Insufficient balance is NOT a payload error — tell the user clearly.
+        if last_error and _is_balance_error(last_error):
+            logger.warning("Insufficient API balance: {}", _sanitize_error(last_error))
+            return LLMResponse(
+                content="API balance insufficient. Please top up at https://lemondata.cc/dashboard/billing or switch to a cheaper model.",
+                finish_reason="error",
+            )
 
         # ── Unified payload-error gate ────────────────────────────────────
         # If the error is a broken request payload (orphaned tool_result,
