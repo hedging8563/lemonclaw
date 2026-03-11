@@ -3,8 +3,6 @@
 *.pyc
 dist/
 build/
-# Product / internal docs live outside this OSS repo
-docs/
 *.egg-info/
 *.egg
 *.pyc
@@ -25,4 +23,3 @@ botpy.log
 .DS_Store
 # Keep private K8s deployment assets out of the OSS repo
 deploy/k8s/
-.github/workflows/
