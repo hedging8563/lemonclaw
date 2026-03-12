@@ -195,7 +195,7 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
         **{
             k: str(v)
             for k, v in defaults.items()
-            if isinstance(v, str) and v and (str(k) != 'chat' or str(v) in active_model_ids)
+            if isinstance(v, str) and v and str(v) in active_model_ids
         },
     })
     _RUNTIME_SCENE_PROFILES.clear()

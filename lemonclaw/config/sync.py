@@ -282,10 +282,7 @@ def _sync_runtime_model_policy(config: Config) -> bool:
             changed = True
         apply_runtime_model_policy(policy)
     else:
-        if policy_path.exists():
-            policy_path.unlink()
-            changed = True
-        apply_runtime_model_policy(None)
+        return _clear_runtime_model_policy(config, config_dir=config_dir)
 
     managed_default = get_runtime_default_model("chat")
     previous_managed = ""

@@ -16,6 +16,7 @@ def test_apply_runtime_policy_updates_defaults_and_chain():
         'defaults': {'chat': 'gpt-5.2', 'vision': 'gemini-3.1-pro-preview'},
         'catalog': [
             {'id': 'gpt-5.2', 'label': 'GPT-5.2', 'tier': 'flagship', 'enabled': True, 'visible': True, 'description': 'x', 'capabilities': ['chat']},
+            {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro', 'tier': 'flagship', 'enabled': True, 'visible': True, 'description': 'vision', 'capabilities': ['chat', 'vision']},
             {'id': 'gpt-4.1-mini', 'label': 'GPT-4.1 Mini', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'y', 'capabilities': ['chat', 'vision']},
             {'id': 'claude-haiku-4-5', 'label': 'Claude Haiku 4.5', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'z', 'capabilities': ['chat']},
         ],
@@ -64,4 +65,21 @@ def test_disabled_runtime_models_are_filtered_and_tagged_with_runtime_metadata()
     assert meta['source'] == 'runtime-policy'
     assert meta['profile'] == 'standard_chat'
     assert meta['runtimePolicyActive'] is True
+
+def test_runtime_policy_falls_back_to_builtin_for_inactive_non_chat_defaults():
+    policy = {
+        'defaults': {'chat': 'gpt-5.2', 'vision': 'gemini-3.1-pro-preview'},
+        'catalog': [
+            {'id': 'gpt-5.2', 'label': 'GPT-5.2', 'tier': 'flagship', 'enabled': True, 'visible': True, 'description': 'x', 'capabilities': ['chat']},
+            {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro', 'tier': 'flagship', 'enabled': False, 'visible': True, 'description': 'vision', 'capabilities': ['chat', 'vision']},
+        ],
+        'profiles': {'standard_chat': ['gpt-5.2']},
+        'sceneProfiles': {'chat': 'standard_chat'},
+        'modelProfileOverrides': {},
+    }
+
+    apply_runtime_model_policy(policy)
+
+    assert get_runtime_default_model('chat') == 'gpt-5.2'
+    assert get_runtime_default_model('vision') == 'gpt-4.1-mini'
 

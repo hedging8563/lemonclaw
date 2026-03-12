@@ -22,22 +22,23 @@ export async function loadModels() {
     const res = await apiFetch('/api/models');
     const data = await res.json();
 
-    // Sort models to put claude-sonnet-4.6 and 4.5 at the top
     const fetchedModels: ModelOption[] = data.models || [];
-    fetchedModels.sort((a, b) => {
-      const aName = a.id.toLowerCase();
-      const bName = b.id.toLowerCase();
-      const isASonnet46 = aName.includes('claude-sonnet-4-6') || aName.includes('claude-sonnet-4.6');
-      const isBSonnet46 = bName.includes('claude-sonnet-4-6') || bName.includes('claude-sonnet-4.6');
-      const isASonnet45 = aName.includes('claude-sonnet-4-5') || aName.includes('claude-sonnet-4.5');
-      const isBSonnet45 = bName.includes('claude-sonnet-4-5') || bName.includes('claude-sonnet-4.5');
+    if (!data.runtimePolicyActive) {
+      fetchedModels.sort((a, b) => {
+        const aName = a.id.toLowerCase();
+        const bName = b.id.toLowerCase();
+        const isASonnet46 = aName.includes('claude-sonnet-4-6') || aName.includes('claude-sonnet-4.6');
+        const isBSonnet46 = bName.includes('claude-sonnet-4-6') || bName.includes('claude-sonnet-4.6');
+        const isASonnet45 = aName.includes('claude-sonnet-4-5') || aName.includes('claude-sonnet-4.5');
+        const isBSonnet45 = bName.includes('claude-sonnet-4-5') || bName.includes('claude-sonnet-4.5');
 
-      if (isASonnet46 && !isBSonnet46) return -1;
-      if (!isASonnet46 && isBSonnet46) return 1;
-      if (isASonnet45 && !isBSonnet45) return -1;
-      if (!isASonnet45 && isBSonnet45) return 1;
-      return 0;
-    });
+        if (isASonnet46 && !isBSonnet46) return -1;
+        if (!isASonnet46 && isBSonnet46) return 1;
+        if (isASonnet45 && !isBSonnet45) return -1;
+        if (!isASonnet45 && isBSonnet45) return 1;
+        return 0;
+      });
+    }
 
     models.value = fetchedModels;
     globalDefaultModel.value = data.current || '';

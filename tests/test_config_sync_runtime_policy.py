@@ -122,3 +122,36 @@ def test_sync_model_config_preserves_custom_api_bases(monkeypatch, tmp_path: Pat
     assert config.providers.lemondata_gemini.api_base == 'https://staging.example.com'
     assert config.tools.coding.api_base == 'https://claude-proxy.example.com'
 
+def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import _sync_runtime_model_policy
+
+    config = Config()
+    config.providers.lemondata.api_key = 'sk-test'
+    config.lemondata.api_base_url = 'https://api.lemondata.cc'
+    config.agents.defaults.model = 'gpt-5.2'
+    config.lemondata.default_model = 'gpt-5.2'
+
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    (tmp_path / 'runtime-model-policy.json').write_text('{"defaults":{"chat":"gpt-5.2"}}', encoding='utf-8')
+    (tmp_path / '.managed-runtime-default-model').write_text('gpt-5.2', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'policy': None}
+
+    monkeypatch.setattr('lemonclaw.config.sync.httpx.get', lambda *args, **kwargs: FakeResponse())
+
+    changed = _sync_runtime_model_policy(config)
+
+    assert changed is True
+    assert get_runtime_default_model('chat') == 'claude-sonnet-4-6'
+    assert config.agents.defaults.model == 'claude-sonnet-4-6'
+    assert config.lemondata.default_model == 'claude-sonnet-4-6'
+    assert not (tmp_path / 'runtime-model-policy.json').exists()
+    assert not (tmp_path / '.managed-runtime-default-model').exists()
+
