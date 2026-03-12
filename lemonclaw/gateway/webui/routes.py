@@ -26,6 +26,7 @@ from lemonclaw.gateway.webui.auth import (
     verify_token,
 )
 from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, runtime_policy_active
+from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 
 if TYPE_CHECKING:
@@ -449,8 +450,14 @@ def get_webui_routes(
 
         # Write model override to session metadata before processing
         model = body.get("model")
+        provider_switch_reset = False
         if model:
             session = session_manager.get_or_create(session_key)
+            current_model = session.metadata.get("current_model") or getattr(agent_loop, "model", "")
+            if session.messages and current_model and provider_family_for_model(current_model) != provider_family_for_model(model):
+                provider_switch_reset = True
+                session.messages = []
+                session.last_consolidated = 0
             session.metadata["current_model"] = model
             session_manager.save(session)
 
@@ -492,10 +499,13 @@ def get_webui_routes(
                     chat_id="webui",
                     on_progress=on_progress,
                     on_chunk=on_chunk,
-                    metadata={"timezone": user_timezone} if user_timezone else None,
+                    metadata={**({"timezone": user_timezone} if user_timezone else {}), **({"provider_switch_reset": True} if provider_switch_reset else {})} or None,
                     media=media_files or None,
                     outbound_sink=outbound_sink,
                 )
+                if provider_switch_reset:
+                    notice = {"type": "error", "data": "Model provider changed. Session context was reset automatically before continuing."}
+                    await queue.put(f"data: {json.dumps(notice, ensure_ascii=False)}\n\n")
                 # Send final response
                 event = {"type": "done", "data": serialize_ui_message({"role": "assistant", "content": final}, session_key=session_key)}
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")

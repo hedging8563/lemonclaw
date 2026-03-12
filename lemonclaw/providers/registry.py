@@ -534,6 +534,16 @@ def find_by_model(model: str) -> ProviderSpec | None:
     return None
 
 
+def provider_family_for_model(model: str) -> str:
+    """Return a stable provider family id for session compatibility decisions."""
+    spec = find_by_model(model)
+    if spec:
+        return spec.name
+    if "/" in model:
+        return model.split("/", 1)[0].lower().replace("-", "_")
+    return "unknown"
+
+
 def find_gateway(
     provider_name: str | None = None,
     api_key: str | None = None,

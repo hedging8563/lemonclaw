@@ -266,6 +266,17 @@ export async function sendMessage(content: string) {
       console.log('Stream aborted by user');
     } else {
       console.error('Stream error', err);
+      const currentMessages = [...messages.value];
+      const lastIdx = currentMessages.length - 1;
+      if (lastIdx >= 0) {
+        const lastMsg = { ...currentMessages[lastIdx] };
+        const errorMessage = err.status === 409 && err.message
+          ? err.message
+          : (err.message || 'Connection failed');
+        Object.assign(lastMsg, withErrorBlock(lastMsg, errorMessage));
+        currentMessages[lastIdx] = lastMsg;
+        messages.value = currentMessages;
+      }
       streamError.value = err.message || 'Connection failed';
     }
   } finally {

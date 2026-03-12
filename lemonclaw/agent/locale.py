@@ -61,6 +61,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "No model matching `{arg}`. Use `/model` to see available models.",
         "zh": "没有匹配 `{arg}` 的模型，使用 `/model` 查看可用模型。",
     },
+    "model_switched_new_context": {
+        "en": "Switched to **{label}** (`{id}`) — {desc}\nDetected a provider change, so a fresh session context has been started automatically.",
+        "zh": "已切换到 **{label}** (`{id}`) — {desc}\n检测到供应商变更，系统已自动开启新的会话上下文。",
+    },
     "model_switched": {
         "en": "Switched to **{label}** (`{id}`) — {desc}",
         "zh": "已切换到 **{label}** (`{id}`) — {desc}",

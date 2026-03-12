@@ -37,6 +37,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 from lemonclaw.providers.base import LLMProvider
 from lemonclaw.providers.catalog import format_model_list, fuzzy_match
+from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 from lemonclaw.utils.attachments import rewrite_text_paths
@@ -983,6 +984,19 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
+    def _session_has_messages(self, session: Session) -> bool:
+        return bool(session and session.messages)
+
+    def _requires_new_session_for_model_switch(self, session: Session, target_model: str) -> bool:
+        current_model = session.metadata.get("current_model") or self.model
+        if not current_model or not self._session_has_messages(session):
+            return False
+        return provider_family_for_model(current_model) != provider_family_for_model(target_model)
+
+    def _reset_session_context(self, session: Session) -> None:
+        session.messages = []
+        session.last_consolidated = 0
+
     def _handle_model_command(self, msg: InboundMessage, session: Session, lang: str = "en") -> OutboundMessage:
         """Handle /model [name] — list models or switch the session model."""
         arg = msg.content.strip()[6:].strip()  # strip "/model" prefix
@@ -995,6 +1009,10 @@ class AgentLoop:
         if not match:
             return self._command_reply(msg, t("no_model_match", lang, arg=arg), kind="model_error", level="warning")
 
+        reset_context = self._requires_new_session_for_model_switch(session, match.id)
+        if reset_context:
+            self._reset_session_context(session)
+
         session.metadata["current_model"] = match.id
         self.sessions.save(session)
 
@@ -1003,7 +1021,8 @@ class AgentLoop:
         # Persist to config.json so it survives restart
         self._persist_model_default(match.id)
 
-        return self._command_reply(msg, t("model_switched", lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
+        reply_key = "model_switched_new_context" if reset_context else "model_switched"
+        return self._command_reply(msg, t(reply_key, lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
 
     def _should_persist_control_reply(self, kind: str) -> bool:
         """Decide whether a slash/system reply should be stored in session history."""
