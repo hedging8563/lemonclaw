@@ -22,10 +22,6 @@ CONSOLIDATION_TIMEOUT = 30  # seconds
 HISTORY_MAX_ENTRIES = 200
 HISTORY_KEEP_ENTRIES = 150
 
-# Max models to try when tool call fails (walk runtime-aware fallback chain).
-_MAX_CONSOLIDATION_FALLBACKS = 3
-
-
 _SAVE_MEMORY_TOOL = [
     {
         "type": "function",
@@ -175,8 +171,8 @@ class MemoryStore:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
-        If the model fails or doesn't call save_memory, walks the runtime-aware
-        fallback chain for the consolidation scene before giving up.
+        If the model fails or doesn't call save_memory, it fails closed without
+        auto-switching providers or models.
 
         Uses a per-workspace lock to prevent concurrent writes to MEMORY.md/HISTORY.md.
         """
@@ -223,92 +219,56 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                 {"role": "user", "content": prompt},
             ]
 
-            # Walk fallback chain using runtime-aware policy.
-            from lemonclaw.providers.catalog import get_fallback_chain
             current_model = model
-            visited: set[str] = set()
+            try:
+                response = await asyncio.wait_for(
+                    provider.chat(
+                        messages=messages,
+                        tools=_SAVE_MEMORY_TOOL,
+                        model=current_model,
+                    ),
+                    timeout=timeout,
+                )
 
-            while current_model and current_model not in visited and len(visited) <= _MAX_CONSOLIDATION_FALLBACKS:
-                visited.add(current_model)
-                try:
-                    response = await asyncio.wait_for(
-                        provider.chat(
-                            messages=messages,
-                            tools=_SAVE_MEMORY_TOOL,
-                            model=current_model,
-                        ),
-                        timeout=timeout,
+                if not response.has_tool_calls:
+                    logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
+                    return False
+
+                args = response.tool_calls[0].arguments
+                if isinstance(args, str):
+                    args = json.loads(args)
+                if not isinstance(args, dict):
+                    logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
+                    return False
+
+                if entry := args.get("history_entry"):
+                    if not isinstance(entry, str):
+                        entry = json.dumps(entry, ensure_ascii=False)
+                    await self._async_append_history(entry)
+                if update := args.get("memory_update"):
+                    if not isinstance(update, str):
+                        update = json.dumps(update, ensure_ascii=False)
+                    if update != current_memory:
+                        await self._async_write_long_term(update)
+
+                new_consolidated = 0 if archive_all else len(session.messages) - keep_count
+                session.last_consolidated = new_consolidated
+
+                if not archive_all and new_consolidated > 0:
+                    session.messages = session.messages[new_consolidated:]
+                    session.last_consolidated = 0
+                    logger.info(
+                        "Session truncated: dropped {} old messages, {} remaining",
+                        new_consolidated, len(session.messages),
                     )
 
-                    if not response.has_tool_calls:
-                        chain = get_fallback_chain(current_model, scene='consolidation')
-                        next_model = next((m for m in chain if m not in visited), None)
-                        if next_model and next_model not in visited:
-                            logger.warning(
-                                "Memory consolidation: {} did not call save_memory, trying {}",
-                                current_model, next_model,
-                            )
-                            current_model = next_model
-                            continue
-                        logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
-                        return False
+                logger.info("Memory consolidation done (model={}): {} messages remaining",
+                            current_model, len(session.messages))
+                return True
 
-                    args = response.tool_calls[0].arguments
-                    if isinstance(args, str):
-                        args = json.loads(args)
-                    if not isinstance(args, dict):
-                        logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
-                        return False
-
-                    if entry := args.get("history_entry"):
-                        if not isinstance(entry, str):
-                            entry = json.dumps(entry, ensure_ascii=False)
-                        await self._async_append_history(entry)
-                    if update := args.get("memory_update"):
-                        if not isinstance(update, str):
-                            update = json.dumps(update, ensure_ascii=False)
-                        if update != current_memory:
-                            await self._async_write_long_term(update)
-
-                    new_consolidated = 0 if archive_all else len(session.messages) - keep_count
-                    session.last_consolidated = new_consolidated
-
-                    if not archive_all and new_consolidated > 0:
-                        session.messages = session.messages[new_consolidated:]
-                        session.last_consolidated = 0
-                        logger.info(
-                            "Session truncated: dropped {} old messages, {} remaining",
-                            new_consolidated, len(session.messages),
-                        )
-
-                    logger.info("Memory consolidation done (model={}): {} messages remaining",
-                                current_model, len(session.messages))
-                    return True
-
-                except asyncio.TimeoutError:
-                    chain = get_fallback_chain(current_model, scene='consolidation')
-                    next_model = next((m for m in chain if m not in visited), None)
-                    if next_model and next_model not in visited:
-                        logger.warning(
-                            "Memory consolidation: {} timed out after {}s, trying {}",
-                            current_model, timeout, next_model,
-                        )
-                        current_model = next_model
-                        continue
-                    logger.warning("Memory consolidation timed out after {}s, giving up", timeout)
-                    return False
-                except Exception:
-                    chain = get_fallback_chain(current_model, scene='consolidation')
-                    next_model = next((m for m in chain if m not in visited), None)
-                    if next_model and next_model not in visited:
-                        logger.warning(
-                            "Memory consolidation: {} failed, trying {}",
-                            current_model, next_model, exc_info=True,
-                        )
-                        current_model = next_model
-                        continue
-                    logger.exception("Memory consolidation failed")
-                    return False
-
-            logger.warning("Memory consolidation: exhausted all fallbacks")
-            return False
+            except asyncio.TimeoutError:
+                logger.warning("Memory consolidation timed out after {}s, giving up", timeout)
+                return False
+            except Exception:
+                logger.exception("Memory consolidation failed")
+                return False

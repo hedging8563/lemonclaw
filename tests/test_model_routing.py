@@ -227,7 +227,7 @@ class TestFallbackRetry:
 
     @pytest.mark.asyncio
     async def test_all_retries_exhausted_triggers_fallback(self, provider):
-        """After max retries, should try fallback model."""
+        """After max retries, chat should fail closed without auto-fallback."""
         from litellm.exceptions import RateLimitError
 
         models_tried = []
@@ -247,11 +247,12 @@ class TestFallbackRetry:
                     {"model": "resolved/claude-sonnet-4-6", "messages": [], "stream": True},
                     "claude-sonnet-4-6",
                 )
-        # 3 retries on primary + chained fallback (sonnet-4-5 → gpt-4.1-mini → haiku-4-5)
-        assert len(models_tried) == 6
-        assert models_tried[3] == "resolved/claude-sonnet-4-5"
-        assert models_tried[4] == "resolved/gpt-4.1-mini"
-        assert models_tried[5] == "resolved/claude-haiku-4-5"
+        assert len(models_tried) == 3
+        assert models_tried == [
+            "resolved/claude-sonnet-4-6",
+            "resolved/claude-sonnet-4-6",
+            "resolved/claude-sonnet-4-6",
+        ]
         assert result.finish_reason == "error"
 
 

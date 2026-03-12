@@ -296,3 +296,28 @@ def test_archive_session_rewrites_attachment_paths(tmp_path: Path) -> None:
     assert original_persisted_path not in message['content']
     assert Path(archived_path).is_file()
 
+def test_analyze_image_falls_back_within_vision_chain(tmp_path: Path) -> None:
+    from lemonclaw.agent.tools.filesystem import AnalyzeImageTool
+    from lemonclaw.providers.base import LLMResponse
+
+    class DummyProvider:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError('primary vision model failed')
+            return LLMResponse(content='fallback result')
+
+    workspace = _make_workspace(tmp_path)
+    image = workspace / 'scan.jpg'
+    image.write_bytes(b'fake-jpeg-bytes')
+    provider = DummyProvider()
+    tool = AnalyzeImageTool(provider=provider, workspace=workspace, default_model='gemini-3.1-pro-preview')
+
+    output = asyncio.run(tool.execute(path=str(image), instruction='提取图片文字'))
+
+    assert output == 'fallback result'
+    assert [call['model'] for call in provider.calls][:2] == ['gemini-3.1-pro-preview', 'claude-sonnet-4-6']
+

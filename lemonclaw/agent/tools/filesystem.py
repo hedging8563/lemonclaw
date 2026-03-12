@@ -190,29 +190,43 @@ class AnalyzeImageTool(Tool):
                 "Read the image carefully. First extract all clearly visible text verbatim in reading order. "
                 "Then provide a short summary if helpful."
             )
-            response = await self._provider.chat(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a precise vision assistant. Extract visible text faithfully before summarizing. "
-                            "If part of the text is unreadable, say so instead of inventing it."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    },
-                ],
-                model=model or self._default_model,
-                max_tokens=max_tokens,
-                temperature=0.1,
-            )
-            content = (response.content or "").strip()
-            return content or "No readable text or image analysis result was produced."
+            from lemonclaw.providers.catalog import get_fallback_chain
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a precise vision assistant. Extract visible text faithfully before summarizing. "
+                        "If part of the text is unreadable, say so instead of inventing it."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ]
+            last_error: Exception | None = None
+            for candidate in get_fallback_chain(model or self._default_model, scene='vision'):
+                try:
+                    response = await self._provider.chat(
+                        messages=messages,
+                        model=candidate,
+                        max_tokens=max_tokens,
+                        temperature=0.1,
+                    )
+                    content = (response.content or "").strip()
+                    if content:
+                        return content
+                except Exception as exc:
+                    last_error = exc
+                    continue
+
+            if last_error:
+                return f"Error analyzing image: {str(last_error)}"
+            return "No readable text or image analysis result was produced."
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:

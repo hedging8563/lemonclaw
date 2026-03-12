@@ -18,7 +18,6 @@ from litellm.exceptions import (
 from loguru import logger
 
 from lemonclaw.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from lemonclaw.providers.catalog import get_fallback_chain
 from lemonclaw.providers.registry import find_by_model, find_gateway
 
 
@@ -440,12 +439,12 @@ class LiteLLMProvider(LLMProvider):
         self, kwargs: dict[str, Any], original_model: str,
         on_chunk: "OnChunkCallback | None" = None,
     ) -> LLMResponse:
-        """Call LLM with exponential backoff retries and chained fallback.
+        """Call LLM with exponential backoff retries for the session-bound chat model.
 
         Retry logic:
-        - AuthenticationError: never retry, never fallback
+        - AuthenticationError: never retry
         - RateLimitError / APIConnectionError / APIError: retry up to _MAX_RETRIES
-        - All retries exhausted: walk the runtime-aware fallback chain for the active scene
+        - All retries exhausted: fail closed and surface the error to the user
         """
         last_error: Exception | None = None
 
@@ -503,31 +502,7 @@ class LiteLLMProvider(LLMProvider):
                 finish_reason="error",
             )
 
-        # ── Fallback chain ────────────────────────────────────────────────
-        for fb_model_id in get_fallback_chain(original_model, scene='chat')[1:]:
-            logger.info("Falling back {} → {}", original_model, fb_model_id)
-            fb_gw = self._resolve_gateway_for_model(fb_model_id) or self._gateway
-            fb_resolved = self._resolve_model(fb_model_id, gateway=fb_gw)
-            fb_kwargs = {**kwargs, "model": fb_resolved}
-            # Set correct api_base for fallback model's gateway.
-            if fb_gw and fb_gw.default_api_base:
-                fb_kwargs["api_base"] = fb_gw.default_api_base
-            elif fb_gw and not fb_gw.default_api_base:
-                fb_kwargs.pop("api_base", None)
-            try:
-                response = await acompletion(**fb_kwargs)
-                return await self._collect_stream(response, on_chunk=on_chunk)
-            except Exception as fb_err:
-                if _is_payload_error(fb_err):
-                    logger.error("Payload error in fallback, stopping: {}", _sanitize_error(fb_err))
-                    return LLMResponse(
-                        content="Message history is corrupted. Please send /new to start a new conversation.",
-                        finish_reason="error",
-                    )
-                logger.warning("Fallback model {} failed: {}", fb_model_id, _sanitize_error(fb_err))
-                last_error = fb_err
-
-        # Everything failed
+        # Chat sessions are session-bound: do not auto-fallback across models/providers.
         error_msg = _sanitize_error(last_error) if last_error else "Unknown error"
         return LLMResponse(
             content=f"LLM service temporarily unavailable: {error_msg}",

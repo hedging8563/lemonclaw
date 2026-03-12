@@ -820,6 +820,24 @@ class TestWebUIMediaAndAttachments:
         assert any(block['type'] == 'media' for block in raw_assistant['blocks'])
 
 
+
+    @pytest.mark.asyncio
+    async def test_model_switch_requires_new_session_for_cross_provider_history(self, make_agent_loop):
+        from lemonclaw.bus.events import InboundMessage
+
+        loop, _bus = make_agent_loop(model='claude-sonnet-4-6')
+        session = loop.sessions.get_or_create('telegram:chat1')
+        session.messages.append({'role': 'user', 'content': 'hello'})
+        reply = loop._handle_model_command(
+            InboundMessage(channel='telegram', sender_id='u1', chat_id='chat1', content='/model gpt-5.2'),
+            session,
+            lang='en',
+        )
+
+        assert 'fresh session context' in reply.content.lower()
+        assert session.messages == []
+        assert session.metadata.get('current_model') == 'gpt-5.2'
+
 class TestWebUIRoutes:
     """WebUI HTTP endpoint tests."""
 
