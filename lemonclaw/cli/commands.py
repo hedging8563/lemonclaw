@@ -139,6 +139,11 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
+def _runtime_version() -> str:
+    """Return the runtime-reported version string for health/status surfaces."""
+    return os.environ.get("LEMONCLAW_RUNTIME_VERSION", "").strip() or __version__
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -457,11 +462,10 @@ def gateway(
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
 
     # Build HTTP server
-    from lemonclaw import __version__
     asgi_app = create_app(
         auth_token=config.gateway.auth_token,
         channel_manager=channels,
-        version=__version__,
+        version=_runtime_version(),
         model=config.agents.defaults.model,
         instance_id=getattr(config.lemondata, "instance_id", ""),
         usage_tracker=usage_tracker,
