@@ -4,6 +4,7 @@ from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import save_config
 from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
+from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 from lemonclaw.session.manager import SessionManager
 
 
@@ -192,3 +193,117 @@ def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, 
     assert runtime['source'] == 'auto_pairing'
     assert runtime['approved_count'] == 1
 
+
+def test_patch_settings_accepts_operator_tool_paths(tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.patch('/api/settings', json={
+        'tools.http': {
+            'enabled': True,
+            'timeout': 25,
+            'allow_domains': ['api.example.com'],
+            'auth_profiles': {'svc': {'Authorization': 'Bearer token'}},
+        },
+        'tools.k8s.default_namespace': 'claw',
+        'tools.k8s.allowed_namespaces': ['claw'],
+        'tools.db': {
+            'enabled': True,
+            'timeout': 10,
+            'sqlite_profiles': {'local': '/tmp/test.db'},
+            'postgres_profiles': {
+                'analytics_ro': {
+                    'host': 'db.example.internal',
+                    'port': 5432,
+                    'dbname': 'analytics',
+                    'user': 'reader',
+                    'password': 'secret',
+                    'sslmode': 'require',
+                }
+            },
+        },
+        'tools.notify.allow_webhook_domains': ['hooks.example.com'],
+    })
+
+    assert resp.status_code == 200
+    assert resp.json() == {'saved': True}
+
+    from lemonclaw.config.loader import load_config
+    cfg = load_config(config_path)
+    assert cfg.tools.http.enabled is True
+    assert cfg.tools.http.allow_domains == ['api.example.com']
+    assert cfg.tools.k8s.default_namespace == 'claw'
+    assert cfg.tools.k8s.allowed_namespaces == ['claw']
+    assert cfg.tools.db.sqlite_profiles == {'local': '/tmp/test.db'}
+    assert cfg.tools.db.postgres_profiles['analytics_ro'].host == 'db.example.internal'
+    assert cfg.tools.db.postgres_profiles['analytics_ro'].sslmode == 'require'
+    assert cfg.tools.notify.allow_webhook_domains == ['hooks.example.com']
+
+
+def test_apply_settings_marks_operator_tools_as_restart_required(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    kill_calls = []
+    monkeypatch.setattr('os.kill', lambda pid, sig: kill_calls.append((pid, sig)))
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.http', 'tools.db', 'tools.k8s', 'tools.notify'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['reloaded'] is True
+    assert body['restart_required'] is True
+    assert body['restart_fields'] == ['tools.http', 'tools.db', 'tools.k8s', 'tools.notify']
+
+
+def test_restart_regex_includes_operator_tools():
+    assert _RESTART_FIELDS.match('tools.http')
+    assert _RESTART_FIELDS.match('tools.notify')
+    assert _RESTART_FIELDS.match('tools.db')
+    assert _RESTART_FIELDS.match('tools.k8s')
+
+
+def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.tools.http.enabled = True
+    cfg.tools.http.auth_profiles = {
+        'svc': {
+            'Authorization': 'Bearer super-secret-token',
+            'X-API-Key': 'abc123456789',
+        }
+    }
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    http_settings = resp.json()['settings']['tools']['http']
+    assert http_settings['auth_profiles']['svc']['Authorization'] == 'Bear****oken'
+    assert http_settings['auth_profiles']['svc']['X-API-Key'] == 'abc1****6789'
+
+    resp = client.patch('/api/settings', json={
+        'tools.http': {
+            'enabled': True,
+            'timeout': 45,
+            'allow_domains': ['api.example.com'],
+            'auth_profiles': http_settings['auth_profiles'],
+        }
+    })
+    assert resp.status_code == 200
+
+    from lemonclaw.config.loader import load_config
+    updated = load_config(config_path)
+    assert updated.tools.http.timeout == 45
+    assert updated.tools.http.auth_profiles['svc']['Authorization'] == 'Bearer super-secret-token'
+    assert updated.tools.http.auth_profiles['svc']['X-API-Key'] == 'abc123456789'

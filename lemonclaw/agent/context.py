@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from lemonclaw.agent.memory import MemoryStore
+from lemonclaw.agent.prompting import build_mode_overlay, parse_soul_markdown
 from lemonclaw.agent.skills import SkillsLoader
 from lemonclaw.utils.attachments import (
     attachment_metadata,
@@ -20,7 +21,7 @@ from lemonclaw.utils.attachments import (
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    BOOTSTRAP_FILES = ["AGENTS.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace: Path, system_prompt: str = "", disabled_skills: list[str] | None = None):
@@ -30,13 +31,36 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace, disabled_skills=disabled_skills)
         self._triggered_skills: list[str] = []
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        mode: str | None = None,
+        session_prompt_override: str = "",
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
-        # Custom system prompt — after identity, before bootstrap files
+        soul_sections = self._load_soul_sections()
+        if soul_sections.get("identity"):
+            parts.append(f"# Soul Identity\n\n{soul_sections['identity']}")
+        if soul_sections.get("operating_doctrine"):
+            parts.append(f"# Operating Doctrine\n\n{soul_sections['operating_doctrine']}")
+        if soul_sections.get("values"):
+            parts.append(f"# Values\n\n{soul_sections['values']}")
+        if soul_sections.get("legacy"):
+            parts.append(f"# Soul\n\n{soul_sections['legacy']}")
+
+        if mode:
+            overlay = build_mode_overlay(mode)
+            if overlay:
+                parts.append(f"# Mode Overlay\n\n{overlay}")
+
+        # Custom system prompt — after identity/SOUL/mode, before bootstrap files
         if self.system_prompt:
             parts.append(f"# Custom Instructions\n\n{self.system_prompt}")
+
+        if session_prompt_override:
+            parts.append(f"# Session Instructions\n\n{session_prompt_override}")
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -142,6 +166,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         return "\n\n".join(parts) if parts else ""
 
+    def _load_soul_sections(self) -> dict[str, str]:
+        soul_path = self.workspace / "SOUL.md"
+        if not soul_path.exists():
+            return {}
+        return parse_soul_markdown(soul_path.read_text(encoding="utf-8"))
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -151,6 +181,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         channel: str | None = None,
         chat_id: str | None = None,
         timezone: str | None = None,
+        mode: str | None = None,
+        session_prompt_override: str = "",
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
 
@@ -204,7 +236,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             user_content = [{"type": "text", "text": text_prefix}, *user_content]
         user_msg: dict[str, Any] = {"role": "user", "content": user_content, "_original_text": current_message}
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, mode=mode, session_prompt_override=session_prompt_override)},
             *history,
             user_msg,
         ]

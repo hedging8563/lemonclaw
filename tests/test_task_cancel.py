@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,8 +18,7 @@ def _make_loop():
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    workspace = MagicMock()
-    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+    workspace = Path(tempfile.mkdtemp(prefix="lemonclaw-task-cancel-"))
 
     with patch("lemonclaw.agent.loop.ContextBuilder"), \
          patch("lemonclaw.agent.loop.SessionManager"), \

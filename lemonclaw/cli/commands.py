@@ -266,6 +266,7 @@ def gateway(
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.cron.service import CronService
     from lemonclaw.cron.types import CronJob
+    from lemonclaw.ledger.runtime import TaskLedger
     from lemonclaw.heartbeat.service import HeartbeatService
     from lemonclaw.gateway.server import create_app, GatewayServer, GracefulShutdown
 
@@ -307,7 +308,7 @@ def gateway(
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
-    cron = CronService(cron_store_path)
+    cron = CronService(cron_store_path, task_ledger=TaskLedger(config.workspace_path))
 
     # Create ActivityBus before AgentLoop and ChannelManager (both need it)
     from lemonclaw.bus.activity import ActivityBus
@@ -332,10 +333,15 @@ def gateway(
         usage_tracker=usage_tracker,
         coding_config=config.tools.coding,
         browser_config=config.tools.browser,
+        http_config=config.tools.http,
+        notify_config=config.tools.notify,
+        db_config=config.tools.db,
+        k8s_config=config.tools.k8s,
         activity_bus=activity_bus,
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        governance_config=config.governance,
     )
 
     # Set cron callback (needs agent)
@@ -532,6 +538,7 @@ def agent(
     from lemonclaw.bus.queue import MessageBus
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.cron.service import CronService
+    from lemonclaw.ledger.runtime import TaskLedger
     from loguru import logger
     
     config = load_config()
@@ -542,7 +549,7 @@ def agent(
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
-    cron = CronService(cron_store_path)
+    cron = CronService(cron_store_path, task_ledger=TaskLedger(config.workspace_path))
 
     if logs:
         logger.enable("lemonclaw")
@@ -565,9 +572,14 @@ def agent(
         channels_config=config.channels,
         coding_config=config.tools.coding,
         browser_config=config.tools.browser,
+        http_config=config.tools.http,
+        notify_config=config.tools.notify,
+        db_config=config.tools.db,
+        k8s_config=config.tools.k8s,
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        governance_config=config.governance,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1016,6 +1028,7 @@ def cron_run(
     from lemonclaw.cron.types import CronJob
     from lemonclaw.bus.queue import MessageBus
     from lemonclaw.agent.loop import AgentLoop
+    from lemonclaw.ledger.runtime import TaskLedger
     logger.disable("lemonclaw")
 
     config = load_config()
@@ -1036,13 +1049,18 @@ def cron_run(
         channels_config=config.channels,
         coding_config=config.tools.coding,
         browser_config=config.tools.browser,
+        http_config=config.tools.http,
+        notify_config=config.tools.notify,
+        db_config=config.tools.db,
+        k8s_config=config.tools.k8s,
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        governance_config=config.governance,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
+    service = CronService(store_path, task_ledger=TaskLedger(config.workspace_path))
 
     result_holder = []
 

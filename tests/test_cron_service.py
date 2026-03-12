@@ -3,6 +3,7 @@ import pytest
 from lemonclaw.agent.tools.cron import CronTool, _IN_CRON_CONTEXT
 from lemonclaw.cron.service import CronService
 from lemonclaw.cron.types import CronSchedule
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
@@ -52,3 +53,26 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
 
     assert job.schedule.tz == "America/Vancouver"
     assert job.state.next_run_at_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_cron_service_writes_task_ledger(tmp_path) -> None:
+    ledger = TaskLedger(tmp_path)
+    service = CronService(tmp_path / "cron" / "jobs.json", task_ledger=ledger)
+    job = service.add_job(
+        name="ledger job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello ledger",
+    )
+
+    async def _on_job(_job):
+        return "ok"
+
+    service.on_job = _on_job
+    await service._execute_job(job)
+
+    task_id_prefix = f"cron_{job.id}_"
+    task_files = list((tmp_path / ".lemonclaw-state" / "tasks").glob(f"{task_id_prefix}*.json"))
+    assert len(task_files) == 1
+    task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
+    assert task["status"] == "completed"

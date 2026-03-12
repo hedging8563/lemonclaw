@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,7 @@ from lemonclaw.agent.locale import detect_lang, session_lang, t
 from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.cron import CronTool
+from lemonclaw.agent.tools.db import DBTool
 from lemonclaw.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -27,7 +29,12 @@ from lemonclaw.agent.tools.filesystem import (
 )
 from lemonclaw.agent.tools.glob import GlobTool
 from lemonclaw.agent.tools.grep import GrepTool
+from lemonclaw.agent.tools.git_tool import GitTool
+from lemonclaw.agent.tools.http_request import HTTPRequestTool
+from lemonclaw.agent.tools.k8s import K8sTool
 from lemonclaw.agent.tools.message import MessageTool
+from lemonclaw.agent.tools.notify import NotifyTool
+from lemonclaw.agent.tools.task_checkpoint import TaskCheckpointTool
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.agent.tools.shell import ExecTool
 from lemonclaw.agent.tools.spawn import SpawnTool
@@ -41,6 +48,9 @@ from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 from lemonclaw.utils.attachments import rewrite_text_paths
+from lemonclaw.agent.prompting import infer_mode
+from lemonclaw.governance import GovernanceRuntime
+from lemonclaw.ledger.runtime import TaskLedger
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -49,7 +59,11 @@ if TYPE_CHECKING:
         BrowserToolConfig,
         ChannelsConfig,
         CodingToolConfig,
+        DBToolConfig,
         ExecToolConfig,
+        HTTPRequestToolConfig,
+        K8sToolConfig,
+        NotifyToolConfig,
     )
     from lemonclaw.cron.service import CronService
 
@@ -94,10 +108,15 @@ class AgentLoop:
         usage_tracker: UsageTracker | None = None,
         coding_config: CodingToolConfig | None = None,
         browser_config: BrowserToolConfig | None = None,
+        http_config: HTTPRequestToolConfig | None = None,
+        notify_config: NotifyToolConfig | None = None,
+        db_config: DBToolConfig | None = None,
+        k8s_config: K8sToolConfig | None = None,
         activity_bus: ActivityBus | None = None,
         default_timezone: str = "",
         system_prompt: str = "",
         disabled_skills: list[str] | None = None,
+        governance_config: Any | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.agent_id = agent_id
@@ -115,13 +134,23 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.coding_config = coding_config
         self.browser_config = browser_config
+        self.http_config = http_config
+        self.notify_config = notify_config
+        self.db_config = db_config
+        self.k8s_config = k8s_config
         self.activity_bus = activity_bus
         self.orchestrator: Orchestrator | None = None
         self.cron_service = cron_service
         self.context = ContextBuilder(workspace, system_prompt=system_prompt, disabled_skills=disabled_skills)
         self.context.memory.set_provider(provider)
         self.sessions = session_manager or SessionManager(workspace)
-        self.tools = ToolRegistry()
+        self.ledger = TaskLedger(workspace)
+        self.governance = GovernanceRuntime(
+            workspace=workspace,
+            config=governance_config,
+            agent_id=agent_id,
+        )
+        self.tools = ToolRegistry(governance=self.governance, ledger=self.ledger)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -198,9 +227,42 @@ class AgentLoop:
         ))
         self.tools.register(GrepTool(workspace=self.workspace))
         self.tools.register(GlobTool(workspace=self.workspace))
+        self.tools.register(GitTool(working_dir=str(self.workspace)))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        if hasattr(self, "db_config") and self.db_config and self.db_config.enabled:
+            self.tools.register(DBTool(
+                timeout=self.db_config.timeout,
+                sqlite_profiles=dict(self.db_config.sqlite_profiles or {}),
+                postgres_profiles={
+                    name: profile.model_dump(by_alias=False)
+                    for name, profile in dict(self.db_config.postgres_profiles or {}).items()
+                },
+            ))
+        if hasattr(self, "k8s_config") and self.k8s_config and self.k8s_config.enabled:
+            self.tools.register(K8sTool(
+                timeout=self.k8s_config.timeout,
+                default_namespace=self.k8s_config.default_namespace,
+                allowed_namespaces=list(self.k8s_config.allowed_namespaces or []),
+                kubeconfig=self.k8s_config.kubeconfig,
+                context=self.k8s_config.context,
+                max_items=self.k8s_config.max_items,
+                max_output=self.k8s_config.max_output,
+            ))
+        if hasattr(self, "http_config") and self.http_config and self.http_config.enabled:
+            self.tools.register(HTTPRequestTool(
+                timeout=self.http_config.timeout,
+                allow_domains=list(self.http_config.allow_domains or []),
+                auth_profiles=dict(self.http_config.auth_profiles or {}),
+            ))
+        self.tools.register(TaskCheckpointTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        if hasattr(self, "notify_config") and self.notify_config and self.notify_config.enabled:
+            self.tools.register(NotifyTool(
+                send_callback=self.bus.publish_outbound,
+                timeout=self.notify_config.timeout,
+                allow_webhook_domains=list(self.notify_config.allow_webhook_domains or []),
+            ))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -604,6 +666,20 @@ class AgentLoop:
         """Process a message under a per-session lock."""
         is_internal = msg.channel == "internal"
         request_id = (msg.metadata or {}).get("_request_id") if is_internal else None
+        metadata = dict(msg.metadata or {})
+        metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
+        metadata.setdefault("_mode", self._infer_mode(msg))
+        metadata.setdefault("_agent_id", self.agent_id)
+        msg.metadata = metadata
+        self.ledger.ensure_task(
+            task_id=str(metadata["_task_id"]),
+            session_key=msg.session_key,
+            agent_id=self.agent_id,
+            mode=str(metadata["_mode"]),
+            channel=msg.channel,
+            goal=msg.content[:500],
+            current_stage="dispatch",
+        )
 
         # Per-session lock: different sessions can run concurrently
         if msg.session_key not in self._session_locks:
@@ -624,6 +700,7 @@ class AgentLoop:
         async with lock:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
+                self.ledger.update_task(str(metadata["_task_id"]), status="completed", current_stage="done")
 
                 # Internal request-response: resolve Future instead of outbound
                 if request_id:
@@ -657,6 +734,7 @@ class AgentLoop:
                         ))
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
+                self.ledger.update_task(str(metadata["_task_id"]), status="abandoned", current_stage="cancelled")
                 if request_id:
                     self.bus.resolve_response(request_id, "[cancelled]")
                 raise
@@ -672,6 +750,12 @@ class AgentLoop:
                     )
                 except Exception:
                     pass  # reflect is best-effort, never block error handling
+                self.ledger.update_task(
+                    str(metadata["_task_id"]),
+                    status="failed",
+                    current_stage="error",
+                    error=str(exc)[:500],
+                )
                 if request_id:
                     self.bus.resolve_response(request_id, "[error]")
                 else:
@@ -682,6 +766,10 @@ class AgentLoop:
                     ))
             finally:
                 self._stop_events.pop(msg.session_key, None)
+
+    @staticmethod
+    def _infer_mode(msg: InboundMessage) -> str:
+        return infer_mode(msg)
 
     async def close_mcp(self) -> None:
         """Close MCP connections and tool resources."""
@@ -743,6 +831,9 @@ class AgentLoop:
                                   content=final_content or t("bg_task_done", session_lang(session)))
 
         key = session_key or msg.session_key
+        task_id = str((msg.metadata or {}).get("_task_id", ""))
+        if task_id:
+            self.ledger.update_task(task_id, current_stage="process_message", status="running")
         if msg.media:
             msg.content, msg.media = self._persist_inbound_media(key, msg.content, list(msg.media or []))
 
@@ -888,14 +979,9 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
             timezone=msg.metadata.get("timezone") or self.default_timezone,
+            mode=str(msg.metadata.get("_mode", "chat")),
+            session_prompt_override=str(session.metadata.get("system_prompt_override", "")),
         )
-
-        # 6.3: Per-session system prompt override — append to system message
-        session_system_prompt = session.metadata.get("system_prompt_override")
-        if session_system_prompt and initial_messages and initial_messages[0].get("role") == "system":
-            initial_messages[0]["content"] += (
-                f"\n\n# Session Instructions\n\n{session_system_prompt}"
-            )
 
         # Token-level compaction: summarize middle messages if over threshold
         from lemonclaw.session.compaction import compact, needs_compaction
@@ -938,8 +1024,23 @@ class AgentLoop:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
-        outbound_sink = (msg.metadata or {}).get("_outbound_sink")
-        tool_context_extra = {"_outbound_sink": outbound_sink} if outbound_sink else None
+        metadata = dict(msg.metadata or {})
+        outbound_sink = metadata.get("_outbound_sink")
+        tool_context_extra = {
+            "_task_id": metadata.get("_task_id"),
+            "_mode": metadata.get("_mode", "chat"),
+            "_agent_id": metadata.get("_agent_id", self.agent_id),
+            "_tenant_id": str(metadata.get("_tenant_id", "")),
+            "_actor_identity": str(metadata.get("_actor_identity", self.agent_id)),
+            "_task_ledger": self.ledger,
+            "_capability_token": self.governance.issue_token(
+                task_id=str(metadata.get("_task_id")),
+                tenant_id=str(metadata.get("_tenant_id", "")),
+                mode=str(metadata.get("_mode", "chat")),
+            ),
+        }
+        if outbound_sink:
+            tool_context_extra["_outbound_sink"] = outbound_sink
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, session_key=key, on_progress=on_progress or _bus_progress,
@@ -1130,9 +1231,31 @@ class AgentLoop:
         self._session_lock_order.append(session_key)
         async with self._session_locks[session_key]:
             direct_metadata = dict(metadata or {})
+            direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
+            direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
+            direct_metadata.setdefault("_agent_id", self.agent_id)
+            self.ledger.ensure_task(
+                task_id=str(direct_metadata["_task_id"]),
+                session_key=session_key,
+                agent_id=self.agent_id,
+                mode=str(direct_metadata["_mode"]),
+                channel=channel,
+                goal=content[:500],
+                current_stage="dispatch",
+            )
             if outbound_sink:
                 direct_metadata["_outbound_sink"] = outbound_sink
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
                                  metadata=direct_metadata, media=media or [])
-            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
+            try:
+                response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
+                self.ledger.update_task(str(direct_metadata["_task_id"]), status="completed", current_stage="done")
+            except Exception as exc:
+                self.ledger.update_task(
+                    str(direct_metadata["_task_id"]),
+                    status="failed",
+                    current_stage="error",
+                    error=str(exc)[:500],
+                )
+                raise
         return response.content if response else ""

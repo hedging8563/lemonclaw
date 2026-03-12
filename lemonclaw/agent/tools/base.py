@@ -100,3 +100,30 @@ class Tool(ABC):
                 "parameters": self.parameters,
             }
         }
+
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        """Resolve this tool call to a capability id."""
+        return f"tool.{self.name}.default"
+
+    def normalize_result(self, raw: Any) -> dict[str, Any]:
+        """Normalize a tool result for governance/audit purposes."""
+        if isinstance(raw, dict):
+            return {
+                "ok": bool(raw.get("ok", True)),
+                "summary": str(raw.get("summary", raw)),
+                "raw": raw.get("raw", raw),
+                "artifacts": raw.get("artifacts", []),
+            }
+        if isinstance(raw, str):
+            return {
+                "ok": not raw.startswith("Error"),
+                "summary": raw,
+                "raw": raw,
+                "artifacts": [],
+            }
+        return {
+            "ok": True,
+            "summary": str(raw),
+            "raw": raw,
+            "artifacts": [],
+        }

@@ -5,6 +5,7 @@ import { currentModel, globalDefaultModel, getCurrentModelMeta, loadModels, mode
 import { activeSessionKey, loadSessions, sessions } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector } from '../../stores/ui';
+import { modelMetaLabel, modelOptionLabel } from './modelPresentation';
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -148,11 +149,11 @@ export function TopBar() {
                 style={{ maxWidth: '240px', textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
               >
                 {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
-                {models.value.map((model) => <option key={model.id} value={model.id}>{model.id.split('/').pop()}{model.source === "runtime-policy" ? ` · ${model.profile || "runtime"}` : ""}</option>)}
+                {models.value.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, t)}</option>)}
               </select>
               {currentModelMeta && (
                 <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                  {currentModelMeta.source === "runtime-policy" ? `runtime · ${currentModelMeta.profile || "default"}` : "builtin"}
+                  {modelMetaLabel(currentModelMeta, t)}
                 </span>
               )}
             </>
@@ -184,9 +185,9 @@ export function TopBar() {
             style={{ width: '100%', minWidth: 0, textOverflow: 'ellipsis', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px 10px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--teal)', outline: 'none', cursor: 'pointer' }}
           >
             {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
-            {models.value.map((model) => <option key={model.id} value={model.id}>{model.id}{model.source === "runtime-policy" ? ` · ${model.profile || "runtime"}` : ""}</option>)}
+            {models.value.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, t)}</option>)}
           </select>
-          {currentModelMeta && <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{currentModelMeta.source === "runtime-policy" ? `runtime · ${currentModelMeta.profile || "default"}` : "builtin"}</span>}
+          {currentModelMeta && <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{modelMetaLabel(currentModelMeta, t)}</span>}
         </div>
       )}
 

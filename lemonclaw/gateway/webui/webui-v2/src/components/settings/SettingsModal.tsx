@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
+import { HTTPAuthProfilesEditor } from './HTTPAuthProfilesEditor';
 import { MCPServersEditor } from './MCPServersEditor';
+import { PostgresProfilesEditor } from './PostgresProfilesEditor';
 import { SkillsTab } from './SkillsTab';
+import { SQLiteProfilesEditor } from './SQLiteProfilesEditor';
 import { SoulEditor } from './SoulEditor';
 import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 
@@ -86,7 +89,7 @@ function getNestedValue(data: DraftData, path: string): any {
   return path.split('.').reduce<any>((current, key) => current?.[key], data);
 }
 
-function normalizeChangedPath(path: string[]): string {
+export function normalizeChangedPath(path: string[]): string {
   if (path[0] === 'agents' && path[1] === 'defaults') {
     return `agents.defaults.${path[2]}`;
   }
@@ -100,7 +103,7 @@ function normalizeChangedPath(path: string[]): string {
     if (path[1] === 'mcp_servers') {
       return `tools.${path[1]}`;
     }
-    if (path[1] === 'browser' || path[1] === 'coding') {
+    if (path[1] === 'browser' || path[1] === 'coding' || path[1] === 'http' || path[1] === 'notify' || path[1] === 'db' || path[1] === 'k8s') {
       return `tools.${path[1]}`;
     }
     if (path[1] === 'exec' && path[2]) {
@@ -173,6 +176,16 @@ const FIELD_HELP_KEYS: Record<string, string> = {
   'channels.auto_pairing': 'settings_help_auto_pairing',
   'tools.web.search.api_key': 'settings_help_search_api_key',
   'tools.web.search.max_results': 'settings_help_search_max_results',
+  'tools.http.allow_domains': 'settings_help_http_allow_domains',
+  'tools.http.auth_profiles': 'settings_help_http_auth_profiles',
+  'tools.notify.allow_webhook_domains': 'settings_help_notify_allow_webhook_domains',
+  'tools.db.sqlite_profiles': 'settings_help_db_sqlite_profiles',
+  'tools.k8s.default_namespace': 'settings_help_k8s_default_namespace',
+  'tools.k8s.allowed_namespaces': 'settings_help_k8s_allowed_namespaces',
+  'tools.k8s.kubeconfig': 'settings_help_k8s_kubeconfig',
+  'tools.k8s.context': 'settings_help_k8s_context',
+  'tools.k8s.max_items': 'settings_help_k8s_max_items',
+  'tools.k8s.max_output': 'settings_help_k8s_max_output',
   'tools.browser.timeout': 'settings_help_browser_timeout',
   'tools.browser.allowed_domains': 'settings_help_browser_allowed_domains',
   'tools.browser.headed': 'settings_help_browser_headed',
@@ -190,6 +203,12 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
   'agents.defaults.provider': 'auto',
   'agents.defaults.timezone': 'Asia/Shanghai',
   'agents.defaults.disabled_skills': 'skill-a, skill-b',
+  'tools.http.allow_domains': '*.example.com, api.example.com',
+  'tools.notify.allow_webhook_domains': 'hooks.example.com, *.internal.example.com',
+  'tools.k8s.default_namespace': 'claw',
+  'tools.k8s.allowed_namespaces': 'claw, claw-staging',
+  'tools.k8s.kubeconfig': '/home/lemonclaw/.kube/config',
+  'tools.k8s.context': 'claw-prod',
   'tools.browser.allowed_domains': '*.example.com, api.example.com',
   'tools.coding.api_base': 'https://api.example.com',
   'tools.exec.path_append': '/usr/local/bin:/app/.venv/bin',
@@ -313,6 +332,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   const displayLabel = (key: string): string => {
+    if (key === 'http') return t('tools_http_title');
+    if (key === 'notify') return t('tools_notify_title');
+    if (key === 'db') return t('tools_db_title');
+    if (key === 'k8s') return t('tools_k8s_title');
     if (key === 'browser') return t('tools_browser_title');
     if (key === 'coding') return t('tools_coding_title');
     if (key === 'web.search') return t('tools_web_search_title');
@@ -601,6 +624,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         );
       }
 
+      if (fullPath === 'tools.http.auth_profiles' && isGroup(v)) {
+        return (
+          <HTTPAuthProfilesEditor key={fullPath} profiles={v as Record<string, Record<string, string>>} onChange={(newVal) => handleChange(currentPath, newVal)} />
+        );
+      }
+
+      if (fullPath === 'tools.db.sqlite_profiles' && isGroup(v)) {
+        return (
+          <SQLiteProfilesEditor key={fullPath} profiles={v as Record<string, string>} onChange={(newVal) => handleChange(currentPath, newVal)} />
+        );
+      }
+
+      if (fullPath === 'tools.db.postgres_profiles' && isGroup(v)) {
+        return (
+          <PostgresProfilesEditor key={fullPath} profiles={v as Record<string, Record<string, string | number>>} onChange={(newVal) => handleChange(currentPath, newVal)} />
+        );
+      }
+
       if (Array.isArray(v)) {
         return (
           <div key={fullPath} style={{ marginBottom: '12px' }}>
@@ -645,6 +686,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {path[0] === 'channels' && renderChannelRuntimeNotice(displayKey)}
             {path[0] === 'channels' && renderChannelPairingCard(displayKey)}
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'http' && renderNotice(t('http_tool_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'notify' && renderNotice(t('notify_tool_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'db' && renderNotice(t('db_tool_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'k8s' && renderNotice(t('k8s_tool_note'), 'warning')}
             {path[0] === 'tools' && displayKey === 'coding' && renderNotice(t('coding_provider_note'), 'info')}
             {renderFields(currentObj, cPath)}
             {path[0] === 'channels' && displayKey === 'whatsapp' && (

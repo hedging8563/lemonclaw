@@ -12,6 +12,7 @@ from typing import Any, Callable, Coroutine
 from loguru import logger
 
 from lemonclaw.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 def _now_ms() -> int:
@@ -66,13 +67,15 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        task_ledger: TaskLedger | None = None,
     ):
         self.store_path = store_path
         self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._task_ledger = task_ledger
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -241,7 +244,22 @@ class CronService:
         from lemonclaw.agent.tools.cron import _IN_CRON_CONTEXT
 
         start_ms = _now_ms()
+        task_id = f"cron_{job.id}_{start_ms}"
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        if self._task_ledger:
+            self._task_ledger.ensure_task(
+                task_id=task_id,
+                session_key=f"cron:{job.id}",
+                agent_id="cron",
+                mode="cron",
+                channel=job.payload.channel or "cron",
+                goal=job.payload.message[:500],
+                current_stage="cron_execute",
+                metadata={"job_id": job.id},
+            )
+            step = self._task_ledger.start_step(task_id, step_type="cron_job", name=job.name, input_summary=job.payload.message[:500])
+        else:
+            step = None
 
         token = _IN_CRON_CONTEXT.set(True)
         try:
@@ -251,11 +269,19 @@ class CronService:
 
             job.state.last_status = "ok"
             job.state.last_error = None
+            if step:
+                self._task_ledger.finish_step(step, status="completed")
+            if self._task_ledger:
+                self._task_ledger.update_task(task_id, status="completed", current_stage="done")
             logger.info("Cron: job '{}' completed", job.name)
 
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
+            if step:
+                self._task_ledger.finish_step(step, status="failed", error=str(e)[:500])
+            if self._task_ledger:
+                self._task_ledger.update_task(task_id, status="failed", current_stage="error", error=str(e)[:500])
             logger.error("Cron: job '{}' failed: {}", job.name, e)
         finally:
             _IN_CRON_CONTEXT.reset(token)

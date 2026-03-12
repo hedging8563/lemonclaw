@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -343,6 +343,56 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class HTTPRequestToolConfig(Base):
+    """Structured HTTP request tool configuration."""
+
+    enabled: bool = False
+    timeout: int = 30
+    allow_domains: list[str] = Field(default_factory=list)
+    auth_profiles: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class NotifyToolConfig(Base):
+    """Notification tool configuration."""
+
+    enabled: bool = False
+    timeout: int = 15
+    allow_webhook_domains: list[str] = Field(default_factory=list)
+
+
+class PostgresProfileConfig(Base):
+    """Named PostgreSQL connection profile for the db tool."""
+
+    host: str = ""
+    port: int = 5432
+    dbname: str = ""
+    user: str = ""
+    password: str = ""
+    sslmode: str = "prefer"
+
+
+class DBToolConfig(Base):
+    """Structured database inspection tool configuration."""
+
+    enabled: bool = False
+    timeout: int = 15
+    sqlite_profiles: dict[str, str] = Field(default_factory=dict)
+    postgres_profiles: dict[str, PostgresProfileConfig] = Field(default_factory=dict)
+
+
+class K8sToolConfig(Base):
+    """Structured Kubernetes operator tool configuration."""
+
+    enabled: bool = False
+    timeout: int = 30
+    default_namespace: str = ""
+    allowed_namespaces: list[str] = Field(default_factory=list)
+    kubeconfig: str = ""
+    context: str = ""
+    max_items: int = 50
+    max_output: int = 50000
+
+
 class CodingToolConfig(Base):
     """Claude Code CLI tool configuration."""
 
@@ -387,10 +437,34 @@ class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    http: HTTPRequestToolConfig = Field(default_factory=HTTPRequestToolConfig)
+    notify: NotifyToolConfig = Field(default_factory=NotifyToolConfig)
+    db: DBToolConfig = Field(default_factory=DBToolConfig)
+    k8s: K8sToolConfig = Field(default_factory=K8sToolConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     coding: CodingToolConfig = Field(default_factory=CodingToolConfig)
     browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+
+
+class GovernanceBudgetConfig(Base):
+    """Budget limits used by the governance layer."""
+
+    platform_daily_usd: float | None = None
+    tenant_daily_usd: float | None = None
+    default_task_usd: float | None = None
+
+
+class GovernanceRuntimeConfig(Base):
+    """Minimal local governance runtime configuration."""
+
+    enabled: bool = True
+    default_autonomy_cap: Literal["L0", "L1", "L2", "L3"] = "L1"
+    token_ttl_seconds: int = 900
+    kill_switch_file: str = "~/.lemonclaw/state/governance.json"
+    audit_log_path: str = "~/.lemonclaw/state/capability-audit.jsonl"
+    budgets: GovernanceBudgetConfig = Field(default_factory=GovernanceBudgetConfig)
+    capability_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class Config(BaseSettings):
@@ -402,6 +476,7 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     lemondata: LemonDataConfig = Field(default_factory=LemonDataConfig)
+    governance: GovernanceRuntimeConfig = Field(default_factory=GovernanceRuntimeConfig)
 
     @property
     def workspace_path(self) -> Path:

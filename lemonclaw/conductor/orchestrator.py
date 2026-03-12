@@ -25,6 +25,7 @@ from lemonclaw.conductor.types import (
     SubTaskStatus,
     TaskComplexity,
 )
+from lemonclaw.ledger.runtime import TaskLedger
 
 if TYPE_CHECKING:
     from lemonclaw.agent.registry import AgentRegistry
@@ -50,6 +51,7 @@ class Orchestrator:
         plan_timeout: int = 1800,  # 30 min overall plan timeout
         subtask_timeout: int = 300,  # 5 min per subtask
         max_retries: int = 1,  # retry failed subtasks once
+        ledger: TaskLedger | None = None,
     ):
         self._provider = provider
         self._bus = bus
@@ -60,6 +62,7 @@ class Orchestrator:
         self._plan_timeout = plan_timeout
         self._subtask_timeout = subtask_timeout
         self._max_retries = max_retries
+        self._ledger = ledger
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -78,27 +81,57 @@ class Orchestrator:
             logger.debug("Orchestrator: SIMPLE — pass-through")
             return None  # Caller handles directly
 
+        task_id = str((msg.metadata or {}).get("_task_id") or f"orch_{uuid.uuid4().hex[:12]}")
+        if self._ledger:
+            self._ledger.ensure_task(
+                task_id=task_id,
+                session_key=msg.session_key,
+                agent_id="conductor",
+                mode="operator",
+                channel=msg.channel,
+                goal=msg.content[:500],
+                current_stage=OrchestratorPhase.ANALYZING.value,
+                metadata={"source": "orchestrator"},
+            )
+
         # Phase 2: SPLITTING
         plan = await self._split(msg.content, intent)
+        plan.metadata["_ledger_task_id"] = task_id
         self._active_plans[plan.request_id] = plan
 
         try:
+            if self._ledger:
+                self._ledger.update_task(task_id, current_stage=OrchestratorPhase.SPLITTING.value)
             # Phase 3: ASSIGNING
             await self._assign(plan)
+            if self._ledger:
+                self._ledger.update_task(task_id, current_stage=OrchestratorPhase.ASSIGNING.value)
 
             # Phase 4: MONITORING
             await self._monitor(plan)
+            if self._ledger:
+                self._ledger.update_task(task_id, current_stage=OrchestratorPhase.MONITORING.value)
 
             # Check if all subtasks failed — degrade to single-agent direct processing
             all_failed = all(st.status == SubTaskStatus.FAILED for st in plan.subtasks)
             if all_failed:
                 logger.warning("Orchestrator: all {} subtasks failed, degrading to single-agent",
                                len(plan.subtasks))
+                if self._ledger:
+                    self._ledger.update_task(task_id, status="failed", current_stage="degraded", error="all subtasks failed")
                 return None  # Caller handles directly as single agent
 
             # Phase 5: MERGING
+            if self._ledger:
+                self._ledger.update_task(task_id, current_stage=OrchestratorPhase.MERGING.value)
             result = await self._merge(plan)
+            if self._ledger:
+                self._ledger.update_task(task_id, status="completed", current_stage="done")
             return result
+        except Exception as e:
+            if self._ledger:
+                self._ledger.update_task(task_id, status="failed", current_stage="error", error=str(e)[:500])
+            raise
         finally:
             self._active_plans.pop(plan.request_id, None)
 
@@ -279,6 +312,7 @@ class Orchestrator:
 
         agent_id = subtask.assigned_agent_id or "default"
         last_error: Exception | None = None
+        task_id = str(plan.metadata.get("_ledger_task_id", ""))
 
         for attempt in range(1 + self._max_retries):
             if attempt > 0:
@@ -291,6 +325,7 @@ class Orchestrator:
             self._registry.update_status(agent_id, AgentStatus.THINKING)
 
             try:
+                step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500]) if self._ledger and task_id else None
                 if agent_id != "default" and agent_id in self._bus.registered_agents:
                     request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
                     fut = self._bus.expect_response(request_id)
@@ -337,12 +372,17 @@ class Orchestrator:
                 subtask.status = SubTaskStatus.COMPLETED
                 self._registry.record_task_result(agent_id, success=True)
                 self._registry.update_status(agent_id, AgentStatus.IDLE)
+                if step:
+                    self._ledger.finish_step(step, status="completed")
                 return result
 
             except Exception as e:
                 last_error = e
                 logger.warning("Orchestrator: subtask '{}' attempt {} failed: {}",
                                subtask.id, attempt + 1, e)
+                if self._ledger and task_id:
+                    failed_step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500])
+                    self._ledger.finish_step(failed_step, status="failed", error=str(e)[:500])
 
         # All retries exhausted
         logger.error("Orchestrator: subtask '{}' failed after {} attempts: {}",

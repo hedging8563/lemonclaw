@@ -52,6 +52,29 @@ _WRITABLE_PATHS: set[str] = {
     # Tools
     "tools.web.search.api_key",
     "tools.web.search.max_results",
+    "tools.http.enabled",
+    "tools.http.timeout",
+    "tools.http.allow_domains",
+    "tools.http.auth_profiles",
+    "tools.http",
+    "tools.notify.enabled",
+    "tools.notify.timeout",
+    "tools.notify.allow_webhook_domains",
+    "tools.notify",
+    "tools.db.enabled",
+    "tools.db.timeout",
+    "tools.db.sqlite_profiles",
+    "tools.db.postgres_profiles",
+    "tools.db",
+    "tools.k8s.enabled",
+    "tools.k8s.timeout",
+    "tools.k8s.default_namespace",
+    "tools.k8s.allowed_namespaces",
+    "tools.k8s.kubeconfig",
+    "tools.k8s.context",
+    "tools.k8s.max_items",
+    "tools.k8s.max_output",
+    "tools.k8s",
     "tools.coding.enabled",
     "tools.coding.timeout",
     "tools.coding.api_key",
@@ -93,7 +116,7 @@ for _p in _PROVIDER_NAMES:
 # Fields that require restart (not hot-reloadable)
 _RESTART_FIELDS = re.compile(
     r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding|browser|exec))"
+    r"|tools\.(mcp_servers|coding|browser|exec|http|notify|db|k8s))"
 )
 
 # Sensitive field names — values masked in GET response
@@ -101,6 +124,9 @@ _SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key
                    "bridge_token", "bot_token", "app_token", "access_token",
                    "client_secret", "imap_password", "smtp_password", "claw_token",
                    "encrypt_key", "verification_token"}
+_MASKED_VALUE_PREFIXES = {
+    "tools.http.auth_profiles",
+}
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 _ALLOWED_SKILL_REPO_HOSTS = {"github.com", "www.github.com", "gitlab.com", "www.gitlab.com", "bitbucket.org", "www.bitbucket.org"}
@@ -111,9 +137,13 @@ _VISIBLE_SENSITIVE_PATHS = {
 
 
 def _should_mask(path: tuple[str, ...], key: str, value: Any) -> bool:
-    if not isinstance(value, str) or not value or key not in _SENSITIVE_KEYS:
+    if not isinstance(value, str) or not value:
         return False
     full_path = ".".join((*path, key))
+    if any(full_path == prefix or full_path.startswith(prefix + ".") for prefix in _MASKED_VALUE_PREFIXES):
+        return True
+    if key not in _SENSITIVE_KEYS:
+        return False
     return full_path not in _VISIBLE_SENSITIVE_PATHS
 
 
@@ -166,14 +196,28 @@ def _is_masked(value: str) -> bool:
 
 
 def _unmark_sensitive(new_obj: dict, path: str, original_data: dict) -> dict:
-    """For provider/channel objects, replace masked sensitive values with originals."""
+    """Replace masked sensitive values with originals for nested settings objects."""
     original = _get_nested(original_data, path)
     if not isinstance(original, dict):
         return new_obj
+    return _restore_masked_values(new_obj, original, tuple(path.split(".")))
+
+
+def _restore_masked_values(new_obj: dict, original: dict, path: tuple[str, ...]) -> dict:
     out = dict(new_obj)
-    for key in _SENSITIVE_KEYS:
-        if key in out and _is_masked(out[key]) and key in original:
-            out[key] = original[key]  # Preserve original un-masked value
+    for key, value in list(out.items()):
+        original_value = original.get(key)
+        full_path = ".".join((*path, key))
+        if isinstance(value, dict) and isinstance(original_value, dict):
+            out[key] = _restore_masked_values(value, original_value, (*path, key))
+            continue
+        if not _is_masked(value) or not isinstance(original_value, str):
+            continue
+        if key in _SENSITIVE_KEYS:
+            out[key] = original_value
+            continue
+        if any(full_path == prefix or full_path.startswith(prefix + ".") for prefix in _MASKED_VALUE_PREFIXES):
+            out[key] = original_value
     return out
 
 
