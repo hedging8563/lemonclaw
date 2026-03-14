@@ -62,11 +62,21 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        origin_channel = _default_channel or self._origin_channel
-        origin_chat_id = _default_chat_id or self._origin_chat_id
+        has_channel_override = bool(_default_channel)
+        has_chat_override = bool(_default_chat_id)
+
+        if has_channel_override and has_chat_override:
+            origin_channel = _default_channel or self._origin_channel
+            origin_chat_id = _default_chat_id or self._origin_chat_id
+        else:
+            # Keep origin bindings as an atomic pair. Partial per-call overrides
+            # are ignored so we don't mix a new channel with a stale chat_id.
+            origin_channel = self._origin_channel
+            origin_chat_id = self._origin_chat_id
+
         if _session_key:
             session_key = _session_key
-        elif _default_channel or _default_chat_id:
+        elif has_channel_override and has_chat_override:
             session_key = f"{origin_channel}:{origin_chat_id}"
         else:
             session_key = self._session_key or f"{origin_channel}:{origin_chat_id}"
