@@ -162,3 +162,54 @@ def test_task_ledger_rejects_invalid_outbox_id(tmp_path: Path):
 
     with pytest.raises(ValueError, match="invalid event_id"):
         ledger.read_outbox_event("../etc/passwd")
+
+
+def test_task_ledger_read_outbox_event_returns_latest_revision_without_materializing(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+    )
+
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+    ledger.update_outbox_event(event["event_id"], status="retrying", attempts=1)
+    ledger.update_outbox_event(event["event_id"], status="sent", attempts=2)
+
+    latest = ledger.read_outbox_event(event["event_id"])
+    assert latest is not None
+    assert latest["status"] == "sent"
+    assert latest["attempts"] == 2
+
+
+def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+    )
+
+    assert ledger.is_valid_step_id("step_valid-1") is True
+    assert ledger.is_valid_step_id("../etc/passwd") is False
+
+    with pytest.raises(ValueError, match="invalid step_id"):
+        ledger.enqueue_outbox(
+            task_id="task_1",
+            step_id="../etc/passwd",
+            effect_type="outbound_message",
+            target="telegram:123",
+            payload={"content": "hello"},
+        )

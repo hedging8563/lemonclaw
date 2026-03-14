@@ -18,6 +18,7 @@ def _now_ms() -> int:
 
 _SAFE_TASK_ID = re.compile(r"^task_[A-Za-z0-9_-]{1,64}$")
 _SAFE_OUTBOX_ID = re.compile(r"^ob_[A-Za-z0-9_-]{1,64}$")
+_SAFE_STEP_ID = re.compile(r"^step_[A-Za-z0-9_-]{1,64}$")
 
 
 class TaskLedger:
@@ -193,6 +194,7 @@ class TaskLedger:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._require_valid_task_id(task_id)
+        self._require_valid_step_id(step_id)
         now = _now_ms()
         event = OutboxEventRecord(
             event_id=f"ob_{uuid.uuid4().hex[:12]}",
@@ -213,6 +215,7 @@ class TaskLedger:
         return event.to_dict()
 
     def update_outbox_event(self, event_id: str, **updates: Any) -> dict[str, Any] | None:
+        self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
             return None
@@ -259,10 +262,19 @@ class TaskLedger:
 
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
-        for event in self.materialize_outbox_events():
-            if event.get("event_id") == event_id:
-                return event
-        return None
+        path = self._outbox_path()
+        if not path.exists():
+            return None
+
+        latest: dict[str, Any] | None = None
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if event.get("event_id") == event_id:
+                    latest = event
+        return latest
 
     @staticmethod
     def is_valid_task_id(task_id: str) -> bool:
@@ -280,6 +292,14 @@ class TaskLedger:
         if not self.is_valid_outbox_id(event_id):
             raise ValueError("invalid event_id")
 
+    @staticmethod
+    def is_valid_step_id(step_id: str) -> bool:
+        return bool(_SAFE_STEP_ID.match(step_id))
+
+    def _require_valid_step_id(self, step_id: str) -> None:
+        if not self.is_valid_step_id(step_id):
+            raise ValueError("invalid step_id")
+
     def _task_path(self, task_id: str) -> Path:
         self._require_valid_task_id(task_id)
         return self._state_dir / f"{task_id}.json"
@@ -289,6 +309,8 @@ class TaskLedger:
         return self._state_dir / f"{task_id}.steps.jsonl"
 
     def _outbox_path(self) -> Path:
+        # TODO: split this global append-only log by task_id or add an index /
+        # retention policy once outbox volume outgrows the current local scale.
         return self._state_dir / "outbox.jsonl"
 
     @staticmethod
