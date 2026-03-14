@@ -11,6 +11,7 @@ import httpx
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.web import USER_AGENT, _validate_url
 from lemonclaw.bus.events import OutboundMessage
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 def _host_allowed(host: str, patterns: list[str]) -> bool:
@@ -115,6 +116,10 @@ class NotifyTool(Tool):
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
+        _task_id: str | None = None,
+        _task_ledger: TaskLedger | None = None,
+        _step_id: str | None = None,
+        _outbox_enabled: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         if target_type == "channel":
@@ -123,6 +128,30 @@ class NotifyTool(Tool):
             callback = _outbound_sink or self._send_callback
             if not out_channel or not out_chat:
                 return {"ok": False, "summary": "Missing channel/chat target", "raw": {"channel": out_channel, "chat_id": out_chat}}
+            if _outbox_enabled and _task_id and _task_ledger and _step_id:
+                event = _task_ledger.enqueue_outbox(
+                    task_id=_task_id,
+                    step_id=_step_id,
+                    effect_type="outbound_message",
+                    target=f"{out_channel}:{out_chat}",
+                    payload={
+                        "channel": out_channel,
+                        "chat_id": out_chat,
+                        "content": content,
+                        "metadata": {"title": title or ""},
+                    },
+                )
+                return {
+                    "ok": True,
+                    "summary": f"Notification queued to {out_channel}:{out_chat}",
+                    "raw": {
+                        "target_type": "channel",
+                        "channel": out_channel,
+                        "chat_id": out_chat,
+                        "event_id": event["event_id"],
+                        "queued": True,
+                    },
+                }
             if not callback:
                 return {"ok": False, "summary": "Notification channel callback not configured", "raw": {"channel": out_channel}}
             msg = OutboundMessage(channel=out_channel, chat_id=out_chat, content=content, metadata={"title": title or ""})
@@ -139,6 +168,24 @@ class NotifyTool(Tool):
             validated, error, resolved_ip = _validate_url(webhook_url)
             if not validated:
                 return {"ok": False, "summary": f"Webhook URL validation failed: {error}", "raw": {"webhook_url": webhook_url}}
+            if _outbox_enabled and _task_id and _task_ledger and _step_id:
+                event = _task_ledger.enqueue_outbox(
+                    task_id=_task_id,
+                    step_id=_step_id,
+                    effect_type="webhook_json",
+                    target=webhook_url,
+                    payload={"title": title or "", "content": content},
+                )
+                return {
+                    "ok": True,
+                    "summary": f"Webhook notification queued -> {host}",
+                    "raw": {
+                        "target_type": "webhook",
+                        "webhook_url": webhook_url,
+                        "event_id": event["event_id"],
+                        "queued": True,
+                    },
+                }
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             request_url = webhook_url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
             payload = {"title": title or "", "content": content}

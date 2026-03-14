@@ -461,34 +461,64 @@ def gateway(
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
     from lemonclaw.ledger.outbox import OutboxDispatcher, PermanentOutboxError
+    from lemonclaw.agent.tools.notify import _host_allowed
+    from lemonclaw.agent.tools.web import USER_AGENT, _validate_url
+    import httpx
+    from urllib.parse import urlparse
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
 
     async def on_outbox_event(event: dict) -> None:
         from lemonclaw.bus.events import OutboundMessage
 
-        if str(event.get("effect_type") or "") != "outbound_message":
-            raise PermanentOutboxError(f"unsupported outbox effect_type: {event.get('effect_type')}")
-
+        effect_type = str(event.get("effect_type") or "")
         payload = dict(event.get("payload") or {})
         target = str(event.get("target") or "")
-        # Payload overrides target-derived routing, with target as a fallback for
-        # older outbox writers that only persist "channel:chat_id" in `target`.
-        target_channel, target_chat_id = (target.split(":", 1) if ":" in target else ("", target))
-        channel = str(payload.get("channel") or target_channel)
-        chat_id = str(payload.get("chat_id") or target_chat_id)
-        if not channel or not chat_id:
-            raise PermanentOutboxError("outbox outbound_message requires channel/chat_id")
+        if effect_type == "outbound_message":
+            # Payload overrides target-derived routing, with target as a fallback for
+            # older outbox writers that only persist "channel:chat_id" in `target`.
+            target_channel, target_chat_id = (target.split(":", 1) if ":" in target else ("", target))
+            channel = str(payload.get("channel") or target_channel)
+            chat_id = str(payload.get("chat_id") or target_chat_id)
+            if not channel or not chat_id:
+                raise PermanentOutboxError("outbox outbound_message requires channel/chat_id")
 
-        await bus.publish_outbound(OutboundMessage(
-            channel=channel,
-            chat_id=chat_id,
-            content=str(payload.get("content") or ""),
-            reply_to=str(payload.get("reply_to") or "") or None,
-            media=list(payload.get("media") or []),
-            metadata=dict(payload.get("metadata") or {}),
-        ))
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=str(payload.get("content") or ""),
+                reply_to=str(payload.get("reply_to") or "") or None,
+                media=list(payload.get("media") or []),
+                metadata=dict(payload.get("metadata") or {}),
+            ))
+            return
+
+        if effect_type == "webhook_json":
+            parsed = urlparse(target)
+            host = (parsed.hostname or "").lower()
+            allow_domains = list(config.tools.notify.allow_webhook_domains or [])
+            if not _host_allowed(host, allow_domains):
+                raise PermanentOutboxError(f"Webhook domain '{host}' is not allowed")
+            validated, error, resolved_ip = _validate_url(target)
+            if not validated:
+                raise PermanentOutboxError(f"Webhook URL validation failed: {error}")
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            request_url = target.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
+            async with httpx.AsyncClient(timeout=float(config.tools.notify.timeout), follow_redirects=False) as client:
+                resp = await client.post(
+                    request_url,
+                    json={"title": str(payload.get("title") or ""), "content": str(payload.get("content") or "")},
+                    headers={"User-Agent": USER_AGENT, "Host": parsed.netloc},
+                )
+            if resp.status_code == 429 or resp.status_code >= 500:
+                raise RuntimeError(f"webhook delivery -> {resp.status_code}")
+            if resp.status_code >= 400:
+                raise PermanentOutboxError(f"webhook delivery -> {resp.status_code}")
+            return
+
+        raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")
 
     outbox_dispatcher = OutboxDispatcher(agent.ledger, on_outbox_event)
+    agent.outbox_enabled = True
 
     # Build HTTP server
     asgi_app = create_app(

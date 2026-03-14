@@ -1046,6 +1046,7 @@ class AgentLoop:
             "_tenant_id": str(metadata.get("_tenant_id", "")),
             "_actor_identity": str(metadata.get("_actor_identity", self.agent_id)),
             "_task_ledger": self.ledger,
+            "_outbox_enabled": bool(getattr(self, "outbox_enabled", False)),
             "_default_channel": msg.channel,
             "_default_chat_id": msg.chat_id,
             "_default_message_id": metadata.get("message_id"),

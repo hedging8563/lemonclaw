@@ -71,6 +71,7 @@ class ToolRegistry:
             if self._ledger and task_id:
                 summary = json.dumps(params, ensure_ascii=False)[:500]
                 step = self._ledger.start_step(task_id, step_type="tool_call", name=name, input_summary=summary)
+                call_context["_step_id"] = step.step_id
 
             if self._governance:
                 decision = self._governance.authorize(
