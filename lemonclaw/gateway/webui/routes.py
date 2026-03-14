@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.agent.usage import UsageTracker
+    from lemonclaw.watchdog.service import WatchdogService
 
 
 def _check_webui_auth(
@@ -139,6 +140,7 @@ def get_webui_routes(
     session_manager: SessionManager,
     usage_tracker: UsageTracker | None = None,
     version: str = "unknown",
+    watchdog: WatchdogService | None = None,
 ) -> list[Route]:
     """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
 
@@ -1102,6 +1104,43 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/recovery — recovery summary + tasks needing attention ──
+
+    async def get_recovery(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        try:
+            limit = min(int(request.query_params.get("limit", "50")), 200)
+        except (TypeError, ValueError):
+            limit = 50
+
+        manual_review_only = str(request.query_params.get("manual_review_only", "")).lower() in {"1", "true", "yes"}
+        tasks = ledger.list_recovery_tasks(limit=limit, manual_review_only=manual_review_only)
+        resp = _json({"summary": ledger.get_recovery_summary(), "tasks": tasks})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── GET /api/watchdog — watchdog runtime snapshot ───────────────────
+
+    async def get_watchdog(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        if watchdog is None:
+            return _json({"error": "watchdog not available"}, 503)
+
+        snapshot = await asyncio.to_thread(watchdog.snapshot)
+        resp = _json({"watchdog": snapshot})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/outbox — outbox summaries ──────────────────────────────
 
     async def list_outbox(request: Request) -> Response:
@@ -1184,6 +1223,8 @@ def get_webui_routes(
         Route("/api/models", list_models, methods=["GET"]),
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
+        Route("/api/recovery", get_recovery, methods=["GET"]),
+        Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),
         Route("/api/outbox/{event_id}", get_outbox_event, methods=["GET"]),
         Route("/api/info", get_info, methods=["GET"]),

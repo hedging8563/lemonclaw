@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.telemetry.usage import UsageTracker
+    from lemonclaw.watchdog.service import WatchdogService
 
 
 def _build_status_handler(
@@ -229,6 +230,7 @@ def create_app(
     registry: Any | None = None,
     config_path: Any | None = None,
     config_watcher: Any | None = None,
+    watchdog: WatchdogService | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
     start_time = time.monotonic()
@@ -297,6 +299,7 @@ def create_app(
             session_manager=session_manager,
             usage_tracker=usage_tracker,
             version=version,
+            watchdog=watchdog,
         ))
 
     return Starlette(routes=routes)

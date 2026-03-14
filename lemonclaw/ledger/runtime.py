@@ -185,6 +185,53 @@ class TaskLedger:
         tasks.sort(key=lambda item: int(item.get("updated_at_ms") or 0))
         return tasks[:max(1, int(limit))]
 
+    def list_recovery_tasks(
+        self,
+        *,
+        limit: int = 50,
+        manual_review_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List tasks that carry recovery metadata, newest first."""
+        tasks: list[dict[str, Any]] = []
+        if not self._state_dir.exists():
+            return tasks
+
+        for path in self._state_dir.glob("task_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            recovery = (data.get("metadata") or {}).get("recovery")
+            if not isinstance(recovery, dict):
+                continue
+            if manual_review_only and not recovery.get("manual_review_required"):
+                continue
+            tasks.append(data)
+
+        tasks.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
+        return tasks[:max(1, int(limit))]
+
+    def get_recovery_summary(self) -> dict[str, int]:
+        """Return aggregate counters for recovery-oriented observability."""
+        tasks = self.list_recovery_tasks(limit=500)
+        summary = {
+            "tasks_with_recovery": len(tasks),
+            "manual_review_required": 0,
+            "stale_recovery_failed": 0,
+            "waiting_manual_review": 0,
+        }
+        for task in tasks:
+            recovery = (task.get("metadata") or {}).get("recovery") or {}
+            status = str(task.get("status") or "")
+            stage = str(task.get("current_stage") or "")
+            if recovery.get("manual_review_required"):
+                summary["manual_review_required"] += 1
+            if status == "failed" and stage == "stale_recovery":
+                summary["stale_recovery_failed"] += 1
+            if status == "waiting" and recovery.get("manual_review_required"):
+                summary["waiting_manual_review"] += 1
+        return summary
+
     def mark_task_stale(
         self,
         task_id: str,

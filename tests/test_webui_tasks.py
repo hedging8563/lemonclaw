@@ -10,12 +10,13 @@ from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.auth import create_session_cookie
 from lemonclaw.ledger.runtime import TaskLedger
 from lemonclaw.session.manager import SessionManager
+from lemonclaw.watchdog.service import WatchdogService
 
 
-def _build_app(tmp_path, *, auth_token=None):
+def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None):
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
-    ledger = TaskLedger(tmp_path)
+    ledger = ledger or TaskLedger(tmp_path)
     agent_loop = SimpleNamespace(workspace=tmp_path, ledger=ledger)
     session_manager = SessionManager(tmp_path)
     app = create_app(
@@ -24,6 +25,7 @@ def _build_app(tmp_path, *, auth_token=None):
         agent_loop=agent_loop,
         session_manager=session_manager,
         webui_enabled=True,
+        watchdog=watchdog,
     )
     return app, ledger
 
@@ -158,3 +160,59 @@ def test_outbox_api_rejects_invalid_ids(tmp_path):
     resp = client.get("/api/outbox", params={"task_id": "not-a-task"})
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid task_id"
+
+
+def test_recovery_api_lists_tasks_with_recovery_metadata(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+        status="running",
+        current_stage="execute",
+    )
+    ledger.mark_task_stale(
+        "task_a",
+        source="watchdog_soft_recovery",
+        reason="no task ledger update for >1s",
+        stale_after_ms=1000,
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/recovery")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["tasks_with_recovery"] == 1
+    assert data["summary"]["stale_recovery_failed"] == 1
+    assert [item["task_id"] for item in data["tasks"]] == ["task_a"]
+
+
+def test_watchdog_api_returns_runtime_snapshot(tmp_path):
+    ledger = TaskLedger(tmp_path)
+    watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
+    app, _ = _build_app(tmp_path, watchdog=watchdog, ledger=ledger)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+        status="running",
+        current_stage="execute",
+    )
+    task = ledger.read_task("task_a")
+    assert task is not None
+    task["updated_at_ms"] = 1
+    ledger._write_json(ledger._task_path("task_a"), task)
+
+    client = TestClient(app)
+    resp = client.get("/api/watchdog")
+    assert resp.status_code == 200
+    data = resp.json()["watchdog"]
+    assert data["config"]["task_stuck_threshold_s"] == 1
+    assert data["task_stuck"]["count"] == 1
+    assert data["task_stuck"]["task_ids"] == ["task_a"]

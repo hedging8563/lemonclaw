@@ -476,6 +476,7 @@ def gateway(
         activity_bus=activity_bus,
         config_path=get_config_path(),
         config_watcher=config_watcher,
+        watchdog=watchdog,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     webui_status = "enabled" if config.gateway.webui_enabled else "disabled"

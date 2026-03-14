@@ -107,6 +107,31 @@ class WatchdogService:
     def state(self) -> WatchdogState:
         return self._state
 
+    def snapshot(self) -> dict:
+        """Return a structured watchdog snapshot for observability APIs."""
+        stale_tasks = self._list_stale_tasks()
+        return {
+            "running": self._running,
+            "config": {
+                "check_interval_s": self._interval,
+                "memory_limit_mb": self._memory_limit_mb,
+                "task_stuck_threshold_s": self._task_stuck_threshold_s,
+            },
+            "state": {
+                "last_check_time": self._state.last_check_time,
+                "last_hard_restart_time": self._state.last_hard_restart_time,
+                "consecutive_failures": self._state.consecutive_failures,
+                "total_checks": self._state.total_checks,
+                "total_soft_recoveries": self._state.total_soft_recoveries,
+                "total_hard_restarts": self._state.total_hard_restarts,
+                "recent_error_count": len(self._state.recent_errors),
+            },
+            "task_stuck": {
+                "count": len(stale_tasks),
+                "task_ids": [str(task.get("task_id") or "") for task in stale_tasks[:10]],
+            },
+        }
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
