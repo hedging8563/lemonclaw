@@ -11,7 +11,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
-from lemonclaw.channels.delivery_context import apply_delivery_route
+from lemonclaw.channels.delivery_context import apply_delivery_route, resolve_delivery_session_key
 from lemonclaw.config.schema import Config
 
 if TYPE_CHECKING:
@@ -261,6 +261,11 @@ class ChannelManager:
                     self.bus.consume_outbound(),
                     timeout=1.0
                 )
+                delivery_session_key = resolve_delivery_session_key(
+                    metadata=msg.metadata,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                )
                 apply_delivery_route(msg)
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
@@ -276,7 +281,7 @@ class ChannelManager:
                         event_type = "message"
                     event: dict[str, Any] = {
                         "type": event_type,
-                        "session_key": self._activity_session_key(msg),
+                        "session_key": delivery_session_key or self._activity_session_key(msg),
                         "channel": msg.channel,
                         "role": "assistant",
                         "content": msg.content,

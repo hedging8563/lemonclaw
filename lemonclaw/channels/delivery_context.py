@@ -86,33 +86,59 @@ def get_delivery_context(metadata: dict[str, Any] | None) -> dict[str, Any] | No
     return context if isinstance(context, dict) else None
 
 
+def _resolve_delivery_context(
+    *,
+    metadata: dict[str, Any] | None,
+    channel: str,
+    chat_id: str,
+) -> dict[str, Any] | None:
+    context = get_delivery_context(metadata)
+    if not context:
+        return None
+    if context.get("source_channel") != channel:
+        return None
+    if str(context.get("source_chat_id", "")) != str(chat_id):
+        return None
+    return context
+
+
 def resolve_delivery_route(
     *,
     metadata: dict[str, Any] | None,
     channel: str,
     chat_id: str,
 ) -> dict[str, Any]:
-    context = get_delivery_context(metadata)
+    context = _resolve_delivery_context(metadata=metadata, channel=channel, chat_id=chat_id)
     if not context:
-        return {}
-    if context.get("source_channel") != channel:
-        return {}
-    if str(context.get("source_chat_id", "")) != str(chat_id):
         return {}
     route = context.get("route")
     return deepcopy(route) if isinstance(route, dict) else {}
 
 
+def resolve_delivery_session_key(
+    *,
+    metadata: dict[str, Any] | None,
+    channel: str,
+    chat_id: str,
+) -> str | None:
+    context = _resolve_delivery_context(metadata=metadata, channel=channel, chat_id=chat_id)
+    if not context:
+        return None
+    session_key = context.get("session_key")
+    return str(session_key) if session_key else None
+
+
 def apply_delivery_route(msg: OutboundMessage) -> None:
+    metadata = dict(msg.metadata or {})
     route = resolve_delivery_route(
-        metadata=msg.metadata,
+        metadata=metadata,
         channel=msg.channel,
         chat_id=msg.chat_id,
     )
+    metadata.pop(DELIVERY_CONTEXT_KEY, None)
     if not route:
+        msg.metadata = metadata
         return
-
-    metadata = dict(msg.metadata or {})
 
     if msg.channel == "telegram":
         if route.get("reply_to_message_id") and "message_id" not in metadata:

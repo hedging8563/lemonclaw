@@ -131,6 +131,7 @@ async def test_manager_applies_delivery_route_before_send() -> None:
     assert len(sent) == 1
     assert sent[0].metadata["message_id"] == 321
     assert sent[0].metadata["message_thread_id"] == 456
+    assert DELIVERY_CONTEXT_KEY not in sent[0].metadata
 
 
 @pytest.mark.asyncio
@@ -162,3 +163,41 @@ async def test_manager_applies_delivery_route_before_activity_broadcast() -> Non
 
     event = activity_bus.broadcast.await_args.args[0]
     assert event["session_key"] == "telegram:-100123:456"
+
+
+@pytest.mark.asyncio
+async def test_manager_activity_uses_delivery_context_session_key_even_after_strip() -> None:
+    bus = MessageBus()
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    manager = ChannelManager(Config(), bus, activity_bus=activity_bus)
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    manager.channels["telegram"] = SimpleNamespace(send=AsyncMock(side_effect=_send))
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="-100123",
+            content="hello",
+            metadata={
+                DELIVERY_CONTEXT_KEY: {
+                    "source_channel": "telegram",
+                    "source_chat_id": "-100123",
+                    "session_key": "telegram:-100123:987",
+                    "route": {"message_thread_id": 456},
+                }
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    event = activity_bus.broadcast.await_args.args[0]
+    assert event["session_key"] == "telegram:-100123:987"
+    assert len(sent) == 1
+    assert DELIVERY_CONTEXT_KEY not in sent[0].metadata

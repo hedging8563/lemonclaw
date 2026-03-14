@@ -8,6 +8,7 @@ from lemonclaw.channels.delivery_context import (
     build_delivery_context,
     get_delivery_context,
     resolve_delivery_route,
+    resolve_delivery_session_key,
 )
 
 
@@ -55,6 +56,18 @@ def test_resolve_delivery_route_rejects_cross_channel_or_chat() -> None:
     assert resolve_delivery_route(metadata=metadata, channel="slack", chat_id="C999") == {}
 
 
+def test_resolve_delivery_session_key_rejects_cross_channel_or_chat() -> None:
+    metadata = attach_delivery_context(
+        channel="telegram",
+        chat_id="12345",
+        session_key="telegram:12345:456",
+        metadata={"message_id": 321, "message_thread_id": 456},
+    )
+
+    assert resolve_delivery_session_key(metadata=metadata, channel="telegram", chat_id="12345") == "telegram:12345:456"
+    assert resolve_delivery_session_key(metadata=metadata, channel="telegram", chat_id="99999") is None
+
+
 def test_apply_delivery_route_mutates_outbound_message_in_place() -> None:
     msg = OutboundMessage(
         channel="telegram",
@@ -75,6 +88,7 @@ def test_apply_delivery_route_mutates_outbound_message_in_place() -> None:
     assert result is None
     assert msg.metadata["message_id"] == 321
     assert msg.metadata["message_thread_id"] == 456
+    assert DELIVERY_CONTEXT_KEY not in msg.metadata
 
 
 def test_apply_delivery_route_sets_reply_to_for_discord() -> None:
@@ -95,3 +109,4 @@ def test_apply_delivery_route_sets_reply_to_for_discord() -> None:
     apply_delivery_route(msg)
 
     assert msg.reply_to == "msg123"
+    assert DELIVERY_CONTEXT_KEY not in msg.metadata
