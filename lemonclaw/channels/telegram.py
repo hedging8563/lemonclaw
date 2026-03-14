@@ -34,7 +34,6 @@ from lemonclaw.config.schema import TelegramConfig
 _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 # Target size per split segment (45MB, leave headroom)
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
-_TG_DRAFT_PREVIEW_CHARS = 4000
 _TG_SPLIT_STALE_MAX_AGE_S = 6 * 60 * 60
 _TG_SPLIT_TEMP_PREFIX = "lemonclaw_tg_split_"
 _EMPTY_MESSAGE = "[empty message]"
@@ -431,78 +430,6 @@ class TelegramChannel(BaseChannel):
         )
         return sent_any
 
-    async def _send_with_streaming(
-        self,
-        msg: OutboundMessage,
-        chat_id: int,
-        *,
-        thread_id: int | None = None,
-        reply_params: ReplyParameters | None = None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
-        thread_kwargs = thread_kwargs or {}
-        text = msg.content or ""
-        if not text or text == _EMPTY_MESSAGE:
-            self._stop_typing(msg.chat_id)
-            return
-
-        preview_text = text[:_TG_DRAFT_PREVIEW_CHARS]
-        draft_id = int(time.time() * 1000) % (2**31) or 1
-
-        self._stop_typing(msg.chat_id)
-
-        try:
-            if preview_text.strip():
-                step = max(len(preview_text) // 8, 40)
-                first_event = True
-                for i in range(step, len(preview_text), step):
-                    partial = preview_text[: min(i, _TG_DRAFT_PREVIEW_CHARS)]
-                    await self._app.bot.send_message_draft(
-                        chat_id=chat_id,
-                        draft_id=draft_id,
-                        text=partial,
-                        **thread_kwargs,
-                    )
-                    await self._emit_activity_event(
-                        msg.chat_id,
-                        partial,
-                        thread_id=thread_id,
-                        event_type="chunk",
-                        first=first_event,
-                    )
-                    first_event = False
-                    await asyncio.sleep(0.04)
-
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id,
-                    draft_id=draft_id,
-                    text=preview_text,
-                    **thread_kwargs,
-                )
-                await self._emit_activity_event(
-                    msg.chat_id,
-                    preview_text,
-                    thread_id=thread_id,
-                    event_type="chunk",
-                    first=first_event,
-                )
-                await asyncio.sleep(0.15)
-        except Exception as e:
-            logger.debug("Telegram draft send failed: {}", e)
-
-        sent_ok = await self._send_text(
-            msg,
-            chat_id,
-            reply_params=reply_params,
-            thread_kwargs=thread_kwargs,
-        )
-        await self._emit_activity_event(
-            msg.chat_id,
-            text if sent_ok else "[Telegram final send failed]",
-            thread_id=thread_id,
-            event_type="done" if sent_ok else "error",
-        )
-
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
@@ -618,22 +545,18 @@ class TelegramChannel(BaseChannel):
                     **topic_kwargs,
                 )
 
-        if msg.metadata.get("_final"):
-            await self._send_with_streaming(
+        try:
+            if msg.metadata.get("_final"):
+                self._stop_typing(msg.chat_id)
+            await self._send_text(
                 msg,
                 chat_id,
-                thread_id=thread_id,
                 reply_params=reply_params,
                 thread_kwargs=topic_kwargs,
             )
-            return
-
-        await self._send_text(
-            msg,
-            chat_id,
-            reply_params=reply_params,
-            thread_kwargs=topic_kwargs,
-        )
+        finally:
+            if msg.metadata.get("_final"):
+                self._stop_typing(msg.chat_id)
 
     def _dedup_update(self, update: Update) -> bool:
         """Return True if this update is new, False if duplicate."""

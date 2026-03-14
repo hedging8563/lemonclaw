@@ -248,11 +248,7 @@ class ChannelManager:
     @staticmethod
     def _should_skip_activity_broadcast(msg: OutboundMessage) -> bool:
         meta = msg.metadata or {}
-        if meta.get("_thinking"):
-            return True
-        # Telegram emits synthetic chunk/done activity events during draft streaming,
-        # so we skip raw progress/final bus messages here to avoid duplicate timelines.
-        return msg.channel == "telegram" and bool(meta.get("_progress") or meta.get("_final"))
+        return bool(meta.get("_thinking"))
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
@@ -291,6 +287,8 @@ class ChannelManager:
                 if msg.metadata.get("_progress"):
                     # Never leak internal reasoning or raw transport chunks to end-user channels.
                     if self._is_internal_message(msg):
+                        continue
+                    if msg.channel != "webui":
                         continue
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue

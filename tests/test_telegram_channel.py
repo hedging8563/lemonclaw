@@ -265,7 +265,7 @@ async def test_empty_final_message_does_not_emit_false_activity_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_final_message_uses_send_message_draft_then_send_message() -> None:
+async def test_final_message_sends_single_committed_message() -> None:
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
     bot = _bot_stub()
@@ -280,41 +280,18 @@ async def test_final_message_uses_send_message_draft_then_send_message() -> None
         )
     )
 
-    assert bot.send_message_draft.await_count >= 1
     bot.send_message.assert_awaited_once()
-    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
-    assert events[-1]["type"] == "done"
-    assert events[0]["type"] == "chunk"
+    bot.send_message_draft.assert_not_awaited()
+    activity_bus.broadcast.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_draft_preview_is_truncated_to_4096_and_draft_id_is_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_final_message_stops_typing_and_skips_draft_preview() -> None:
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
     bot = _bot_stub()
     channel._app = SimpleNamespace(bot=bot)
-    monkeypatch.setattr(time, "time", lambda: 0)
-
-    await channel.send(
-        OutboundMessage(
-            channel="telegram",
-            chat_id="12345",
-            content="a" * 5000,
-            metadata={"_final": True},
-        )
-    )
-
-    for call in bot.send_message_draft.await_args_list:
-        assert len(call.kwargs["text"]) <= 4000
-        assert call.kwargs["draft_id"] == 1
-
-
-@pytest.mark.asyncio
-async def test_draft_failure_still_falls_back_to_final_send() -> None:
-    activity_bus = SimpleNamespace(broadcast=AsyncMock())
-    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
-    bot = _bot_stub(send_message_draft=AsyncMock(side_effect=RuntimeError("draft unavailable")))
-    channel._app = SimpleNamespace(bot=bot)
+    channel._typing_tasks["12345"] = asyncio.create_task(asyncio.sleep(60))
 
     await channel.send(
         OutboundMessage(
@@ -326,36 +303,13 @@ async def test_draft_failure_still_falls_back_to_final_send() -> None:
     )
 
     bot.send_message.assert_awaited_once()
-    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
-    assert events[-1]["type"] == "done"
+    bot.send_message_draft.assert_not_awaited()
+    activity_bus.broadcast.assert_not_awaited()
+    assert "12345" not in channel._typing_tasks
 
 
 @pytest.mark.asyncio
-async def test_final_send_failure_emits_activity_error() -> None:
-    activity_bus = SimpleNamespace(broadcast=AsyncMock())
-    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
-    bot = _bot_stub(
-        send_message=AsyncMock(side_effect=[RuntimeError("html fail"), RuntimeError("plain fail")]),
-        send_message_draft=AsyncMock(side_effect=RuntimeError("draft unavailable")),
-    )
-    channel._app = SimpleNamespace(bot=bot)
-
-    await channel.send(
-        OutboundMessage(
-            channel="telegram",
-            chat_id="12345",
-            content="完整最终文本",
-            metadata={"_final": True},
-        )
-    )
-
-    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
-    assert events[-1]["type"] == "error"
-    assert events[-1]["content"] == "[Telegram final send failed]"
-
-
-@pytest.mark.asyncio
-async def test_draft_and_final_propagate_message_thread_id_to_telegram_and_activity() -> None:
+async def test_final_message_propagates_message_thread_id_without_draft() -> None:
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus(), activity_bus=activity_bus)
     bot = _bot_stub()
@@ -370,11 +324,9 @@ async def test_draft_and_final_propagate_message_thread_id_to_telegram_and_activ
         )
     )
 
-    for call in bot.send_message_draft.await_args_list:
-        assert call.kwargs["message_thread_id"] == 456
     assert bot.send_message.await_args.kwargs["message_thread_id"] == 456
-    events = [call.args[0] for call in activity_bus.broadcast.await_args_list]
-    assert all(event["session_key"] == "telegram:-100123:456" for event in events)
+    bot.send_message_draft.assert_not_awaited()
+    activity_bus.broadcast.assert_not_awaited()
 
 
 @pytest.mark.asyncio

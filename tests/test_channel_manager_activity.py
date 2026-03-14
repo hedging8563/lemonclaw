@@ -1,5 +1,13 @@
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
 from lemonclaw.bus.events import OutboundMessage
+from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.manager import ChannelManager
+from lemonclaw.config.schema import Config
 
 
 def test_activity_session_key_includes_message_thread_id() -> None:
@@ -13,7 +21,7 @@ def test_activity_session_key_includes_message_thread_id() -> None:
     assert ChannelManager._activity_session_key(msg) == "telegram:-100123:456"
 
 
-def test_telegram_progress_and_final_are_skipped_from_manager_broadcast() -> None:
+def test_telegram_progress_is_not_skipped_from_manager_broadcast() -> None:
     progress = OutboundMessage(
         channel="telegram",
         chat_id="12345",
@@ -33,8 +41,8 @@ def test_telegram_progress_and_final_are_skipped_from_manager_broadcast() -> Non
         metadata={},
     )
 
-    assert ChannelManager._should_skip_activity_broadcast(progress) is True
-    assert ChannelManager._should_skip_activity_broadcast(final) is True
+    assert ChannelManager._should_skip_activity_broadcast(progress) is False
+    assert ChannelManager._should_skip_activity_broadcast(final) is False
     assert ChannelManager._should_skip_activity_broadcast(regular) is False
 
 
@@ -63,3 +71,26 @@ def test_tool_start_and_result_are_internal_messages() -> None:
 
     assert ChannelManager._is_internal_message(tool_start) is True
     assert ChannelManager._is_internal_message(tool_result) is True
+
+
+@pytest.mark.asyncio
+async def test_manager_suppresses_progress_delivery_to_im_channels() -> None:
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    fake_channel = SimpleNamespace(send=AsyncMock())
+    manager.channels["telegram"] = fake_channel
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="working...",
+            metadata={"_progress": True},
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    fake_channel.send.assert_not_awaited()
