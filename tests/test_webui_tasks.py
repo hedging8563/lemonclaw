@@ -190,6 +190,50 @@ def test_recovery_api_lists_tasks_with_recovery_metadata(tmp_path):
     assert [item["task_id"] for item in data["tasks"]] == ["task_a"]
 
 
+def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_waiting",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="waiting review",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    ledger.mark_task_stale(
+        "task_waiting",
+        source="watchdog_soft_recovery",
+        reason="no task ledger update for >1s",
+        stale_after_ms=1000,
+    )
+    ledger.ensure_task(
+        task_id="task_failed",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="failed recovery",
+        status="running",
+        current_stage="execute",
+    )
+    ledger.mark_task_stale(
+        "task_failed",
+        source="watchdog_soft_recovery",
+        reason="no task ledger update for >1s",
+        stale_after_ms=1000,
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/recovery", params={"manual_review_only": "true"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["tasks_with_recovery"] == 2
+    assert data["summary"]["manual_review_required"] == 1
+    assert [item["task_id"] for item in data["tasks"]] == ["task_waiting"]
+
+
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):
     ledger = TaskLedger(tmp_path)
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)

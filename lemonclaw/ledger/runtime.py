@@ -214,6 +214,11 @@ class TaskLedger:
     def get_recovery_summary(self) -> dict[str, int]:
         """Return aggregate counters for recovery-oriented observability."""
         tasks = self.list_recovery_tasks(limit=500)
+        return self.summarize_recovery_tasks(tasks)
+
+    @staticmethod
+    def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
+        """Aggregate counters for a preloaded recovery task list."""
         summary = {
             "tasks_with_recovery": len(tasks),
             "manual_review_required": 0,

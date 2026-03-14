@@ -1121,8 +1121,18 @@ def get_webui_routes(
             limit = 50
 
         manual_review_only = str(request.query_params.get("manual_review_only", "")).lower() in {"1", "true", "yes"}
-        tasks = ledger.list_recovery_tasks(limit=limit, manual_review_only=manual_review_only)
-        resp = _json({"summary": ledger.get_recovery_summary(), "tasks": tasks})
+        all_tasks = ledger.list_recovery_tasks(limit=500)
+        tasks = all_tasks
+        if manual_review_only:
+            tasks = [
+                task
+                for task in all_tasks
+                if ((task.get("metadata") or {}).get("recovery") or {}).get("manual_review_required")
+            ]
+        resp = _json({
+            "summary": ledger.summarize_recovery_tasks(all_tasks),
+            "tasks": tasks[:max(1, int(limit))],
+        })
         _maybe_refresh_cookie(request, resp)
         return resp
 
