@@ -111,15 +111,11 @@ class TestMessageToolSuppressLogic:
 
 class TestMessageToolTurnTracking:
 
-    def test_sent_in_turn_tracks_same_target(self) -> None:
-        tool = MessageTool()
-        tool.set_context("feishu", "chat1")
-        assert not tool._sent_in_turn
-        tool._sent_in_turn = True
-        assert tool._sent_in_turn
+    def test_start_turn_returns_fresh_tracking_state(self) -> None:
+        first = MessageTool.start_turn()
+        second = MessageTool.start_turn()
 
-    def test_start_turn_resets(self) -> None:
-        tool = MessageTool()
-        tool._sent_in_turn = True
-        tool.start_turn()
-        assert not tool._sent_in_turn
+        first["sent"] = True
+        first["messages"].append("hello")
+
+        assert second == {"sent": False, "messages": []}

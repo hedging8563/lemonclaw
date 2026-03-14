@@ -716,18 +716,44 @@ class FeishuChannel(BaseChannel):
                 if ext in self._IMAGE_EXTS:
                     key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
                     if key:
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
-                        )
+                        payload = json.dumps({"image_key": key}, ensure_ascii=False)
+                        if reply_message_id:
+                            await loop.run_in_executor(
+                                None,
+                                partial(
+                                    self._reply_message_sync,
+                                    reply_message_id,
+                                    "image",
+                                    payload,
+                                    reply_in_thread=reply_in_thread,
+                                ),
+                            )
+                        else:
+                            await loop.run_in_executor(
+                                None, self._send_message_sync,
+                                receive_id_type, msg.chat_id, "image", payload,
+                            )
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
                         media_type = "audio" if ext in self._AUDIO_EXTS else "file"
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
-                        )
+                        payload = json.dumps({"file_key": key}, ensure_ascii=False)
+                        if reply_message_id:
+                            await loop.run_in_executor(
+                                None,
+                                partial(
+                                    self._reply_message_sync,
+                                    reply_message_id,
+                                    media_type,
+                                    payload,
+                                    reply_in_thread=reply_in_thread,
+                                ),
+                            )
+                        else:
+                            await loop.run_in_executor(
+                                None, self._send_message_sync,
+                                receive_id_type, msg.chat_id, media_type, payload,
+                            )
 
             if msg.content and msg.content.strip():
                 card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}

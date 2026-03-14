@@ -976,9 +976,10 @@ class AgentLoop:
             self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        message_turn_state: dict[str, Any] | None = None
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
+                message_turn_state = message_tool.start_turn()
 
         # Per-session model override
         session_model = session.metadata.get("current_model")
@@ -1048,6 +1049,7 @@ class AgentLoop:
             "_default_chat_id": msg.chat_id,
             "_default_message_id": metadata.get("message_id"),
             "_default_delivery_context": metadata.get("_delivery_context"),
+            "_message_turn_state": message_turn_state,
             "_capability_token": self.governance.issue_token(
                 task_id=str(metadata.get("_task_id")),
                 tenant_id=str(metadata.get("_tenant_id", "")),
@@ -1082,8 +1084,8 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=alert,
             ))
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            for sent in mt._turn_messages:
+        if isinstance(message_turn_state, dict) and message_turn_state.get("sent"):
+            for sent in message_turn_state.get("messages", []):
                 session.messages.append(serialize_ui_message({
                     "role": "assistant",
                     "content": sent.content,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -68,3 +69,28 @@ async def test_feishu_on_message_includes_reply_context(feishu_channel: FeishuCh
     kwargs = feishu_channel._handle_message.await_args.kwargs
     assert kwargs["content"] == "[Reply to: 上一条 Feishu 消息]\n现在继续"
     assert kwargs["metadata"]["parent_id"] == "om_parent"
+
+
+@pytest.mark.asyncio
+async def test_feishu_send_replies_with_image_attachment_when_message_id_present(
+    feishu_channel: FeishuChannel, tmp_path
+) -> None:
+    image_path = tmp_path / "reply.png"
+    image_path.write_bytes(b"png")
+
+    feishu_channel._client = SimpleNamespace()
+    feishu_channel._upload_image_sync = lambda _path: "img_key"
+    feishu_channel._reply_message_sync = lambda message_id, msg_type, content, *, reply_in_thread: (
+        message_id == "om_parent" and msg_type == "image" and json.loads(content)["image_key"] == "img_key" and reply_in_thread
+    )
+    feishu_channel._send_message_sync = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not use create"))
+
+    await feishu_channel.send(
+        SimpleNamespace(
+            channel="feishu",
+            chat_id="oc_test123",
+            content="",
+            media=[str(image_path)],
+            metadata={"message_id": "om_parent", "chat_type": "group"},
+        )
+    )

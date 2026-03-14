@@ -22,8 +22,6 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._default_delivery_context: dict[str, Any] | None = None
-        self._sent_in_turn: bool = False
-        self._turn_messages: list[OutboundMessage] = []
 
     def set_context(
         self,
@@ -42,10 +40,10 @@ class MessageTool(Tool):
         """Set the callback for sending messages."""
         self._send_callback = callback
 
-    def start_turn(self) -> None:
-        """Reset per-turn send tracking."""
-        self._sent_in_turn = False
-        self._turn_messages = []
+    @staticmethod
+    def start_turn() -> dict[str, Any]:
+        """Create isolated per-turn state so concurrent sessions don't share send tracking."""
+        return {"sent": False, "messages": []}
 
     @property
     def name(self) -> str:
@@ -92,6 +90,7 @@ class MessageTool(Tool):
         _default_chat_id: str | None = None,
         _default_message_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
+        _message_turn_state: dict[str, Any] | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
         **kwargs: Any
     ) -> str:
@@ -128,9 +127,9 @@ class MessageTool(Tool):
 
         try:
             await callback(msg)
-            if same_target:
-                self._sent_in_turn = True
-                self._turn_messages.append(msg)
+            if same_target and isinstance(_message_turn_state, dict):
+                _message_turn_state["sent"] = True
+                _message_turn_state.setdefault("messages", []).append(msg)
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:
