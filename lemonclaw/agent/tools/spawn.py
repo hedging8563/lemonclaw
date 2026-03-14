@@ -64,7 +64,12 @@ class SpawnTool(Tool):
         """Spawn a subagent to execute the given task."""
         origin_channel = _default_channel or self._origin_channel
         origin_chat_id = _default_chat_id or self._origin_chat_id
-        session_key = _session_key or self._session_key or f"{origin_channel}:{origin_chat_id}"
+        if _session_key:
+            session_key = _session_key
+        elif _default_channel or _default_chat_id:
+            session_key = f"{origin_channel}:{origin_chat_id}"
+        else:
+            session_key = self._session_key or f"{origin_channel}:{origin_chat_id}"
         return await self._manager.spawn(
             task=task,
             label=label,
