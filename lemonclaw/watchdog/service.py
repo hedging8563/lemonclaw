@@ -21,8 +21,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from lemonclaw.ledger.runtime import TaskLedger
 
 
 # ============================================================================
@@ -36,6 +40,7 @@ COOLDOWN_SECONDS = 600            # 10 minutes between hard restarts
 ERROR_RATE_WINDOW = 300           # 5-minute sliding window for error tracking
 ERROR_RATE_THRESHOLD = 20         # errors in window before triggering action
 ALARM_TIMEOUT = 150               # seconds: must be > CHECK_INTERVAL + tick duration
+TASK_STUCK_THRESHOLD = 1800       # seconds without ledger update before task is considered stale
 
 
 # ============================================================================
@@ -84,11 +89,15 @@ class WatchdogService:
         check_interval: int = DEFAULT_CHECK_INTERVAL,
         memory_limit_mb: int = MEMORY_LIMIT_MB,
         session_manager: object | None = None,
+        task_ledger: "TaskLedger" | None = None,
+        task_stuck_threshold_s: int = TASK_STUCK_THRESHOLD,
     ) -> None:
         self._port = port
         self._interval = check_interval
         self._memory_limit_mb = memory_limit_mb
         self._session_manager = session_manager
+        self._task_ledger = task_ledger
+        self._task_stuck_threshold_s = task_stuck_threshold_s
         self._state = WatchdogState()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -107,6 +116,9 @@ class WatchdogService:
             return
         self._running = True
         self._setup_alarm()
+        recovered = self._recover_stale_tasks(source="watchdog_startup_scan")
+        if recovered:
+            logger.warning("watchdog: startup stale-task scan recovered {} task(s)", recovered)
         self._task = asyncio.create_task(self._run_loop())
         logger.info(f"watchdog: started (interval={self._interval}s, memory_limit={self._memory_limit_mb}MB)")
 
@@ -233,6 +245,9 @@ class WatchdogService:
         # 4. Error rate
         results.append(self._check_error_rate())
 
+        # 5. Task ledger stale scan
+        results.append(self._check_task_stuck())
+
         return results
 
     async def _check_http(self) -> HealthCheck:
@@ -289,6 +304,51 @@ class WatchdogService:
             return HealthCheck("error_rate", False, f"{count} errors in {ERROR_RATE_WINDOW}s")
         return HealthCheck("error_rate", True, f"{count} errors in window")
 
+    def _check_task_stuck(self) -> HealthCheck:
+        """Detect ledger tasks that have stopped making progress."""
+        stale_tasks = self._list_stale_tasks()
+        if not self._task_ledger:
+            return HealthCheck("task_stuck", True, "no task ledger")
+        if not stale_tasks:
+            return HealthCheck("task_stuck", True)
+        preview = ", ".join(str(task.get("task_id") or "") for task in stale_tasks[:3])
+        return HealthCheck("task_stuck", False, f"{len(stale_tasks)} stale task(s): {preview}")
+
+    def _list_stale_tasks(self) -> list[dict]:
+        if not self._task_ledger:
+            return []
+        return self._task_ledger.list_stale_tasks(
+            stale_after_ms=self._task_stuck_threshold_s * 1000,
+            statuses=("running", "verifying", "waiting"),
+            limit=20,
+        )
+
+    def _recover_stale_tasks(self, *, source: str) -> int:
+        if not self._task_ledger:
+            return 0
+
+        recovered = 0
+        reason = f"no task ledger update for >{self._task_stuck_threshold_s}s"
+        for task in self._list_stale_tasks():
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            updated = self._task_ledger.mark_task_stale(
+                task_id,
+                source=source,
+                reason=reason,
+                stale_after_ms=self._task_stuck_threshold_s * 1000,
+            )
+            if updated:
+                recovered += 1
+                logger.warning(
+                    "watchdog: stale task {} annotated (status={} action={})",
+                    task_id,
+                    updated.get("status"),
+                    ((updated.get("metadata") or {}).get("recovery") or {}).get("action", ""),
+                )
+        return recovered
+
     # ------------------------------------------------------------------
     # Recovery actions
     # ------------------------------------------------------------------
@@ -315,6 +375,10 @@ class WatchdogService:
                             self._session_manager.invalidate(key)
                 except Exception as e:
                     logger.error(f"watchdog: soft recovery error: {e}")
+            if c.name == "task_stuck":
+                recovered = self._recover_stale_tasks(source="watchdog_soft_recovery")
+                if recovered:
+                    logger.warning("watchdog: stale-task recovery annotated {} task(s)", recovered)
 
     async def _hard_recovery(self, checks: list[HealthCheck]) -> None:
         """Hard recovery: exit process (K8s/launchd/systemd will restart).

@@ -213,3 +213,37 @@ def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
             target="telegram:123",
             payload={"content": "hello"},
         )
+
+
+def test_task_ledger_lists_and_marks_stale_tasks(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+
+    task = ledger.read_task("task_1")
+    assert task is not None
+    task["updated_at_ms"] = 1
+    ledger._write_json(ledger._task_path("task_1"), task)
+
+    stale = ledger.list_stale_tasks(stale_after_ms=1000)
+    assert [item["task_id"] for item in stale] == ["task_1"]
+
+    updated = ledger.mark_task_stale(
+        "task_1",
+        source="watchdog_soft_recovery",
+        reason="no task ledger update for >1s",
+        stale_after_ms=1000,
+    )
+    assert updated is not None
+    assert updated["status"] == "failed"
+    assert updated["current_stage"] == "stale_recovery"
+    assert updated["metadata"]["recovery"]["action"] == "mark_failed"
+    view = ledger.read_task_view("task_1")
+    assert view is not None
+    assert view["summary"]["recovery"]["source"] == "watchdog_soft_recovery"

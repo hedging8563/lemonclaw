@@ -156,6 +156,74 @@ class TaskLedger:
         tasks.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
         return tasks[:max(1, int(limit))]
 
+    def list_stale_tasks(
+        self,
+        *,
+        stale_after_ms: int,
+        statuses: tuple[str, ...] = ("running", "verifying", "waiting"),
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List tasks that have not been updated within the allowed threshold."""
+        if stale_after_ms <= 0 or not self._state_dir.exists():
+            return []
+
+        cutoff = _now_ms() - stale_after_ms
+        allowed = {status for status in statuses if status}
+        tasks: list[dict[str, Any]] = []
+
+        for path in self._state_dir.glob("task_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if allowed and str(data.get("status") or "") not in allowed:
+                continue
+            updated_at_ms = int(data.get("updated_at_ms") or 0)
+            if updated_at_ms and updated_at_ms <= cutoff:
+                tasks.append(data)
+
+        tasks.sort(key=lambda item: int(item.get("updated_at_ms") or 0))
+        return tasks[:max(1, int(limit))]
+
+    def mark_task_stale(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        reason: str,
+        stale_after_ms: int,
+    ) -> dict[str, Any] | None:
+        """Annotate stale-task recovery state and fail closed when safe to do so."""
+        self._require_valid_task_id(task_id)
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        previous_status = str(task.get("status") or "")
+        previous_stage = str(task.get("current_stage") or "")
+        metadata = dict(task.get("metadata") or {})
+        metadata["recovery"] = {
+            "source": source,
+            "reason": reason[:500],
+            "detected_at_ms": _now_ms(),
+            "stale_after_ms": stale_after_ms,
+            "previous_status": previous_status,
+            "previous_stage": previous_stage,
+            "action": "mark_failed" if previous_status in {"running", "verifying"} else "manual_review",
+            "manual_review_required": previous_status == "waiting",
+        }
+
+        updates: dict[str, Any] = {"metadata": metadata}
+        if previous_status in {"running", "verifying"}:
+            updates.update(
+                status="failed",
+                current_stage="stale_recovery",
+                error=reason[:500],
+            )
+
+        self.update_task(task_id, **updates)
+        return self.read_task(task_id)
+
     def read_task_view(self, task_id: str) -> dict[str, Any] | None:
         """Return task + materialized steps + summary for observer UIs."""
         task = self.read_task(task_id)
@@ -177,6 +245,7 @@ class TaskLedger:
                 "last_successful_step": task.get("last_successful_step"),
                 "current_stage": task.get("current_stage"),
                 "completion_gate": task.get("completion_gate"),
+                "recovery": (task.get("metadata") or {}).get("recovery"),
             },
         }
 
