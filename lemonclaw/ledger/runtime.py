@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from lemonclaw.ledger.types import StepRecord, TaskRecord
+from lemonclaw.ledger.types import OutboxEventRecord, StepRecord, TaskRecord
 
 
 def _now_ms() -> int:
@@ -17,6 +17,7 @@ def _now_ms() -> int:
 
 
 _SAFE_TASK_ID = re.compile(r"^task_[A-Za-z0-9_-]{1,64}$")
+_SAFE_OUTBOX_ID = re.compile(r"^ob_[A-Za-z0-9_-]{1,64}$")
 
 
 class TaskLedger:
@@ -177,6 +178,92 @@ class TaskLedger:
             },
         }
 
+    def enqueue_outbox(
+        self,
+        *,
+        task_id: str,
+        step_id: str,
+        effect_type: str,
+        target: str,
+        payload: dict[str, Any],
+        status: str = "pending",
+        attempts: int = 0,
+        next_attempt_at_ms: int | None = None,
+        error: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_valid_task_id(task_id)
+        now = _now_ms()
+        event = OutboxEventRecord(
+            event_id=f"ob_{uuid.uuid4().hex[:12]}",
+            task_id=task_id,
+            step_id=step_id,
+            effect_type=effect_type,
+            target=target,
+            payload=payload,
+            status=status,
+            attempts=attempts,
+            created_at_ms=now,
+            updated_at_ms=now,
+            next_attempt_at_ms=next_attempt_at_ms,
+            error=error,
+            metadata=metadata or {},
+        )
+        self._append_jsonl(self._outbox_path(), event.to_dict())
+        return event.to_dict()
+
+    def update_outbox_event(self, event_id: str, **updates: Any) -> dict[str, Any] | None:
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+        current.update(updates)
+        next_updated = _now_ms()
+        previous_updated = int(current.get("updated_at_ms") or 0)
+        current["updated_at_ms"] = max(next_updated, previous_updated + 1)
+        self._append_jsonl(self._outbox_path(), current)
+        return current
+
+    def materialize_outbox_events(self) -> list[dict[str, Any]]:
+        latest_by_event: dict[str, dict[str, Any]] = {}
+        for event in self.read_outbox_events():
+            event_id = str(event.get("event_id", "")).strip()
+            if not event_id:
+                continue
+            latest_by_event[event_id] = event
+        return sorted(
+            latest_by_event.values(),
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+            reverse=True,
+        )
+
+    def read_outbox_events(self) -> list[dict[str, Any]]:
+        path = self._outbox_path()
+        if not path.exists():
+            return []
+        # TODO: stream JSONL once outbox volume is large enough to matter.
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def list_outbox_events(
+        self,
+        *,
+        limit: int = 50,
+        status: str | None = None,
+        task_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        events = self.materialize_outbox_events()
+        if status:
+            events = [event for event in events if event.get("status") == status]
+        if task_id:
+            events = [event for event in events if event.get("task_id") == task_id]
+        return events[:max(1, int(limit))]
+
+    def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
+        self._require_valid_outbox_id(event_id)
+        for event in self.materialize_outbox_events():
+            if event.get("event_id") == event_id:
+                return event
+        return None
+
     @staticmethod
     def is_valid_task_id(task_id: str) -> bool:
         return bool(_SAFE_TASK_ID.match(task_id))
@@ -185,6 +272,14 @@ class TaskLedger:
         if not self.is_valid_task_id(task_id):
             raise ValueError("invalid task_id")
 
+    @staticmethod
+    def is_valid_outbox_id(event_id: str) -> bool:
+        return bool(_SAFE_OUTBOX_ID.match(event_id))
+
+    def _require_valid_outbox_id(self, event_id: str) -> None:
+        if not self.is_valid_outbox_id(event_id):
+            raise ValueError("invalid event_id")
+
     def _task_path(self, task_id: str) -> Path:
         self._require_valid_task_id(task_id)
         return self._state_dir / f"{task_id}.json"
@@ -192,6 +287,9 @@ class TaskLedger:
     def _steps_path(self, task_id: str) -> Path:
         self._require_valid_task_id(task_id)
         return self._state_dir / f"{task_id}.steps.jsonl"
+
+    def _outbox_path(self) -> Path:
+        return self._state_dir / "outbox.jsonl"
 
     @staticmethod
     def _write_json(path: Path, payload: dict[str, Any]) -> None:

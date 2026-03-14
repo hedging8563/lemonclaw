@@ -118,3 +118,47 @@ def test_task_ledger_write_paths_reject_invalid_task_id(tmp_path: Path):
             channel="cli",
             goal="bad",
         )
+
+
+def test_task_ledger_outbox_roundtrip_and_materialization(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+    )
+
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+    assert event["status"] == "pending"
+
+    updated = ledger.update_outbox_event(
+        event["event_id"],
+        status="sent",
+        attempts=1,
+    )
+    assert updated is not None
+    assert updated["status"] == "sent"
+
+    events = ledger.list_outbox_events()
+    assert len(events) == 1
+    assert events[0]["event_id"] == event["event_id"]
+    assert events[0]["status"] == "sent"
+
+
+def test_task_ledger_rejects_invalid_outbox_id(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+
+    assert ledger.is_valid_outbox_id("ob_valid-1") is True
+    assert ledger.is_valid_outbox_id("../etc/passwd") is False
+
+    with pytest.raises(ValueError, match="invalid event_id"):
+        ledger.read_outbox_event("../etc/passwd")

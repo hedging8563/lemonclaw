@@ -116,3 +116,45 @@ def test_tasks_api_requires_auth_when_token_enabled(tmp_path):
     client.cookies.set("lc_session", cookie)
     resp = client.get("/api/tasks")
     assert resp.status_code == 200
+
+
+def test_outbox_api_lists_and_reads_events(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_a",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+
+    client = TestClient(app)
+
+    resp = client.get("/api/outbox")
+    assert resp.status_code == 200
+    assert [item["event_id"] for item in resp.json()["events"]] == [event["event_id"]]
+
+    resp = client.get(f"/api/outbox/{event['event_id']}")
+    assert resp.status_code == 200
+    assert resp.json()["event"]["target"] == "telegram:123"
+
+
+def test_outbox_api_rejects_invalid_ids(tmp_path):
+    app, _ledger = _build_app(tmp_path)
+    client = TestClient(app)
+
+    resp = client.get("/api/outbox/not-an-event")
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid event_id"
+
+    resp = client.get("/api/outbox", params={"task_id": "not-a-task"})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid task_id"

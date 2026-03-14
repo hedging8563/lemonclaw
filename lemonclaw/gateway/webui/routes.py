@@ -1102,6 +1102,57 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/outbox — outbox summaries ──────────────────────────────
+
+    async def list_outbox(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        try:
+            limit = min(int(request.query_params.get("limit", "50")), 200)
+        except (TypeError, ValueError):
+            limit = 50
+
+        status = request.query_params.get("status") or None
+        task_id = request.query_params.get("task_id") or None
+        if task_id and not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+
+        events = ledger.list_outbox_events(limit=limit, status=status, task_id=task_id)
+        resp = _json({"events": events})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── GET /api/outbox/{event_id} — outbox detail ─────────────────────
+
+    async def get_outbox_event(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        event_id = request.path_params.get("event_id", "")
+        if not event_id:
+            return _json({"error": "event_id is required"}, 400)
+        if not ledger.is_valid_outbox_id(event_id):
+            return _json({"error": "invalid event_id"}, 400)
+
+        event = ledger.read_outbox_event(event_id)
+        if not event:
+            return _json({"error": "event not found"}, 404)
+
+        resp = _json({"event": event})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── Assemble routes ──────────────────────────────────────────────────
 
     return [
@@ -1133,5 +1184,7 @@ def get_webui_routes(
         Route("/api/models", list_models, methods=["GET"]),
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
+        Route("/api/outbox", list_outbox, methods=["GET"]),
+        Route("/api/outbox/{event_id}", get_outbox_event, methods=["GET"]),
         Route("/api/info", get_info, methods=["GET"]),
     ]

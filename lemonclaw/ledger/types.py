@@ -40,3 +40,23 @@ class StepRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class OutboxEventRecord:
+    event_id: str
+    task_id: str
+    step_id: str
+    effect_type: str
+    target: str
+    payload: dict[str, Any]
+    status: str
+    attempts: int
+    created_at_ms: int
+    updated_at_ms: int
+    next_attempt_at_ms: int | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
