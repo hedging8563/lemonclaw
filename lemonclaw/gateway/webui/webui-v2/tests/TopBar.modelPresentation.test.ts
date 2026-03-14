@@ -20,7 +20,7 @@ describe('modelPresentation', () => {
 
   it('builds user-friendly model option labels', () => {
     expect(modelOptionLabel({ id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', source: 'runtime-policy', profile: 'standard_chat' }, t))
-      .toBe('Claude Sonnet 4.6 · Daily Chat');
+      .toBe('Claude Sonnet 4.6');
     expect(modelOptionLabel({ id: 'gpt-5.4', label: 'GPT-5.4', source: 'builtin' }, t))
       .toBe('GPT-5.4');
   });

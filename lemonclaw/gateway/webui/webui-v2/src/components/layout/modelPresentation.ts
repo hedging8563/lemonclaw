@@ -42,11 +42,7 @@ export function profileLabel(profile: string | null | undefined, t: TranslateFn)
 }
 
 export function modelOptionLabel(model: ModelLike, t: TranslateFn): string {
-  const title = humanModelName(model);
-  if (model.source === 'runtime-policy') {
-    return `${title} · ${profileLabel(model.profile, t)}`;
-  }
-  return title;
+  return humanModelName(model);
 }
 
 export function modelMetaLabel(model: ModelLike | null | undefined, t: TranslateFn): string {

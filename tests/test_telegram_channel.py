@@ -153,7 +153,7 @@ async def test_send_model_list_attaches_inline_keyboard(telegram_channel: Telegr
     assert kwargs["chat_id"] == 12345
     assert kwargs["reply_markup"] is not None
     assert "Select model" in kwargs["text"]
-    assert "Source:" in kwargs["text"]
+    assert "Source:" not in kwargs["text"]
     bot.send_message_draft.assert_not_awaited()
 
 
@@ -420,4 +420,3 @@ def test_cleanup_split_tempdirs_only_removes_stale_dirs(monkeypatch: pytest.Monk
 
     assert not stale.exists()
     assert fresh.exists()
-

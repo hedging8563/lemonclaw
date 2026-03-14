@@ -305,8 +305,7 @@ def format_model_list(current_model: str | None = None) -> str:
         lines.append(f"\n**{label}**")
         for m in grouped[tier]:
             marker = ' ← current' if current_model and m.id == current_model else ''
-            runtime_badge = format_model_runtime_badge(m.id)
-            lines.append(f"  `{m.id}` — {m.description} · {runtime_badge}{marker}")
+            lines.append(f"  `{m.id}` — {m.description}{marker}")
     header = 'Available models (use `/model <name>` to switch):\n'
     footer = '\n\n**Aliases** (use `/model <alias>` to switch):'
     from lemonclaw.providers.aliases import list_aliases

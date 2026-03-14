@@ -391,12 +391,11 @@ class TelegramChannel(BaseChannel):
         sent_any = False
         if msg.metadata.get("_command") == "model_list":
             reply_markup = self._build_model_keyboard(msg.metadata.get("_current_model"))
-            from lemonclaw.providers.catalog import MODEL_MAP, format_model_runtime_badge
+            from lemonclaw.providers.catalog import MODEL_MAP
             current_id = msg.metadata.get("_current_model")
             entry = MODEL_MAP.get(current_id) if current_id else None
             label = entry.label if entry else (current_id or "—")
-            runtime_badge = format_model_runtime_badge(current_id) if current_id else "builtin"
-            chunks = [f"🍋 *Select model*\nCurrent: `{label}`\nSource: `{runtime_badge}`"]
+            chunks = [f"🍋 *Select model*\nCurrent: `{label}`"]
 
         for chunk in chunks:
             html = _markdown_to_telegram_html(chunk)
