@@ -1,7 +1,6 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
-from collections import deque
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -9,6 +8,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.config.schema import QQConfig
 
 try:
@@ -54,7 +54,7 @@ class QQChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
-        self._processed_ids: deque = deque(maxlen=1000)
+        self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -112,9 +112,8 @@ class QQChannel(BaseChannel):
         """Handle incoming message from QQ."""
         try:
             # Dedup by message ID
-            if data.id in self._processed_ids:
+            if not self._ingress_dedupe.remember(f"message:{data.id}"):
                 return
-            self._processed_ids.append(data.id)
 
             author = data.author
             user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))

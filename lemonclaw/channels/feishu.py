@@ -1,11 +1,11 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
+from functools import partial
 import json
 import os
 import re
 import threading
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.config.schema import FeishuConfig
 
 try:
@@ -29,8 +30,11 @@ try:
         CreateMessageReactionRequestBody,
         Emoji,
         GetFileRequest,
+        GetMessageRequest,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -45,6 +49,7 @@ MSG_TYPE_MAP = {
     "file": "[file]",
     "sticker": "[sticker]",
 }
+_FEISHU_REPLY_CONTEXT_MAX_CHARS = 600
 
 
 def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
@@ -265,7 +270,7 @@ class FeishuChannel(BaseChannel):
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
-        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._bot_open_id: str | None = None  # Bot's own open_id for precise mention detection
         self._mention_warned = False  # Only warn once about mention mode limitation
@@ -630,6 +635,67 @@ class FeishuChannel(BaseChannel):
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return False
 
+    def _reply_message_sync(self, message_id: str, msg_type: str, content: str, *, reply_in_thread: bool) -> bool:
+        """Reply to an existing Feishu message so the response stays attached to the quoted turn."""
+        try:
+            request = ReplyMessageRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .content(content)
+                    .msg_type(msg_type)
+                    .reply_in_thread(reply_in_thread)
+                    .build()
+                ).build()
+            response = self._client.im.v1.message.reply(request)
+            if not response.success():
+                logger.error(
+                    "Failed to reply Feishu {} message: code={}, msg={}, log_id={}",
+                    msg_type, response.code, response.msg, response.get_log_id()
+                )
+                return False
+            logger.debug("Feishu {} reply sent for {}", msg_type, message_id)
+            return True
+        except Exception as e:
+            logger.error("Error replying Feishu {} message: {}", msg_type, e)
+            return False
+
+    def _fetch_reply_context_sync(self, message_id: str) -> str | None:
+        """Fetch a quoted Feishu message and extract a compact text representation."""
+        try:
+            request = GetMessageRequest.builder().message_id(message_id).build()
+            response = self._client.im.v1.message.get(request)
+            if not response.success():
+                logger.warning(
+                    "Failed to fetch Feishu reply context: code={}, msg={}, log_id={}",
+                    response.code, response.msg, response.get_log_id()
+                )
+                return None
+            items = getattr(getattr(response, "data", None), "items", None) or []
+            message = items[0] if items else None
+            if not message:
+                return None
+
+            msg_type = getattr(message, "msg_type", "") or ""
+            body_content = getattr(getattr(message, "body", None), "content", None)
+            try:
+                content_json = json.loads(body_content) if body_content else {}
+            except json.JSONDecodeError:
+                content_json = {}
+
+            if msg_type == "text":
+                return content_json.get("text") or None
+            if msg_type == "post":
+                text, _ = _extract_post_content(content_json)
+                return text or None
+            if msg_type in ("share_chat", "share_user", "interactive", "share_calendar_event", "system", "merge_forward"):
+                text = _extract_share_card_content(content_json, msg_type)
+                return text or None
+            return MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
+        except Exception as e:
+            logger.warning("Error fetching Feishu reply context: {}", e)
+            return None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
@@ -639,6 +705,8 @@ class FeishuChannel(BaseChannel):
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
+            reply_message_id = (msg.metadata or {}).get("message_id")
+            reply_in_thread = (msg.metadata or {}).get("chat_type") == "group"
 
             for file_path in msg.media:
                 if not os.path.isfile(file_path):
@@ -663,10 +731,22 @@ class FeishuChannel(BaseChannel):
 
             if msg.content and msg.content.strip():
                 card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                if reply_message_id:
+                    await loop.run_in_executor(
+                        None,
+                        partial(
+                            self._reply_message_sync,
+                            reply_message_id,
+                            "interactive",
+                            json.dumps(card, ensure_ascii=False),
+                            reply_in_thread=reply_in_thread,
+                        ),
+                    )
+                else:
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
@@ -688,13 +768,8 @@ class FeishuChannel(BaseChannel):
 
             # Deduplication check
             message_id = message.message_id
-            if message_id in self._processed_message_ids:
+            if not self._ingress_dedupe.remember(f"message:{message_id}"):
                 return
-            self._processed_message_ids[message_id] = None
-
-            # Trim cache
-            while len(self._processed_message_ids) > 1000:
-                self._processed_message_ids.popitem(last=False)
 
             # Skip bot messages
             if sender.sender_type == "bot":
@@ -745,6 +820,18 @@ class FeishuChannel(BaseChannel):
             # Parse content
             content_parts = []
             media_paths = []
+            reply_context_id = getattr(message, "parent_id", None) or getattr(message, "root_id", None)
+            if reply_context_id:
+                reply_context = await asyncio.get_running_loop().run_in_executor(
+                    None, self._fetch_reply_context_sync, reply_context_id
+                )
+                if isinstance(reply_context, str) and reply_context.strip():
+                    compact = reply_context.strip()
+                    if len(compact) > _FEISHU_REPLY_CONTEXT_MAX_CHARS:
+                        compact = compact[:_FEISHU_REPLY_CONTEXT_MAX_CHARS].rstrip() + "..."
+                    content_parts.append(f"[Reply to: {compact}]")
+                else:
+                    content_parts.append("[Reply to: previous Feishu message]")
 
             try:
                 content_json = json.loads(message.content) if message.content else {}
@@ -801,6 +888,8 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "parent_id": getattr(message, "parent_id", None),
+                    "root_id": getattr(message, "root_id", None),
                 },
                 pairing_policy=self.config.dm_policy if not is_group else None,
             )

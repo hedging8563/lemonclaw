@@ -31,7 +31,7 @@ def _group_callback_update(data: str, *, thread_id: int | None = 456, message_id
         answer=AsyncMock(),
         edit_message_reply_markup=AsyncMock(),
     )
-    return SimpleNamespace(callback_query=query, effective_user=user)
+    return SimpleNamespace(update_id=1001, callback_query=query, effective_user=user)
 
 
 def _private_callback_update(data: str, *, message_id: int = 321):
@@ -44,7 +44,44 @@ def _private_callback_update(data: str, *, message_id: int = 321):
         answer=AsyncMock(),
         edit_message_reply_markup=AsyncMock(),
     )
-    return SimpleNamespace(callback_query=query, effective_user=user)
+    return SimpleNamespace(update_id=1002, callback_query=query, effective_user=user)
+
+
+def _private_text_update(
+    text: str,
+    *,
+    message_id: int = 321,
+    reply_text: str | None = None,
+    reply_message_id: int = 111,
+):
+    user = SimpleNamespace(id=7, username="bob", first_name="Bob")
+    chat = SimpleNamespace(id=12345, type="private")
+    reply_to_message = None
+    if reply_text is not None:
+        reply_to_message = SimpleNamespace(
+            message_id=reply_message_id,
+            text=reply_text,
+            caption=None,
+            photo=None,
+            voice=None,
+            audio=None,
+            document=None,
+            video=None,
+            sticker=None,
+        )
+    message = SimpleNamespace(
+        chat_id=chat.id,
+        chat=chat,
+        message_id=message_id,
+        text=text,
+        caption=None,
+        photo=None,
+        voice=None,
+        audio=None,
+        document=None,
+        reply_to_message=reply_to_message,
+    )
+    return SimpleNamespace(update_id=2001, message=message, effective_user=user)
 
 
 def _bot_stub(**overrides):
@@ -132,6 +169,19 @@ async def test_model_callback_forwards_private_chat_without_thread_metadata(tele
         },
         session_key=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_on_message_includes_reply_context_for_text_reply(telegram_channel: TelegramChannel) -> None:
+    update = _private_text_update("现在继续", reply_text="上一条消息内容")
+    telegram_channel._handle_message = AsyncMock()
+
+    await telegram_channel._on_message(update, None)
+
+    telegram_channel._handle_message.assert_awaited_once()
+    kwargs = telegram_channel._handle_message.await_args.kwargs
+    assert kwargs["content"] == "[Reply to: 上一条消息内容]\n现在继续"
+    assert kwargs["metadata"]["reply_to_message_id"] == 111
 
 
 @pytest.mark.asyncio

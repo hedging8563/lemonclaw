@@ -27,6 +27,7 @@ from telegram.request import HTTPXRequest
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.channels.utils import split_message as _split_message_impl
 from lemonclaw.config.schema import TelegramConfig
 
@@ -36,6 +37,7 @@ _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
 _TG_SPLIT_TARGET_BYTES = 45 * 1024 * 1024
 _TG_SPLIT_STALE_MAX_AGE_S = 6 * 60 * 60
 _TG_SPLIT_TEMP_PREFIX = "lemonclaw_tg_split_"
+_TG_REPLY_CONTEXT_MAX_CHARS = 600
 _EMPTY_MESSAGE = "[empty message]"
 
 
@@ -151,8 +153,7 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
-        self._seen_update_ids: set[int] = set()  # Dedup Telegram updates
-        self._seen_update_ids_max = 500
+        self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
         self._activity_bus = activity_bus
 
     async def start(self) -> None:
@@ -324,6 +325,34 @@ class TelegramChannel(BaseChannel):
             return []
 
         return segments
+
+    @staticmethod
+    def _extract_reply_context(message) -> str | None:
+        reply = getattr(message, "reply_to_message", None)
+        if not reply:
+            return None
+
+        source_text = getattr(reply, "text", None) or getattr(reply, "caption", None)
+        if isinstance(source_text, str) and source_text.strip():
+            compact = source_text.strip()
+            if len(compact) > _TG_REPLY_CONTEXT_MAX_CHARS:
+                compact = compact[:_TG_REPLY_CONTEXT_MAX_CHARS].rstrip() + "..."
+            return f"[Reply to: {compact}]"
+
+        if getattr(reply, "photo", None):
+            return "[Reply to: (image)]"
+        if getattr(reply, "voice", None):
+            return "[Reply to: (voice)]"
+        if getattr(reply, "audio", None):
+            return "[Reply to: (audio)]"
+        if getattr(reply, "document", None):
+            return "[Reply to: (file)]"
+        if getattr(reply, "video", None):
+            return "[Reply to: (video)]"
+        if getattr(reply, "sticker", None):
+            return "[Reply to: (sticker)]"
+
+        return "[Reply to: (message)]"
 
 
     def _activity_session_key(self, chat_id: str, thread_id: int | None = None) -> str:
@@ -561,14 +590,9 @@ class TelegramChannel(BaseChannel):
     def _dedup_update(self, update: Update) -> bool:
         """Return True if this update is new, False if duplicate."""
         uid = update.update_id
-        if uid in self._seen_update_ids:
+        if not self._ingress_dedupe.remember(f"update:{uid}"):
             logger.debug("Telegram duplicate update_id={}, skipping", uid)
             return False
-        self._seen_update_ids.add(uid)
-        if len(self._seen_update_ids) > self._seen_update_ids_max:
-            # Trim oldest half
-            sorted_ids = sorted(self._seen_update_ids)
-            self._seen_update_ids = set(sorted_ids[len(sorted_ids) // 2:])
         return True
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -673,6 +697,8 @@ class TelegramChannel(BaseChannel):
         query = update.callback_query
         if not query or not query.data or not update.effective_user:
             return
+        if not self._dedup_update(update):
+            return
 
         await query.answer()
 
@@ -765,6 +791,9 @@ class TelegramChannel(BaseChannel):
         content_parts = []
         media_paths = []
 
+        if reply_context := self._extract_reply_context(message):
+            content_parts.append(reply_context)
+
         # Text content (strip @mention for cleaner agent input)
         if message.text:
             content_parts.append(self._strip_bot_mention(message.text) if is_group else message.text)
@@ -847,6 +876,9 @@ class TelegramChannel(BaseChannel):
             "first_name": user.first_name,
             "is_group": is_group,
         }
+        if reply_to_message := getattr(message, "reply_to_message", None):
+            if getattr(reply_to_message, "message_id", None) is not None:
+                base_metadata["reply_to_message_id"] = reply_to_message.message_id
         if thread_id:
             base_metadata["message_thread_id"] = thread_id
 

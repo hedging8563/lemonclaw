@@ -1044,6 +1044,10 @@ class AgentLoop:
             "_tenant_id": str(metadata.get("_tenant_id", "")),
             "_actor_identity": str(metadata.get("_actor_identity", self.agent_id)),
             "_task_ledger": self.ledger,
+            "_default_channel": msg.channel,
+            "_default_chat_id": msg.chat_id,
+            "_default_message_id": metadata.get("message_id"),
+            "_default_delivery_context": metadata.get("_delivery_context"),
             "_capability_token": self.governance.issue_token(
                 task_id=str(metadata.get("_task_id")),
                 tenant_id=str(metadata.get("_tenant_id", "")),

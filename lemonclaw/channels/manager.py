@@ -11,6 +11,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.delivery_context import apply_delivery_route
 from lemonclaw.config.schema import Config
 
 if TYPE_CHECKING:
@@ -298,6 +299,7 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
+                        apply_delivery_route(msg)
                         await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)

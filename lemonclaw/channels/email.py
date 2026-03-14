@@ -139,7 +139,10 @@ class EmailChannel(BaseChannel):
         email_msg["Subject"] = subject
         email_msg.set_content(msg.content or "")
 
-        in_reply_to = self._last_message_id_by_chat.get(to_addr)
+        in_reply_to = (
+            (msg.metadata or {}).get("message_id")
+            or self._last_message_id_by_chat.get(to_addr)
+        )
         if in_reply_to:
             email_msg["In-Reply-To"] = in_reply_to
             email_msg["References"] = in_reply_to

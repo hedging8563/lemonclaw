@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
+from lemonclaw.channels.delivery_context import attach_delivery_context
 from lemonclaw.bus.queue import MessageBus
 
 
@@ -248,7 +249,12 @@ class BaseChannel(ABC):
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {},
+            metadata=attach_delivery_context(
+                channel=self.name,
+                chat_id=str(chat_id),
+                session_key=session_key or f"{self.name}:{chat_id}",
+                metadata=metadata,
+            ),
             session_key_override=session_key,
         )
 
