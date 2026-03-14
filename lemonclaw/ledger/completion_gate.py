@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from lemonclaw.ledger.types import CompletionGateResult
 
 if TYPE_CHECKING:
@@ -50,6 +52,9 @@ def evaluate_completion(
 
     failed_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _FAILED_OUTBOX_STATUSES]
     if failed_outbox:
+        # Failed outbox does not immediately fail the whole task: the task stays
+        # blocked in waiting_outbox so a dispatcher / compensator can retry or
+        # reconcile the side effect without the agent declaring success early.
         return CompletionGateResult(
             task_id=task_id,
             passed=False,
@@ -86,15 +91,28 @@ def finalize_task(ledger: "TaskLedger", task_id: str) -> CompletionGateResult | 
     """Move a task through verifying and persist the gate decision."""
     task = ledger.read_task(task_id)
     if not task:
+        logger.warning("Completion gate skipped missing task {}", task_id)
         return None
 
     ledger.update_task(task_id, status="verifying", current_stage="verify")
-    result = evaluate_completion(
-        task_id=task_id,
-        steps=ledger.materialize_steps(task_id),
-        outbox_events=ledger.materialize_outbox_events_for_task(task_id),
-        checked_at_ms=ledger.now_ms(),
-    )
+    try:
+        result = evaluate_completion(
+            task_id=task_id,
+            steps=ledger.materialize_steps(task_id),
+            outbox_events=ledger.materialize_outbox_events_for_task(task_id),
+            checked_at_ms=ledger.now_ms(),
+        )
+    except Exception as exc:
+        logger.exception("Completion gate evaluation failed for {}", task_id)
+        result = CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"completion gate evaluation failed: {type(exc).__name__}: {exc}"[:500],
+            next_status="failed",
+            next_stage="error",
+            checked_at_ms=ledger.now_ms(),
+        )
+
     updates: dict[str, Any] = {
         "status": result.next_status,
         "current_stage": result.next_stage,
