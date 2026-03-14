@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hmac
 import re
 import secrets
 from pathlib import Path
@@ -429,6 +430,14 @@ def get_settings_routes(
         request.state.refreshed_cookie = refreshed
         return True, None
 
+    def _require_bearer_auth(request: Request) -> tuple[bool, Response | None]:
+        if not auth_token:
+            return True, None
+        header = request.headers.get("authorization", "")
+        if not hmac.compare_digest(header, f"Bearer {auth_token}"):
+            return False, _json({"error": "Unauthorized"}, 401)
+        return True, None
+
     def _maybe_refresh(request: Request, response: Response) -> Response:
         """Set refreshed session cookie on response if available."""
         cookie = getattr(request.state, "refreshed_cookie", None)
@@ -643,6 +652,55 @@ def get_settings_routes(
             return resp
 
         return _maybe_refresh(request, _json({"reloaded": True, "restart_required": False}))
+
+    # ── POST /api/runtime-policy/reload ───────────────────────────────
+
+    async def reload_runtime_policy(request: Request) -> Response:
+        ok, err = _require_bearer_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        async with _config_lock:
+            from lemonclaw.config.loader import load_config
+            from lemonclaw.config.sync import run_config_sync
+            from lemonclaw.providers.catalog import runtime_policy_active
+
+            try:
+                config = load_config(config_path)
+                sync_report = run_config_sync(config)
+            except Exception as exc:
+                logger.exception("Runtime policy reload failed")
+                return _json({"error": str(exc)}, 500)
+
+            runtime_policy_op = next((op for op in sync_report.ops if op.name == "sync_runtime_model_policy"), None)
+            if runtime_policy_op and runtime_policy_op.error:
+                return _json(
+                    {
+                        "error": "runtime policy sync failed",
+                        "details": runtime_policy_op.error,
+                    },
+                    502,
+                )
+
+            if agent_loop:
+                defaults = config.agents.defaults
+                agent_loop.update_defaults(
+                    model=defaults.model,
+                    temperature=defaults.temperature,
+                    max_tokens=defaults.max_tokens,
+                    memory_window=defaults.memory_window,
+                    max_tool_iterations=defaults.max_tool_iterations,
+                    system_prompt=defaults.system_prompt,
+                    disabled_skills=defaults.disabled_skills,
+                )
+
+        return _json({
+            "reloaded": True,
+            "changed": sync_report.changed,
+            "summary": sync_report.summary(),
+            "runtime_policy_active": runtime_policy_active(),
+            "model": config.agents.defaults.model,
+        })
 
     # ── GET /api/settings/channels/whatsapp/pairing ───────────────────
 
@@ -983,6 +1041,7 @@ def get_settings_routes(
         Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings", patch_settings, methods=["PATCH"]),
         Route("/api/settings/apply", apply_settings, methods=["POST"]),
+        Route("/api/runtime-policy/reload", reload_runtime_policy, methods=["POST"]),
         Route("/api/settings/skills", list_skills, methods=["GET"]),
         Route("/api/settings/skills", install_skill, methods=["POST"]),
         Route("/api/settings/skills/{name}", toggle_skill, methods=["PATCH"]),

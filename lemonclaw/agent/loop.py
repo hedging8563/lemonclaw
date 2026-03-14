@@ -193,6 +193,8 @@ class AgentLoop:
         if model is not None and model != self.model:
             self.model = model
             self.subagents.model = model
+            if hasattr(self.provider, "default_model"):
+                self.provider.default_model = model
             changed.append(f"model={model}")
         if temperature is not None and temperature != self.temperature:
             self.temperature = temperature
@@ -212,6 +214,14 @@ class AgentLoop:
         if disabled_skills is not None and set(disabled_skills) != self.context.skills._disabled:
             self.context.skills._disabled = set(disabled_skills)
             changed.append(f"disabled_skills={disabled_skills}")
+        analyze_image_tool = self.tools.get("analyze_image")
+        if analyze_image_tool is not None and hasattr(analyze_image_tool, "_default_model"):
+            from lemonclaw.providers.catalog import get_runtime_default_model
+
+            vision_model = get_runtime_default_model("vision")
+            if getattr(analyze_image_tool, "_default_model", None) != vision_model:
+                analyze_image_tool._default_model = vision_model
+                changed.append(f"vision_model={vision_model}")
         if changed:
             logger.info("Agent defaults updated: {}", ", ".join(changed))
 
