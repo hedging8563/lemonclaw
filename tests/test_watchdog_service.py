@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -68,3 +69,20 @@ async def test_watchdog_soft_recovery_keeps_waiting_task_in_manual_review(tmp_pa
     assert task["current_stage"] == "waiting_outbox"
     assert task["metadata"]["recovery"]["action"] == "manual_review"
     assert task["metadata"]["recovery"]["manual_review_required"] is True
+    assert watchdog._check_task_stuck() == HealthCheck("task_stuck", True)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_start_offloads_startup_scan_to_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
+    to_thread = AsyncMock(return_value=0)
+
+    monkeypatch.setattr("lemonclaw.watchdog.service.asyncio.to_thread", to_thread)
+    monkeypatch.setattr(watchdog, "_setup_alarm", lambda: None)
+
+    await watchdog.start()
+    watchdog.stop()
+    await __import__("asyncio").sleep(0)
+
+    to_thread.assert_awaited_once()

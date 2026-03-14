@@ -41,6 +41,7 @@ ERROR_RATE_WINDOW = 300           # 5-minute sliding window for error tracking
 ERROR_RATE_THRESHOLD = 20         # errors in window before triggering action
 ALARM_TIMEOUT = 150               # seconds: must be > CHECK_INTERVAL + tick duration
 TASK_STUCK_THRESHOLD = 1800       # seconds without ledger update before task is considered stale
+# TODO: support per-task stale-threshold overrides for long-running human-in-loop tasks.
 
 
 # ============================================================================
@@ -116,7 +117,7 @@ class WatchdogService:
             return
         self._running = True
         self._setup_alarm()
-        recovered = self._recover_stale_tasks(source="watchdog_startup_scan")
+        recovered = await asyncio.to_thread(self._recover_stale_tasks, source="watchdog_startup_scan")
         if recovered:
             logger.warning("watchdog: startup stale-task scan recovered {} task(s)", recovered)
         self._task = asyncio.create_task(self._run_loop())
@@ -246,7 +247,7 @@ class WatchdogService:
         results.append(self._check_error_rate())
 
         # 5. Task ledger stale scan
-        results.append(self._check_task_stuck())
+        results.append(await asyncio.to_thread(self._check_task_stuck))
 
         return results
 
@@ -317,11 +318,19 @@ class WatchdogService:
     def _list_stale_tasks(self) -> list[dict]:
         if not self._task_ledger:
             return []
-        return self._task_ledger.list_stale_tasks(
+        tasks = self._task_ledger.list_stale_tasks(
             stale_after_ms=self._task_stuck_threshold_s * 1000,
             statuses=("running", "verifying", "waiting"),
             limit=20,
         )
+        return [task for task in tasks if not self._is_already_recovered_waiting_task(task)]
+
+    @staticmethod
+    def _is_already_recovered_waiting_task(task: dict) -> bool:
+        if str(task.get("status") or "") != "waiting":
+            return False
+        recovery = (task.get("metadata") or {}).get("recovery") or {}
+        return bool(recovery.get("manual_review_required")) and str(recovery.get("action") or "") == "manual_review"
 
     def _recover_stale_tasks(self, *, source: str) -> int:
         if not self._task_ledger:
@@ -376,7 +385,7 @@ class WatchdogService:
                 except Exception as e:
                     logger.error(f"watchdog: soft recovery error: {e}")
             if c.name == "task_stuck":
-                recovered = self._recover_stale_tasks(source="watchdog_soft_recovery")
+                recovered = await asyncio.to_thread(self._recover_stale_tasks, source="watchdog_soft_recovery")
                 if recovered:
                     logger.warning("watchdog: stale-task recovery annotated {} task(s)", recovered)
 
