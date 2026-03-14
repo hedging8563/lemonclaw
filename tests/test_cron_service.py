@@ -42,6 +42,27 @@ async def test_cron_tool_blocks_add_in_cron_context(tmp_path) -> None:
     assert "Created job" in result
 
 
+@pytest.mark.asyncio
+async def test_cron_tool_prefers_per_call_default_context_over_instance_context(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    tool = CronTool(service)
+    tool.set_context("old", "stale")
+
+    result = await tool.execute(
+        action="add",
+        message="hello",
+        every_seconds=60,
+        _default_channel="fresh",
+        _default_chat_id="target",
+    )
+
+    assert "Created job" in result
+    jobs = service.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.channel == "fresh"
+    assert jobs[0].payload.to == "target"
+
+
 def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

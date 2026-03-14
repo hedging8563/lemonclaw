@@ -112,12 +112,14 @@ class NotifyTool(Tool):
         chat_id: str | None = None,
         webhook_url: str | None = None,
         title: str | None = None,
+        _default_channel: str | None = None,
+        _default_chat_id: str | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         if target_type == "channel":
-            out_channel = channel or self._default_channel
-            out_chat = chat_id or self._default_chat_id
+            out_channel = channel or _default_channel or self._default_channel
+            out_chat = chat_id or _default_chat_id or self._default_chat_id
             callback = _outbound_sink or self._send_callback
             if not out_channel or not out_chat:
                 return {"ok": False, "summary": "Missing channel/chat target", "raw": {"channel": out_channel, "chat_id": out_chat}}

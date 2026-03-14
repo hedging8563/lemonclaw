@@ -33,3 +33,25 @@ def test_notify_resolves_capability():
     tool = NotifyTool()
     assert tool.resolve_capability({"target_type": "channel"}) == "notify.channel.send"
     assert tool.resolve_capability({"target_type": "webhook"}) == "notify.webhook.send"
+
+
+@pytest.mark.asyncio
+async def test_notify_prefers_per_call_default_context_over_instance_context():
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = NotifyTool(send_callback=_send)
+    tool.set_context("old", "stale")
+
+    result = await tool.execute(
+        target_type="channel",
+        content="hello",
+        _default_channel="fresh",
+        _default_chat_id="target",
+    )
+
+    assert result["ok"] is True
+    assert sent[0].channel == "fresh"
+    assert sent[0].chat_id == "target"
