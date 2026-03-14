@@ -19,6 +19,7 @@ def _now_ms() -> int:
 _SAFE_TASK_ID = re.compile(r"^task_[A-Za-z0-9_-]{1,64}$")
 _SAFE_OUTBOX_ID = re.compile(r"^ob_[A-Za-z0-9_-]{1,64}$")
 _SAFE_STEP_ID = re.compile(r"^step_[A-Za-z0-9_-]{1,64}$")
+_OUTBOX_MANUAL_RETRY_DEBOUNCE_MS = 1500
 
 
 class TaskLedger:
@@ -531,6 +532,13 @@ class TaskLedger:
 
         now = _now_ms()
         metadata = dict(current.get("metadata") or {})
+        last_manual_retry = int(metadata.get("manual_retry_requested_at_ms") or 0)
+        if (
+            status in {"pending", "retrying"}
+            and last_manual_retry
+            and (now - last_manual_retry) < _OUTBOX_MANUAL_RETRY_DEBOUNCE_MS
+        ):
+            return current
         metadata.pop("terminal", None)
         metadata["manual_retry_requested_at_ms"] = now
         metadata["manual_retry_source"] = source

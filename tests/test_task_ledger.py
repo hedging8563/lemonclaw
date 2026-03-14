@@ -317,6 +317,71 @@ def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):
     assert task["metadata"]["recovery"]["manual_review_required"] is False
 
 
+def test_task_ledger_request_outbox_retry_uses_retrying_for_previously_attempted_event(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        attempts=1,
+        error="temporary failure",
+    )
+
+    updated = ledger.request_outbox_retry(event["event_id"], source="webui_manual_retry")
+
+    assert updated is not None
+    assert updated["status"] == "retrying"
+    assert updated["next_attempt_at_ms"] is not None
+
+
+def test_task_ledger_request_outbox_retry_is_debounced_for_quick_repeat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        attempts=1,
+        error="temporary failure",
+    )
+
+    monkeypatch.setattr("lemonclaw.ledger.runtime._now_ms", lambda: 10_000)
+    first = ledger.request_outbox_retry(event["event_id"], source="webui_manual_retry")
+    assert first is not None
+    assert first["status"] == "retrying"
+
+    monkeypatch.setattr("lemonclaw.ledger.runtime._now_ms", lambda: 10_500)
+    second = ledger.request_outbox_retry(event["event_id"], source="webui_manual_retry")
+    assert second is not None
+    assert second["updated_at_ms"] == first["updated_at_ms"]
+    assert second["metadata"]["manual_retry_requested_at_ms"] == first["metadata"]["manual_retry_requested_at_ms"]
+
+
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
