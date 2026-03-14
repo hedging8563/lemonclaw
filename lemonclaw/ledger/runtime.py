@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -13,6 +14,9 @@ from lemonclaw.ledger.types import StepRecord, TaskRecord
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+_SAFE_TASK_ID = re.compile(r"^task_[A-Za-z0-9_-]{1,64}$")
 
 
 class TaskLedger:
@@ -34,6 +38,7 @@ class TaskLedger:
         current_stage: str = "dispatch",
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        self._require_valid_task_id(task_id)
         path = self._task_path(task_id)
         if path.exists():
             return
@@ -54,6 +59,7 @@ class TaskLedger:
         self._write_json(path, record.to_dict())
 
     def update_task(self, task_id: str, **updates: Any) -> None:
+        self._require_valid_task_id(task_id)
         path = self._task_path(task_id)
         if not path.exists():
             return
@@ -61,10 +67,13 @@ class TaskLedger:
         data.update(updates)
         next_updated = _now_ms()
         previous_updated = int(data.get("updated_at_ms") or 0)
+        # Preserve a monotonic ordering key for local observer UIs even when
+        # multiple updates land in the same millisecond or the system clock shifts.
         data["updated_at_ms"] = max(next_updated, previous_updated + 1)
         self._write_json(path, data)
 
     def start_step(self, task_id: str, *, step_type: str, name: str, input_summary: str = "") -> StepRecord:
+        self._require_valid_task_id(task_id)
         step = StepRecord(
             task_id=task_id,
             step_id=f"step_{uuid.uuid4().hex[:10]}",
@@ -98,6 +107,7 @@ class TaskLedger:
         path = self._steps_path(task_id)
         if not path.exists():
             return []
+        # TODO: stream JSONL when long-running tasks accumulate large step logs.
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def materialize_steps(self, task_id: str) -> list[dict[str, Any]]:
@@ -128,6 +138,8 @@ class TaskLedger:
         if not self._state_dir.exists():
             return tasks
 
+        # TODO: replace the full directory scan with an index / retention policy
+        # once task volume grows beyond the current single-instance scale.
         for path in self._state_dir.glob("task_*.json"):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -165,10 +177,20 @@ class TaskLedger:
             },
         }
 
+    @staticmethod
+    def is_valid_task_id(task_id: str) -> bool:
+        return bool(_SAFE_TASK_ID.match(task_id))
+
+    def _require_valid_task_id(self, task_id: str) -> None:
+        if not self.is_valid_task_id(task_id):
+            raise ValueError("invalid task_id")
+
     def _task_path(self, task_id: str) -> Path:
+        self._require_valid_task_id(task_id)
         return self._state_dir / f"{task_id}.json"
 
     def _steps_path(self, task_id: str) -> Path:
+        self._require_valid_task_id(task_id)
         return self._state_dir / f"{task_id}.steps.jsonl"
 
     @staticmethod

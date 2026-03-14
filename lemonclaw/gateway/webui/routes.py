@@ -1091,6 +1091,8 @@ def get_webui_routes(
         task_id = request.path_params.get("task_id", "")
         if not task_id:
             return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
 
         task_view = ledger.read_task_view(task_id)
         if not task_view:

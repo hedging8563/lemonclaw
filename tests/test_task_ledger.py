@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -92,3 +94,27 @@ def test_task_ledger_list_tasks_orders_by_updated_at_desc(tmp_path: Path):
 
     tasks = ledger.list_tasks()
     assert [task["task_id"] for task in tasks] == ["task_b", "task_a"]
+
+
+def test_task_ledger_rejects_invalid_task_id(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+
+    assert ledger.is_valid_task_id("task_valid-1") is True
+    assert ledger.is_valid_task_id("../etc/passwd") is False
+
+    with pytest.raises(ValueError, match="invalid task_id"):
+        ledger.read_task("../etc/passwd")
+
+
+def test_task_ledger_write_paths_reject_invalid_task_id(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+
+    with pytest.raises(ValueError, match="invalid task_id"):
+        ledger.ensure_task(
+            task_id="../etc/passwd",
+            session_key="cli:direct",
+            agent_id="default",
+            mode="chat",
+            channel="cli",
+            goal="bad",
+        )
