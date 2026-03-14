@@ -386,6 +386,98 @@ class TaskLedger:
             events = [event for event in events if event.get("task_id") == task_id]
         return events[:max(1, int(limit))]
 
+    def claim_due_outbox_events(
+        self,
+        *,
+        limit: int = 20,
+        now_ms: int | None = None,
+        claim_owner: str = "outbox_dispatcher",
+    ) -> list[dict[str, Any]]:
+        """Claim due pending/retrying outbox events for delivery."""
+        now = now_ms if now_ms is not None else _now_ms()
+        due: list[dict[str, Any]] = []
+        for event in self.materialize_outbox_events():
+            status = str(event.get("status") or "")
+            if status not in {"pending", "retrying"}:
+                continue
+            next_attempt = event.get("next_attempt_at_ms")
+            if next_attempt is not None and int(next_attempt) > now:
+                continue
+            due.append(event)
+
+        due.sort(key=lambda item: (
+            int(item.get("next_attempt_at_ms") or item.get("created_at_ms") or 0),
+            int(item.get("updated_at_ms") or 0),
+        ))
+
+        claimed: list[dict[str, Any]] = []
+        for event in due[:max(1, int(limit))]:
+            metadata = dict(event.get("metadata") or {})
+            metadata["claimed_by"] = claim_owner
+            metadata["claimed_at_ms"] = now
+            updated = self.update_outbox_event(
+                str(event["event_id"]),
+                status="claimed",
+                attempts=int(event.get("attempts") or 0) + 1,
+                next_attempt_at_ms=None,
+                error=None,
+                metadata=metadata,
+            )
+            if updated:
+                claimed.append(updated)
+        return claimed
+
+    def mark_outbox_sent(
+        self,
+        event_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Mark a claimed outbox event as delivered."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+        metadata = dict(current.get("metadata") or {})
+        metadata["sent_at_ms"] = _now_ms()
+        if result is not None:
+            metadata["delivery_result"] = result
+        return self.update_outbox_event(
+            event_id,
+            status="sent",
+            next_attempt_at_ms=None,
+            error=None,
+            metadata=metadata,
+        )
+
+    def mark_outbox_retry(
+        self,
+        event_id: str,
+        *,
+        error: str,
+        retry_at_ms: int,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Reschedule an outbox event or mark it terminally failed."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        attempts = int(current.get("attempts") or 0)
+        terminal = bool(max_attempts and max_attempts > 0 and attempts >= max_attempts)
+        metadata = dict(current.get("metadata") or {})
+        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_claimed_by"] = metadata.get("claimed_by")
+
+        return self.update_outbox_event(
+            event_id,
+            status="failed" if terminal else "retrying",
+            next_attempt_at_ms=None if terminal else int(retry_at_ms),
+            error=error[:500],
+            metadata=metadata,
+        )
+
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
         path = self._outbox_path()

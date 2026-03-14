@@ -460,7 +460,33 @@ def gateway(
     # Create config watcher (started later in run())
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
+    from lemonclaw.ledger.outbox import OutboxDispatcher
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
+
+    async def on_outbox_event(event: dict) -> None:
+        from lemonclaw.bus.events import OutboundMessage
+
+        if str(event.get("effect_type") or "") != "outbound_message":
+            raise ValueError(f"unsupported outbox effect_type: {event.get('effect_type')}")
+
+        payload = dict(event.get("payload") or {})
+        target = str(event.get("target") or "")
+        target_channel, target_chat_id = (target.split(":", 1) if ":" in target else ("", target))
+        channel = str(payload.get("channel") or target_channel)
+        chat_id = str(payload.get("chat_id") or target_chat_id)
+        if not channel or not chat_id:
+            raise ValueError("outbox outbound_message requires channel/chat_id")
+
+        await bus.publish_outbound(OutboundMessage(
+            channel=channel,
+            chat_id=chat_id,
+            content=str(payload.get("content") or ""),
+            reply_to=str(payload.get("reply_to") or "") or None,
+            media=list(payload.get("media") or []),
+            metadata=dict(payload.get("metadata") or {}),
+        ))
+
+    outbox_dispatcher = OutboxDispatcher(agent.ledger, on_outbox_event)
 
     # Build HTTP server
     asgi_app = create_app(
@@ -489,6 +515,7 @@ def gateway(
         await cron.start()
         await heartbeat.start()
         await watchdog.start()
+        await outbox_dispatcher.start()
 
         # Start config file watcher for API key + agent defaults hot-reload
         config_watcher.start()
@@ -501,6 +528,7 @@ def gateway(
         # Run agent, channels, HTTP server, and shutdown watcher concurrently
         async def _shutdown_watcher():
             await shutdown.wait()
+            outbox_dispatcher.stop()
             watchdog.stop()
             mem_backup.stop()
             config_watcher.stop()

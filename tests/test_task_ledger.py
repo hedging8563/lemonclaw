@@ -191,6 +191,65 @@ def test_task_ledger_read_outbox_event_returns_latest_revision_without_materiali
     assert latest["attempts"] == 2
 
 
+def test_task_ledger_claims_due_outbox_events_and_reschedules_retry(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+    )
+
+    pending = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+    future = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "later"},
+        status="retrying",
+        next_attempt_at_ms=9_999,
+    )
+
+    claimed = ledger.claim_due_outbox_events(limit=10, now_ms=1_000, claim_owner="test-dispatcher")
+    assert [event["event_id"] for event in claimed] == [pending["event_id"]]
+    assert claimed[0]["status"] == "claimed"
+    assert claimed[0]["attempts"] == 1
+    assert claimed[0]["metadata"]["claimed_by"] == "test-dispatcher"
+
+    retried = ledger.mark_outbox_retry(
+        pending["event_id"],
+        error="temporary failure",
+        retry_at_ms=2_000,
+        max_attempts=3,
+    )
+    assert retried is not None
+    assert retried["status"] == "retrying"
+    assert retried["next_attempt_at_ms"] == 2_000
+
+    terminal = ledger.mark_outbox_retry(
+        pending["event_id"],
+        error="still failing",
+        retry_at_ms=3_000,
+        max_attempts=1,
+    )
+    assert terminal is not None
+    assert terminal["status"] == "failed"
+    assert terminal["next_attempt_at_ms"] is None
+
+    not_due = ledger.claim_due_outbox_events(limit=10, now_ms=1_000)
+    assert [event["event_id"] for event in not_due] == []
+    assert ledger.read_outbox_event(future["event_id"])["status"] == "retrying"
+
+
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
