@@ -254,6 +254,9 @@ export async function sendMessage(content: string) {
           const payload = normalizeMessage(event.data);
           Object.assign(lastMsg, { ...payload, blocks: [...lastMsg.blocks.filter((b) => ['thinking', 'tool', 'error'].includes(b.type)), ...payload.blocks.filter((b) => !['thinking', 'tool', 'error'].includes(b.type))] });
         }
+        if (event.session_key && event.session_key !== activeSessionKey.value) {
+          activeSessionKey.value = event.session_key;
+        }
       } else if (event.type === 'error') {
         Object.assign(lastMsg, withErrorBlock(lastMsg, event.data));
       }

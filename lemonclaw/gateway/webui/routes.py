@@ -447,19 +447,21 @@ def get_webui_routes(
         # Enforce webui: prefix — prevent accessing other channel sessions
         if not session_key.startswith("webui:"):
             session_key = f"webui:{session_key}"
+        effective_session_key = session_key
 
         # Write model override to session metadata before processing
         model = body.get("model")
-        provider_switch_reset = False
+        provider_switch_new_session = False
         if model:
             session = session_manager.get_or_create(session_key)
             current_model = session.metadata.get("current_model") or getattr(agent_loop, "model", "")
+            target_session = session
             if session.messages and current_model and provider_family_for_model(current_model) != provider_family_for_model(model):
-                provider_switch_reset = True
-                session.messages = []
-                session.last_consolidated = 0
-            session.metadata["current_model"] = model
-            session_manager.save(session)
+                provider_switch_new_session = True
+                effective_session_key = f"webui:{uuid.uuid4().hex[:8]}"
+                target_session = session_manager.get_or_create(effective_session_key)
+            target_session.metadata["current_model"] = model
+            session_manager.save(target_session)
 
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -488,29 +490,37 @@ def get_webui_routes(
                 # If model specified, temporarily set it via session metadata
                 async def outbound_sink(out_msg):
                     if out_msg.media:
-                        _touch_session_media_grants(session_key, list(out_msg.media))
-                    event = {"type": "outbound", "data": serialize_ui_message({"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])}, session_key=session_key)}
+                        _touch_session_media_grants(effective_session_key, list(out_msg.media))
+                    event = {
+                        "type": "outbound",
+                        "session_key": effective_session_key,
+                        "data": serialize_ui_message(
+                            {"role": "assistant", "content": out_msg.content, "media": list(out_msg.media or [])},
+                            session_key=effective_session_key,
+                        ),
+                    }
                     await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
                 final = await agent_loop.process_direct(
                     content=message,
-                    session_key=session_key,
+                    session_key=effective_session_key,
                     channel="webui",
                     chat_id="webui",
                     on_progress=on_progress,
                     on_chunk=on_chunk,
-                    metadata={**({"timezone": user_timezone} if user_timezone else {}), **({"provider_switch_reset": True} if provider_switch_reset else {})} or None,
+                    metadata={"timezone": user_timezone} if user_timezone else None,
                     media=media_files or None,
                     outbound_sink=outbound_sink,
                 )
-                if provider_switch_reset:
-                    notice = {"type": "error", "data": "Model provider changed. Session context was reset automatically before continuing."}
-                    await queue.put(f"data: {json.dumps(notice, ensure_ascii=False)}\n\n")
                 # Send final response
-                event = {"type": "done", "data": serialize_ui_message({"role": "assistant", "content": final}, session_key=session_key)}
+                event = {
+                    "type": "done",
+                    "session_key": effective_session_key,
+                    "data": serialize_ui_message({"role": "assistant", "content": final}, session_key=effective_session_key),
+                }
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
                 # Set title for new sessions (instant, no LLM)
-                _set_session_title(session_key, message)
+                _set_session_title(effective_session_key, message)
             except Exception as exc:
                 logger.error("WebUI chat error: {}", exc)
                 event = {"type": "error", "data": str(exc)}

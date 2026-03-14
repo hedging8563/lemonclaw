@@ -200,6 +200,8 @@ class TestSlashCommands:
         )
         await loop._process_message(msg1)
         session = loop.sessions.get_or_create("test:c1")
+        session.metadata["current_model"] = "gpt-5.2"
+        loop.sessions.save(session)
         assert len(session.messages) > 0
 
         # /new requires memory consolidation to succeed — mock it
@@ -210,6 +212,8 @@ class TestSlashCommands:
             response = await loop._process_message(msg2)
         assert response is not None
         assert "new session" in response.content.lower() or "started" in response.content.lower()
+        refreshed = loop.sessions.get_or_create("test:c1")
+        assert refreshed.metadata.get("current_model") is None
 
 
 # ── 2c. Token Tracking (P2-A) ──
@@ -970,6 +974,42 @@ class TestWebUIRoutes:
         assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
 
     @pytest.mark.asyncio
+    async def test_chat_stream_cross_provider_switch_creates_new_webui_session(self, make_agent_loop):
+        from starlette.testclient import TestClient
+
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop(model='claude-sonnet-4-6')
+        existing = loop.sessions.get_or_create('webui:existing')
+        existing.messages.append({'role': 'user', 'content': 'hello'})
+        existing.metadata['current_model'] = 'claude-sonnet-4-6'
+        loop.sessions.save(existing)
+
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post('/api/chat/stream', json={
+            'message': 'switch provider',
+            'session_key': 'webui:existing',
+            'model': 'gpt-5.2',
+        })
+        assert resp.status_code == 200
+        assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
+        assert '"session_key": "webui:' in resp.text or '"session_key":"webui:' in resp.text
+
+        preserved = loop.sessions.get_or_create('webui:existing')
+        assert preserved.messages == [{'role': 'user', 'content': 'hello'}]
+        assert preserved.metadata.get('current_model') == 'claude-sonnet-4-6'
+
+        sessions = [item for item in loop.sessions.list_sessions() if item['key'].startswith('webui:')]
+        new_keys = [item['key'] for item in sessions if item['key'] != 'webui:existing']
+        assert len(new_keys) == 1
+
+        new_session = loop.sessions.get_or_create(new_keys[0])
+        assert new_session.metadata.get('current_model') == 'gpt-5.2'
+        assert any(message.get('role') == 'assistant' for message in new_session.messages)
+
+    @pytest.mark.asyncio
     async def test_webui_disabled(self, make_agent_loop):
         from starlette.testclient import TestClient
 
@@ -1003,4 +1043,3 @@ def test_conductor_routes_require_valid_cookie(tmp_path):
     resp = client.get('/api/conductor/agents')
     assert resp.status_code == 200
     assert resp.json()['agents'][0]['id'] == 'a1'
-

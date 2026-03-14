@@ -905,6 +905,7 @@ class AgentLoop:
             # then create a fresh session with the same key.
             self.sessions.archive_session(session.key)
             session.clear()
+            session.metadata.pop("current_model", None)
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return self._command_reply(msg, t("new_session", lang), kind="new_session")
