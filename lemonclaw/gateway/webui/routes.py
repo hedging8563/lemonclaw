@@ -25,6 +25,7 @@ from lemonclaw.gateway.webui.auth import (
     verify_session_cookie,
     verify_token,
 )
+from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, runtime_policy_active
 from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
@@ -1104,6 +1105,31 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── POST /api/tasks/{task_id}/recheck — rerun completion gate ──────
+
+    async def recheck_task(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+        if not ledger.read_task(task_id):
+            return _json({"error": "task not found"}, 404)
+
+        result = await asyncio.to_thread(finalize_task, ledger, task_id)
+        task_view = ledger.read_task_view(task_id)
+        resp = _json({"result": result.to_dict() if result else None, "task": task_view["task"], "summary": task_view["summary"]} if task_view else {"result": result.to_dict() if result else None})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/recovery — recovery summary + tasks needing attention ──
 
     async def get_recovery(request: Request) -> Response:
@@ -1267,6 +1293,7 @@ def get_webui_routes(
         Route("/api/models", list_models, methods=["GET"]),
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
+        Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
         Route("/api/recovery", get_recovery, methods=["GET"]),
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),

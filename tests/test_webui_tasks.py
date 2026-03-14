@@ -99,6 +99,35 @@ def test_tasks_api_rejects_invalid_task_id(tmp_path):
     assert resp.json()["error"] == "invalid task_id"
 
 
+def test_task_recheck_api_reruns_completion_gate(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="say hello",
+        status="waiting",
+        current_stage="waiting_outbox",
+        metadata={
+            "recovery": {
+                "action": "manual_retry_requested",
+                "manual_review_required": False,
+                "source": "webui_manual_retry",
+            }
+        },
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/tasks/task_1/recheck")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["result"]["passed"] is True
+    assert data["task"]["status"] == "completed"
+    assert data["summary"]["completion_gate"]["passed"] is True
+
+
 def test_tasks_api_requires_auth_when_token_enabled(tmp_path):
     app, ledger = _build_app(tmp_path, auth_token="secret-token")
     ledger.ensure_task(
