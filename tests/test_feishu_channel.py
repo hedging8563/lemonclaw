@@ -94,3 +94,31 @@ async def test_feishu_send_replies_with_image_attachment_when_message_id_present
             metadata={"message_id": "om_parent", "chat_type": "group"},
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_feishu_send_falls_back_to_direct_send_when_reply_fails(
+    feishu_channel: FeishuChannel, tmp_path
+) -> None:
+    image_path = tmp_path / "reply.png"
+    image_path.write_bytes(b"png")
+
+    feishu_channel._client = SimpleNamespace()
+    feishu_channel._upload_image_sync = lambda _path: "img_key"
+    feishu_channel._reply_message_sync = lambda *args, **kwargs: False
+    sent = []
+    feishu_channel._send_message_sync = lambda receive_id_type, receive_id, msg_type, content: sent.append(
+        (receive_id_type, receive_id, msg_type, json.loads(content))
+    ) or True
+
+    await feishu_channel.send(
+        SimpleNamespace(
+            channel="feishu",
+            chat_id="oc_test123",
+            content="",
+            media=[str(image_path)],
+            metadata={"message_id": "om_parent", "chat_type": "group"},
+        )
+    )
+
+    assert sent == [("chat_id", "oc_test123", "image", {"image_key": "img_key"})]

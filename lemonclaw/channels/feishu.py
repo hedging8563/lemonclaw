@@ -660,6 +660,44 @@ class FeishuChannel(BaseChannel):
             logger.error("Error replying Feishu {} message: {}", msg_type, e)
             return False
 
+    async def _send_or_reply(
+        self,
+        *,
+        receive_id_type: str,
+        receive_id: str,
+        msg_type: str,
+        content: str,
+        reply_message_id: str | None,
+        reply_in_thread: bool,
+    ) -> bool:
+        loop = asyncio.get_running_loop()
+        if reply_message_id:
+            ok = await loop.run_in_executor(
+                None,
+                partial(
+                    self._reply_message_sync,
+                    reply_message_id,
+                    msg_type,
+                    content,
+                    reply_in_thread=reply_in_thread,
+                ),
+            )
+            if ok:
+                return True
+            logger.warning(
+                "Feishu reply failed for {}, falling back to direct send",
+                reply_message_id,
+            )
+
+        return await loop.run_in_executor(
+            None,
+            self._send_message_sync,
+            receive_id_type,
+            receive_id,
+            msg_type,
+            content,
+        )
+
     def _fetch_reply_context_sync(self, message_id: str) -> str | None:
         """Fetch a quoted Feishu message and extract a compact text representation."""
         try:
@@ -704,7 +742,6 @@ class FeishuChannel(BaseChannel):
 
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
-            loop = asyncio.get_running_loop()
             reply_message_id = (msg.metadata or {}).get("message_id")
             reply_in_thread = (msg.metadata or {}).get("chat_type") == "group"
 
@@ -714,65 +751,41 @@ class FeishuChannel(BaseChannel):
                     continue
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in self._IMAGE_EXTS:
-                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+                    key = await asyncio.get_running_loop().run_in_executor(None, self._upload_image_sync, file_path)
                     if key:
                         payload = json.dumps({"image_key": key}, ensure_ascii=False)
-                        if reply_message_id:
-                            await loop.run_in_executor(
-                                None,
-                                partial(
-                                    self._reply_message_sync,
-                                    reply_message_id,
-                                    "image",
-                                    payload,
-                                    reply_in_thread=reply_in_thread,
-                                ),
-                            )
-                        else:
-                            await loop.run_in_executor(
-                                None, self._send_message_sync,
-                                receive_id_type, msg.chat_id, "image", payload,
-                            )
+                        await self._send_or_reply(
+                            receive_id_type=receive_id_type,
+                            receive_id=msg.chat_id,
+                            msg_type="image",
+                            content=payload,
+                            reply_message_id=reply_message_id,
+                            reply_in_thread=reply_in_thread,
+                        )
                 else:
-                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                    key = await asyncio.get_running_loop().run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
                         media_type = "audio" if ext in self._AUDIO_EXTS else "file"
                         payload = json.dumps({"file_key": key}, ensure_ascii=False)
-                        if reply_message_id:
-                            await loop.run_in_executor(
-                                None,
-                                partial(
-                                    self._reply_message_sync,
-                                    reply_message_id,
-                                    media_type,
-                                    payload,
-                                    reply_in_thread=reply_in_thread,
-                                ),
-                            )
-                        else:
-                            await loop.run_in_executor(
-                                None, self._send_message_sync,
-                                receive_id_type, msg.chat_id, media_type, payload,
-                            )
+                        await self._send_or_reply(
+                            receive_id_type=receive_id_type,
+                            receive_id=msg.chat_id,
+                            msg_type=media_type,
+                            content=payload,
+                            reply_message_id=reply_message_id,
+                            reply_in_thread=reply_in_thread,
+                        )
 
             if msg.content and msg.content.strip():
                 card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                if reply_message_id:
-                    await loop.run_in_executor(
-                        None,
-                        partial(
-                            self._reply_message_sync,
-                            reply_message_id,
-                            "interactive",
-                            json.dumps(card, ensure_ascii=False),
-                            reply_in_thread=reply_in_thread,
-                        ),
-                    )
-                else:
-                    await loop.run_in_executor(
-                        None, self._send_message_sync,
-                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                    )
+                await self._send_or_reply(
+                    receive_id_type=receive_id_type,
+                    receive_id=msg.chat_id,
+                    msg_type="interactive",
+                    content=json.dumps(card, ensure_ascii=False),
+                    reply_message_id=reply_message_id,
+                    reply_in_thread=reply_in_thread,
+                )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)

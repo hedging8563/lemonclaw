@@ -103,14 +103,14 @@ def resolve_delivery_route(
     return deepcopy(route) if isinstance(route, dict) else {}
 
 
-def apply_delivery_route(msg: OutboundMessage) -> OutboundMessage:
+def apply_delivery_route(msg: OutboundMessage) -> None:
     route = resolve_delivery_route(
         metadata=msg.metadata,
         channel=msg.channel,
         chat_id=msg.chat_id,
     )
     if not route:
-        return msg
+        return
 
     metadata = dict(msg.metadata or {})
 
@@ -148,4 +148,3 @@ def apply_delivery_route(msg: OutboundMessage) -> OutboundMessage:
                 metadata[key] = route[key]
 
     msg.metadata = metadata
-    return msg

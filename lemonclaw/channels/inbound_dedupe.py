@@ -6,7 +6,11 @@ from collections import OrderedDict
 
 
 class InboundDedupeCache:
-    """Thread-safe TTL cache for suppressing duplicate inbound events."""
+    """Thread-safe TTL cache for suppressing duplicate inbound events.
+
+    Safe to call from both asyncio tasks and callback threads.
+    The critical section is intentionally tiny: pure in-memory bookkeeping only.
+    """
 
     def __init__(self, *, ttl_seconds: int = 300, max_entries: int = 2000) -> None:
         self._ttl_seconds = ttl_seconds
@@ -17,6 +21,8 @@ class InboundDedupeCache:
     def remember(self, key: str) -> bool:
         """Return True if this key is new within the TTL window, else False."""
         if not key:
+            # Empty identifiers cannot be deduped safely; callers should prefer
+            # namespaced non-empty keys (for example "telegram:update:123").
             return True
 
         now = time.monotonic()
