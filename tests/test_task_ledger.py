@@ -276,6 +276,47 @@ def test_task_ledger_can_mark_outbox_failed_without_retry(tmp_path: Path):
     assert failed["metadata"]["terminal"] is True
 
 
+def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+        status="waiting",
+        current_stage="waiting_outbox",
+        metadata={
+            "recovery": {
+                "action": "manual_review",
+                "manual_review_required": True,
+                "source": "watchdog_soft_recovery",
+            }
+        },
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        error="temporary failure",
+    )
+
+    updated = ledger.request_outbox_retry(event["event_id"], source="webui_manual_retry")
+
+    assert updated is not None
+    assert updated["status"] == "pending"
+    assert updated["error"] is None
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "waiting"
+    assert task["metadata"]["recovery"]["action"] == "manual_retry_requested"
+    assert task["metadata"]["recovery"]["manual_review_required"] is False
+
+
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(

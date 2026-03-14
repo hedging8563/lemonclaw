@@ -512,6 +512,57 @@ class TaskLedger:
             metadata=metadata,
         )
 
+    def request_outbox_retry(
+        self,
+        event_id: str,
+        *,
+        source: str,
+        delay_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        """Manually reschedule an outbox event and clear manual-review state."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        status = str(current.get("status") or "")
+        if status == "sent":
+            raise ValueError("cannot retry a sent outbox event")
+
+        now = _now_ms()
+        metadata = dict(current.get("metadata") or {})
+        metadata.pop("terminal", None)
+        metadata["manual_retry_requested_at_ms"] = now
+        metadata["manual_retry_source"] = source
+
+        updated = self.update_outbox_event(
+            event_id,
+            status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
+            next_attempt_at_ms=now + max(0, int(delay_ms)),
+            error=None,
+            metadata=metadata,
+        )
+
+        task_id = str(current.get("task_id") or "")
+        if updated and task_id and self.is_valid_task_id(task_id):
+            task = self.read_task(task_id)
+            if task:
+                task_metadata = dict(task.get("metadata") or {})
+                recovery = dict(task_metadata.get("recovery") or {})
+                recovery["action"] = "manual_retry_requested"
+                recovery["manual_review_required"] = False
+                recovery["requested_at_ms"] = now
+                recovery["source"] = source
+                task_metadata["recovery"] = recovery
+                self.update_task(
+                    task_id,
+                    status="waiting",
+                    current_stage="waiting_outbox",
+                    error=None,
+                    metadata=task_metadata,
+                )
+        return updated
+
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
         path = self._outbox_path()

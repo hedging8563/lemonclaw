@@ -1202,6 +1202,40 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── POST /api/outbox/{event_id}/retry — manual retry request ───────
+
+    async def retry_outbox_event(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        event_id = request.path_params.get("event_id", "")
+        if not event_id:
+            return _json({"error": "event_id is required"}, 400)
+        if not ledger.is_valid_outbox_id(event_id):
+            return _json({"error": "invalid event_id"}, 400)
+
+        event = ledger.read_outbox_event(event_id)
+        if not event:
+            return _json({"error": "event not found"}, 404)
+
+        try:
+            updated = ledger.request_outbox_retry(event_id, source="webui_manual_retry")
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 409)
+        if not updated:
+            return _json({"error": "event not found"}, 404)
+
+        task_id = str(updated.get("task_id") or "")
+        task = ledger.read_task(task_id) if task_id and ledger.is_valid_task_id(task_id) else None
+        resp = _json({"event": updated, "task": task})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── Assemble routes ──────────────────────────────────────────────────
 
     return [
@@ -1237,5 +1271,6 @@ def get_webui_routes(
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),
         Route("/api/outbox/{event_id}", get_outbox_event, methods=["GET"]),
+        Route("/api/outbox/{event_id}/retry", retry_outbox_event, methods=["POST"]),
         Route("/api/info", get_info, methods=["GET"]),
     ]

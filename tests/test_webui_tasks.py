@@ -260,3 +260,66 @@ def test_watchdog_api_returns_runtime_snapshot(tmp_path):
     assert data["config"]["task_stuck_threshold_s"] == 1
     assert data["task_stuck"]["count"] == 1
     assert data["task_stuck"]["task_ids"] == ["task_a"]
+
+
+def test_outbox_retry_api_reschedules_event_and_clears_manual_review(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+        status="waiting",
+        current_stage="waiting_outbox",
+        metadata={
+            "recovery": {
+                "action": "manual_review",
+                "manual_review_required": True,
+                "source": "watchdog_soft_recovery",
+            }
+        },
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_a",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        error="temporary failure",
+    )
+
+    client = TestClient(app)
+    resp = client.post(f"/api/outbox/{event['event_id']}/retry")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["event"]["status"] == "pending"
+    assert data["task"]["metadata"]["recovery"]["action"] == "manual_retry_requested"
+    assert data["task"]["metadata"]["recovery"]["manual_review_required"] is False
+
+
+def test_outbox_retry_api_rejects_sent_event(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_a",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="sent",
+    )
+
+    client = TestClient(app)
+    resp = client.post(f"/api/outbox/{event['event_id']}/retry")
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "cannot retry a sent outbox event"
