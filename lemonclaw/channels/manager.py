@@ -261,6 +261,7 @@ class ChannelManager:
                     self.bus.consume_outbound(),
                     timeout=1.0
                 )
+                apply_delivery_route(msg)
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
                 if msg.channel != "webui" and self.activity_bus and not self._should_skip_activity_broadcast(msg):
@@ -299,7 +300,6 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
-                        apply_delivery_route(msg)
                         await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)
