@@ -1053,6 +1053,53 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/tasks — task ledger summaries ───────────────────────────
+
+    async def list_tasks(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        try:
+            limit = min(int(request.query_params.get("limit", "50")), 200)
+        except (TypeError, ValueError):
+            limit = 50
+
+        session_key = request.query_params.get("session_key") or None
+        status = request.query_params.get("status") or None
+        tasks = ledger.list_tasks(limit=limit, session_key=session_key, status=status)
+
+        resp = _json({"tasks": tasks})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── GET /api/tasks/{task_id} — task ledger detail ───────────────────
+
+    async def get_task(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+
+        task_view = ledger.read_task_view(task_id)
+        if not task_view:
+            return _json({"error": "task not found"}, 404)
+
+        resp = _json(task_view)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── Assemble routes ──────────────────────────────────────────────────
 
     return [
@@ -1082,5 +1129,7 @@ def get_webui_routes(
         Route("/api/sessions/{key:path}", update_session, methods=["PATCH"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
         Route("/api/models", list_models, methods=["GET"]),
+        Route("/api/tasks", list_tasks, methods=["GET"]),
+        Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/info", get_info, methods=["GET"]),
     ]

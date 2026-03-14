@@ -59,7 +59,9 @@ class TaskLedger:
             return
         data = json.loads(path.read_text(encoding="utf-8"))
         data.update(updates)
-        data["updated_at_ms"] = _now_ms()
+        next_updated = _now_ms()
+        previous_updated = int(data.get("updated_at_ms") or 0)
+        data["updated_at_ms"] = max(next_updated, previous_updated + 1)
         self._write_json(path, data)
 
     def start_step(self, task_id: str, *, step_type: str, name: str, input_summary: str = "") -> StepRecord:
@@ -97,6 +99,71 @@ class TaskLedger:
         if not path.exists():
             return []
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def materialize_steps(self, task_id: str) -> list[dict[str, Any]]:
+        """Collapse step event history into the latest state per step_id."""
+        latest_by_step: dict[str, dict[str, Any]] = {}
+        for event in self.read_steps(task_id):
+            step_id = str(event.get("step_id", "")).strip()
+            if not step_id:
+                continue
+            latest_by_step[step_id] = event
+        return sorted(
+            latest_by_step.values(),
+            key=lambda item: (
+                int(item.get("started_at_ms") or 0),
+                int(item.get("ended_at_ms") or 0),
+            ),
+        )
+
+    def list_tasks(
+        self,
+        *,
+        limit: int = 50,
+        session_key: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List persisted tasks ordered by most recently updated."""
+        tasks: list[dict[str, Any]] = []
+        if not self._state_dir.exists():
+            return tasks
+
+        for path in self._state_dir.glob("task_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if session_key and data.get("session_key") != session_key:
+                continue
+            if status and data.get("status") != status:
+                continue
+            tasks.append(data)
+
+        tasks.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
+        return tasks[:max(1, int(limit))]
+
+    def read_task_view(self, task_id: str) -> dict[str, Any] | None:
+        """Return task + materialized steps + summary for observer UIs."""
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        steps = self.materialize_steps(task_id)
+        status_counts: dict[str, int] = {}
+        for step in steps:
+            key = str(step.get("status") or "unknown")
+            status_counts[key] = status_counts.get(key, 0) + 1
+
+        return {
+            "task": task,
+            "steps": steps,
+            "summary": {
+                "step_count": len(steps),
+                "status_counts": status_counts,
+                "last_successful_step": task.get("last_successful_step"),
+                "current_stage": task.get("current_stage"),
+            },
+        }
 
     def _task_path(self, task_id: str) -> Path:
         return self._state_dir / f"{task_id}.json"
