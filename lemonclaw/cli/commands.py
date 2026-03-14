@@ -460,22 +460,24 @@ def gateway(
     # Create config watcher (started later in run())
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
-    from lemonclaw.ledger.outbox import OutboxDispatcher
+    from lemonclaw.ledger.outbox import OutboxDispatcher, PermanentOutboxError
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
 
     async def on_outbox_event(event: dict) -> None:
         from lemonclaw.bus.events import OutboundMessage
 
         if str(event.get("effect_type") or "") != "outbound_message":
-            raise ValueError(f"unsupported outbox effect_type: {event.get('effect_type')}")
+            raise PermanentOutboxError(f"unsupported outbox effect_type: {event.get('effect_type')}")
 
         payload = dict(event.get("payload") or {})
         target = str(event.get("target") or "")
+        # Payload overrides target-derived routing, with target as a fallback for
+        # older outbox writers that only persist "channel:chat_id" in `target`.
         target_channel, target_chat_id = (target.split(":", 1) if ":" in target else ("", target))
         channel = str(payload.get("channel") or target_channel)
         chat_id = str(payload.get("chat_id") or target_chat_id)
         if not channel or not chat_id:
-            raise ValueError("outbox outbound_message requires channel/chat_id")
+            raise PermanentOutboxError("outbox outbound_message requires channel/chat_id")
 
         await bus.publish_outbound(OutboundMessage(
             channel=channel,

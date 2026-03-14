@@ -393,7 +393,11 @@ class TaskLedger:
         now_ms: int | None = None,
         claim_owner: str = "outbox_dispatcher",
     ) -> list[dict[str, Any]]:
-        """Claim due pending/retrying outbox events for delivery."""
+        """Claim due pending/retrying outbox events for delivery.
+
+        `attempts` counts total delivery attempts, so it increments when an
+        event is claimed for a real send attempt, not when it is rescheduled.
+        """
         now = now_ms if now_ms is not None else _now_ms()
         due: list[dict[str, Any]] = []
         for event in self.materialize_outbox_events():
@@ -458,7 +462,12 @@ class TaskLedger:
         retry_at_ms: int,
         max_attempts: int | None = None,
     ) -> dict[str, Any] | None:
-        """Reschedule an outbox event or mark it terminally failed."""
+        """Reschedule an outbox event or mark it terminally failed.
+
+        `max_attempts` is the maximum total delivery attempts, not "retries
+        after the first attempt". Once the current claimed attempt reaches the
+        cap, the event becomes terminally failed.
+        """
         self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
@@ -474,6 +483,31 @@ class TaskLedger:
             event_id,
             status="failed" if terminal else "retrying",
             next_attempt_at_ms=None if terminal else int(retry_at_ms),
+            error=error[:500],
+            metadata=metadata,
+        )
+
+    def mark_outbox_failed(
+        self,
+        event_id: str,
+        *,
+        error: str,
+    ) -> dict[str, Any] | None:
+        """Mark an outbox event as terminally failed without retry."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        metadata = dict(current.get("metadata") or {})
+        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_claimed_by"] = metadata.get("claimed_by")
+        metadata["terminal"] = True
+
+        return self.update_outbox_event(
+            event_id,
+            status="failed",
+            next_attempt_at_ms=None,
             error=error[:500],
             metadata=metadata,
         )

@@ -250,6 +250,32 @@ def test_task_ledger_claims_due_outbox_events_and_reschedules_retry(tmp_path: Pa
     assert ledger.read_outbox_event(future["event_id"])["status"] == "retrying"
 
 
+def test_task_ledger_can_mark_outbox_failed_without_retry(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+    ledger.claim_due_outbox_events(limit=10, now_ms=1_000, claim_owner="test-dispatcher")
+
+    failed = ledger.mark_outbox_failed(event["event_id"], error="unsupported effect")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert failed["next_attempt_at_ms"] is None
+    assert failed["metadata"]["terminal"] is True
+
+
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(

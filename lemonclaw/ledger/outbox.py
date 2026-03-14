@@ -11,6 +11,10 @@ from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
 
+class PermanentOutboxError(RuntimeError):
+    """Non-retriable outbox delivery error."""
+
+
 class OutboxDispatcher:
     """Background dispatcher for claim/deliver/retry outbox flows."""
 
@@ -20,6 +24,7 @@ class OutboxDispatcher:
         on_deliver: Callable[[dict[str, Any]], Awaitable[None]],
         *,
         poll_interval_s: float = 1.0,
+        max_idle_poll_s: float = 15.0,
         batch_size: int = 20,
         retry_delay_ms: int = 5_000,
         max_attempts: int = 3,
@@ -28,6 +33,7 @@ class OutboxDispatcher:
         self._ledger = ledger
         self._on_deliver = on_deliver
         self._poll_interval_s = poll_interval_s
+        self._max_idle_poll_s = max(max_idle_poll_s, poll_interval_s)
         self._batch_size = batch_size
         self._retry_delay_ms = retry_delay_ms
         self._max_attempts = max_attempts
@@ -55,16 +61,21 @@ class OutboxDispatcher:
             self._task = None
 
     async def _run_loop(self) -> None:
+        idle_sleep_s = self._poll_interval_s
         while self._running:
             try:
                 delivered = await self.dispatch_once()
                 if delivered == 0:
-                    await asyncio.sleep(self._poll_interval_s)
+                    await asyncio.sleep(idle_sleep_s)
+                    idle_sleep_s = min(self._max_idle_poll_s, idle_sleep_s * 2)
+                else:
+                    idle_sleep_s = self._poll_interval_s
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("outbox: dispatcher tick failed")
-                await asyncio.sleep(self._poll_interval_s)
+                await asyncio.sleep(idle_sleep_s)
+                idle_sleep_s = min(self._max_idle_poll_s, idle_sleep_s * 2)
 
     async def dispatch_once(self) -> int:
         claimed = await asyncio.to_thread(
@@ -78,6 +89,15 @@ class OutboxDispatcher:
             task_id = str(event.get("task_id") or "")
             try:
                 await self._on_deliver(event)
+            except PermanentOutboxError as exc:
+                updated = await asyncio.to_thread(
+                    self._ledger.mark_outbox_failed,
+                    event_id,
+                    error=str(exc),
+                )
+                logger.warning("outbox: permanent delivery failure for {}: {}", event_id, exc)
+                if updated and task_id:
+                    await asyncio.to_thread(finalize_task, self._ledger, task_id)
             except Exception as exc:
                 updated = await asyncio.to_thread(
                     self._ledger.mark_outbox_retry,
