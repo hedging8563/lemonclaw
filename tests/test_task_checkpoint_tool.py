@@ -22,6 +22,7 @@ def test_task_checkpoint_updates_ledger(tmp_path: Path):
             summary="Waiting for verification",
             last_successful_step="tool_call",
             next_action="check output",
+            status="verifying",
             _task_id="task_1",
             _task_ledger=ledger,
         )
@@ -30,6 +31,7 @@ def test_task_checkpoint_updates_ledger(tmp_path: Path):
     assert "Checkpoint saved" in result
     task = ledger.read_task("task_1")
     assert task is not None
+    assert task["status"] == "verifying"
     assert task["current_stage"] == "verify"
     assert task["last_successful_step"] == "tool_call"
     assert task["metadata"]["next_action"] == "check output"

@@ -50,6 +50,7 @@ from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 from lemonclaw.utils.attachments import rewrite_text_paths
 from lemonclaw.agent.prompting import infer_mode
 from lemonclaw.governance import GovernanceRuntime
+from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
 if TYPE_CHECKING:
@@ -710,7 +711,7 @@ class AgentLoop:
         async with lock:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
-                self.ledger.update_task(str(metadata["_task_id"]), status="completed", current_stage="done")
+                finalize_task(self.ledger, str(metadata["_task_id"]))
 
                 # Internal request-response: resolve Future instead of outbound
                 if request_id:
@@ -1266,7 +1267,7 @@ class AgentLoop:
                                  metadata=direct_metadata, media=media or [])
             try:
                 response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
-                self.ledger.update_task(str(direct_metadata["_task_id"]), status="completed", current_stage="done")
+                finalize_task(self.ledger, str(direct_metadata["_task_id"]))
             except Exception as exc:
                 self.ledger.update_task(
                     str(direct_metadata["_task_id"]),

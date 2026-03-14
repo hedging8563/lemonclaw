@@ -53,7 +53,7 @@ class TaskCheckpointTool(Tool):
                 "status": {
                     "type": "string",
                     "description": "Optional task status override.",
-                    "enum": ["running", "waiting", "failed", "abandoned", "completed"],
+                    "enum": ["running", "waiting", "verifying", "failed", "abandoned"],
                 },
             },
             "required": ["stage", "summary"],

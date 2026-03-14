@@ -176,6 +176,7 @@ class TaskLedger:
                 "status_counts": status_counts,
                 "last_successful_step": task.get("last_successful_step"),
                 "current_stage": task.get("current_stage"),
+                "completion_gate": task.get("completion_gate"),
             },
         }
 
@@ -239,6 +240,10 @@ class TaskLedger:
             reverse=True,
         )
 
+    def materialize_outbox_events_for_task(self, task_id: str) -> list[dict[str, Any]]:
+        self._require_valid_task_id(task_id)
+        return [event for event in self.materialize_outbox_events() if event.get("task_id") == task_id]
+
     def read_outbox_events(self) -> list[dict[str, Any]]:
         path = self._outbox_path()
         if not path.exists():
@@ -279,6 +284,10 @@ class TaskLedger:
     @staticmethod
     def is_valid_task_id(task_id: str) -> bool:
         return bool(_SAFE_TASK_ID.match(task_id))
+
+    @staticmethod
+    def now_ms() -> int:
+        return _now_ms()
 
     def _require_valid_task_id(self, task_id: str) -> None:
         if not self.is_valid_task_id(task_id):

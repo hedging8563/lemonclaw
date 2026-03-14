@@ -12,6 +12,7 @@ from typing import Any, Callable, Coroutine
 from loguru import logger
 
 from lemonclaw.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -244,7 +245,7 @@ class CronService:
         from lemonclaw.agent.tools.cron import _IN_CRON_CONTEXT
 
         start_ms = _now_ms()
-        task_id = f"cron_{job.id}_{start_ms}"
+        task_id = f"task_cron_{job.id}_{start_ms}"
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         if self._task_ledger:
             self._task_ledger.ensure_task(
@@ -272,7 +273,7 @@ class CronService:
             if step:
                 self._task_ledger.finish_step(step, status="completed")
             if self._task_ledger:
-                self._task_ledger.update_task(task_id, status="completed", current_stage="done")
+                finalize_task(self._task_ledger, task_id)
             logger.info("Cron: job '{}' completed", job.name)
 
         except Exception as e:

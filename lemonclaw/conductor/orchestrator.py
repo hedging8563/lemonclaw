@@ -25,6 +25,7 @@ from lemonclaw.conductor.types import (
     SubTaskStatus,
     TaskComplexity,
 )
+from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ class Orchestrator:
             logger.debug("Orchestrator: SIMPLE — pass-through")
             return None  # Caller handles directly
 
-        task_id = str((msg.metadata or {}).get("_task_id") or f"orch_{uuid.uuid4().hex[:12]}")
+        task_id = str((msg.metadata or {}).get("_task_id") or f"task_orch_{uuid.uuid4().hex[:12]}")
         if self._ledger:
             self._ledger.ensure_task(
                 task_id=task_id,
@@ -126,7 +127,7 @@ class Orchestrator:
                 self._ledger.update_task(task_id, current_stage=OrchestratorPhase.MERGING.value)
             result = await self._merge(plan)
             if self._ledger:
-                self._ledger.update_task(task_id, status="completed", current_stage="done")
+                finalize_task(self._ledger, task_id)
             return result
         except Exception as e:
             if self._ledger:

@@ -103,6 +103,42 @@ class TestDispatch:
         await loop._dispatch(msg)
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert out.content == "hi"
+        task = loop.ledger.read_task(str(msg.metadata["_task_id"]))
+        assert task is not None
+        assert task["status"] == "completed"
+        assert task["completion_gate"]["passed"] is True
+
+    @pytest.mark.asyncio
+    async def test_dispatch_keeps_task_waiting_when_outbox_is_pending(self):
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+
+        async def _mock_process(m, **kwargs):
+            task_id = str(m.metadata["_task_id"])
+            step = loop.ledger.start_step(task_id, step_type="tool_call", name="notify")
+            loop.ledger.finish_step(step, status="completed")
+            loop.ledger.enqueue_outbox(
+                task_id=task_id,
+                step_id=step.step_id,
+                effect_type="outbound_message",
+                target="telegram:123",
+                payload={"content": "hi"},
+            )
+            return OutboundMessage(channel="test", chat_id="c1", content="hi")
+
+        loop._process_message = _mock_process
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hello")
+
+        await loop._dispatch(msg)
+
+        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert out.content == "hi"
+        task = loop.ledger.read_task(str(msg.metadata["_task_id"]))
+        assert task is not None
+        assert task["status"] == "waiting"
+        assert task["current_stage"] == "waiting_outbox"
+        assert task["completion_gate"]["passed"] is False
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):

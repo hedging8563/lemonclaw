@@ -92,8 +92,9 @@ async def test_cron_service_writes_task_ledger(tmp_path) -> None:
     service.on_job = _on_job
     await service._execute_job(job)
 
-    task_id_prefix = f"cron_{job.id}_"
+    task_id_prefix = f"task_cron_{job.id}_"
     task_files = list((tmp_path / ".lemonclaw-state" / "tasks").glob(f"{task_id_prefix}*.json"))
     assert len(task_files) == 1
     task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
     assert task["status"] == "completed"
+    assert task["completion_gate"]["passed"] is True

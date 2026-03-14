@@ -60,3 +60,18 @@ class OutboxEventRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class CompletionGateResult:
+    task_id: str
+    passed: bool
+    reason: str
+    next_status: str
+    next_stage: str
+    checked_at_ms: int
+    open_steps: list[str] = field(default_factory=list)
+    open_outbox: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
