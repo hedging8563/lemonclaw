@@ -472,6 +472,7 @@ def gateway(
         create_outbox_delivery_handler(
             bus=bus,
             notify_config=config.tools.notify,
+            http_config=config.tools.http,
         ),
     )
     agent.outbox_enabled = True

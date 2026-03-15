@@ -66,3 +66,24 @@ async def test_deliver_outbox_event_unknown_effect_is_permanent():
             publish_outbound=_publish,
             notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
         )
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_http_json_dns_failure_is_retryable(monkeypatch: pytest.MonkeyPatch):
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for http_json effect")
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery.httpx.AsyncClient", lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not create client")))
+    monkeypatch.setattr("lemonclaw.ledger.delivery._validate_url", lambda _url: (False, "DNS resolution failed", ""))
+
+    with pytest.raises(RuntimeError, match="DNS resolution failed"):
+        await deliver_outbox_event(
+            {
+                "effect_type": "http_json",
+                "target": "https://example.com/data",
+                "payload": {"method": "POST", "body": {"hello": "world"}},
+            },
+            publish_outbound=_publish,
+            notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+            http_config=SimpleNamespace(timeout=30, allow_domains=["example.com"], auth_profiles={}),
+        )

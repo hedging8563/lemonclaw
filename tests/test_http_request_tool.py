@@ -5,8 +5,10 @@ import json
 import pytest
 
 from lemonclaw.agent.tools.http_request import HTTPRequestTool
+from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.config.schema import HTTPRequestToolConfig
 from lemonclaw.governance.runtime import GovernanceRuntime
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 class DummyResponse:
@@ -67,6 +69,66 @@ async def test_http_request_applies_auth_profile(monkeypatch: pytest.MonkeyPatch
     method, _url, headers, _params, _json = client.calls[0]
     assert method == "GET"
     assert headers["Authorization"] == "Bearer token"
+
+
+@pytest.mark.asyncio
+async def test_http_request_write_enqueues_outbox_when_enabled(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+    monkeypatch.setattr("lemonclaw.agent.tools.http_request._validate_url", lambda url: (True, "", "1.2.3.4"))
+
+    tool = HTTPRequestTool(allow_domains=["example.com"])
+    result = await tool.execute(
+        "POST",
+        "https://example.com/data",
+        body={"hello": "world"},
+        _task_id="task_1",
+        _task_ledger=ledger,
+        _step_id="step_http_1",
+        _outbox_enabled=True,
+    )
+
+    assert result["ok"] is True
+    assert result["raw"]["queued"] is True
+    assert result["step_status"] == "waiting_outbox"
+    events = ledger.list_outbox_events()
+    assert len(events) == 1
+    assert events[0]["effect_type"] == "http_json"
+    assert events[0]["payload"]["method"] == "POST"
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_passes_step_id_to_http_request_outbox(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+    monkeypatch.setattr("lemonclaw.agent.tools.http_request._validate_url", lambda url: (True, "", "1.2.3.4"))
+    registry = ToolRegistry(ledger=ledger)
+    registry.register(HTTPRequestTool(allow_domains=["example.com"]))
+
+    result = await registry.execute(
+        "http_request",
+        {"method": "POST", "url": "https://example.com/data", "body": {"hello": "world"}},
+        context={"_task_id": "task_1", "_task_ledger": ledger, "_outbox_enabled": True},
+    )
+
+    assert '"queued": true' in result.lower()
+    steps = ledger.materialize_steps("task_1")
+    assert len(steps) == 1
+    assert steps[0]["status"] == "waiting_outbox"
 
 
 def test_governance_marks_http_write_as_external_write(tmp_path):

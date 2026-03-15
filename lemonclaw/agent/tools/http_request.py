@@ -11,6 +11,7 @@ import httpx
 
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.web import MAX_REDIRECTS, USER_AGENT, _validate_url
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 def _domain_allowed(host: str, patterns: list[str]) -> bool:
@@ -118,6 +119,10 @@ class HTTPRequestTool(Tool):
         auth_profile: str | None = None,
         expect_json: bool = True,
         timeout: int | None = None,
+        _task_id: str | None = None,
+        _task_ledger: TaskLedger | None = None,
+        _step_id: str | None = None,
+        _outbox_enabled: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         method = method.upper().strip()
@@ -141,6 +146,30 @@ class HTTPRequestTool(Tool):
         validated, error, resolved_ip = _validate_url(url)
         if not validated:
             return {"ok": False, "summary": f"URL validation failed: {error}", "raw": {"url": url}}
+
+        if method not in {"GET", "HEAD"} and _outbox_enabled and _task_id and _task_ledger and _step_id:
+            event = _task_ledger.enqueue_outbox(
+                task_id=_task_id,
+                step_id=_step_id,
+                effect_type="http_json",
+                target=url,
+                payload={
+                    "method": method,
+                    "headers": headers,
+                    "query": query,
+                    "body": body,
+                    "auth_profile": auth_profile or "",
+                    "expect_json": expect_json,
+                    "timeout": request_timeout,
+                },
+            )
+            return {
+                "ok": True,
+                "summary": f"{method} {url} queued",
+                "step_status": "waiting_outbox",
+                "raw": {"event_id": event["event_id"], "queued": True, "method": method, "url": url},
+                "artifacts": [],
+            }
 
         response = None
         current_url = url
