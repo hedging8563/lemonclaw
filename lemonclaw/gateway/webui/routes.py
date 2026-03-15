@@ -1175,6 +1175,61 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── GET /api/tasks/{task_id}/resume-candidate — suggested action ───
+
+    async def get_resume_candidate(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+
+        candidate = ledger.build_resume_candidate(task_id)
+        if not candidate:
+            return _json({"error": "task not found"}, 404)
+        resp = _json({"candidate": candidate})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    # ── POST /api/tasks/{task_id}/resume/execute — safe action only ────
+
+    async def execute_safe_resume(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+        if not ledger.read_task(task_id):
+            return _json({"error": "task not found"}, 404)
+
+        lock = _task_resume_locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            try:
+                candidate = ledger.execute_safe_resume(task_id, source="webui_safe_resume_execute")
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 409)
+            task_view = ledger.read_task_view(task_id)
+
+        resp = _json({"candidate": candidate, "task": task_view["task"] if task_view else None, "summary": task_view["summary"] if task_view else None})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── POST /api/channels/{name}/restart — reconnect one channel ──────
 
     async def restart_channel(request: Request) -> Response:
@@ -1390,7 +1445,9 @@ def get_webui_routes(
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
+        Route("/api/tasks/{task_id}/resume-candidate", get_resume_candidate, methods=["GET"]),
         Route("/api/tasks/{task_id}/resume", resume_task, methods=["POST"]),
+        Route("/api/tasks/{task_id}/resume/execute", execute_safe_resume, methods=["POST"]),
         Route("/api/recovery", get_recovery, methods=["GET"]),
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),

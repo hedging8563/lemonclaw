@@ -455,6 +455,99 @@ class TaskLedger:
         )
         return self.read_task(task_id)
 
+    def build_resume_candidate(self, task_id: str) -> dict[str, Any] | None:
+        """Describe the safest next recovery action for a task."""
+        self._require_valid_task_id(task_id)
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        steps = self.materialize_steps(task_id)
+        outbox_events = self.materialize_outbox_events_for_task(task_id)
+        resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
+        resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
+        failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
+        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in {"pending", "retrying", "claimed"}]
+
+        recommended_action = "manual_resume"
+        safe_to_execute = False
+        reason = "manual intervention required"
+        if failed_outbox:
+            recommended_action = "retry_outbox"
+            safe_to_execute = True
+            reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
+        elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
+            recommended_action = "recheck"
+            safe_to_execute = True
+            reason = "task can be safely rechecked through CompletionGate"
+        elif open_outbox:
+            recommended_action = "wait_outbox"
+            safe_to_execute = False
+            reason = "outbox delivery is still in progress"
+
+        return {
+            "task_id": task_id,
+            "status": str(task.get("status") or ""),
+            "current_stage": str(task.get("current_stage") or ""),
+            "resume_from_step": resume_from_step or None,
+            "resume_step": dict(resume_step or {}) if resume_step else None,
+            "failed_outbox_count": len(failed_outbox),
+            "open_outbox_count": len(open_outbox),
+            "recommended_action": recommended_action,
+            "safe_to_execute": safe_to_execute,
+            "reason": reason,
+        }
+
+    def execute_safe_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Execute the current safe recovery action when one exists."""
+        candidate = self.build_resume_candidate(task_id)
+        if not candidate:
+            return None
+        if not candidate.get("safe_to_execute"):
+            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
+
+        action = str(candidate.get("recommended_action") or "")
+        if action == "retry_outbox":
+            for event in self.materialize_outbox_events_for_task(task_id):
+                if str(event.get("status") or "") != "failed":
+                    continue
+                self.request_outbox_retry(str(event["event_id"]), source=source)
+            task = self.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action="safe_resume_execute",
+                    reason="retry failed outbox events",
+                    details={"task_id": task_id},
+                )
+                self.update_task(task_id, metadata=metadata)
+        elif action == "recheck":
+            from lemonclaw.ledger.completion_gate import finalize_task
+
+            result = finalize_task(self, task_id)
+            task = self.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action="safe_resume_execute",
+                    reason=str((result.to_dict() if result else {}).get("reason") or ""),
+                    details={"task_id": task_id, "mode": "recheck"},
+                )
+                self.update_task(task_id, metadata=metadata)
+        else:
+            raise ValueError(f"unsupported safe resume action: {action}")
+
+        return self.build_resume_candidate(task_id)
+
     def enqueue_outbox(
         self,
         *,

@@ -155,6 +155,73 @@ def test_task_resume_api_sets_resume_from_step(tmp_path):
     assert data["summary"]["resume_from_step"] == step.step_id
 
 
+def test_resume_candidate_api_reports_safe_retry_outbox(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume me",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="boom")
+    ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        error="boom",
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks/task_1/resume-candidate")
+    assert resp.status_code == 200
+    data = resp.json()["candidate"]
+    assert data["recommended_action"] == "retry_outbox"
+    assert data["safe_to_execute"] is True
+
+
+def test_safe_resume_execute_api_retries_failed_outbox(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume me",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="boom")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        attempts=1,
+        error="boom",
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/tasks/task_1/resume/execute")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate"]["recommended_action"] in {"wait_outbox", "manual_resume"}
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+
+
 def test_tasks_api_requires_auth_when_token_enabled(tmp_path):
     app, ledger = _build_app(tmp_path, auth_token="secret-token")
     ledger.ensure_task(

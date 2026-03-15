@@ -588,3 +588,70 @@ def test_task_ledger_request_task_resume_sets_resume_from_step(tmp_path: Path):
     assert resumed["resume_from_step"] == step.step_id
     assert resumed["metadata"]["recovery"]["action"] == "resume_requested"
     assert resumed["metadata"]["recovery_history"][-1]["action"] == "resume_requested"
+
+
+def test_task_ledger_build_resume_candidate_prefers_failed_outbox_retry(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="resume demo",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="delivery failed")
+    ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        error="boom",
+    )
+
+    candidate = ledger.build_resume_candidate("task_1")
+
+    assert candidate is not None
+    assert candidate["recommended_action"] == "retry_outbox"
+    assert candidate["safe_to_execute"] is True
+
+
+def test_task_ledger_execute_safe_resume_retries_failed_outbox(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="resume demo",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="delivery failed")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="failed",
+        attempts=1,
+        error="boom",
+    )
+
+    candidate = ledger.execute_safe_resume("task_1", source="webui_safe_resume_execute")
+
+    assert candidate is not None
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["metadata"]["recovery_history"][-1]["action"] == "safe_resume_execute"
