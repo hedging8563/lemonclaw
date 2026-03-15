@@ -48,9 +48,12 @@ async def test_channel_manager_restart_channel_restarts_task():
 
     assert result["channel"] == "telegram"
     assert result["running"] is True
+    assert result["restart_count"] == 1
+    assert result["restart_fail_count"] == 0
     assert fake.start_calls == 2
     assert fake.stop_calls == 1
     assert manager._channel_tasks["telegram"] is not first_task
+    assert manager.get_status()["telegram"]["restart_count"] == 1
 
     await fake.stop()
     await asyncio.sleep(0.05)

@@ -35,6 +35,7 @@ class ChannelManager:
         self.channels: dict[str, BaseChannel] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
         self._restart_locks: dict[str, asyncio.Lock] = {}
+        self._restart_state: dict[str, dict[str, Any]] = {}
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
@@ -271,11 +272,19 @@ class ChannelManager:
             logger.info("Restarting {} channel...", name)
             restart_task = self._spawn_channel_task(name, channel)
             await asyncio.sleep(0)
-            return {
+            result = {
                 "channel": name,
                 "running": channel.is_running,
                 "task_done": restart_task.done(),
             }
+            state = self._restart_state.setdefault(name, {"restart_count": 0, "restart_fail_count": 0})
+            state["restart_count"] += 1
+            state["last_restart_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
+            state["last_restart_result"] = "running" if result["running"] else "not_running"
+            if not result["running"]:
+                state["restart_fail_count"] += 1
+            result.update(state)
+            return result
 
     @staticmethod
     def _activity_session_key(msg: OutboundMessage) -> str:
@@ -373,7 +382,8 @@ class ChannelManager:
         return {
             name: {
                 "enabled": True,
-                "running": channel.is_running
+                "running": channel.is_running,
+                **dict(self._restart_state.get(name, {})),
             }
             for name, channel in self.channels.items()
         }
