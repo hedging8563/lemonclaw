@@ -1078,7 +1078,10 @@ def get_webui_routes(
 
         session_key = request.query_params.get("session_key") or None
         status = request.query_params.get("status") or None
-        tasks = ledger.list_tasks(limit=limit, session_key=session_key, status=status)
+        tasks = [
+            ledger.enrich_task_for_observer(task) or task
+            for task in ledger.list_tasks(limit=limit, session_key=session_key, status=status)
+        ]
 
         resp = _json({"tasks": tasks})
         _maybe_refresh_cookie(request, resp)
@@ -1171,7 +1174,7 @@ def get_webui_routes(
             task = ledger.request_task_resume(task_id, source="webui_task_resume")
             task_view = ledger.read_task_view(task_id)
 
-        resp = _json({"task": task, "summary": task_view["summary"] if task_view else None})
+        resp = _json({"task": task_view["task"] if task_view else task, "summary": task_view["summary"] if task_view else None})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1276,6 +1279,7 @@ def get_webui_routes(
 
         manual_review_only = str(request.query_params.get("manual_review_only", "")).lower() in {"1", "true", "yes"}
         all_tasks = ledger.list_recovery_tasks(limit=500)
+        all_tasks = [ledger.enrich_task_for_observer(task) or task for task in all_tasks]
         tasks = all_tasks
         if manual_review_only:
             tasks = [

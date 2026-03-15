@@ -23,6 +23,28 @@ _SAFE_STEP_ID = re.compile(r"^step_[A-Za-z0-9_-]{1,64}$")
 _OUTBOX_MANUAL_RETRY_DEBOUNCE_MS = 1500
 
 
+def build_task_resume_context(
+    *,
+    channel: str,
+    chat_id: str,
+    session_key: str,
+    sender_id: str = "",
+    timezone: str = "",
+    message_id: str = "",
+    delivery_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a stable resume context payload for later task recovery."""
+    return {
+        "channel": str(channel),
+        "chat_id": str(chat_id),
+        "sender_id": str(sender_id or ""),
+        "session_key": str(session_key),
+        "timezone": str(timezone or ""),
+        "message_id": str(message_id or ""),
+        "delivery_context": dict(delivery_context or {}),
+    }
+
+
 class TaskLedger:
     """Simple JSON-backed task and step ledger."""
 
@@ -287,6 +309,98 @@ class TaskLedger:
                 summary["waiting_manual_review"] += 1
         return summary
 
+    @staticmethod
+    def describe_task_display_state(task: dict[str, Any]) -> dict[str, str]:
+        """Return a UI-friendly task state descriptor from ledger state."""
+        status = str(task.get("status") or "")
+        stage = str(task.get("current_stage") or "")
+        recovery = (task.get("metadata") or {}).get("recovery") or {}
+
+        if stage in {"resume_requested", "resume_queued"}:
+            return {
+                "key": "resume_queued",
+                "label": "Resume Queued",
+                "tone": "accent",
+                "detail": "Waiting for the resume executor to pick up this task.",
+            }
+        if stage == "resume_execute" and status == "running":
+            return {
+                "key": "resume_running",
+                "label": "Resume Running",
+                "tone": "accent",
+                "detail": "A resumed execution is currently in progress.",
+            }
+        if recovery.get("manual_review_required"):
+            return {
+                "key": "manual_review",
+                "label": "Needs Review",
+                "tone": "warning",
+                "detail": str(recovery.get("reason") or "Manual review is required before resume."),
+            }
+        if stage == "waiting_outbox" or (status == "waiting" and stage == "waiting_outbox"):
+            return {
+                "key": "waiting_outbox",
+                "label": "Waiting Outbox",
+                "tone": "warning",
+                "detail": "Delivery or retry is still pending in the outbox.",
+            }
+        if status == "completed":
+            return {
+                "key": "completed",
+                "label": "Completed",
+                "tone": "success",
+                "detail": "All known steps and outbox events are settled.",
+            }
+        if status == "failed":
+            return {
+                "key": "failed",
+                "label": "Failed",
+                "tone": "error",
+                "detail": str(task.get("error") or "Task execution failed."),
+            }
+        if status == "verifying":
+            return {
+                "key": "verifying",
+                "label": "Verifying",
+                "tone": "accent",
+                "detail": "Completion gate is still evaluating the task state.",
+            }
+        if status == "waiting":
+            return {
+                "key": "waiting",
+                "label": "Waiting",
+                "tone": "warning",
+                "detail": "Task is blocked on an external dependency or operator action.",
+            }
+        if status == "running":
+            return {
+                "key": "running",
+                "label": "Running",
+                "tone": "accent",
+                "detail": "Task execution is currently in progress.",
+            }
+        if status == "abandoned":
+            return {
+                "key": "abandoned",
+                "label": "Abandoned",
+                "tone": "muted",
+                "detail": "Task was intentionally abandoned or superseded.",
+            }
+        return {
+            "key": status or "unknown",
+            "label": (status or "unknown").replace("_", " ").title(),
+            "tone": "muted",
+            "detail": "",
+        }
+
+    def enrich_task_for_observer(self, task: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Add observer-friendly derived fields without mutating stored task data."""
+        if not task:
+            return None
+        enriched = dict(task)
+        enriched["display_state"] = self.describe_task_display_state(task)
+        return enriched
+
     def mark_task_stale(
         self,
         task_id: str,
@@ -387,13 +501,14 @@ class TaskLedger:
             return None
 
         steps = self.materialize_steps(task_id)
+        display_state = self.describe_task_display_state(task)
         status_counts: dict[str, int] = {}
         for step in steps:
             key = str(step.get("status") or "unknown")
             status_counts[key] = status_counts.get(key, 0) + 1
 
         return {
-            "task": task,
+            "task": self.enrich_task_for_observer(task),
             "steps": steps,
             "summary": {
                 "step_count": len(steps),
@@ -401,6 +516,7 @@ class TaskLedger:
                 "last_successful_step": task.get("last_successful_step"),
                 "resume_from_step": task.get("resume_from_step"),
                 "current_stage": task.get("current_stage"),
+                "display_state": display_state,
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
@@ -960,7 +1076,7 @@ class TaskLedger:
         self.update_task(
             task_id,
             status="running",
-            current_stage="resume_execute",
+            current_stage="resume_queued",
             error=None,
             metadata=metadata,
         )

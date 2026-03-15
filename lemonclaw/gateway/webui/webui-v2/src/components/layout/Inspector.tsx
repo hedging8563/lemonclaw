@@ -3,6 +3,7 @@ import { showInspector } from '../../stores/ui';
 import { ConductorPanel } from '../inspector/ConductorPanel';
 import { MemoryPanel } from '../inspector/MemoryPanel';
 import { StarOffice } from '../inspector/StarOffice';
+import { TaskRecoveryPanel } from '../inspector/TaskRecoveryPanel';
 import { YesterdayMemo } from '../inspector/YesterdayMemo';
 
 export function Inspector() {
@@ -29,6 +30,7 @@ export function Inspector() {
           <YesterdayMemo />
           <StarOffice />
           <ConductorPanel />
+          <TaskRecoveryPanel />
           <MemoryPanel />
         </div>
       </aside>

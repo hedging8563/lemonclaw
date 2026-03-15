@@ -51,7 +51,7 @@ from lemonclaw.utils.attachments import rewrite_text_paths
 from lemonclaw.agent.prompting import infer_mode
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.ledger.completion_gate import finalize_task
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -376,15 +376,15 @@ class AgentLoop:
         """Persist the minimum routing context needed for later task resume."""
         metadata = dict(msg.metadata or {})
         delivery_context = metadata.get("_delivery_context")
-        return {
-            "channel": msg.channel,
-            "chat_id": str(msg.chat_id),
-            "sender_id": str(msg.sender_id),
-            "session_key": msg.session_key,
-            "timezone": str(metadata.get("timezone") or ""),
-            "message_id": str(metadata.get("message_id") or ""),
-            "delivery_context": dict(delivery_context) if isinstance(delivery_context, dict) else {},
-        }
+        return build_task_resume_context(
+            channel=msg.channel,
+            chat_id=str(msg.chat_id),
+            sender_id=str(msg.sender_id),
+            session_key=msg.session_key,
+            timezone=str(metadata.get("timezone") or ""),
+            message_id=str(metadata.get("message_id") or ""),
+            delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
+        )
 
     def _spawn_dispatch_task(self, msg: InboundMessage) -> asyncio.Task:
         """Spawn a tracked dispatch task so /stop and recovery share the same path."""
@@ -987,7 +987,11 @@ class AgentLoop:
         task_id = str((msg.metadata or {}).get("_task_id", ""))
         resume_internal = bool((msg.metadata or {}).get("_resume_internal"))
         if task_id:
-            self.ledger.update_task(task_id, current_stage="process_message", status="running")
+            self.ledger.update_task(
+                task_id,
+                current_stage="resume_execute" if resume_internal else "process_message",
+                status="running",
+            )
         if msg.media:
             msg.content, msg.media = self._persist_inbound_media(key, msg.content, list(msg.media or []))
 
@@ -1406,15 +1410,15 @@ class AgentLoop:
                 channel=channel,
                 goal=content[:500],
                 current_stage="dispatch",
-                resume_context={
-                    "channel": channel,
-                    "chat_id": str(chat_id),
-                    "sender_id": "user",
-                    "session_key": session_key,
-                    "timezone": str(direct_metadata.get("timezone") or self.default_timezone or ""),
-                    "message_id": str(direct_metadata.get("message_id") or ""),
-                    "delivery_context": dict(direct_metadata.get("_delivery_context") or {}),
-                },
+                resume_context=build_task_resume_context(
+                    channel=channel,
+                    chat_id=str(chat_id),
+                    sender_id="user",
+                    session_key=session_key,
+                    timezone=str(direct_metadata.get("timezone") or self.default_timezone or ""),
+                    message_id=str(direct_metadata.get("message_id") or ""),
+                    delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
+                ),
             )
             if outbound_sink:
                 direct_metadata["_outbound_sink"] = outbound_sink

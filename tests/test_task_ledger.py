@@ -778,5 +778,5 @@ def test_prepare_replay_failed_steps_supersedes_old_failed_steps(tmp_path: Path)
     task = ledger.read_task("task_1")
     assert task is not None
     assert task["status"] == "running"
-    assert task["current_stage"] == "resume_execute"
+    assert task["current_stage"] == "resume_queued"
     assert task["metadata"]["recovery"]["action"] == "resume_execute_requested"

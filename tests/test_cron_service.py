@@ -145,4 +145,44 @@ async def test_cron_service_writes_task_ledger(tmp_path) -> None:
     assert len(task_files) == 1
     task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
     assert task["status"] == "completed"
+    assert task["resume_context"]["channel"] == "cli"
+    assert task["resume_context"]["chat_id"] == "direct"
+    assert task["resume_context"]["session_key"] == f"cron:{job.id}"
     assert task["completion_gate"]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -> None:
+    ledger = TaskLedger(tmp_path)
+    service = CronService(tmp_path / "cron" / "jobs.json", task_ledger=ledger)
+    job = service.add_job(
+        name="threaded job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello thread",
+        channel="telegram",
+        to="123",
+        session_key="telegram:123:456",
+        metadata={
+            "delivery_context": {
+                "source_channel": "telegram",
+                "source_chat_id": "123",
+                "session_key": "telegram:123:456",
+                "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+            }
+        },
+    )
+
+    async def _on_job(_job):
+        return "ok"
+
+    service.on_job = _on_job
+    await service._execute_job(job)
+
+    task_id_prefix = f"task_cron_{job.id}_"
+    task_files = list((tmp_path / ".lemonclaw-state" / "tasks").glob(f"{task_id_prefix}*.json"))
+    assert len(task_files) == 1
+    task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
+    assert task["resume_context"]["channel"] == "telegram"
+    assert task["resume_context"]["chat_id"] == "123"
+    assert task["resume_context"]["session_key"] == "telegram:123:456"
+    assert task["resume_context"]["delivery_context"]["route"]["message_thread_id"] == 456

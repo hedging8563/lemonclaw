@@ -60,6 +60,8 @@ def test_tasks_api_lists_tasks_and_filters_by_session(tmp_path):
     assert resp.status_code == 200
     tasks = resp.json()["tasks"]
     assert [item["task_id"] for item in tasks] == ["task_b", "task_a"]
+    assert tasks[0]["display_state"]["key"] == "completed"
+    assert tasks[1]["display_state"]["key"] == "running"
 
     resp = client.get("/api/tasks", params={"session_key": "telegram:123"})
     assert resp.status_code == 200
@@ -87,8 +89,10 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert data["task"]["task_id"] == "task_1"
+    assert data["task"]["display_state"]["key"] == "completed"
     assert data["summary"]["step_count"] == 1
     assert data["summary"]["status_counts"]["completed"] == 1
+    assert data["summary"]["display_state"]["key"] == "completed"
     assert data["summary"]["last_successful_step"] == "read_file"
 
 
@@ -152,6 +156,7 @@ def test_task_resume_api_sets_resume_from_step(tmp_path):
     data = resp.json()
     assert data["task"]["status"] == "waiting"
     assert data["task"]["current_stage"] == "resume_requested"
+    assert data["task"]["display_state"]["key"] == "resume_queued"
     assert data["task"]["resume_from_step"] == step.step_id
     assert data["summary"]["resume_from_step"] == step.step_id
 

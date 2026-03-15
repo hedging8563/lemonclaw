@@ -26,7 +26,7 @@ from lemonclaw.conductor.types import (
     TaskComplexity,
 )
 from lemonclaw.ledger.completion_gate import finalize_task
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
 if TYPE_CHECKING:
     from lemonclaw.agent.registry import AgentRegistry
@@ -92,6 +92,15 @@ class Orchestrator:
                 channel=msg.channel,
                 goal=msg.content[:500],
                 current_stage=OrchestratorPhase.ANALYZING.value,
+                resume_context=build_task_resume_context(
+                    channel=msg.channel,
+                    chat_id=str(msg.chat_id),
+                    sender_id=str(msg.sender_id),
+                    session_key=msg.session_key,
+                    timezone=str((msg.metadata or {}).get("timezone") or ""),
+                    message_id=str((msg.metadata or {}).get("message_id") or ""),
+                    delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
+                ),
                 metadata={"source": "orchestrator"},
             )
 

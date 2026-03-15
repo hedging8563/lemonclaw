@@ -13,7 +13,7 @@ from loguru import logger
 
 from lemonclaw.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
 from lemonclaw.ledger.completion_gate import finalize_task
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
 
 def _now_ms() -> int:
@@ -254,16 +254,30 @@ class CronService:
 
         start_ms = _now_ms()
         task_id = f"task_cron_{job.id}_{start_ms}"
+        effective_session_key = job.payload.session_key or f"cron:{job.id}"
+        effective_channel = job.payload.channel or "cli"
+        effective_chat_id = job.payload.to or "direct"
+        payload_metadata = dict(job.payload.metadata or {})
+        delivery_context = dict(payload_metadata.get("delivery_context") or {})
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         if self._task_ledger:
             self._task_ledger.ensure_task(
                 task_id=task_id,
-                session_key=f"cron:{job.id}",
+                session_key=effective_session_key,
                 agent_id="cron",
                 mode="cron",
-                channel=job.payload.channel or "cron",
+                channel=effective_channel,
                 goal=job.payload.message[:500],
                 current_stage="cron_execute",
+                resume_context=build_task_resume_context(
+                    channel=effective_channel,
+                    chat_id=effective_chat_id,
+                    sender_id="cron",
+                    session_key=effective_session_key,
+                    timezone=str(payload_metadata.get("timezone") or ""),
+                    message_id="",
+                    delivery_context=delivery_context,
+                ),
                 metadata={"job_id": job.id},
             )
             step = self._task_ledger.start_step(task_id, step_type="cron_job", name=job.name, input_summary=job.payload.message[:500])

@@ -47,4 +47,7 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
     assert task is not None
     assert task["status"] == "completed"
     assert task["current_stage"] == "done"
+    assert task["resume_context"]["channel"] == "test"
+    assert task["resume_context"]["chat_id"] == "chat1"
+    assert task["resume_context"]["session_key"] == "test:chat1"
     assert task["completion_gate"]["passed"] is True
