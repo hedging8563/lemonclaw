@@ -382,6 +382,37 @@ def test_task_ledger_request_outbox_retry_is_debounced_for_quick_repeat(tmp_path
     assert second["metadata"]["manual_retry_requested_at_ms"] == first["metadata"]["manual_retry_requested_at_ms"]
 
 
+def test_task_ledger_request_outbox_retry_debounces_claimed_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="say hello",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="claimed",
+        attempts=1,
+        metadata={"manual_retry_requested_at_ms": 10_000},
+    )
+
+    monkeypatch.setattr("lemonclaw.ledger.runtime._now_ms", lambda: 10_500)
+    same = ledger.request_outbox_retry(event["event_id"], source="webui_manual_retry")
+
+    assert same is not None
+    assert same["status"] == "claimed"
+    assert same["metadata"]["manual_retry_requested_at_ms"] == 10_000
+
+
 def test_task_ledger_compact_outbox_keeps_nonterminal_and_recent_terminal(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
@@ -427,9 +458,9 @@ def test_task_ledger_compact_outbox_keeps_nonterminal_and_recent_terminal(tmp_pa
     result = ledger.compact_outbox(keep_terminal=0, min_terminal_age_ms=1_000, now_ms=2_000)
 
     assert result["before"] == 3
-    assert result["after"] == 2
+    assert result["after"] == 1
     events = ledger.list_outbox_events(limit=10)
-    assert {event["event_id"] for event in events} == {sent_recent["event_id"], pending["event_id"]}
+    assert {event["event_id"] for event in events} == {pending["event_id"]}
 
 
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):

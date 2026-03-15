@@ -34,6 +34,7 @@ class ChannelManager:
         self.activity_bus = activity_bus
         self.channels: dict[str, BaseChannel] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
+        self._restart_locks: dict[str, asyncio.Lock] = {}
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
@@ -251,28 +252,30 @@ class ChannelManager:
         if channel is None:
             raise KeyError(name)
 
-        task = self._channel_tasks.get(name)
-        await channel.stop()
-        if task and not task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
-            except asyncio.TimeoutError:
-                task.cancel()
+        lock = self._restart_locks.setdefault(name, asyncio.Lock())
+        async with lock:
+            task = self._channel_tasks.get(name)
+            await channel.stop()
+            if task and not task.done():
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            finally:
-                self._channel_tasks.pop(name, None)
+                    await asyncio.wait_for(task, timeout=0.5)
+                except asyncio.TimeoutError:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                finally:
+                    self._channel_tasks.pop(name, None)
 
-        logger.info("Restarting {} channel...", name)
-        restart_task = self._spawn_channel_task(name, channel)
-        await asyncio.sleep(0)
-        return {
-            "channel": name,
-            "running": channel.is_running,
-            "task_done": restart_task.done(),
-        }
+            logger.info("Restarting {} channel...", name)
+            restart_task = self._spawn_channel_task(name, channel)
+            await asyncio.sleep(0)
+            return {
+                "channel": name,
+                "running": channel.is_running,
+                "task_done": restart_task.done(),
+            }
 
     @staticmethod
     def _activity_session_key(msg: OutboundMessage) -> str:

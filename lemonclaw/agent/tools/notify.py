@@ -31,6 +31,42 @@ def _host_allowed(host: str, patterns: list[str]) -> bool:
     return False
 
 
+def prepare_webhook_delivery(
+    webhook_url: str,
+    allow_domains: list[str],
+) -> tuple[str, dict[str, str], str]:
+    parsed = urlparse(webhook_url)
+    host = (parsed.hostname or "").lower()
+    if not _host_allowed(host, allow_domains):
+        raise ValueError(f"Webhook domain '{host}' is not allowed")
+    validated, error, resolved_ip = _validate_url(webhook_url)
+    if not validated:
+        if error in {"DNS resolution failed", "No addresses returned by DNS"}:
+            raise RuntimeError(f"Webhook URL validation failed: {error}")
+        raise ValueError(f"Webhook URL validation failed: {error}")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    request_url = webhook_url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
+    return request_url, {"User-Agent": USER_AGENT, "Host": parsed.netloc}, host
+
+
+async def deliver_webhook_json(
+    *,
+    webhook_url: str,
+    title: str,
+    content: str,
+    timeout: int,
+    allow_domains: list[str],
+) -> int:
+    request_url, headers, _host = prepare_webhook_delivery(webhook_url, allow_domains)
+    async with httpx.AsyncClient(timeout=float(timeout), follow_redirects=False) as client:
+        resp = await client.post(
+            request_url,
+            json={"title": title, "content": content},
+            headers=headers,
+        )
+    return resp.status_code
+
+
 class NotifyTool(Tool):
     """Send notifications to channels or webhooks."""
 
@@ -164,11 +200,10 @@ class NotifyTool(Tool):
                 return {"ok": False, "summary": "Missing webhook_url", "raw": {}}
             parsed = urlparse(webhook_url)
             host = (parsed.hostname or "").lower()
-            if not _host_allowed(host, self._allow_webhook_domains):
-                return {"ok": False, "summary": f"Webhook domain '{host}' is not allowed", "raw": {"webhook_url": webhook_url}}
-            validated, error, resolved_ip = _validate_url(webhook_url)
-            if not validated:
-                return {"ok": False, "summary": f"Webhook URL validation failed: {error}", "raw": {"webhook_url": webhook_url}}
+            try:
+                prepare_webhook_delivery(webhook_url, self._allow_webhook_domains)
+            except (ValueError, RuntimeError) as exc:
+                return {"ok": False, "summary": str(exc), "raw": {"webhook_url": webhook_url}}
             if _outbox_enabled and _task_id and _task_ledger and _step_id:
                 event = _task_ledger.enqueue_outbox(
                     task_id=_task_id,
@@ -188,19 +223,17 @@ class NotifyTool(Tool):
                         "queued": True,
                     },
                 }
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            request_url = webhook_url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
-            payload = {"title": title or "", "content": content}
-            async with httpx.AsyncClient(timeout=float(self._timeout), follow_redirects=False) as client:
-                resp = await client.post(
-                    request_url,
-                    json=payload,
-                    headers={"User-Agent": USER_AGENT, "Host": parsed.netloc},
-                )
+            resp_status = await deliver_webhook_json(
+                webhook_url=webhook_url,
+                title=title or "",
+                content=content,
+                timeout=self._timeout,
+                allow_domains=self._allow_webhook_domains,
+            )
             return {
-                "ok": resp.status_code < 400,
-                "summary": f"Webhook notification -> {resp.status_code}",
-                "raw": {"target_type": "webhook", "webhook_url": webhook_url, "status_code": resp.status_code},
+                "ok": resp_status < 400,
+                "summary": f"Webhook notification -> {resp_status}",
+                "raw": {"target_type": "webhook", "webhook_url": webhook_url, "status_code": resp_status},
             }
 
         return {"ok": False, "summary": f"Unsupported target_type '{target_type}'", "raw": {"target_type": target_type}}

@@ -54,3 +54,22 @@ async def test_channel_manager_restart_channel_restarts_task():
 
     await fake.stop()
     await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_restart_channel_is_serialized():
+    manager = ChannelManager(Config(), MessageBus())
+    fake = _FakeChannel()
+    manager.channels["telegram"] = fake
+    manager._spawn_channel_task("telegram", fake)
+    await asyncio.sleep(0.05)
+
+    first = asyncio.create_task(manager.restart_channel("telegram"))
+    second = asyncio.create_task(manager.restart_channel("telegram"))
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result["channel"] == "telegram"
+    assert second_result["channel"] == "telegram"
+    assert fake.start_calls == 3
+    await fake.stop()
+    await asyncio.sleep(0.05)

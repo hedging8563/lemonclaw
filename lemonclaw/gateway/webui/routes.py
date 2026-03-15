@@ -146,6 +146,7 @@ def get_webui_routes(
     watchdog: WatchdogService | None = None,
 ) -> list[Route]:
     """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
+    _task_recheck_locks: dict[str, asyncio.Lock] = {}
 
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
@@ -1126,8 +1127,10 @@ def get_webui_routes(
         if not ledger.read_task(task_id):
             return _json({"error": "task not found"}, 404)
 
-        result = await asyncio.to_thread(finalize_task, ledger, task_id)
-        task_view = ledger.read_task_view(task_id)
+        lock = _task_recheck_locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            result = await asyncio.to_thread(finalize_task, ledger, task_id)
+            task_view = ledger.read_task_view(task_id)
         resp = _json({"result": result.to_dict() if result else None, "task": task_view["task"], "summary": task_view["summary"]} if task_view else {"result": result.to_dict() if result else None})
         _maybe_refresh_cookie(request, resp)
         return resp

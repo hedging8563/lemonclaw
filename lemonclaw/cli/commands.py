@@ -462,10 +462,7 @@ def gateway(
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
     from lemonclaw.ledger.outbox import OutboxDispatcher, PermanentOutboxError
-    from lemonclaw.agent.tools.notify import _host_allowed
-    from lemonclaw.agent.tools.web import USER_AGENT, _validate_url
-    import httpx
-    from urllib.parse import urlparse
+    from lemonclaw.agent.tools.notify import deliver_webhook_json
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
 
     async def on_outbox_event(event: dict) -> None:
@@ -494,28 +491,22 @@ def gateway(
             return
 
         if effect_type == "webhook_json":
-            parsed = urlparse(target)
-            host = (parsed.hostname or "").lower()
-            allow_domains = list(config.tools.notify.allow_webhook_domains or [])
-            if not _host_allowed(host, allow_domains):
-                raise PermanentOutboxError(f"Webhook domain '{host}' is not allowed")
-            validated, error, resolved_ip = _validate_url(target)
-            if not validated:
-                if error in {"DNS resolution failed", "No addresses returned by DNS"}:
-                    raise RuntimeError(f"Webhook URL validation failed: {error}")
-                raise PermanentOutboxError(f"Webhook URL validation failed: {error}")
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            request_url = target.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
-            async with httpx.AsyncClient(timeout=float(config.tools.notify.timeout), follow_redirects=False) as client:
-                resp = await client.post(
-                    request_url,
-                    json={"title": str(payload.get("title") or ""), "content": str(payload.get("content") or "")},
-                    headers={"User-Agent": USER_AGENT, "Host": parsed.netloc},
+            try:
+                resp_status = await deliver_webhook_json(
+                    webhook_url=target,
+                    title=str(payload.get("title") or ""),
+                    content=str(payload.get("content") or ""),
+                    timeout=config.tools.notify.timeout,
+                    allow_domains=list(config.tools.notify.allow_webhook_domains or []),
                 )
-            if resp.status_code == 429 or resp.status_code >= 500:
-                raise RuntimeError(f"webhook delivery -> {resp.status_code}")
-            if resp.status_code >= 400:
-                raise PermanentOutboxError(f"webhook delivery -> {resp.status_code}")
+            except ValueError as exc:
+                raise PermanentOutboxError(str(exc))
+            except RuntimeError:
+                raise
+            if resp_status == 429 or resp_status >= 500:
+                raise RuntimeError(f"webhook delivery -> {resp_status}")
+            if resp_status >= 400:
+                raise PermanentOutboxError(f"webhook delivery -> {resp_status}")
             return
 
         raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")
