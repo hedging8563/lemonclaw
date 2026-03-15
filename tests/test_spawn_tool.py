@@ -63,6 +63,34 @@ async def test_spawn_recomputes_session_key_from_per_call_context_when_key_missi
 
 
 @pytest.mark.asyncio
+async def test_spawn_preserves_thread_scoped_session_key_when_provided() -> None:
+    calls = []
+
+    async def _spawn(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    tool = SpawnTool(SimpleNamespace(spawn=_spawn))
+    tool.set_context("telegram", "123")
+
+    result = await tool.execute(
+        task="do work",
+        _default_channel="telegram",
+        _default_chat_id="123",
+        _session_key="telegram:123:456",
+    )
+
+    assert result == "ok"
+    assert calls == [{
+        "task": "do work",
+        "label": None,
+        "origin_channel": "telegram",
+        "origin_chat_id": "123",
+        "session_key": "telegram:123:456",
+    }]
+
+
+@pytest.mark.asyncio
 async def test_spawn_falls_back_to_instance_context_when_no_overrides() -> None:
     calls = []
 
