@@ -1225,6 +1225,36 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── POST /api/outbox/compact — compact retained outbox state ───────
+
+    async def compact_outbox(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        try:
+            keep_terminal = int(body.get("keep_terminal", 200))
+            min_terminal_age_ms = int(body.get("min_terminal_age_ms", 24 * 60 * 60 * 1000))
+        except (TypeError, ValueError):
+            return _json({"error": "invalid compaction parameters"}, 400)
+
+        result = ledger.compact_outbox(
+            keep_terminal=keep_terminal,
+            min_terminal_age_ms=min_terminal_age_ms,
+        )
+        resp = _json({"result": result, "events": ledger.list_outbox_events(limit=200)})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/outbox/{event_id} — outbox detail ─────────────────────
 
     async def get_outbox_event(request: Request) -> Response:
@@ -1320,6 +1350,7 @@ def get_webui_routes(
         Route("/api/recovery", get_recovery, methods=["GET"]),
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),
+        Route("/api/outbox/compact", compact_outbox, methods=["POST"]),
         Route("/api/outbox/{event_id}", get_outbox_event, methods=["GET"]),
         Route("/api/outbox/{event_id}/retry", retry_outbox_event, methods=["POST"]),
         Route("/api/info", get_info, methods=["GET"]),

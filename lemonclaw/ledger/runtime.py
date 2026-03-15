@@ -409,6 +409,54 @@ class TaskLedger:
         # TODO: stream JSONL once outbox volume is large enough to matter.
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
+    def compact_outbox(
+        self,
+        *,
+        keep_terminal: int = 200,
+        min_terminal_age_ms: int = 24 * 60 * 60 * 1000,
+        now_ms: int | None = None,
+    ) -> dict[str, int]:
+        """Rewrite outbox.jsonl with only the latest retained event states."""
+        events = self.materialize_outbox_events()
+        if not events:
+            return {"before": 0, "after": 0, "dropped": 0}
+
+        now = now_ms if now_ms is not None else _now_ms()
+        cutoff = now - max(0, int(min_terminal_age_ms))
+        terminal_statuses = {"sent", "failed", "compensated"}
+
+        kept: list[dict[str, Any]] = []
+        terminal_kept = 0
+        for event in events:
+            status = str(event.get("status") or "")
+            updated_at_ms = int(event.get("updated_at_ms") or 0)
+            is_terminal = status in terminal_statuses
+            keep_event = not is_terminal
+            if is_terminal and updated_at_ms >= cutoff:
+                keep_event = True
+            elif is_terminal and terminal_kept < max(0, int(keep_terminal)):
+                keep_event = True
+            if keep_event:
+                kept.append(event)
+                if is_terminal and updated_at_ms < cutoff:
+                    terminal_kept += 1
+
+        kept.sort(key=lambda item: (
+            int(item.get("created_at_ms") or 0),
+            int(item.get("updated_at_ms") or 0),
+        ))
+        payload = "\n".join(json.dumps(event, ensure_ascii=False) for event in kept)
+        path = self._outbox_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".compact.tmp")
+        tmp.write_text((payload + "\n") if payload else "", encoding="utf-8")
+        tmp.replace(path)
+        return {
+            "before": len(events),
+            "after": len(kept),
+            "dropped": max(0, len(events) - len(kept)),
+        }
+
     def list_outbox_events(
         self,
         *,

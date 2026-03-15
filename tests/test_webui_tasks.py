@@ -192,6 +192,47 @@ def test_outbox_api_rejects_invalid_ids(tmp_path):
     assert resp.json()["error"] == "invalid task_id"
 
 
+def test_outbox_compact_api_rewrites_retained_state(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+    )
+    old_event = ledger.enqueue_outbox(
+        task_id="task_a",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "old"},
+    )
+    ledger.update_outbox_event(old_event["event_id"], status="sent")
+    old_record = ledger.read_outbox_event(old_event["event_id"])
+    old_record["updated_at_ms"] = 1
+    ledger._append_jsonl(ledger._outbox_path(), old_record)
+
+    pending = ledger.enqueue_outbox(
+        task_id="task_a",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "pending"},
+        status="retrying",
+        next_attempt_at_ms=9_999,
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/outbox/compact", json={"keep_terminal": 0, "min_terminal_age_ms": 1000})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["result"]["before"] == 2
+    assert data["result"]["after"] == 1
+    assert [item["event_id"] for item in data["events"]] == [pending["event_id"]]
+
+
 def test_recovery_api_lists_tasks_with_recovery_metadata(tmp_path):
     app, ledger = _build_app(tmp_path)
     ledger.ensure_task(

@@ -382,6 +382,56 @@ def test_task_ledger_request_outbox_retry_is_debounced_for_quick_repeat(tmp_path
     assert second["metadata"]["manual_retry_requested_at_ms"] == first["metadata"]["manual_retry_requested_at_ms"]
 
 
+def test_task_ledger_compact_outbox_keeps_nonterminal_and_recent_terminal(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+
+    sent_old = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:1",
+        payload={"content": "old"},
+    )
+    ledger.update_outbox_event(sent_old["event_id"], status="sent")
+    old_record = ledger.read_outbox_event(sent_old["event_id"])
+    old_record["updated_at_ms"] = 1
+    ledger._append_jsonl(ledger._outbox_path(), old_record)
+
+    sent_recent = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:2",
+        payload={"content": "recent"},
+    )
+    ledger.update_outbox_event(sent_recent["event_id"], status="sent")
+
+    pending = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:3",
+        payload={"content": "pending"},
+        status="retrying",
+        next_attempt_at_ms=9_999,
+    )
+
+    result = ledger.compact_outbox(keep_terminal=0, min_terminal_age_ms=1_000, now_ms=2_000)
+
+    assert result["before"] == 3
+    assert result["after"] == 2
+    events = ledger.list_outbox_events(limit=10)
+    assert {event["event_id"] for event in events} == {sent_recent["event_id"], pending["event_id"]}
+
+
 def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
