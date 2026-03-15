@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from starlette.testclient import TestClient
 
@@ -13,11 +14,11 @@ from lemonclaw.session.manager import SessionManager
 from lemonclaw.watchdog.service import WatchdogService
 
 
-def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None, channel_manager=None):
+def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None, channel_manager=None, agent_loop=None):
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
     ledger = ledger or TaskLedger(tmp_path)
-    agent_loop = SimpleNamespace(workspace=tmp_path, ledger=ledger)
+    agent_loop = agent_loop or SimpleNamespace(workspace=tmp_path, ledger=ledger)
     session_manager = SessionManager(tmp_path)
     app = create_app(
         config_path=config_path,
@@ -220,6 +221,43 @@ def test_safe_resume_execute_api_retries_failed_outbox(tmp_path):
     updated = ledger.read_outbox_event(event["event_id"])
     assert updated is not None
     assert updated["status"] == "retrying"
+
+
+def test_safe_resume_execute_api_uses_agent_loop_resume_executor_when_available(tmp_path):
+    ledger = TaskLedger(tmp_path)
+    agent_loop = SimpleNamespace(
+        workspace=tmp_path,
+        ledger=ledger,
+        execute_safe_resume=AsyncMock(return_value={
+            "task_id": "task_1",
+            "recommended_action": "replay_failed_steps",
+            "safe_to_execute": True,
+            "scheduled": True,
+        }),
+    )
+    app, ledger = _build_app(tmp_path, ledger=ledger, agent_loop=agent_loop)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume me",
+        status="failed",
+        current_stage="error",
+        resume_context={"channel": "telegram", "chat_id": "123", "session_key": "telegram:123"},
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
+    ledger.finish_step(step, status="failed", error="boom")
+
+    client = TestClient(app)
+    resp = client.post("/api/tasks/task_1/resume/execute")
+
+    assert resp.status_code == 200
+    agent_loop.execute_safe_resume.assert_awaited_once_with("task_1", source="webui_safe_resume_execute")
+    data = resp.json()
+    assert data["candidate"]["recommended_action"] == "replay_failed_steps"
+    assert data["candidate"]["scheduled"] is True
 
 
 def test_tasks_api_requires_auth_when_token_enabled(tmp_path):

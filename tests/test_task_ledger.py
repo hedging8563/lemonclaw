@@ -683,7 +683,7 @@ def test_step_replayable_flag_persisted(tmp_path: Path):
     assert by_name["read_file"]["replayable"] is True
 
 
-def test_build_resume_candidate_marks_replayable_failed_steps_for_manual_resume_until_executor_exists(tmp_path: Path):
+def test_build_resume_candidate_recommends_replay_for_replayable_failed_steps(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
         task_id="task_1",
@@ -700,8 +700,8 @@ def test_build_resume_candidate_marks_replayable_failed_steps_for_manual_resume_
 
     candidate = ledger.build_resume_candidate("task_1")
     assert candidate is not None
-    assert candidate["recommended_action"] == "manual_resume"
-    assert candidate["safe_to_execute"] is False
+    assert candidate["recommended_action"] == "replay_failed_steps"
+    assert candidate["safe_to_execute"] is True
     assert candidate["replayable_failed_count"] == 1
 
 
@@ -750,3 +750,33 @@ def test_execute_safe_resume_rejects_replayable_failed_steps_until_executor_exis
     assert task["current_stage"] == "error"
     steps = ledger.materialize_steps("task_1")
     assert steps[0]["status"] == "failed"
+
+
+def test_prepare_replay_failed_steps_supersedes_old_failed_steps(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume demo",
+        status="failed",
+        current_stage="error",
+        resume_context={"channel": "telegram", "chat_id": "123", "session_key": "telegram:123"},
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
+    ledger.finish_step(step, status="failed", error="file not found")
+
+    prepared = ledger.prepare_replay_failed_steps("task_1", source="test_resume_executor")
+
+    assert prepared is not None
+    assert prepared["resume_from_step"] == step.step_id
+    steps = ledger.materialize_steps("task_1")
+    assert steps[0]["status"] == "abandoned"
+    assert steps[0]["error"] == "superseded by replay resume"
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "running"
+    assert task["current_stage"] == "resume_execute"
+    assert task["metadata"]["recovery"]["action"] == "resume_execute_requested"

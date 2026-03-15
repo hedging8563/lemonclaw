@@ -1221,7 +1221,10 @@ def get_webui_routes(
         lock = _task_resume_locks.setdefault(task_id, asyncio.Lock())
         async with lock:
             try:
-                candidate = ledger.execute_safe_resume(task_id, source="webui_safe_resume_execute")
+                if hasattr(agent_loop, "execute_safe_resume"):
+                    candidate = await agent_loop.execute_safe_resume(task_id, source="webui_safe_resume_execute")
+                else:
+                    candidate = ledger.execute_safe_resume(task_id, source="webui_safe_resume_execute")
             except ValueError as exc:
                 return _json({"error": str(exc)}, 409)
             task_view = ledger.read_task_view(task_id)

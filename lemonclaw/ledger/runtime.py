@@ -41,6 +41,7 @@ class TaskLedger:
         goal: str,
         status: str = "running",
         current_stage: str = "dispatch",
+        resume_context: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         self._require_valid_task_id(task_id)
@@ -59,6 +60,7 @@ class TaskLedger:
             current_stage=current_stage,
             created_at_ms=now,
             updated_at_ms=now,
+            resume_context=resume_context or {},
             metadata=metadata or {},
         )
         self._write_json(path, record.to_dict())
@@ -487,11 +489,11 @@ class TaskLedger:
             safe_to_execute = False
             reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
         elif replayable_failed and not open_outbox:
-            recommended_action = "manual_resume"
-            safe_to_execute = False
+            recommended_action = "replay_failed_steps"
+            safe_to_execute = True
             reason = (
-                f"{len(replayable_failed)} failed step(s) are replayable, but no resume executor is wired yet. "
-                "Request a normal resume after operator review instead of auto-executing from the WebUI."
+                f"{len(replayable_failed)} failed step(s) are replayable and can be resumed safely. "
+                "A dedicated resume executor will supersede those failed steps and continue the task in-place."
             )
         elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
             recommended_action = "recheck"
@@ -891,6 +893,83 @@ class TaskLedger:
                     error=None,
                 )
         return updated
+
+    def prepare_replay_failed_steps(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Supersede replayable failed steps before a real resume execution."""
+        self._require_valid_task_id(task_id)
+        candidate = self.build_resume_candidate(task_id)
+        if not candidate:
+            return None
+        if str(candidate.get("recommended_action") or "") != "replay_failed_steps" or not candidate.get("safe_to_execute"):
+            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
+
+        steps = self.materialize_steps(task_id)
+        superseded_steps: list[str] = []
+        for step in steps:
+            if str(step.get("status") or "") != "failed":
+                continue
+            if not step.get("replayable", True):
+                continue
+            step_id = str(step.get("step_id") or "")
+            if not step_id:
+                continue
+            updated = self.update_step_state(
+                task_id,
+                step_id,
+                status="abandoned",
+                error="superseded by replay resume",
+            )
+            if updated:
+                superseded_steps.append(step_id)
+
+        if not superseded_steps:
+            raise ValueError("no replayable failed steps remain to resume")
+
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        now = _now_ms()
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        recovery.update({
+            "source": source,
+            "action": "resume_execute_requested",
+            "manual_review_required": False,
+            "requested_at_ms": now,
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_execute_requested",
+            reason=f"resume execution requested for {len(superseded_steps)} replayable failed step(s)",
+            details={
+                "task_id": task_id,
+                "mode": "replay_failed_steps",
+                "resume_from_step": str(candidate.get("resume_from_step") or ""),
+                "superseded_steps": superseded_steps[:20],
+            },
+            at_ms=now,
+        )
+        self.update_task(
+            task_id,
+            status="running",
+            current_stage="resume_execute",
+            error=None,
+            metadata=metadata,
+        )
+        return {
+            "task_id": task_id,
+            "resume_from_step": candidate.get("resume_from_step"),
+            "superseded_steps": superseded_steps,
+            "task": self.read_task(task_id),
+        }
 
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)

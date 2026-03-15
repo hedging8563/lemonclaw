@@ -9,7 +9,7 @@ import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -173,6 +173,7 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._resume_tasks: dict[str, asyncio.Task] = {}  # task_id -> background resume task
         self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
         self._session_locks: dict[str, asyncio.Lock] = {}  # per-session processing locks
         self._session_lock_order: list[str] = []  # LRU tracking for session locks
@@ -370,6 +371,143 @@ class AgentLoop:
         """Copy inbound attachments into the session-native attachment directory."""
         persisted_media, path_map = self.sessions.persist_attachments(session_key, media)
         return rewrite_text_paths(content, path_map), persisted_media
+
+    def _build_task_resume_context(self, msg: InboundMessage) -> dict[str, Any]:
+        """Persist the minimum routing context needed for later task resume."""
+        metadata = dict(msg.metadata or {})
+        delivery_context = metadata.get("_delivery_context")
+        return {
+            "channel": msg.channel,
+            "chat_id": str(msg.chat_id),
+            "sender_id": str(msg.sender_id),
+            "session_key": msg.session_key,
+            "timezone": str(metadata.get("timezone") or ""),
+            "message_id": str(metadata.get("message_id") or ""),
+            "delivery_context": dict(delivery_context) if isinstance(delivery_context, dict) else {},
+        }
+
+    def _spawn_dispatch_task(self, msg: InboundMessage) -> asyncio.Task:
+        """Spawn a tracked dispatch task so /stop and recovery share the same path."""
+        task = asyncio.create_task(self._dispatch(msg))
+        self._active_tasks.setdefault(msg.session_key, []).append(task)
+
+        def _on_task_done(t: asyncio.Task, key: str = msg.session_key) -> None:
+            tasks = self._active_tasks.get(key, [])
+            if t in tasks:
+                tasks.remove(t)
+            if not tasks and key in self._active_tasks:
+                del self._active_tasks[key]
+
+        task.add_done_callback(_on_task_done)
+        return task
+
+    @staticmethod
+    def _derive_chat_id_from_session_key(channel: str, session_key: str) -> str:
+        prefix = f"{channel}:"
+        if session_key.startswith(prefix):
+            remainder = session_key[len(prefix):]
+            return remainder.split(":", 1)[0] if ":" in remainder else remainder
+        return session_key.split(":", 1)[-1] if ":" in session_key else session_key
+
+    def _build_resume_prompt(self, task: dict[str, Any], candidate: dict[str, Any]) -> str:
+        resume_step = candidate.get("resume_step") or {}
+        step_name = str((resume_step or {}).get("name") or candidate.get("resume_from_step") or "task boundary")
+        step_error = str((resume_step or {}).get("error") or task.get("error") or "").strip()
+        checkpoint = str(((task.get("metadata") or {}).get("checkpoint_summary") or "")).strip()
+        last_successful = str(task.get("last_successful_step") or "").strip()
+
+        lines = [
+            "System resume request: continue an interrupted task.",
+            f"Original goal: {str(task.get('goal') or '').strip()}",
+            f"Resume from step: {step_name}",
+        ]
+        if step_error:
+            lines.append(f"Previous failure: {step_error}")
+        if last_successful:
+            lines.append(f"Last successful step: {last_successful}")
+        if checkpoint:
+            lines.append(f"Checkpoint summary: {checkpoint}")
+        lines.extend([
+            "Replayable failed steps were superseded before this resume. Do not repeat already-settled side effects.",
+            "Continue from the failed point and finish the task.",
+        ])
+        return "\n".join(lines)
+
+    async def execute_safe_resume(self, task_id: str, *, source: str) -> dict[str, Any] | None:
+        """Execute a safe resume action, including real replay for replayable failed steps."""
+        candidate = self.ledger.build_resume_candidate(task_id)
+        if not candidate:
+            return None
+        if not candidate.get("safe_to_execute"):
+            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
+
+        action = str(candidate.get("recommended_action") or "")
+        if action != "replay_failed_steps":
+            return self.ledger.execute_safe_resume(task_id, source=source)
+
+        running = self._resume_tasks.get(task_id)
+        if running is not None and not running.done():
+            raise ValueError("resume already running for task")
+
+        task = self.ledger.read_task(task_id)
+        if not task:
+            return None
+
+        prepared = self.ledger.prepare_replay_failed_steps(task_id, source=source)
+        if not prepared:
+            return None
+
+        resume_context = dict(task.get("resume_context") or {})
+        delivery_context = resume_context.get("delivery_context")
+        channel = str(resume_context.get("channel") or task.get("channel") or "")
+        session_key = str(resume_context.get("session_key") or task.get("session_key") or "")
+        chat_id = str(
+            resume_context.get("chat_id")
+            or (delivery_context.get("source_chat_id") if isinstance(delivery_context, dict) else "")
+            or self._derive_chat_id_from_session_key(channel, session_key)
+        )
+        if not channel or not chat_id or not session_key:
+            raise ValueError("resume executor lacks channel/chat/session context")
+
+        metadata: dict[str, Any] = {
+            "_task_id": task_id,
+            "_mode": str(task.get("mode") or "chat"),
+            "_agent_id": str(task.get("agent_id") or self.agent_id),
+            "_resume_internal": True,
+            "_resume_source": source,
+            "_resume_from_step": str(candidate.get("resume_from_step") or ""),
+        }
+        if isinstance(delivery_context, dict) and delivery_context:
+            metadata["_delivery_context"] = dict(delivery_context)
+        if resume_context.get("timezone"):
+            metadata["timezone"] = str(resume_context["timezone"])
+        if resume_context.get("message_id"):
+            metadata["message_id"] = str(resume_context["message_id"])
+
+        resume_msg = InboundMessage(
+            channel=channel,
+            sender_id=str(resume_context.get("sender_id") or "resume_executor"),
+            chat_id=chat_id,
+            content=self._build_resume_prompt(task, candidate),
+            metadata=metadata,
+            session_key_override=session_key,
+        )
+        dispatch_task = self._spawn_dispatch_task(resume_msg)
+        self._resume_tasks[task_id] = dispatch_task
+
+        def _clear_resume_task(t: asyncio.Task, resume_task_id: str = task_id) -> None:
+            if self._resume_tasks.get(resume_task_id) is t:
+                self._resume_tasks.pop(resume_task_id, None)
+
+        dispatch_task.add_done_callback(_clear_resume_task)
+
+        return {
+            **candidate,
+            "scheduled": True,
+            "background": True,
+            "superseded_steps": list(prepared.get("superseded_steps") or []),
+            "reason": f"resume execution scheduled from {candidate.get('resume_from_step') or 'task boundary'}",
+        }
 
     async def _run_agent_loop(
         self,
@@ -629,18 +767,7 @@ class AgentLoop:
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
             else:
-                task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(msg.session_key, []).append(task)
-
-                def _on_task_done(t: asyncio.Task, key: str = msg.session_key) -> None:
-                    tasks = self._active_tasks.get(key, [])
-                    if t in tasks:
-                        tasks.remove(t)
-                    # Clean up empty list to prevent unbounded dict growth
-                    if not tasks and key in self._active_tasks:
-                        del self._active_tasks[key]
-
-                task.add_done_callback(_on_task_done)
+                self._spawn_dispatch_task(msg)
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -704,6 +831,7 @@ class AgentLoop:
             channel=msg.channel,
             goal=msg.content[:500],
             current_stage="dispatch",
+            resume_context=self._build_task_resume_context(msg),
         )
 
         # Per-session lock: different sessions can run concurrently
@@ -857,6 +985,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         task_id = str((msg.metadata or {}).get("_task_id", ""))
+        resume_internal = bool((msg.metadata or {}).get("_resume_internal"))
         if task_id:
             self.ledger.update_task(task_id, current_stage="process_message", status="running")
         if msg.media:
@@ -865,7 +994,7 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        if msg.channel != "webui" and self.activity_bus:
+        if msg.channel != "webui" and self.activity_bus and not resume_internal:
             await self.activity_bus.broadcast({
                 "type": "message",
                 "session_key": key,
@@ -1016,6 +1145,7 @@ class AgentLoop:
             initial_messages = await compact(
                 initial_messages, session_model or self.model, self.provider,
             )
+        initial_message_count = len(initial_messages)
 
         async def _bus_progress(content: str, *, tool_hint: bool = False,
                                 thinking: bool = False, tool_start: bool = False,
@@ -1086,7 +1216,8 @@ class AgentLoop:
         if final_content is None:
             final_content = t("no_response", lang)
 
-        self._save_turn(session, all_msgs, 1 + len(history), turn_media=list(msg.media or []))
+        save_skip = initial_message_count if resume_internal else (1 + len(history))
+        self._save_turn(session, all_msgs, save_skip, turn_media=list(msg.media or []))
 
         # Record usage and check budgets
         alerts: list[str] = []
@@ -1275,6 +1406,15 @@ class AgentLoop:
                 channel=channel,
                 goal=content[:500],
                 current_stage="dispatch",
+                resume_context={
+                    "channel": channel,
+                    "chat_id": str(chat_id),
+                    "sender_id": "user",
+                    "session_key": session_key,
+                    "timezone": str(direct_metadata.get("timezone") or self.default_timezone or ""),
+                    "message_id": str(direct_metadata.get("message_id") or ""),
+                    "delivery_context": dict(direct_metadata.get("_delivery_context") or {}),
+                },
             )
             if outbound_sink:
                 direct_metadata["_outbound_sink"] = outbound_sink
