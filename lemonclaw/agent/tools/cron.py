@@ -98,7 +98,7 @@ class CronTool(Tool):
                 at,
                 effective_channel,
                 effective_chat_id,
-                _session_key or f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None,
+                _session_key or (f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None),
                 dict(_default_delivery_context or {}),
             )
         elif action == "list":

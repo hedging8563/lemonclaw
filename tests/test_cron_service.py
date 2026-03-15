@@ -91,6 +91,26 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
     assert jobs[0].payload.metadata["delivery_context"]["route"]["message_thread_id"] == 456
 
 
+def test_cron_service_round_trips_session_key_from_json(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    service.add_job(
+        name="persist session",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello",
+        channel="telegram",
+        to="123",
+        session_key="telegram:123:456",
+        metadata={"delivery_context": {"session_key": "telegram:123:456"}},
+    )
+
+    reloaded = CronService(tmp_path / "cron" / "jobs.json")
+    jobs = reloaded.list_jobs()
+
+    assert len(jobs) == 1
+    assert jobs[0].payload.session_key == "telegram:123:456"
+    assert jobs[0].payload.metadata["delivery_context"]["session_key"] == "telegram:123:456"
+
+
 def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

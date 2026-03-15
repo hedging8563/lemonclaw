@@ -105,6 +105,8 @@ class CronService:
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
+                            # On disk we keep camelCase sessionKey for backward
+                            # compatibility with the existing cron JSON schema.
                             session_key=j["payload"].get("sessionKey"),
                             metadata=dict(j["payload"].get("metadata", {}) or {}),
                         ),
@@ -154,6 +156,8 @@ class CronService:
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
+                        # Keep camelCase in JSON while the Python model stays
+                        # snake_case to match the rest of the codebase.
                         "sessionKey": j.payload.session_key,
                         "metadata": dict(j.payload.metadata or {}),
                     },

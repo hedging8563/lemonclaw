@@ -28,6 +28,8 @@ class CronPayload:
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    # Persisted as payload.sessionKey in JSON so the on-disk shape stays
+    # consistent with the existing camelCase cron store schema.
     session_key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
