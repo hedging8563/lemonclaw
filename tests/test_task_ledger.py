@@ -315,6 +315,7 @@ def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):
     assert task["status"] == "waiting"
     assert task["metadata"]["recovery"]["action"] == "manual_retry_requested"
     assert task["metadata"]["recovery"]["manual_review_required"] is False
+    assert task["metadata"]["recovery_history"][-1]["action"] == "manual_retry_requested"
 
 
 def test_task_ledger_request_outbox_retry_uses_retrying_for_previously_attempted_event(tmp_path: Path):
@@ -516,9 +517,11 @@ def test_task_ledger_lists_and_marks_stale_tasks(tmp_path: Path):
     assert updated["status"] == "failed"
     assert updated["current_stage"] == "stale_recovery"
     assert updated["metadata"]["recovery"]["action"] == "mark_failed"
+    assert updated["metadata"]["recovery_history"][-1]["action"] == "mark_failed"
     view = ledger.read_task_view("task_1")
     assert view is not None
     assert view["summary"]["recovery"]["source"] == "watchdog_soft_recovery"
+    assert view["summary"]["recovery_history_count"] == 1
 
 
 def test_task_ledger_marks_active_tasks_for_process_restart(tmp_path: Path):
@@ -555,6 +558,8 @@ def test_task_ledger_marks_active_tasks_for_process_restart(tmp_path: Path):
     assert run_task["status"] == "failed"
     assert run_task["current_stage"] == "hard_recovery"
     assert run_task["metadata"]["recovery"]["source"] == "watchdog_hard_recovery"
+    assert run_task["metadata"]["recovery_history"][-1]["action"] == "mark_failed"
     assert wait_task["status"] == "waiting"
     assert wait_task["metadata"]["recovery"]["action"] == "process_restart_review"
     assert wait_task["metadata"]["recovery"]["manual_review_required"] is True
+    assert wait_task["metadata"]["recovery_history"][-1]["action"] == "process_restart_review"

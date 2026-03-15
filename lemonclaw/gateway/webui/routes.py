@@ -1130,6 +1130,17 @@ def get_webui_routes(
         lock = _task_recheck_locks.setdefault(task_id, asyncio.Lock())
         async with lock:
             result = await asyncio.to_thread(finalize_task, ledger, task_id)
+            task = ledger.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                ledger._append_recovery_history(  # type: ignore[attr-defined]
+                    metadata,
+                    source="webui_task_recheck",
+                    action="task_recheck",
+                    reason=str((result.to_dict() if result else {}).get("reason") or ""),
+                    details={"passed": bool(result.passed) if result else False},
+                )
+                ledger.update_task(task_id, metadata=metadata)
             task_view = ledger.read_task_view(task_id)
         resp = _json({"result": result.to_dict() if result else None, "task": task_view["task"], "summary": task_view["summary"]} if task_view else {"result": result.to_dict() if result else None})
         _maybe_refresh_cookie(request, resp)

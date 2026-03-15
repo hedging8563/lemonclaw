@@ -243,6 +243,27 @@ class TaskLedger:
         return self.summarize_recovery_tasks(tasks)
 
     @staticmethod
+    def _append_recovery_history(
+        metadata: dict[str, Any],
+        *,
+        source: str,
+        action: str,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        history = list(metadata.get("recovery_history") or [])
+        history.append({
+            "source": source,
+            "action": action,
+            "reason": reason[:500],
+            "details": dict(details or {}),
+            "at_ms": at_ms or _now_ms(),
+        })
+        metadata["recovery_history"] = history[-20:]
+        return metadata
+
+    @staticmethod
     def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
         """Aggregate counters for a preloaded recovery task list."""
         summary = {
@@ -280,16 +301,25 @@ class TaskLedger:
         previous_status = str(task.get("status") or "")
         previous_stage = str(task.get("current_stage") or "")
         metadata = dict(task.get("metadata") or {})
+        detected_at_ms = _now_ms()
         metadata["recovery"] = {
             "source": source,
             "reason": reason[:500],
-            "detected_at_ms": _now_ms(),
+            "detected_at_ms": detected_at_ms,
             "stale_after_ms": stale_after_ms,
             "previous_status": previous_status,
             "previous_stage": previous_stage,
             "action": "mark_failed" if previous_status in {"running", "verifying"} else "manual_review",
             "manual_review_required": previous_status == "waiting",
         }
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action=str(metadata["recovery"]["action"]),
+            reason=reason,
+            details={"stale_after_ms": stale_after_ms, "previous_status": previous_status, "previous_stage": previous_stage},
+            at_ms=detected_at_ms,
+        )
 
         updates: dict[str, Any] = {"metadata": metadata}
         if previous_status in {"running", "verifying"}:
@@ -319,16 +349,25 @@ class TaskLedger:
                     continue
                 metadata = dict(task.get("metadata") or {})
                 recovery = dict(metadata.get("recovery") or {})
+                detected_at_ms = _now_ms()
                 recovery.update({
                     "source": source,
                     "reason": reason[:500],
-                    "detected_at_ms": _now_ms(),
+                    "detected_at_ms": detected_at_ms,
                     "previous_status": str(task.get("status") or ""),
                     "previous_stage": str(task.get("current_stage") or ""),
                     "action": "process_restart_review" if status == "waiting" else "mark_failed",
                     "manual_review_required": status == "waiting",
                 })
                 metadata["recovery"] = recovery
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action=str(recovery["action"]),
+                    reason=reason,
+                    details={"previous_status": recovery["previous_status"], "previous_stage": recovery["previous_stage"]},
+                    at_ms=detected_at_ms,
+                )
                 updates: dict[str, Any] = {"metadata": metadata}
                 if status in {"running", "verifying"}:
                     updates.update(status="failed", current_stage="hard_recovery", error=reason[:500])
@@ -360,6 +399,7 @@ class TaskLedger:
                 "current_stage": task.get("current_stage"),
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
+                "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
             },
         }
 
@@ -658,6 +698,14 @@ class TaskLedger:
                 recovery["requested_at_ms"] = now
                 recovery["source"] = source
                 task_metadata["recovery"] = recovery
+                self._append_recovery_history(
+                    task_metadata,
+                    source=source,
+                    action="manual_retry_requested",
+                    reason="manual outbox retry requested",
+                    details={"event_id": event_id, "status": status},
+                    at_ms=now,
+                )
                 self.update_task(
                     task_id,
                     status="waiting",

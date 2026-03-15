@@ -127,6 +127,7 @@ def test_task_recheck_api_reruns_completion_gate(tmp_path):
     assert data["result"]["passed"] is True
     assert data["task"]["status"] == "completed"
     assert data["summary"]["completion_gate"]["passed"] is True
+    assert data["task"]["metadata"]["recovery_history"][-1]["action"] == "task_recheck"
 
 
 def test_tasks_api_requires_auth_when_token_enabled(tmp_path):
