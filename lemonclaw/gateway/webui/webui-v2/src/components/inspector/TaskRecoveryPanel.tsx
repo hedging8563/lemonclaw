@@ -8,6 +8,7 @@ import {
   taskActionBusy,
   taskDetails,
   taskPanelError,
+  triggerManualResume,
   triggerSafeResume,
   triggerTaskRecheck,
   type TaskDisplayState,
@@ -65,6 +66,8 @@ function taskCard(task: TaskRecord, expandedTaskId: string | null, setExpandedTa
   const canRunSafeResume = Boolean(candidate?.safe_to_execute);
   const canRecheck = ['waiting', 'verifying'].includes(task.status || '') && (!candidate || candidate?.recommended_action === 'recheck');
   const isResumeLive = ['resume_queued', 'resume_running'].includes(state?.key || '');
+  const showRetryDispatchCta = state?.key === 'resume_dispatch_failed' && canRunSafeResume && !isResumeLive;
+  const showManualResumeCta = state?.key === 'resume_manual_only' && !isResumeLive;
 
   return (
     <div key={task.task_id} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -142,6 +145,25 @@ function taskCard(task: TaskRecord, expandedTaskId: string | null, setExpandedTa
           >
             {isExpanded ? t('task_hide_details') : t('task_show_details')}
           </button>
+          {showManualResumeCta && (
+            <button
+              onClick={() => triggerManualResume(task.task_id)}
+              disabled={!!busy}
+              style={{
+                padding: '6px 10px',
+                background: 'transparent',
+                border: '1px solid var(--accent)',
+                borderRadius: '6px',
+                color: 'var(--accent)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                cursor: busy ? 'wait' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy === 'manual_resume' ? t('task_action_running') : t('task_action_queue_manual_resume')}
+            </button>
+          )}
           {canRunSafeResume && !isResumeLive && (
             <button
               onClick={() => triggerSafeResume(task.task_id)}
@@ -158,7 +180,11 @@ function taskCard(task: TaskRecord, expandedTaskId: string | null, setExpandedTa
                 opacity: busy ? 0.7 : 1,
               }}
             >
-              {busy === 'resume' ? t('task_action_running') : suggestedActionLabel(candidate)}
+              {busy === 'resume'
+                ? t('task_action_running')
+                : showRetryDispatchCta
+                  ? t('task_action_retry_resume_dispatch')
+                  : suggestedActionLabel(candidate)}
             </button>
           )}
           {canRecheck && !canRunSafeResume && !isResumeLive && (
@@ -195,6 +221,21 @@ function taskCard(task: TaskRecord, expandedTaskId: string | null, setExpandedTa
               </div>
               <div>{suggestedActionLabel(candidate)}</div>
               <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{candidate.reason || '—'}</div>
+            </div>
+          )}
+          {(showRetryDispatchCta || showManualResumeCta) && (
+            <div style={{
+              fontSize: '11px',
+              lineHeight: '1.55',
+              color: showRetryDispatchCta ? 'var(--error)' : 'var(--accent)',
+              background: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 53, 0.08)',
+              border: '1px solid',
+              borderColor: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.24)' : 'rgba(255, 107, 53, 0.24)',
+              borderRadius: '6px',
+              padding: '8px 10px',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>

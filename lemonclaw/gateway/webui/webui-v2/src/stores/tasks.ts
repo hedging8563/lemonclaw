@@ -21,6 +21,7 @@ export interface TaskRecord {
   updated_at_ms?: number;
   resume_from_step?: string | null;
   display_state?: TaskDisplayState;
+  resume_context?: Record<string, any>;
   metadata?: Record<string, any>;
 }
 
@@ -121,6 +122,20 @@ export async function triggerTaskRecheck(taskId: string) {
   } catch (err: any) {
     console.error('Failed to recheck task', err);
     taskPanelError.value = err?.message || 'Failed to recheck task';
+  } finally {
+    setTaskBusy(taskId, null);
+  }
+}
+
+export async function triggerManualResume(taskId: string) {
+  setTaskBusy(taskId, 'manual_resume');
+  taskPanelError.value = null;
+  try {
+    await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+    await Promise.all([loadTaskPanel(), loadTaskDetail(taskId)]);
+  } catch (err: any) {
+    console.error('Failed to request manual resume', err);
+    taskPanelError.value = err?.message || 'Failed to queue manual resume';
   } finally {
     setTaskBusy(taskId, null);
   }

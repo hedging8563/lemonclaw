@@ -727,6 +727,35 @@ def test_build_resume_candidate_blocks_replay_for_non_replayable_steps(tmp_path:
     assert candidate["non_replayable_failed_count"] == 1
 
 
+def test_build_resume_candidate_blocks_auto_resume_when_resume_context_disallows_it(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cron:job-1",
+        agent_id="cron",
+        mode="cron",
+        channel="cli",
+        goal="cron replay test",
+        status="failed",
+        current_stage="error",
+        resume_context={
+            "channel": "cli",
+            "chat_id": "direct",
+            "session_key": "cron:job-1",
+            "auto_resume_allowed": False,
+            "resume_disabled_reason": "cron job has no explicit delivery target; resume requires operator review",
+        },
+    )
+    step = ledger.start_step("task_1", step_type="cron_job", name="nightly", replayable=True)
+    ledger.finish_step(step, status="failed", error="timeout")
+
+    candidate = ledger.build_resume_candidate("task_1")
+    assert candidate is not None
+    assert candidate["recommended_action"] == "manual_resume"
+    assert candidate["safe_to_execute"] is False
+    assert "explicit delivery target" in candidate["reason"]
+
+
 def test_execute_safe_resume_rejects_replayable_failed_steps_until_executor_exists(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
@@ -780,3 +809,30 @@ def test_prepare_replay_failed_steps_supersedes_old_failed_steps(tmp_path: Path)
     assert task["status"] == "running"
     assert task["current_stage"] == "resume_queued"
     assert task["metadata"]["recovery"]["action"] == "resume_execute_requested"
+
+
+def test_describe_task_display_state_for_resume_dispatch_failed() -> None:
+    state = TaskLedger.describe_task_display_state({
+        "status": "failed",
+        "current_stage": "error",
+        "error": "resume dispatch failed: loop closed",
+        "metadata": {"recovery": {"action": "resume_dispatch_failed", "reason": "resume dispatch failed: loop closed"}},
+    })
+
+    assert state["key"] == "resume_dispatch_failed"
+    assert "dispatch failed" in state["detail"].lower()
+
+
+def test_describe_task_display_state_for_manual_only_resume() -> None:
+    state = TaskLedger.describe_task_display_state({
+        "status": "failed",
+        "current_stage": "error",
+        "resume_context": {
+            "auto_resume_allowed": False,
+            "resume_disabled_reason": "cron job has no explicit delivery target; resume requires operator review",
+        },
+        "metadata": {"recovery": {}},
+    })
+
+    assert state["key"] == "resume_manual_only"
+    assert "operator review" in state["detail"].lower()

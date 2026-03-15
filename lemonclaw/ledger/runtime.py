@@ -319,6 +319,15 @@ class TaskLedger:
         status = str(task.get("status") or "")
         stage = str(task.get("current_stage") or "")
         recovery = (task.get("metadata") or {}).get("recovery") or {}
+        resume_context = dict(task.get("resume_context") or {})
+
+        if str(recovery.get("action") or "") == "resume_dispatch_failed":
+            return {
+                "key": "resume_dispatch_failed",
+                "label": "Resume Dispatch Failed",
+                "tone": "error",
+                "detail": str(recovery.get("reason") or task.get("error") or "Resume dispatch could not be scheduled."),
+            }
 
         if stage in {"resume_requested", "resume_queued"}:
             return {
@@ -340,6 +349,16 @@ class TaskLedger:
                 "label": "Needs Review",
                 "tone": "warning",
                 "detail": str(recovery.get("reason") or "Manual review is required before resume."),
+            }
+        if not bool(resume_context.get("auto_resume_allowed", True)) and status in {"failed", "waiting"}:
+            return {
+                "key": "resume_manual_only",
+                "label": "Manual Resume Only",
+                "tone": "warning",
+                "detail": str(
+                    resume_context.get("resume_disabled_reason")
+                    or "Automatic resume is disabled for this task; operator action is required."
+                ),
             }
         if stage == "waiting_outbox" or (status == "waiting" and stage == "waiting_outbox"):
             return {
@@ -587,6 +606,7 @@ class TaskLedger:
 
         steps = self.materialize_steps(task_id)
         outbox_events = self.materialize_outbox_events_for_task(task_id)
+        resume_context = dict(task.get("resume_context") or {})
         resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
         resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
         failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
@@ -609,12 +629,20 @@ class TaskLedger:
             safe_to_execute = False
             reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
         elif replayable_failed and not open_outbox:
-            recommended_action = "replay_failed_steps"
-            safe_to_execute = True
-            reason = (
-                f"{len(replayable_failed)} failed step(s) are replayable and can be resumed safely. "
-                "A dedicated resume executor will supersede those failed steps and continue the task in-place."
-            )
+            if not bool(resume_context.get("auto_resume_allowed", True)):
+                recommended_action = "manual_resume"
+                safe_to_execute = False
+                reason = str(
+                    resume_context.get("resume_disabled_reason")
+                    or "Automatic resume is disabled for this task; operator action is required."
+                )
+            else:
+                recommended_action = "replay_failed_steps"
+                safe_to_execute = True
+                reason = (
+                    f"{len(replayable_failed)} failed step(s) are replayable and can be resumed safely. "
+                    "A dedicated resume executor will supersede those failed steps and continue the task in-place."
+                )
         elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
             recommended_action = "recheck"
             safe_to_execute = True
