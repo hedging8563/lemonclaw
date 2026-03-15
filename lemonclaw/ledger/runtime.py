@@ -329,7 +329,14 @@ class TaskLedger:
                 "detail": str(recovery.get("reason") or task.get("error") or "Resume dispatch could not be scheduled."),
             }
 
-        if stage in {"resume_requested", "resume_queued"}:
+        if stage == "resume_requested":
+            return {
+                "key": "resume_requested",
+                "label": "Manual Resume Queued",
+                "tone": "warning",
+                "detail": "Queued for operator follow-up before any replay resume is attempted.",
+            }
+        if stage == "resume_queued":
             return {
                 "key": "resume_queued",
                 "label": "Resume Queued",

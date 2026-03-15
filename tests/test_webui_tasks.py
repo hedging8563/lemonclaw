@@ -156,7 +156,7 @@ def test_task_resume_api_sets_resume_from_step(tmp_path):
     data = resp.json()
     assert data["task"]["status"] == "waiting"
     assert data["task"]["current_stage"] == "resume_requested"
-    assert data["task"]["display_state"]["key"] == "resume_queued"
+    assert data["task"]["display_state"]["key"] == "resume_requested"
     assert data["task"]["resume_from_step"] == step.step_id
     assert data["summary"]["resume_from_step"] == step.step_id
 
