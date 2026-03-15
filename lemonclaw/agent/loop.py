@@ -815,7 +815,7 @@ class AgentLoop:
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
+            key = session_key or msg.session_key
             session = self.sessions.get_or_create(key)
             session_model = session.metadata.get("current_model")
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
