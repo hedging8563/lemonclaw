@@ -105,6 +105,26 @@ class Tool(ABC):
         """Resolve this tool call to a capability id."""
         return f"tool.{self.name}.default"
 
+    # Tools whose default capability is inherently non-replayable (side effects).
+    _NON_REPLAYABLE_TOOLS = frozenset({"exec", "spawn", "cron", "message", "browser"})
+
+    def is_replayable(self, capability_id: str) -> bool:
+        """Whether a step using this capability can be safely replayed.
+
+        External writes (http.write, notify.*, db.write, k8s.write, etc.) are
+        not replayable because replaying them would duplicate the side effect.
+        Tools with inherent side effects (exec, spawn, cron, message, browser)
+        are also non-replayable regardless of capability id.
+        Read-only operations and pure computations are safe to replay.
+        """
+        if ".write" in capability_id or capability_id.startswith("notify."):
+            return False
+        # Check if the tool name (second segment of tool.{name}.xxx) is inherently non-replayable
+        parts = capability_id.split(".")
+        if len(parts) >= 2 and parts[1] in self._NON_REPLAYABLE_TOOLS:
+            return False
+        return True
+
     def normalize_result(self, raw: Any) -> dict[str, Any]:
         """Normalize a tool result for governance/audit purposes."""
         if isinstance(raw, dict):

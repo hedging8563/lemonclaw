@@ -107,7 +107,9 @@ async def test_watchdog_soft_recovery_restarts_down_channels():
 
     await watchdog._soft_recovery([HealthCheck("channel_down", False, "down: telegram")])
 
-    manager.restart_channel.assert_awaited_once_with("telegram")
+    manager.restart_channel.assert_awaited_once_with(
+        "telegram", reason="channel_down detected", source="watchdog",
+    )
 
 
 @pytest.mark.asyncio

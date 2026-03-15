@@ -501,4 +501,4 @@ def test_channel_restart_api_calls_manager(tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert data["result"]["channel"] == "telegram"
-    manager.restart_channel.assert_awaited_once_with("telegram")
+    manager.restart_channel.assert_awaited_once_with("telegram", reason="", source="webui")

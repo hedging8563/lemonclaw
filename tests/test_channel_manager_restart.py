@@ -76,3 +76,28 @@ async def test_channel_manager_restart_channel_is_serialized():
     assert fake.start_calls == 3
     await fake.stop()
     await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_restart_records_reason_and_history():
+    manager = ChannelManager(Config(), MessageBus())
+    fake = _FakeChannel()
+    manager.channels["telegram"] = fake
+    manager._spawn_channel_task("telegram", fake)
+    await asyncio.sleep(0.05)
+
+    result = await manager.restart_channel("telegram", reason="config changed", source="webui")
+    await asyncio.sleep(0.05)
+
+    assert result["last_restart_reason"] == "config changed"
+    assert result["last_restart_source"] == "webui"
+    assert len(result["restart_history"]) == 1
+    assert result["restart_history"][0]["reason"] == "config changed"
+    assert result["restart_history"][0]["source"] == "webui"
+    assert result["restart_history"][0]["result"] == "running"
+
+    status = manager.get_status()
+    assert status["telegram"]["last_restart_reason"] == "config changed"
+
+    await fake.stop()
+    await asyncio.sleep(0.05)

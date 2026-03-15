@@ -328,12 +328,26 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for all tools that need routing info."""
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Update context for all tools that need routing info.
+
+        *session_key* is forwarded verbatim to spawn/cron so that thread
+        dimensions (e.g. ``telegram:123:789``) are preserved instead of being
+        reconstructed from *channel* and *chat_id* alone.
+        """
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id)
+                    else:
+                        tool.set_context(channel, chat_id, session_key=session_key)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -818,7 +832,7 @@ class AgentLoop:
             key = session_key or msg.session_key
             session = self.sessions.get_or_create(key)
             session_model = session.metadata.get("current_model")
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), session_key=key)
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
@@ -976,7 +990,7 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), session_key=key)
         message_turn_state: dict[str, Any] | None = None
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):

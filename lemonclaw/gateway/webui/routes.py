@@ -1243,7 +1243,12 @@ def get_webui_routes(
         if not name:
             return _json({"error": "channel name is required"}, 400)
         try:
-            result = await channel_manager.restart_channel(name)
+            body = await _parse_json_body(request)
+            reason = str(body.get("reason", "")) if body else ""
+        except Exception:
+            reason = ""
+        try:
+            result = await channel_manager.restart_channel(name, reason=reason, source="webui")
         except KeyError:
             return _json({"error": "unknown channel"}, 404)
         resp = _json({"result": result, "channels": channel_manager.get_status()})

@@ -473,7 +473,16 @@ def gateway(
             bus=bus,
             notify_config=config.tools.notify,
             http_config=config.tools.http,
+            email_config=config.channels.email if config.channels.email.smtp_host else None,
         ),
+        poll_interval_s=config.outbox.poll_interval_s,
+        max_idle_poll_s=config.outbox.max_idle_poll_s,
+        batch_size=config.outbox.batch_size,
+        retry_delay_ms=config.outbox.retry_delay_ms,
+        max_attempts=config.outbox.max_attempts,
+        compact_interval_s=config.outbox.compact_interval_s,
+        keep_terminal=config.outbox.keep_terminal,
+        min_terminal_age_ms=config.outbox.min_terminal_age_ms,
     )
     agent.outbox_enabled = True
 
@@ -487,6 +496,7 @@ def gateway(
         agent_loop=agent,
         watchdog=watchdog,
         activity_bus=activity_bus,
+        outbox_dispatcher=outbox_dispatcher,
         config_path=get_config_path(),
         config_watcher=config_watcher,
     )

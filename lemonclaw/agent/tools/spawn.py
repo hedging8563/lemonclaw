@@ -17,11 +17,17 @@ class SpawnTool(Tool):
         self._origin_chat_id = "direct"
         self._session_key = "cli:direct"
     
-    def set_context(self, channel: str, chat_id: str) -> None:
-        """Set the origin context for subagent announcements."""
+    def set_context(self, channel: str, chat_id: str, *, session_key: str | None = None) -> None:
+        """Set the origin context for subagent announcements.
+
+        When *session_key* is provided it is stored verbatim so that thread
+        dimensions (e.g. ``telegram:123:789``) are preserved.  Without it the
+        key is reconstructed from *channel* and *chat_id* which loses the
+        thread segment.
+        """
         self._origin_channel = channel
         self._origin_chat_id = chat_id
-        self._session_key = f"{channel}:{chat_id}"
+        self._session_key = session_key or f"{channel}:{chat_id}"
     
     @property
     def name(self) -> str:

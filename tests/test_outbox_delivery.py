@@ -73,8 +73,15 @@ async def test_deliver_outbox_event_http_json_dns_failure_is_retryable(monkeypat
     async def _publish(_msg: OutboundMessage) -> None:
         raise AssertionError("should not publish outbound for http_json effect")
 
-    monkeypatch.setattr("lemonclaw.ledger.delivery.httpx.AsyncClient", lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not create client")))
-    monkeypatch.setattr("lemonclaw.ledger.delivery._validate_url", lambda _url: (False, "DNS resolution failed", ""))
+    from lemonclaw.agent.tools.http_request import HTTPRequestResult
+
+    async def _fake_execute(**kwargs):
+        return HTTPRequestResult(
+            ok=False, status_code=None, final_url=kwargs["url"], method=kwargs["method"],
+            headers={}, body=None, error="URL validation failed: DNS resolution failed", dns_error=True,
+        )
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery._execute_http_request", _fake_execute)
 
     with pytest.raises(RuntimeError, match="DNS resolution failed"):
         await deliver_outbox_event(
@@ -87,3 +94,113 @@ async def test_deliver_outbox_event_http_json_dns_failure_is_retryable(monkeypat
             notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
             http_config=SimpleNamespace(timeout=30, allow_domains=["example.com"], auth_profiles={}),
         )
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_http_json_408_is_retryable(monkeypatch: pytest.MonkeyPatch):
+    """408 Request Timeout should be retryable, not permanent."""
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for http_json effect")
+
+    from lemonclaw.agent.tools.http_request import HTTPRequestResult
+
+    async def _fake_execute(**kwargs):
+        return HTTPRequestResult(
+            ok=False, status_code=408, final_url=kwargs["url"], method=kwargs["method"],
+            headers={}, body=None,
+        )
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery._execute_http_request", _fake_execute)
+
+    with pytest.raises(RuntimeError, match="http delivery -> 408"):
+        await deliver_outbox_event(
+            {
+                "effect_type": "http_json",
+                "target": "https://example.com/data",
+                "payload": {"method": "POST", "body": {"hello": "world"}},
+            },
+            publish_outbound=_publish,
+            notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+            http_config=SimpleNamespace(timeout=30, allow_domains=["example.com"], auth_profiles={}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_http_json_permanent_4xx(monkeypatch: pytest.MonkeyPatch):
+    """Non-retryable 4xx (e.g. 403) should raise PermanentOutboxError."""
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for http_json effect")
+
+    from lemonclaw.agent.tools.http_request import HTTPRequestResult
+
+    async def _fake_execute(**kwargs):
+        return HTTPRequestResult(
+            ok=False, status_code=403, final_url=kwargs["url"], method=kwargs["method"],
+            headers={}, body=None,
+        )
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery._execute_http_request", _fake_execute)
+
+    with pytest.raises(PermanentOutboxError, match="http delivery -> 403"):
+        await deliver_outbox_event(
+            {
+                "effect_type": "http_json",
+                "target": "https://example.com/data",
+                "payload": {"method": "POST", "body": {"hello": "world"}},
+            },
+            publish_outbound=_publish,
+            notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+            http_config=SimpleNamespace(timeout=30, allow_domains=["example.com"], auth_profiles={}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_email_send_missing_config_is_permanent():
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for email_send effect")
+
+    with pytest.raises(PermanentOutboxError, match="email_send requires email configuration"):
+        await deliver_outbox_event(
+            {
+                "effect_type": "email_send",
+                "target": "user@example.com",
+                "payload": {"subject": "Test", "body": "Hello"},
+            },
+            publish_outbound=_publish,
+            notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+            email_config=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_email_send_success(monkeypatch: pytest.MonkeyPatch):
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for email_send effect")
+
+    sent: list[dict] = []
+
+    async def _fake_send(**kwargs):
+        sent.append(kwargs)
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery._send_email_smtp", _fake_send)
+
+    email_cfg = SimpleNamespace(
+        smtp_host="smtp.example.com", smtp_port=587,
+        smtp_username="user", smtp_password="pass",
+        from_address="bot@example.com",
+        smtp_use_tls=True, smtp_use_ssl=False,
+    )
+    await deliver_outbox_event(
+        {
+            "effect_type": "email_send",
+            "target": "recipient@example.com",
+            "payload": {"subject": "Test Subject", "body": "Hello World"},
+        },
+        publish_outbound=_publish,
+        notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+        email_config=email_cfg,
+    )
+
+    assert len(sent) == 1
+    assert sent[0]["to"] == "recipient@example.com"
+    assert sent[0]["subject"] == "Test Subject"

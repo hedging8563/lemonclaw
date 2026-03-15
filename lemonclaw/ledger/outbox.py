@@ -10,6 +10,7 @@ This is a best-effort durable outbox:
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
@@ -36,6 +37,9 @@ class OutboxDispatcher:
         retry_delay_ms: int = 5_000,
         max_attempts: int = 3,
         claim_owner: str = "outbox_dispatcher",
+        compact_interval_s: float = 3600.0,
+        keep_terminal: int = 200,
+        min_terminal_age_ms: int = 24 * 60 * 60 * 1000,
     ) -> None:
         self._ledger = ledger
         self._on_deliver = on_deliver
@@ -45,8 +49,12 @@ class OutboxDispatcher:
         self._retry_delay_ms = retry_delay_ms
         self._max_attempts = max_attempts
         self._claim_owner = claim_owner
+        self._compact_interval_s = compact_interval_s
+        self._keep_terminal = keep_terminal
+        self._min_terminal_age_ms = min_terminal_age_ms
         self._running = False
         self._task: asyncio.Task | None = None
+        self._last_compact_ms: int = int(time.time() * 1000)
 
     async def start(self) -> None:
         if self._running:
@@ -72,6 +80,7 @@ class OutboxDispatcher:
         while self._running:
             try:
                 delivered = await self.dispatch_once()
+                await self._maybe_compact()
                 if delivered == 0:
                     await asyncio.sleep(idle_sleep_s)
                     idle_sleep_s = min(self._max_idle_poll_s, idle_sleep_s * 2)
@@ -83,6 +92,24 @@ class OutboxDispatcher:
                 logger.exception("outbox: dispatcher tick failed")
                 await asyncio.sleep(idle_sleep_s)
                 idle_sleep_s = min(self._max_idle_poll_s, idle_sleep_s * 2)
+
+    async def _maybe_compact(self) -> None:
+        if self._compact_interval_s <= 0:
+            return
+        now = self._ledger.now_ms()
+        if now - self._last_compact_ms < int(self._compact_interval_s * 1000):
+            return
+        self._last_compact_ms = now
+        try:
+            result = await asyncio.to_thread(
+                self._ledger.compact_outbox,
+                keep_terminal=self._keep_terminal,
+                min_terminal_age_ms=self._min_terminal_age_ms,
+            )
+            if result.get("dropped", 0) > 0:
+                logger.info("outbox: compacted {} events (kept {})", result["dropped"], result["after"])
+        except Exception:
+            logger.exception("outbox: compaction failed")
 
     async def dispatch_once(self) -> int:
         claimed = await asyncio.to_thread(

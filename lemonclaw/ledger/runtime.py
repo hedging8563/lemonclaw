@@ -77,7 +77,7 @@ class TaskLedger:
         data["updated_at_ms"] = max(next_updated, previous_updated + 1)
         self._write_json(path, data)
 
-    def start_step(self, task_id: str, *, step_type: str, name: str, input_summary: str = "") -> StepRecord:
+    def start_step(self, task_id: str, *, step_type: str, name: str, input_summary: str = "", replayable: bool = True) -> StepRecord:
         self._require_valid_task_id(task_id)
         step = StepRecord(
             task_id=task_id,
@@ -87,6 +87,7 @@ class TaskLedger:
             status="running",
             started_at_ms=_now_ms(),
             input_summary=input_summary[:500],
+            replayable=replayable,
         )
         self._append_jsonl(self._steps_path(task_id), step.to_dict())
         return step
@@ -469,6 +470,11 @@ class TaskLedger:
         failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
         open_outbox = [event for event in outbox_events if str(event.get("status") or "") in {"pending", "retrying", "claimed"}]
 
+        # Classify steps by replayability
+        failed_steps = [s for s in steps if str(s.get("status") or "") == "failed"]
+        replayable_failed = [s for s in failed_steps if s.get("replayable", True)]
+        non_replayable_failed = [s for s in failed_steps if not s.get("replayable", True)]
+
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
@@ -476,6 +482,17 @@ class TaskLedger:
             recommended_action = "retry_outbox"
             safe_to_execute = True
             reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
+        elif non_replayable_failed:
+            recommended_action = "manual_resume"
+            safe_to_execute = False
+            reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
+        elif replayable_failed and not open_outbox:
+            recommended_action = "replay_failed_steps"
+            safe_to_execute = True
+            reason = (
+                f"{len(replayable_failed)} failed step(s) are safe to replay (read-only / no side effects). "
+                "Steps will be reset to pending; the caller must re-trigger the agent loop to actually re-execute them."
+            )
         elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
             recommended_action = "recheck"
             safe_to_execute = True
@@ -493,6 +510,8 @@ class TaskLedger:
             "resume_step": dict(resume_step or {}) if resume_step else None,
             "failed_outbox_count": len(failed_outbox),
             "open_outbox_count": len(open_outbox),
+            "replayable_failed_count": len(replayable_failed),
+            "non_replayable_failed_count": len(non_replayable_failed),
             "recommended_action": recommended_action,
             "safe_to_execute": safe_to_execute,
             "reason": reason,
@@ -528,6 +547,29 @@ class TaskLedger:
                     details={"task_id": task_id},
                 )
                 self.update_task(task_id, metadata=metadata)
+        elif action == "replay_failed_steps":
+            steps = self.materialize_steps(task_id)
+            replayed = []
+            for step in steps:
+                if str(step.get("status") or "") != "failed":
+                    continue
+                if not step.get("replayable", True):
+                    continue
+                step_id = str(step.get("step_id") or "")
+                if step_id:
+                    self.update_step_state(task_id, step_id, status="pending", error=None)
+                    replayed.append(step_id)
+            task = self.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action="safe_resume_execute",
+                    reason=f"replayed {len(replayed)} failed replayable step(s)",
+                    details={"task_id": task_id, "mode": "replay_failed_steps", "replayed_steps": replayed[:20]},
+                )
+                self.update_task(task_id, status="running", current_stage="execute", error=None, metadata=metadata)
         elif action == "recheck":
             from lemonclaw.ledger.completion_gate import finalize_task
 
@@ -627,12 +669,15 @@ class TaskLedger:
                 for event in terminal
                 if int(event.get("updated_at_ms") or 0) >= cutoff
             ]
+            kept_ids = {str(e.get("event_id") or "") for e in kept_terminal}
             for event in terminal:
-                if event in kept_terminal:
+                eid = str(event.get("event_id") or "")
+                if eid in kept_ids:
                     continue
                 if len(kept_terminal) >= max(0, int(keep_terminal)):
                     break
                 kept_terminal.append(event)
+                kept_ids.add(eid)
             if len(kept_terminal) > max(0, int(keep_terminal)):
                 kept_terminal = kept_terminal[:max(0, int(keep_terminal))]
             kept: list[dict[str, Any]] = non_terminal + kept_terminal

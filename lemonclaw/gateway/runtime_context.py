@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.bus.activity import ActivityBus
     from lemonclaw.channels.manager import ChannelManager
+    from lemonclaw.ledger.outbox import OutboxDispatcher
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.telemetry.usage import UsageTracker
     from lemonclaw.watchdog.service import WatchdogService
@@ -35,6 +36,7 @@ class GatewayRuntimeContext:
     agent_loop: "AgentLoop | None" = None
     watchdog: "WatchdogService | None" = None
     activity_bus: "ActivityBus | None" = None
+    outbox_dispatcher: "OutboxDispatcher | None" = None
     orchestrator: Any | None = None
     registry: Any | None = None
     config_path: "Path | Any | None" = None

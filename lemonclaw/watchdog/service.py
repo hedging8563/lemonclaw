@@ -435,7 +435,9 @@ class WatchdogService:
                     if bool(info.get("running")):
                         continue
                     try:
-                        result = await self._channel_manager.restart_channel(name)
+                        result = await self._channel_manager.restart_channel(
+                            name, reason="channel_down detected", source="watchdog",
+                        )
                         logger.warning("watchdog: restarted channel {} -> {}", name, result)
                     except Exception as e:
                         logger.error("watchdog: failed to restart channel {}: {}", name, e)

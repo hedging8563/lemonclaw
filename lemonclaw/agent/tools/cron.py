@@ -18,11 +18,17 @@ class CronTool(Tool):
         self._cron = cron_service
         self._channel = ""
         self._chat_id = ""
+        self._session_key = ""
     
-    def set_context(self, channel: str, chat_id: str) -> None:
-        """Set the current session context for delivery."""
+    def set_context(self, channel: str, chat_id: str, *, session_key: str | None = None) -> None:
+        """Set the current session context for delivery.
+
+        When *session_key* is provided it is stored verbatim so that thread
+        dimensions are preserved when scheduling new jobs.
+        """
         self._channel = channel
         self._chat_id = chat_id
+        self._session_key = session_key or f"{channel}:{chat_id}"
     
     @property
     def name(self) -> str:
@@ -98,7 +104,7 @@ class CronTool(Tool):
                 at,
                 effective_channel,
                 effective_chat_id,
-                _session_key or (f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None),
+                _session_key or self._session_key or (f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None),
                 dict(_default_delivery_context or {}),
             )
         elif action == "list":

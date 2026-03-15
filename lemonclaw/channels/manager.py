@@ -247,7 +247,7 @@ class ChannelManager:
             finally:
                 self._channel_tasks.pop(name, None)
 
-    async def restart_channel(self, name: str) -> dict[str, Any]:
+    async def restart_channel(self, name: str, *, reason: str = "", source: str = "system") -> dict[str, Any]:
         """Stop and restart a single channel without touching others."""
         channel = self.channels.get(name)
         if channel is None:
@@ -269,7 +269,7 @@ class ChannelManager:
                 finally:
                     self._channel_tasks.pop(name, None)
 
-            logger.info("Restarting {} channel...", name)
+            logger.info("Restarting {} channel (reason={}, source={})...", name, reason or "unspecified", source)
             restart_task = self._spawn_channel_task(name, channel)
             await asyncio.sleep(0)
             result = {
@@ -279,10 +279,22 @@ class ChannelManager:
             }
             state = self._restart_state.setdefault(name, {"restart_count": 0, "restart_fail_count": 0})
             state["restart_count"] += 1
-            state["last_restart_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            state["last_restart_at_ms"] = now_ms
             state["last_restart_result"] = "running" if result["running"] else "not_running"
+            state["last_restart_reason"] = reason[:500] if reason else ""
+            state["last_restart_source"] = source
             if not result["running"]:
                 state["restart_fail_count"] += 1
+            # Append to audit history (capped at 20 entries)
+            history = list(state.get("restart_history") or [])
+            history.append({
+                "at_ms": now_ms,
+                "reason": reason[:500] if reason else "",
+                "source": source,
+                "result": state["last_restart_result"],
+            })
+            state["restart_history"] = history[-20:]
             result.update(state)
             return result
 

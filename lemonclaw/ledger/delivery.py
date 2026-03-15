@@ -9,20 +9,51 @@ Best-effort durable outbox:
 
 from __future__ import annotations
 
+import asyncio
+from email.message import EmailMessage
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-import httpx
-from urllib.parse import urlparse
-
-from lemonclaw.agent.tools.http_request import _domain_allowed
+from lemonclaw.agent.tools.http_request import RETRYABLE_STATUS_CODES, _execute_http_request
 from lemonclaw.agent.tools.notify import deliver_webhook_json
-from lemonclaw.agent.tools.web import MAX_REDIRECTS, USER_AGENT, _validate_url
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.ledger.outbox import PermanentOutboxError
 
 if TYPE_CHECKING:
     from lemonclaw.bus.queue import MessageBus
-    from lemonclaw.config.schema import HTTPRequestToolConfig, NotifyToolConfig
+    from lemonclaw.config.schema import EmailConfig, HTTPRequestToolConfig, NotifyToolConfig
+
+
+async def _send_email_smtp(
+    *,
+    to: str,
+    subject: str,
+    body: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    from_address: str,
+    use_tls: bool = True,
+    use_ssl: bool = False,
+) -> None:
+    """Send a single email via SMTP using aiosmtplib."""
+    import aiosmtplib
+
+    msg = EmailMessage()
+    msg["From"] = from_address
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    await aiosmtplib.send(
+        msg,
+        hostname=smtp_host,
+        port=smtp_port,
+        username=smtp_username or None,
+        password=smtp_password or None,
+        start_tls=use_tls,
+        use_tls=use_ssl,
+    )
 
 
 async def deliver_outbox_event(
@@ -31,6 +62,7 @@ async def deliver_outbox_event(
     publish_outbound: Callable[[OutboundMessage], Awaitable[None]],
     notify_config: "NotifyToolConfig",
     http_config: "HTTPRequestToolConfig | None" = None,
+    email_config: "EmailConfig | None" = None,
 ) -> None:
     """Deliver one outbox event.
 
@@ -89,81 +121,61 @@ async def deliver_outbox_event(
         allow_domains = list((http_config.allow_domains if http_config else []) or [])
         auth_profiles = dict((http_config.auth_profiles if http_config else {}) or {})
 
-        parsed = urlparse(target)
-        host = (parsed.hostname or "").lower()
-        if not _domain_allowed(host, allow_domains):
-            raise PermanentOutboxError(f"Domain '{host}' is not in allow_domains")
-        if auth_profile:
-            profile_headers = auth_profiles.get(auth_profile)
-            if not profile_headers:
-                raise PermanentOutboxError(f"Unknown auth profile '{auth_profile}'")
-            for key, value in profile_headers.items():
-                headers.setdefault(key, value)
+        result = await _execute_http_request(
+            method=method,
+            url=target,
+            headers=headers,
+            query=query,
+            body=body,
+            timeout=request_timeout,
+            allow_domains=allow_domains,
+            auth_profiles=auth_profiles,
+            auth_profile=auth_profile,
+            expect_json=expect_json,
+        )
 
-        validated, error, resolved_ip = _validate_url(target)
-        if not validated:
-            if error in {"DNS resolution failed", "No addresses returned by DNS"}:
-                raise RuntimeError(f"URL validation failed: {error}")
-            raise PermanentOutboxError(f"URL validation failed: {error}")
+        if not result.ok and result.status_code is None:
+            if result.dns_error:
+                raise RuntimeError(f"URL validation failed: {result.error}")
+            raise PermanentOutboxError(result.error or "Unknown error")
 
-        response = None
-        current_url = target
-        current_ip = resolved_ip
-        current_port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        transport = httpx.AsyncHTTPTransport()
+        if result.status_code is not None and result.status_code in RETRYABLE_STATUS_CODES:
+            raise RuntimeError(f"http delivery -> {result.status_code}")
+        if result.status_code is not None and result.status_code >= 400:
+            raise PermanentOutboxError(f"http delivery -> {result.status_code}")
+        return
+
+    if effect_type == "email_send":
+        if not email_config:
+            raise PermanentOutboxError("email_send requires email configuration")
+        if not email_config.smtp_host or not email_config.from_address:
+            raise PermanentOutboxError("email_send requires smtp_host and from_address")
+        to = target or str(payload.get("to") or "")
+        subject = str(payload.get("subject") or "")
+        body_text = str(payload.get("body") or "")
+        if not to:
+            raise PermanentOutboxError("email_send requires a recipient address")
+        if email_config.smtp_use_tls and email_config.smtp_use_ssl:
+            raise PermanentOutboxError("smtp_use_tls and smtp_use_ssl are mutually exclusive")
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-                transport=transport,
-                timeout=float(request_timeout),
-                verify=True,
-            ) as client:
-                for _ in range(MAX_REDIRECTS):
-                    current_parsed = urlparse(current_url)
-                    request_url = current_url.replace(
-                        f"{current_parsed.scheme}://{current_parsed.netloc}",
-                        f"{current_parsed.scheme}://{current_ip}:{current_port}",
-                        1,
-                    )
-                    req_headers = {"User-Agent": USER_AGENT, "Host": current_parsed.netloc, **headers}
-                    response = await client.request(
-                        method,
-                        request_url,
-                        headers=req_headers,
-                        params=query if method in {"GET", "HEAD", "DELETE"} else None,
-                        json=body if method not in {"GET", "HEAD"} and body else None,
-                    )
-                    if response.status_code in (301, 302, 303, 307, 308):
-                        location = response.headers.get("location", "")
-                        if not location:
-                            break
-                        if location.startswith("/"):
-                            location = f"{current_parsed.scheme}://{current_parsed.netloc}{location}"
-                        redir_ok, redir_err, redir_ip = _validate_url(location)
-                        if not redir_ok:
-                            if redir_err in {"DNS resolution failed", "No addresses returned by DNS"}:
-                                raise RuntimeError(f"Redirect validation failed: {redir_err}")
-                            raise PermanentOutboxError(f"Redirect blocked: {redir_err}")
-                        redir_parsed = urlparse(location)
-                        redir_host = (redir_parsed.hostname or "").lower()
-                        if not _domain_allowed(redir_host, allow_domains):
-                            raise PermanentOutboxError(f"Redirect domain '{redir_host}' is not in allow_domains")
-                        current_url = location
-                        current_ip = redir_ip
-                        current_port = redir_parsed.port or (443 if redir_parsed.scheme == "https" else 80)
-                        continue
-                    break
-        except PermanentOutboxError:
-            raise
+            await _send_email_smtp(
+                to=to,
+                subject=subject,
+                body=body_text,
+                smtp_host=email_config.smtp_host,
+                smtp_port=email_config.smtp_port,
+                smtp_username=email_config.smtp_username,
+                smtp_password=email_config.smtp_password,
+                from_address=email_config.from_address,
+                use_tls=email_config.smtp_use_tls,
+                use_ssl=email_config.smtp_use_ssl,
+            )
+        except ImportError as exc:
+            raise PermanentOutboxError(f"email_send requires aiosmtplib: {exc}")
         except Exception as exc:
-            raise RuntimeError(f"HTTP request failed: {exc}")
-
-        if response is None:
-            raise RuntimeError("No response received")
-        if response.status_code == 429 or response.status_code >= 500:
-            raise RuntimeError(f"http delivery -> {response.status_code}")
-        if response.status_code >= 400:
-            raise PermanentOutboxError(f"http delivery -> {response.status_code}")
+            if type(exc).__name__ == "SMTPAuthenticationError":
+                raise PermanentOutboxError(f"email auth failed: {exc}")
+            raise RuntimeError(f"email delivery failed: {err_str}")
         return
 
     raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")
@@ -174,6 +186,7 @@ def create_outbox_delivery_handler(
     bus: "MessageBus",
     notify_config: "NotifyToolConfig",
     http_config: "HTTPRequestToolConfig | None" = None,
+    email_config: "EmailConfig | None" = None,
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
     async def _deliver(event: dict[str, Any]) -> None:
         await deliver_outbox_event(
@@ -181,6 +194,7 @@ def create_outbox_delivery_handler(
             publish_outbound=bus.publish_outbound,
             notify_config=notify_config,
             http_config=http_config,
+            email_config=email_config,
         )
 
     return _deliver

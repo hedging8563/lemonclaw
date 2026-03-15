@@ -360,6 +360,20 @@ class NotifyToolConfig(Base):
     allow_webhook_domains: list[str] = Field(default_factory=list)
 
 
+class OutboxConfig(Base):
+    """Outbox dispatcher and retention configuration."""
+
+    poll_interval_s: float = 1.0
+    max_idle_poll_s: float = 15.0
+    batch_size: int = 20
+    retry_delay_ms: int = 5_000
+    max_attempts: int = 3
+    # Retention / compaction
+    compact_interval_s: float = 3600.0  # auto-compact every N seconds (0 = disabled)
+    keep_terminal: int = 200  # max terminal events to retain after compaction
+    min_terminal_age_ms: int = 24 * 60 * 60 * 1000  # terminal events younger than this are always kept
+
+
 class PostgresProfileConfig(Base):
     """Named PostgreSQL connection profile for the db tool."""
 
@@ -475,6 +489,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    outbox: OutboxConfig = Field(default_factory=OutboxConfig)
     lemondata: LemonDataConfig = Field(default_factory=LemonDataConfig)
     governance: GovernanceRuntimeConfig = Field(default_factory=GovernanceRuntimeConfig)
 

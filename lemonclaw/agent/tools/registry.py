@@ -64,13 +64,17 @@ class ToolRegistry:
             capability_id = tool.resolve_capability(params, call_context)
             capability_token = call_context.get("_capability_token")
             mode = str(call_context.get("_mode", "chat"))
-            task_id = str(call_context.get("_task_id", ""))
-            tenant_id = str(call_context.get("_tenant_id", ""))
-            actor_identity = str(call_context.get("_actor_identity", call_context.get("_agent_id", "agent")))
+            task_id = str(call_context.get("_task_id") or "")
+            tenant_id = str(call_context.get("_tenant_id") or "")
+            actor_identity = str(call_context.get("_actor_identity") or call_context.get("_agent_id") or "agent")
             step = None
             if self._ledger and task_id:
                 summary = json.dumps(params, ensure_ascii=False)[:500]
-                step = self._ledger.start_step(task_id, step_type="tool_call", name=name, input_summary=summary)
+                replayable = tool.is_replayable(capability_id)
+                step = self._ledger.start_step(
+                    task_id, step_type="tool_call", name=name,
+                    input_summary=summary, replayable=replayable,
+                )
                 call_context["_step_id"] = step.step_id
 
             if self._governance:
@@ -133,7 +137,7 @@ class ToolRegistry:
             return result
         except Exception as e:
             logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, e)
-            if self._ledger and (task_id := str((context or {}).get("_task_id", ""))):
+            if self._ledger and (task_id := str((context or {}).get("_task_id") or "")):
                 summary = json.dumps(params, ensure_ascii=False)[:500]
                 step = self._ledger.start_step(task_id, step_type="tool_call", name=name, input_summary=summary)
                 self._ledger.finish_step(step, status="failed", error=str(e)[:500])

@@ -655,3 +655,95 @@ def test_task_ledger_execute_safe_resume_retries_failed_outbox(tmp_path: Path):
     task = ledger.read_task("task_1")
     assert task is not None
     assert task["metadata"]["recovery_history"][-1]["action"] == "safe_resume_execute"
+
+
+def test_step_replayable_flag_persisted(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="replay test",
+    )
+    step_rw = ledger.start_step("task_1", step_type="tool_call", name="http_request", replayable=False)
+    step_ro = ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
+    ledger.finish_step(step_rw, status="failed", error="boom")
+    ledger.finish_step(step_ro, status="failed", error="boom")
+
+    steps = ledger.materialize_steps("task_1")
+    by_name = {s["name"]: s for s in steps}
+    assert by_name["http_request"]["replayable"] is False
+    assert by_name["read_file"]["replayable"] is True
+
+
+def test_build_resume_candidate_recommends_replay_for_replayable_failed_steps(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="replay test",
+        status="failed",
+        current_stage="error",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
+    ledger.finish_step(step, status="failed", error="file not found")
+
+    candidate = ledger.build_resume_candidate("task_1")
+    assert candidate is not None
+    assert candidate["recommended_action"] == "replay_failed_steps"
+    assert candidate["safe_to_execute"] is True
+    assert candidate["replayable_failed_count"] == 1
+
+
+def test_build_resume_candidate_blocks_replay_for_non_replayable_steps(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="replay test",
+        status="failed",
+        current_stage="error",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="http_request", replayable=False)
+    ledger.finish_step(step, status="failed", error="timeout")
+
+    candidate = ledger.build_resume_candidate("task_1")
+    assert candidate is not None
+    assert candidate["recommended_action"] == "manual_resume"
+    assert candidate["safe_to_execute"] is False
+    assert candidate["non_replayable_failed_count"] == 1
+
+
+def test_execute_safe_resume_replays_failed_replayable_steps(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="replay test",
+        status="failed",
+        current_stage="error",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="web_search", replayable=True)
+    ledger.finish_step(step, status="failed", error="network error")
+
+    candidate = ledger.execute_safe_resume("task_1", source="test")
+
+    assert candidate is not None
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "running"
+    assert task["current_stage"] == "execute"
+    steps = ledger.materialize_steps("task_1")
+    assert steps[0]["status"] == "pending"
+    assert task["metadata"]["recovery_history"][-1]["action"] == "safe_resume_execute"

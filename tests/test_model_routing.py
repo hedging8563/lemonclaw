@@ -124,8 +124,9 @@ class TestFormatModelList:
         assert "← current" not in output
 
     def test_runtime_badge_present_in_model_list(self):
-        output = format_model_list()
-        assert 'builtin' in output or 'runtime-policy' in output
+        from lemonclaw.providers.catalog import format_model_runtime_badge
+        badge = format_model_runtime_badge("claude-sonnet-4-6")
+        assert 'builtin' in badge or 'runtime-policy' in badge
 
 
 # ── Fallback chain (litellm_provider) ────────────────────────────────

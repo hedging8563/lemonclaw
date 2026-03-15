@@ -38,6 +38,7 @@ class StepRecord:
     ended_at_ms: int | None = None
     input_summary: str = ""
     error: str | None = None
+    replayable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
