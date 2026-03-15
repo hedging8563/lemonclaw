@@ -377,6 +377,8 @@ class TaskLedger:
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Best-effort durable outbox: the event is persisted before delivery,
+        # but delivery itself is still asynchronous and non-transactional.
         self._require_valid_task_id(task_id)
         self._require_valid_step_id(step_id)
         with self._outbox_lock:

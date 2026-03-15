@@ -26,16 +26,13 @@ from lemonclaw.gateway.webui.auth import (
     verify_token,
 )
 from lemonclaw.ledger.completion_gate import finalize_task
+from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
 from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, runtime_policy_active
 from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 
 if TYPE_CHECKING:
-    from lemonclaw.agent.loop import AgentLoop
-    from lemonclaw.channels.manager import ChannelManager
-    from lemonclaw.session.manager import SessionManager
-    from lemonclaw.agent.usage import UsageTracker
-    from lemonclaw.watchdog.service import WatchdogService
+    pass
 
 
 def _check_webui_auth(
@@ -138,14 +135,17 @@ def _visible_ui_messages(session, *, session_key: str | None = None) -> list[dic
 def get_webui_routes(
     *,
     auth_token: str | None,
-    agent_loop: AgentLoop,
-    channel_manager: ChannelManager | None = None,
-    session_manager: SessionManager,
-    usage_tracker: UsageTracker | None = None,
-    version: str = "unknown",
-    watchdog: WatchdogService | None = None,
+    runtime: GatewayRuntimeContext,
 ) -> list[Route]:
     """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
+    agent_loop = runtime.agent_loop
+    session_manager = runtime.session_manager
+    channel_manager = runtime.channel_manager
+    usage_tracker = runtime.usage_tracker
+    watchdog = runtime.watchdog
+    version = runtime.version
+    assert agent_loop is not None
+    assert session_manager is not None
     _task_recheck_locks: dict[str, asyncio.Lock] = {}
 
     def _is_secure(request: Request) -> bool:

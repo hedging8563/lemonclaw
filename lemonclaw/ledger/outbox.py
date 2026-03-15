@@ -1,4 +1,11 @@
-"""Outbox dispatcher for durable side-effect delivery."""
+"""Outbox dispatcher for durable side-effect delivery.
+
+This is a best-effort durable outbox:
+- delivery intents are durably recorded before send
+- retries, manual intervention and recovery remain auditable
+- but it is not a fully transactional outbox with atomic commit guarantees
+  across every external side effect
+"""
 
 from __future__ import annotations
 
@@ -16,7 +23,7 @@ class PermanentOutboxError(RuntimeError):
 
 
 class OutboxDispatcher:
-    """Background dispatcher for claim/deliver/retry outbox flows."""
+    """Background dispatcher for best-effort durable outbox flows."""
 
     def __init__(
         self,

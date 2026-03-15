@@ -26,6 +26,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
+from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
@@ -38,8 +39,7 @@ if TYPE_CHECKING:
 
 def _build_status_handler(
     auth_token: str | None,
-    channel_manager: ChannelManager | None,
-    extra: dict[str, Any] | None = None,
+    runtime: GatewayRuntimeContext,
 ):
     """Return a handler for GET /api/status (token-protected)."""
 
@@ -50,14 +50,14 @@ def _build_status_handler(
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         data: dict[str, Any] = {
-            "uptime_s": round(time.monotonic() - (extra or {}).get("start_time", 0), 1),
+            "uptime_s": round(time.monotonic() - runtime.start_time, 1),
         }
-        if channel_manager:
-            data["channels"] = channel_manager.enabled_channels
-        if extra:
-            for k in ("version", "model", "instance_id"):
-                if k in extra:
-                    data[k] = extra[k]
+        if runtime.channel_manager:
+            data["channels"] = runtime.channel_manager.enabled_channels
+        for k in ("version", "model", "instance_id"):
+            value = getattr(runtime, k, "")
+            if value:
+                data[k] = value
         return JSONResponse(data)
 
     return status_handler
@@ -65,8 +65,7 @@ def _build_status_handler(
 
 def _build_usage_handler(
     auth_token: str | None,
-    usage_tracker: UsageTracker | None,
-    session_manager: SessionManager | None,
+    runtime: GatewayRuntimeContext,
 ):
     """Return a handler for GET /api/usage (token-protected)."""
 
@@ -76,42 +75,42 @@ def _build_usage_handler(
             if not hmac.compare_digest(header, f"Bearer {auth_token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-        if not usage_tracker:
+        if not runtime.usage_tracker:
             return JSONResponse({"error": "usage tracking not available"}, status_code=503)
 
         # Instance-level summary
-        data: dict[str, Any] = usage_tracker.get_instance_summary()
+        data: dict[str, Any] = runtime.usage_tracker.get_instance_summary()
 
         # Optional: per-session detail
         session_key = request.query_params.get("session")
-        if session_key and session_manager:
+        if session_key and runtime.session_manager:
             # Security: force api: prefix to prevent cross-channel session enumeration
             if not session_key.startswith("api:"):
                 session_key = f"api:{session_key}"
             # Use _load to avoid creating empty sessions from arbitrary query params
-            session = session_manager._load(session_key)
+            session = runtime.session_manager._load(session_key)
             if session:
                 data["session"] = {
                     "key": session_key,
-                    **usage_tracker.get_session_summary(session.metadata),
+                    **runtime.usage_tracker.get_session_summary(session.metadata),
                 }
             else:
                 data["session"] = {"key": session_key, "error": "not found"}
-        elif session_manager:
+        elif runtime.session_manager:
             # List all sessions with usage data (from metadata in JSONL)
             sessions_usage = []
-            for info in session_manager.list_sessions():
+            for info in runtime.session_manager.list_sessions():
                 key = info.get("key", "")
                 if not key:
                     continue
-                s = session_manager._load(key)
+                s = runtime.session_manager._load(key)
                 if not s:
                     continue
                 stats = s.metadata.get("usage_stats")
                 if stats and stats.get("total_tokens", 0) > 0:
                     sessions_usage.append({
                         "key": key,
-                        **usage_tracker.get_session_summary(s.metadata),
+                        **runtime.usage_tracker.get_session_summary(s.metadata),
                     })
             if sessions_usage:
                 data["sessions"] = sessions_usage
@@ -123,7 +122,7 @@ def _build_usage_handler(
 
 def _build_chat_handler(
     auth_token: str | None,
-    agent_loop: AgentLoop | None,
+    runtime: GatewayRuntimeContext,
 ):
     """Return a handler for POST /api/chat (token-protected, for testing)."""
 
@@ -133,7 +132,7 @@ def _build_chat_handler(
             if not hmac.compare_digest(header, f"Bearer {auth_token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-        if not agent_loop:
+        if not runtime.agent_loop:
             return JSONResponse({"error": "agent loop not available"}, status_code=503)
 
         try:
@@ -154,7 +153,7 @@ def _build_chat_handler(
 
         try:
             response = await asyncio.wait_for(
-                agent_loop.process_direct(
+                runtime.agent_loop.process_direct(
                     content=message,
                     session_key=session_key,
                     channel="api",
@@ -231,57 +230,66 @@ def create_app(
     config_path: Any | None = None,
     config_watcher: Any | None = None,
     watchdog: WatchdogService | None = None,
+    runtime: GatewayRuntimeContext | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
-    start_time = time.monotonic()
-    set_context(version=version, channel_manager=channel_manager)
-
-    extra = {
-        "start_time": start_time,
-        "version": version,
-        "model": model,
-        "instance_id": instance_id,
-    }
+    runtime = runtime or GatewayRuntimeContext(
+        version=version,
+        model=model,
+        instance_id=instance_id,
+        start_time=time.monotonic(),
+        channel_manager=channel_manager,
+        usage_tracker=usage_tracker,
+        session_manager=session_manager,
+        agent_loop=agent_loop,
+        watchdog=watchdog,
+        activity_bus=activity_bus,
+        orchestrator=orchestrator,
+        registry=registry,
+        config_path=config_path,
+        config_watcher=config_watcher,
+    )
+    set_context(version=runtime.version, channel_manager=runtime.channel_manager)
 
     routes = [
         Route("/health", liveness, methods=["GET"]),
         Route("/readyz", readiness, methods=["GET"]),
-        Route("/api/status", _build_status_handler(auth_token, channel_manager, extra), methods=["GET"]),
-        Route("/api/usage", _build_usage_handler(auth_token, usage_tracker, session_manager), methods=["GET"]),
-        Route("/api/chat", _build_chat_handler(auth_token, agent_loop), methods=["POST"]),
+        Route("/api/status", _build_status_handler(auth_token, runtime), methods=["GET"]),
+        Route("/api/usage", _build_usage_handler(auth_token, runtime), methods=["GET"]),
+        Route("/api/chat", _build_chat_handler(auth_token, runtime), methods=["POST"]),
     ]
 
     # WeCom webhook routes (no auth_token — WeCom uses its own signature verification)
-    wecom_verify, wecom_callback = _build_wecom_webhook_handler(channel_manager)
+    wecom_verify, wecom_callback = _build_wecom_webhook_handler(runtime.channel_manager)
     routes.append(Route("/webhook/wecom", wecom_verify, methods=["GET"]))
     routes.append(Route("/webhook/wecom", wecom_callback, methods=["POST"]))
 
     # Activity Feed routes (REST + WebSocket)
-    if activity_bus and session_manager:
+    if runtime.activity_bus and runtime.session_manager:
         from lemonclaw.gateway.webui.activity import get_activity_routes
 
         routes.extend(get_activity_routes(
-            activity_bus=activity_bus,
-            session_manager=session_manager,
+            activity_bus=runtime.activity_bus,
+            session_manager=runtime.session_manager,
             auth_token=auth_token,
         ))
 
     # Conductor panel routes (REST)
     from lemonclaw.gateway.webui.conductor import get_conductor_routes
     routes.extend(get_conductor_routes(
-        orchestrator=orchestrator,
-        registry=registry,
+        orchestrator=runtime.orchestrator,
+        registry=runtime.registry,
         auth_token=auth_token,
     ))
 
     # Settings API routes (before WebUI catch-all)
-    if config_path:
+    if runtime.config_path:
         from lemonclaw.gateway.webui.settings import get_settings_routes
         routes.extend(get_settings_routes(
             auth_token=auth_token,
-            config_path=config_path,
-            config_watcher=config_watcher,
-            agent_loop=agent_loop,
+            config_path=runtime.config_path,
+            config_watcher=runtime.config_watcher,
+            agent_loop=runtime.agent_loop,
         ))
 
     # Static assets for WebUI v2 (JS/CSS bundles)
@@ -290,17 +298,12 @@ def create_app(
         routes.append(Mount("/assets", app=StaticFiles(directory=str(_static_dir)), name="static-assets"))
 
     # WebUI routes (appended last so /health, /api/*, /webhook/* take priority)
-    if webui_enabled and agent_loop and session_manager:
+    if webui_enabled and runtime.agent_loop and runtime.session_manager:
         from lemonclaw.gateway.webui.routes import get_webui_routes
 
         routes.extend(get_webui_routes(
             auth_token=auth_token,
-            agent_loop=agent_loop,
-            channel_manager=channel_manager,
-            session_manager=session_manager,
-            usage_tracker=usage_tracker,
-            version=version,
-            watchdog=watchdog,
+            runtime=runtime,
         ))
 
     return Starlette(routes=routes)

@@ -461,74 +461,38 @@ def gateway(
     # Create config watcher (started later in run())
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
-    from lemonclaw.ledger.outbox import OutboxDispatcher, PermanentOutboxError
-    from lemonclaw.agent.tools.notify import deliver_webhook_json
+    from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
+    from lemonclaw.ledger.delivery import create_outbox_delivery_handler
+    from lemonclaw.ledger.outbox import OutboxDispatcher
     config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
-
-    async def on_outbox_event(event: dict) -> None:
-        from lemonclaw.bus.events import OutboundMessage
-
-        effect_type = str(event.get("effect_type") or "")
-        payload = dict(event.get("payload") or {})
-        target = str(event.get("target") or "")
-        if effect_type == "outbound_message":
-            # Payload overrides target-derived routing, with target as a fallback for
-            # older outbox writers that only persist "channel:chat_id" in `target`.
-            target_channel, target_chat_id = (target.split(":", 1) if ":" in target else ("", target))
-            channel = str(payload.get("channel") or target_channel)
-            chat_id = str(payload.get("chat_id") or target_chat_id)
-            if not channel or not chat_id:
-                raise PermanentOutboxError("outbox outbound_message requires channel/chat_id")
-
-            await bus.publish_outbound(OutboundMessage(
-                channel=channel,
-                chat_id=chat_id,
-                content=str(payload.get("content") or ""),
-                reply_to=str(payload.get("reply_to") or "") or None,
-                media=list(payload.get("media") or []),
-                metadata=dict(payload.get("metadata") or {}),
-            ))
-            return
-
-        if effect_type == "webhook_json":
-            try:
-                resp_status = await deliver_webhook_json(
-                    webhook_url=target,
-                    title=str(payload.get("title") or ""),
-                    content=str(payload.get("content") or ""),
-                    timeout=config.tools.notify.timeout,
-                    allow_domains=list(config.tools.notify.allow_webhook_domains or []),
-                )
-            except ValueError as exc:
-                raise PermanentOutboxError(str(exc))
-            except RuntimeError:
-                raise
-            if resp_status == 429 or resp_status >= 500:
-                raise RuntimeError(f"webhook delivery -> {resp_status}")
-            if resp_status >= 400:
-                raise PermanentOutboxError(f"webhook delivery -> {resp_status}")
-            return
-
-        raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")
-
-    outbox_dispatcher = OutboxDispatcher(agent.ledger, on_outbox_event)
+    outbox_dispatcher = OutboxDispatcher(
+        agent.ledger,
+        create_outbox_delivery_handler(
+            bus=bus,
+            notify_config=config.tools.notify,
+        ),
+    )
     agent.outbox_enabled = True
+
+    runtime = GatewayRuntimeContext(
+        version=_runtime_version(),
+        model=config.agents.defaults.model,
+        instance_id=getattr(config.lemondata, "instance_id", ""),
+        channel_manager=channels,
+        usage_tracker=usage_tracker,
+        session_manager=session_manager,
+        agent_loop=agent,
+        watchdog=watchdog,
+        activity_bus=activity_bus,
+        config_path=get_config_path(),
+        config_watcher=config_watcher,
+    )
 
     # Build HTTP server
     asgi_app = create_app(
         auth_token=config.gateway.auth_token,
-        channel_manager=channels,
-        version=_runtime_version(),
-        model=config.agents.defaults.model,
-        instance_id=getattr(config.lemondata, "instance_id", ""),
-        usage_tracker=usage_tracker,
-        session_manager=session_manager,
-        agent_loop=agent,
+        runtime=runtime,
         webui_enabled=config.gateway.webui_enabled,
-        activity_bus=activity_bus,
-        config_path=get_config_path(),
-        config_watcher=config_watcher,
-        watchdog=watchdog,
     )
     http_server = GatewayServer(asgi_app, host=host, port=port)
     webui_status = "enabled" if config.gateway.webui_enabled else "disabled"
