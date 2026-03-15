@@ -173,9 +173,10 @@ async def deliver_outbox_event(
         except ImportError as exc:
             raise PermanentOutboxError(f"email_send requires aiosmtplib: {exc}")
         except Exception as exc:
+            err_str = str(exc)
             if type(exc).__name__ == "SMTPAuthenticationError":
-                raise PermanentOutboxError(f"email auth failed: {exc}")
-            raise RuntimeError(f"email delivery failed: {err_str}")
+                raise PermanentOutboxError(f"email auth failed: {err_str}")
+            raise RuntimeError(f"email delivery failed: {err_str}") from exc
         return
 
     raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")

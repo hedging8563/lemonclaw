@@ -55,6 +55,9 @@ class ToolRegistry:
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
+        step = None
+        task_id = ""
+        capability_id = ""
         try:
             errors = tool.validate_params(params)
             if errors:
@@ -67,7 +70,6 @@ class ToolRegistry:
             task_id = str(call_context.get("_task_id") or "")
             tenant_id = str(call_context.get("_tenant_id") or "")
             actor_identity = str(call_context.get("_actor_identity") or call_context.get("_agent_id") or "agent")
-            step = None
             if self._ledger and task_id:
                 summary = json.dumps(params, ensure_ascii=False)[:500]
                 replayable = tool.is_replayable(capability_id)
@@ -137,10 +139,20 @@ class ToolRegistry:
             return result
         except Exception as e:
             logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, e)
-            if self._ledger and (task_id := str((context or {}).get("_task_id") or "")):
-                summary = json.dumps(params, ensure_ascii=False)[:500]
-                step = self._ledger.start_step(task_id, step_type="tool_call", name=name, input_summary=summary)
-                self._ledger.finish_step(step, status="failed", error=str(e)[:500])
+            if self._ledger and task_id:
+                if step is not None:
+                    self._ledger.finish_step(step, status="failed", error=str(e)[:500])
+                else:
+                    summary = json.dumps(params, ensure_ascii=False)[:500]
+                    replayable = tool.is_replayable(capability_id) if capability_id else True
+                    fallback_step = self._ledger.start_step(
+                        task_id,
+                        step_type="tool_call",
+                        name=name,
+                        input_summary=summary,
+                        replayable=replayable,
+                    )
+                    self._ledger.finish_step(fallback_step, status="failed", error=str(e)[:500])
             return f"Error executing {name}: {str(e)}" + _TOOL_ERROR_HINT
 
     @property

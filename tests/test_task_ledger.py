@@ -295,9 +295,11 @@ def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):
             }
         },
     )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="failed", error="terminal delivery failure")
     event = ledger.enqueue_outbox(
         task_id="task_1",
-        step_id="step_notify",
+        step_id=step.step_id,
         effect_type="outbound_message",
         target="telegram:123",
         payload={"content": "hello"},
@@ -316,6 +318,9 @@ def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):
     assert task["metadata"]["recovery"]["action"] == "manual_retry_requested"
     assert task["metadata"]["recovery"]["manual_review_required"] is False
     assert task["metadata"]["recovery_history"][-1]["action"] == "manual_retry_requested"
+    steps = ledger.materialize_steps("task_1")
+    assert steps[0]["status"] == "waiting_outbox"
+    assert steps[0]["error"] is None
 
 
 def test_task_ledger_request_outbox_retry_uses_retrying_for_previously_attempted_event(tmp_path: Path):
@@ -678,7 +683,7 @@ def test_step_replayable_flag_persisted(tmp_path: Path):
     assert by_name["read_file"]["replayable"] is True
 
 
-def test_build_resume_candidate_recommends_replay_for_replayable_failed_steps(tmp_path: Path):
+def test_build_resume_candidate_marks_replayable_failed_steps_for_manual_resume_until_executor_exists(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
         task_id="task_1",
@@ -695,8 +700,8 @@ def test_build_resume_candidate_recommends_replay_for_replayable_failed_steps(tm
 
     candidate = ledger.build_resume_candidate("task_1")
     assert candidate is not None
-    assert candidate["recommended_action"] == "replay_failed_steps"
-    assert candidate["safe_to_execute"] is True
+    assert candidate["recommended_action"] == "manual_resume"
+    assert candidate["safe_to_execute"] is False
     assert candidate["replayable_failed_count"] == 1
 
 
@@ -722,7 +727,7 @@ def test_build_resume_candidate_blocks_replay_for_non_replayable_steps(tmp_path:
     assert candidate["non_replayable_failed_count"] == 1
 
 
-def test_execute_safe_resume_replays_failed_replayable_steps(tmp_path: Path):
+def test_execute_safe_resume_rejects_replayable_failed_steps_until_executor_exists(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
         task_id="task_1",
@@ -737,13 +742,11 @@ def test_execute_safe_resume_replays_failed_replayable_steps(tmp_path: Path):
     step = ledger.start_step("task_1", step_type="tool_call", name="web_search", replayable=True)
     ledger.finish_step(step, status="failed", error="network error")
 
-    candidate = ledger.execute_safe_resume("task_1", source="test")
-
-    assert candidate is not None
+    with pytest.raises(ValueError, match="resume executor is wired"):
+        ledger.execute_safe_resume("task_1", source="test")
     task = ledger.read_task("task_1")
     assert task is not None
-    assert task["status"] == "running"
-    assert task["current_stage"] == "execute"
+    assert task["status"] == "failed"
+    assert task["current_stage"] == "error"
     steps = ledger.materialize_steps("task_1")
-    assert steps[0]["status"] == "pending"
-    assert task["metadata"]["recovery_history"][-1]["action"] == "safe_resume_execute"
+    assert steps[0]["status"] == "failed"

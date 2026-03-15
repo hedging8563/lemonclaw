@@ -46,7 +46,7 @@ async def test_outbox_dispatcher_delivers_and_finalizes_task(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_outbox_dispatcher_retries_then_leaves_task_waiting(tmp_path: Path):
+async def test_outbox_dispatcher_retries_then_marks_task_failed_when_attempts_exhausted(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
         task_id="task_1",
@@ -78,11 +78,11 @@ async def test_outbox_dispatcher_retries_then_leaves_task_waiting(tmp_path: Path
     assert failed["status"] == "failed"
     task = ledger.read_task("task_1")
     assert task is not None
-    assert task["status"] == "waiting"
-    assert task["current_stage"] == "waiting_outbox"
-    assert task["completion_gate"]["reason"].startswith("failed outbox events remain")
+    assert task["status"] == "failed"
+    assert task["current_stage"] == "error"
+    assert task["completion_gate"]["reason"].startswith("failed steps remain")
     steps = ledger.materialize_steps("task_1")
-    assert steps[0]["status"] == "waiting_outbox"
+    assert steps[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -118,8 +118,12 @@ async def test_outbox_dispatcher_terminal_errors_do_not_retry(tmp_path: Path):
     assert failed["status"] == "failed"
     assert failed["metadata"]["terminal"] is True
     assert failed["attempts"] == 1
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "failed"
+    assert task["current_stage"] == "error"
     steps = ledger.materialize_steps("task_1")
-    assert steps[0]["status"] == "waiting_outbox"
+    assert steps[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio

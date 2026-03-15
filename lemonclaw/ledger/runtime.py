@@ -487,11 +487,11 @@ class TaskLedger:
             safe_to_execute = False
             reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
         elif replayable_failed and not open_outbox:
-            recommended_action = "replay_failed_steps"
-            safe_to_execute = True
+            recommended_action = "manual_resume"
+            safe_to_execute = False
             reason = (
-                f"{len(replayable_failed)} failed step(s) are safe to replay (read-only / no side effects). "
-                "Steps will be reset to pending; the caller must re-trigger the agent loop to actually re-execute them."
+                f"{len(replayable_failed)} failed step(s) are replayable, but no resume executor is wired yet. "
+                "Request a normal resume after operator review instead of auto-executing from the WebUI."
             )
         elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
             recommended_action = "recheck"
@@ -548,28 +548,7 @@ class TaskLedger:
                 )
                 self.update_task(task_id, metadata=metadata)
         elif action == "replay_failed_steps":
-            steps = self.materialize_steps(task_id)
-            replayed = []
-            for step in steps:
-                if str(step.get("status") or "") != "failed":
-                    continue
-                if not step.get("replayable", True):
-                    continue
-                step_id = str(step.get("step_id") or "")
-                if step_id:
-                    self.update_step_state(task_id, step_id, status="pending", error=None)
-                    replayed.append(step_id)
-            task = self.read_task(task_id)
-            if task:
-                metadata = dict(task.get("metadata") or {})
-                self._append_recovery_history(
-                    metadata,
-                    source=source,
-                    action="safe_resume_execute",
-                    reason=f"replayed {len(replayed)} failed replayable step(s)",
-                    details={"task_id": task_id, "mode": "replay_failed_steps", "replayed_steps": replayed[:20]},
-                )
-                self.update_task(task_id, status="running", current_stage="execute", error=None, metadata=metadata)
+            raise ValueError("replay_failed_steps is not executable until a dedicated resume executor is wired")
         elif action == "recheck":
             from lemonclaw.ledger.completion_gate import finalize_task
 
@@ -902,6 +881,14 @@ class TaskLedger:
                     current_stage="waiting_outbox",
                     error=None,
                     metadata=task_metadata,
+                )
+            step_id = str(current.get("step_id") or "")
+            if step_id and self.is_valid_step_id(step_id):
+                self.update_step_state(
+                    task_id,
+                    step_id,
+                    status="waiting_outbox",
+                    error=None,
                 )
         return updated
 

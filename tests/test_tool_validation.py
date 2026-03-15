@@ -1,7 +1,9 @@
+from pathlib import Path
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.registry import ToolRegistry
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 class SampleTool(Tool):
@@ -38,6 +40,26 @@ class SampleTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         return "ok"
+
+
+class ExplodingTool(Tool):
+    @property
+    def name(self) -> str:
+        return "explode"
+
+    @property
+    def description(self) -> str:
+        return "raises during execution"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        raise RuntimeError("boom")
 
 
 def test_validate_params_missing_required() -> None:
@@ -86,3 +108,25 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+async def test_registry_marks_existing_step_failed_when_tool_raises(tmp_path: Path) -> None:
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="explode",
+    )
+    reg = ToolRegistry(ledger=ledger)
+    reg.register(ExplodingTool())
+
+    result = await reg.execute("explode", {"query": "hi"}, context={"_task_id": "task_1"})
+
+    assert "Error executing explode: boom" in result
+    steps = ledger.materialize_steps("task_1")
+    assert len(steps) == 1
+    assert steps[0]["status"] == "failed"
+    assert steps[0]["error"] == "boom"

@@ -204,3 +204,33 @@ async def test_deliver_outbox_event_email_send_success(monkeypatch: pytest.Monke
     assert len(sent) == 1
     assert sent[0]["to"] == "recipient@example.com"
     assert sent[0]["subject"] == "Test Subject"
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_email_send_transient_error_is_retryable(monkeypatch: pytest.MonkeyPatch):
+    async def _publish(_msg: OutboundMessage) -> None:
+        raise AssertionError("should not publish outbound for email_send effect")
+
+    async def _fake_send(**kwargs):
+        raise RuntimeError("smtp timeout")
+
+    monkeypatch.setattr("lemonclaw.ledger.delivery._send_email_smtp", _fake_send)
+
+    email_cfg = SimpleNamespace(
+        smtp_host="smtp.example.com", smtp_port=587,
+        smtp_username="user", smtp_password="pass",
+        from_address="bot@example.com",
+        smtp_use_tls=True, smtp_use_ssl=False,
+    )
+
+    with pytest.raises(RuntimeError, match="email delivery failed: smtp timeout"):
+        await deliver_outbox_event(
+            {
+                "effect_type": "email_send",
+                "target": "recipient@example.com",
+                "payload": {"subject": "Test Subject", "body": "Hello World"},
+            },
+            publish_outbound=_publish,
+            notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+            email_config=email_cfg,
+        )

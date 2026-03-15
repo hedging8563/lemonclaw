@@ -135,7 +135,7 @@ class OutboxDispatcher:
                         self._ledger.update_step_state,
                         task_id,
                         str(event.get("step_id")),
-                        status="waiting_outbox",
+                        status="failed",
                         error=str(exc),
                     )
                 if updated and task_id:
@@ -155,7 +155,7 @@ class OutboxDispatcher:
                         self._ledger.update_step_state,
                         task_id,
                         str(event.get("step_id")),
-                        status="waiting_outbox",
+                        status="failed" if status == "failed" else "waiting_outbox",
                         error=str(exc),
                     )
                 if updated and status == "failed" and task_id:
