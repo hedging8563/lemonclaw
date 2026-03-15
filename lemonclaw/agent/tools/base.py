@@ -113,6 +113,7 @@ class Tool(ABC):
                 "summary": str(raw.get("summary", raw)),
                 "raw": raw.get("raw", raw),
                 "artifacts": raw.get("artifacts", []),
+                "step_status": raw.get("step_status"),
             }
         if isinstance(raw, str):
             return {
@@ -120,10 +121,12 @@ class Tool(ABC):
                 "summary": raw,
                 "raw": raw,
                 "artifacts": [],
+                "step_status": None,
             }
         return {
             "ok": True,
             "summary": str(raw),
             "raw": raw,
             "artifacts": [],
+            "step_status": None,
         }

@@ -96,6 +96,14 @@ class OutboxDispatcher:
                     error=str(exc),
                 )
                 logger.warning("outbox: permanent delivery failure for {}: {}", event_id, exc)
+                if updated and task_id and event.get("step_id"):
+                    await asyncio.to_thread(
+                        self._ledger.update_step_state,
+                        task_id,
+                        str(event.get("step_id")),
+                        status="waiting_outbox",
+                        error=str(exc),
+                    )
                 if updated and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
             except Exception as exc:
@@ -108,6 +116,14 @@ class OutboxDispatcher:
                 )
                 status = str((updated or {}).get("status") or "")
                 logger.warning("outbox: delivery failed for {} (status={}): {}", event_id, status or "missing", exc)
+                if updated and task_id and event.get("step_id"):
+                    await asyncio.to_thread(
+                        self._ledger.update_step_state,
+                        task_id,
+                        str(event.get("step_id")),
+                        status="waiting_outbox",
+                        error=str(exc),
+                    )
                 if updated and status == "failed" and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
             else:
@@ -115,6 +131,14 @@ class OutboxDispatcher:
                 if updated:
                     delivered += 1
                     logger.info("outbox: delivered {}", event_id)
+                if updated and task_id and event.get("step_id"):
+                    await asyncio.to_thread(
+                        self._ledger.update_step_state,
+                        task_id,
+                        str(event.get("step_id")),
+                        status="completed",
+                        error=None,
+                    )
                 if updated and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
         return delivered

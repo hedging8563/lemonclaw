@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ class TaskLedger:
 
     def __init__(self, workspace: Path):
         self._state_dir = workspace / ".lemonclaw-state" / "tasks"
+        self._outbox_lock = threading.RLock()
 
     def ensure_task(
         self,
@@ -91,11 +93,34 @@ class TaskLedger:
 
     def finish_step(self, step: StepRecord, *, status: str, error: str | None = None) -> None:
         step.status = status
-        step.ended_at_ms = _now_ms()
+        step.ended_at_ms = _now_ms() if status in {"completed", "failed", "abandoned", "compensated"} else None
         step.error = error
         self._append_jsonl(self._steps_path(step.task_id), step.to_dict())
         if status == "completed":
             self.update_task(step.task_id, last_successful_step=step.name)
+
+    def update_step_state(
+        self,
+        task_id: str,
+        step_id: str,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Append a new state event for an existing step."""
+        self._require_valid_task_id(task_id)
+        self._require_valid_step_id(step_id)
+        current = next((step for step in self.materialize_steps(task_id) if str(step.get("step_id")) == step_id), None)
+        if not current:
+            return None
+        updated = dict(current)
+        updated["status"] = status
+        updated["error"] = error
+        updated["ended_at_ms"] = _now_ms() if status in {"completed", "failed", "abandoned", "compensated"} else None
+        self._append_jsonl(self._steps_path(task_id), updated)
+        if status == "completed":
+            self.update_task(task_id, last_successful_step=str(updated.get("name") or ""))
+        return updated
 
     def task_exists(self, task_id: str) -> bool:
         return self._task_path(task_id).exists()
@@ -354,60 +379,64 @@ class TaskLedger:
     ) -> dict[str, Any]:
         self._require_valid_task_id(task_id)
         self._require_valid_step_id(step_id)
-        now = _now_ms()
-        event = OutboxEventRecord(
-            event_id=f"ob_{uuid.uuid4().hex[:12]}",
-            task_id=task_id,
-            step_id=step_id,
-            effect_type=effect_type,
-            target=target,
-            payload=payload,
-            status=status,
-            attempts=attempts,
-            created_at_ms=now,
-            updated_at_ms=now,
-            next_attempt_at_ms=next_attempt_at_ms,
-            error=error,
-            metadata=metadata or {},
-        )
-        self._append_jsonl(self._outbox_path(), event.to_dict())
-        return event.to_dict()
+        with self._outbox_lock:
+            now = _now_ms()
+            event = OutboxEventRecord(
+                event_id=f"ob_{uuid.uuid4().hex[:12]}",
+                task_id=task_id,
+                step_id=step_id,
+                effect_type=effect_type,
+                target=target,
+                payload=payload,
+                status=status,
+                attempts=attempts,
+                created_at_ms=now,
+                updated_at_ms=now,
+                next_attempt_at_ms=next_attempt_at_ms,
+                error=error,
+                metadata=metadata or {},
+            )
+            self._append_jsonl(self._outbox_path(), event.to_dict())
+            return event.to_dict()
 
     def update_outbox_event(self, event_id: str, **updates: Any) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
-        current = self.read_outbox_event(event_id)
-        if not current:
-            return None
-        current.update(updates)
-        next_updated = _now_ms()
-        previous_updated = int(current.get("updated_at_ms") or 0)
-        current["updated_at_ms"] = max(next_updated, previous_updated + 1)
-        self._append_jsonl(self._outbox_path(), current)
-        return current
+        with self._outbox_lock:
+            current = self.read_outbox_event(event_id)
+            if not current:
+                return None
+            current.update(updates)
+            next_updated = _now_ms()
+            previous_updated = int(current.get("updated_at_ms") or 0)
+            current["updated_at_ms"] = max(next_updated, previous_updated + 1)
+            self._append_jsonl(self._outbox_path(), current)
+            return current
 
     def materialize_outbox_events(self) -> list[dict[str, Any]]:
-        latest_by_event: dict[str, dict[str, Any]] = {}
-        for event in self.read_outbox_events():
-            event_id = str(event.get("event_id", "")).strip()
-            if not event_id:
-                continue
-            latest_by_event[event_id] = event
-        return sorted(
-            latest_by_event.values(),
-            key=lambda item: int(item.get("updated_at_ms") or 0),
-            reverse=True,
-        )
+        with self._outbox_lock:
+            latest_by_event: dict[str, dict[str, Any]] = {}
+            for event in self.read_outbox_events():
+                event_id = str(event.get("event_id", "")).strip()
+                if not event_id:
+                    continue
+                latest_by_event[event_id] = event
+            return sorted(
+                latest_by_event.values(),
+                key=lambda item: int(item.get("updated_at_ms") or 0),
+                reverse=True,
+            )
 
     def materialize_outbox_events_for_task(self, task_id: str) -> list[dict[str, Any]]:
         self._require_valid_task_id(task_id)
         return [event for event in self.materialize_outbox_events() if event.get("task_id") == task_id]
 
     def read_outbox_events(self) -> list[dict[str, Any]]:
-        path = self._outbox_path()
-        if not path.exists():
-            return []
-        # TODO: stream JSONL once outbox volume is large enough to matter.
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        with self._outbox_lock:
+            path = self._outbox_path()
+            if not path.exists():
+                return []
+            # TODO: stream JSONL once outbox volume is large enough to matter.
+            return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def compact_outbox(
         self,
@@ -417,45 +446,46 @@ class TaskLedger:
         now_ms: int | None = None,
     ) -> dict[str, int]:
         """Rewrite outbox.jsonl with only the latest retained event states."""
-        events = self.materialize_outbox_events()
-        if not events:
-            return {"before": 0, "after": 0, "dropped": 0}
+        with self._outbox_lock:
+            events = self.materialize_outbox_events()
+            if not events:
+                return {"before": 0, "after": 0, "dropped": 0}
 
-        now = now_ms if now_ms is not None else _now_ms()
-        cutoff = now - max(0, int(min_terminal_age_ms))
-        terminal_statuses = {"sent", "failed", "compensated"}
+            now = now_ms if now_ms is not None else _now_ms()
+            cutoff = now - max(0, int(min_terminal_age_ms))
+            terminal_statuses = {"sent", "failed", "compensated"}
 
-        kept: list[dict[str, Any]] = []
-        terminal_kept = 0
-        for event in events:
-            status = str(event.get("status") or "")
-            updated_at_ms = int(event.get("updated_at_ms") or 0)
-            is_terminal = status in terminal_statuses
-            keep_event = not is_terminal
-            if is_terminal and updated_at_ms >= cutoff:
-                keep_event = True
-            elif is_terminal and terminal_kept < max(0, int(keep_terminal)):
-                keep_event = True
-            if keep_event:
-                kept.append(event)
-                if is_terminal and updated_at_ms < cutoff:
-                    terminal_kept += 1
+            kept: list[dict[str, Any]] = []
+            terminal_kept = 0
+            for event in events:
+                status = str(event.get("status") or "")
+                updated_at_ms = int(event.get("updated_at_ms") or 0)
+                is_terminal = status in terminal_statuses
+                keep_event = not is_terminal
+                if is_terminal and updated_at_ms >= cutoff:
+                    keep_event = True
+                elif is_terminal and terminal_kept < max(0, int(keep_terminal)):
+                    keep_event = True
+                if keep_event:
+                    kept.append(event)
+                    if is_terminal and updated_at_ms < cutoff:
+                        terminal_kept += 1
 
-        kept.sort(key=lambda item: (
-            int(item.get("created_at_ms") or 0),
-            int(item.get("updated_at_ms") or 0),
-        ))
-        payload = "\n".join(json.dumps(event, ensure_ascii=False) for event in kept)
-        path = self._outbox_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".compact.tmp")
-        tmp.write_text((payload + "\n") if payload else "", encoding="utf-8")
-        tmp.replace(path)
-        return {
-            "before": len(events),
-            "after": len(kept),
-            "dropped": max(0, len(events) - len(kept)),
-        }
+            kept.sort(key=lambda item: (
+                int(item.get("created_at_ms") or 0),
+                int(item.get("updated_at_ms") or 0),
+            ))
+            payload = "\n".join(json.dumps(event, ensure_ascii=False) for event in kept)
+            path = self._outbox_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".compact.tmp")
+            tmp.write_text((payload + "\n") if payload else "", encoding="utf-8")
+            tmp.replace(path)
+            return {
+                "before": len(events),
+                "after": len(kept),
+                "dropped": max(0, len(events) - len(kept)),
+            }
 
     def list_outbox_events(
         self,
@@ -657,19 +687,20 @@ class TaskLedger:
 
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
-        path = self._outbox_path()
-        if not path.exists():
-            return None
+        with self._outbox_lock:
+            path = self._outbox_path()
+            if not path.exists():
+                return None
 
-        latest: dict[str, Any] | None = None
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                if not line.strip():
-                    continue
-                event = json.loads(line)
-                if event.get("event_id") == event_id:
-                    latest = event
-        return latest
+            latest: dict[str, Any] | None = None
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    event = json.loads(line)
+                    if event.get("event_id") == event_id:
+                        latest = event
+            return latest
 
     @staticmethod
     def is_valid_task_id(task_id: str) -> bool:

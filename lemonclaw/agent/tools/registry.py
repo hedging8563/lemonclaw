@@ -101,9 +101,10 @@ class ToolRegistry:
             result = await tool.execute(**params, **call_context)
             normalized = tool.normalize_result(result)
             if step:
+                step_status = str(normalized.get("step_status") or ("completed" if normalized.get("ok") else "failed"))
                 self._ledger.finish_step(
                     step,
-                    status="completed" if normalized.get("ok") else "failed",
+                    status=step_status,
                     error=None if normalized.get("ok") else str(normalized.get("summary", ""))[:500],
                 )
             if self._governance:

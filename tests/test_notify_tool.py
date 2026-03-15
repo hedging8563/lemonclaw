@@ -85,6 +85,7 @@ async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
 
     assert result["ok"] is True
     assert result["raw"]["queued"] is True
+    assert result["step_status"] == "waiting_outbox"
     events = ledger.list_outbox_events()
     assert len(events) == 1
     assert events[0]["effect_type"] == "outbound_message"
@@ -117,6 +118,7 @@ async def test_notify_webhook_enqueues_outbox_when_enabled(tmp_path, monkeypatch
 
     assert result["ok"] is True
     assert result["raw"]["queued"] is True
+    assert result["step_status"] == "waiting_outbox"
     events = ledger.list_outbox_events()
     assert len(events) == 1
     assert events[0]["effect_type"] == "webhook_json"
@@ -147,3 +149,6 @@ async def test_tool_registry_passes_step_id_to_notify_outbox(tmp_path):
     events = ledger.list_outbox_events()
     assert len(events) == 1
     assert events[0]["step_id"].startswith("step_")
+    steps = ledger.materialize_steps("task_1")
+    assert len(steps) == 1
+    assert steps[0]["status"] == "waiting_outbox"

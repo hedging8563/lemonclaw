@@ -501,6 +501,8 @@ def gateway(
                 raise PermanentOutboxError(f"Webhook domain '{host}' is not allowed")
             validated, error, resolved_ip = _validate_url(target)
             if not validated:
+                if error in {"DNS resolution failed", "No addresses returned by DNS"}:
+                    raise RuntimeError(f"Webhook URL validation failed: {error}")
                 raise PermanentOutboxError(f"Webhook URL validation failed: {error}")
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
             request_url = target.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)

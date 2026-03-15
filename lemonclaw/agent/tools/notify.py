@@ -144,6 +144,7 @@ class NotifyTool(Tool):
                 return {
                     "ok": True,
                     "summary": f"Notification queued to {out_channel}:{out_chat}",
+                    "step_status": "waiting_outbox",
                     "raw": {
                         "target_type": "channel",
                         "channel": out_channel,
@@ -179,6 +180,7 @@ class NotifyTool(Tool):
                 return {
                     "ok": True,
                     "summary": f"Webhook notification queued -> {host}",
+                    "step_status": "waiting_outbox",
                     "raw": {
                         "target_type": "webhook",
                         "webhook_url": webhook_url,

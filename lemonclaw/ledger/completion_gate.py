@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 
 _OPEN_STEP_STATUSES = {"pending", "running", "waiting", "retrying"}
+_OUTBOX_WAITING_STEP_STATUSES = {"waiting_outbox"}
 _FAILED_STEP_STATUSES = {"failed"}
 _OPEN_OUTBOX_STATUSES = {"pending", "claimed", "retrying"}
 _FAILED_OUTBOX_STATUSES = {"failed"}
@@ -36,18 +37,6 @@ def evaluate_completion(
             next_stage="error",
             checked_at_ms=checked_at_ms,
             open_steps=failed_steps[:20],
-        )
-
-    open_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _OPEN_STEP_STATUSES]
-    if open_steps:
-        return CompletionGateResult(
-            task_id=task_id,
-            passed=False,
-            reason=f"unfinished steps remain: {', '.join(open_steps[:5])}",
-            next_status="running",
-            next_stage="verify",
-            checked_at_ms=checked_at_ms,
-            open_steps=open_steps[:20],
         )
 
     failed_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _FAILED_OUTBOX_STATUSES]
@@ -75,6 +64,30 @@ def evaluate_completion(
             next_stage="waiting_outbox",
             checked_at_ms=checked_at_ms,
             open_outbox=open_outbox[:20],
+        )
+
+    waiting_outbox_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _OUTBOX_WAITING_STEP_STATUSES]
+    if waiting_outbox_steps:
+        return CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"waiting outbox steps remain: {', '.join(waiting_outbox_steps[:5])}",
+            next_status="waiting",
+            next_stage="waiting_outbox",
+            checked_at_ms=checked_at_ms,
+            open_steps=waiting_outbox_steps[:20],
+        )
+
+    open_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _OPEN_STEP_STATUSES]
+    if open_steps:
+        return CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"unfinished steps remain: {', '.join(open_steps[:5])}",
+            next_status="running",
+            next_stage="verify",
+            checked_at_ms=checked_at_ms,
+            open_steps=open_steps[:20],
         )
 
     return CompletionGateResult(

@@ -255,7 +255,7 @@ class ChannelManager:
         await channel.stop()
         if task and not task.done():
             try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
             except asyncio.TimeoutError:
                 task.cancel()
                 try:
