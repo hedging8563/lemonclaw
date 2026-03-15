@@ -81,6 +81,8 @@ class CronTool(Tool):
         job_id: str | None = None,
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
+        _default_delivery_context: dict[str, Any] | None = None,
+        _session_key: str | None = None,
         **kwargs: Any
     ) -> str:
         effective_channel = _default_channel or self._channel
@@ -88,7 +90,17 @@ class CronTool(Tool):
         if action == "add":
             if _IN_CRON_CONTEXT.get():
                 return "Error: cannot schedule new jobs from within a cron job (prevents recursive loops)"
-            return self._add_job(message, every_seconds, cron_expr, tz, at, effective_channel, effective_chat_id)
+            return self._add_job(
+                message,
+                every_seconds,
+                cron_expr,
+                tz,
+                at,
+                effective_channel,
+                effective_chat_id,
+                _session_key or f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None,
+                dict(_default_delivery_context or {}),
+            )
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -104,6 +116,8 @@ class CronTool(Tool):
         at: str | None,
         channel: str,
         chat_id: str,
+        session_key: str | None,
+        delivery_context: dict[str, Any],
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -140,6 +154,8 @@ class CronTool(Tool):
             deliver=True,
             channel=channel,
             to=chat_id,
+            session_key=session_key,
+            metadata={"delivery_context": delivery_context} if delivery_context else {},
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"

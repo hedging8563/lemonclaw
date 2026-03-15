@@ -105,6 +105,8 @@ class CronService:
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
+                            session_key=j["payload"].get("sessionKey"),
+                            metadata=dict(j["payload"].get("metadata", {}) or {}),
                         ),
                         state=CronJobState(
                             next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -152,6 +154,8 @@ class CronService:
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
+                        "sessionKey": j.payload.session_key,
+                        "metadata": dict(j.payload.metadata or {}),
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -317,6 +321,8 @@ class CronService:
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
+        session_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
         delete_after_run: bool = False,
         payload_kind: str = "agent_turn",
     ) -> CronJob:
@@ -336,6 +342,8 @@ class CronService:
                 deliver=deliver,
                 channel=channel,
                 to=to,
+                session_key=session_key,
+                metadata=metadata or {},
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,

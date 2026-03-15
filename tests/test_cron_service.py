@@ -63,6 +63,34 @@ async def test_cron_tool_prefers_per_call_default_context_over_instance_context(
     assert jobs[0].payload.to == "target"
 
 
+@pytest.mark.asyncio
+async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    tool = CronTool(service)
+    tool.set_context("telegram", "123")
+
+    result = await tool.execute(
+        action="add",
+        message="hello",
+        every_seconds=60,
+        _default_channel="telegram",
+        _default_chat_id="123",
+        _session_key="telegram:123:456",
+        _default_delivery_context={
+            "source_channel": "telegram",
+            "source_chat_id": "123",
+            "session_key": "telegram:123:456",
+            "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+        },
+    )
+
+    assert "Created job" in result
+    jobs = service.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.session_key == "telegram:123:456"
+    assert jobs[0].payload.metadata["delivery_context"]["route"]["message_thread_id"] == 456
+
+
 def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

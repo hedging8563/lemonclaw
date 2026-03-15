@@ -361,16 +361,18 @@ def gateway(
 
         response = await agent.process_direct(
             job.payload.message,
-            session_key=f"cron:{job.id}",
+            session_key=job.payload.session_key or f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            metadata=dict(job.payload.metadata or {}),
         )
         if job.payload.deliver and job.payload.to:
             from lemonclaw.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response or "",
+                metadata=dict(job.payload.metadata or {}),
             ))
         return response
     cron.on_job = on_cron_job
