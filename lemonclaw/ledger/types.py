@@ -19,6 +19,7 @@ class TaskRecord:
     created_at_ms: int
     updated_at_ms: int
     last_successful_step: str | None = None
+    resume_from_step: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

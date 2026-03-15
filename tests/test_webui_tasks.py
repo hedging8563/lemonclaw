@@ -130,6 +130,31 @@ def test_task_recheck_api_reruns_completion_gate(tmp_path):
     assert data["task"]["metadata"]["recovery_history"][-1]["action"] == "task_recheck"
 
 
+def test_task_resume_api_sets_resume_from_step(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume me",
+        status="failed",
+        current_stage="execute",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="failed", error="boom")
+
+    client = TestClient(app)
+    resp = client.post("/api/tasks/task_1/resume")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["task"]["status"] == "waiting"
+    assert data["task"]["current_stage"] == "resume_requested"
+    assert data["task"]["resume_from_step"] == step.step_id
+    assert data["summary"]["resume_from_step"] == step.step_id
+
+
 def test_tasks_api_requires_auth_when_token_enabled(tmp_path):
     app, ledger = _build_app(tmp_path, auth_token="secret-token")
     ledger.ensure_task(

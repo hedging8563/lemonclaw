@@ -147,6 +147,7 @@ def get_webui_routes(
     assert agent_loop is not None
     assert session_manager is not None
     _task_recheck_locks: dict[str, asyncio.Lock] = {}
+    _task_resume_locks: dict[str, asyncio.Lock] = {}
 
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
@@ -1146,6 +1147,34 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── POST /api/tasks/{task_id}/resume — request step-boundary resume ─
+
+    async def resume_task(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+        if not ledger.read_task(task_id):
+            return _json({"error": "task not found"}, 404)
+
+        lock = _task_resume_locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            task = ledger.request_task_resume(task_id, source="webui_task_resume")
+            task_view = ledger.read_task_view(task_id)
+
+        resp = _json({"task": task, "summary": task_view["summary"] if task_view else None})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── POST /api/channels/{name}/restart — reconnect one channel ──────
 
     async def restart_channel(request: Request) -> Response:
@@ -1361,6 +1390,7 @@ def get_webui_routes(
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
+        Route("/api/tasks/{task_id}/resume", resume_task, methods=["POST"]),
         Route("/api/recovery", get_recovery, methods=["GET"]),
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),

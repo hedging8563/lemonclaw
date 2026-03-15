@@ -563,3 +563,28 @@ def test_task_ledger_marks_active_tasks_for_process_restart(tmp_path: Path):
     assert wait_task["metadata"]["recovery"]["action"] == "process_restart_review"
     assert wait_task["metadata"]["recovery"]["manual_review_required"] is True
     assert wait_task["metadata"]["recovery_history"][-1]["action"] == "process_restart_review"
+
+
+def test_task_ledger_request_task_resume_sets_resume_from_step(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="resume demo",
+        status="failed",
+        current_stage="execute",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="failed", error="boom")
+
+    resumed = ledger.request_task_resume("task_1", source="webui_task_resume")
+
+    assert resumed is not None
+    assert resumed["status"] == "waiting"
+    assert resumed["current_stage"] == "resume_requested"
+    assert resumed["resume_from_step"] == step.step_id
+    assert resumed["metadata"]["recovery"]["action"] == "resume_requested"
+    assert resumed["metadata"]["recovery_history"][-1]["action"] == "resume_requested"

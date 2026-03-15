@@ -396,12 +396,64 @@ class TaskLedger:
                 "step_count": len(steps),
                 "status_counts": status_counts,
                 "last_successful_step": task.get("last_successful_step"),
+                "resume_from_step": task.get("resume_from_step"),
                 "current_stage": task.get("current_stage"),
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
             },
         }
+
+    def infer_resume_from_step(self, task_id: str) -> str | None:
+        """Infer the best step boundary to resume from for a task."""
+        self._require_valid_task_id(task_id)
+        steps = self.materialize_steps(task_id)
+        for status in ("waiting_outbox", "failed", "waiting", "retrying", "running", "pending"):
+            for step in reversed(steps):
+                if str(step.get("status") or "") == status:
+                    return str(step.get("step_id") or "")
+        return None
+
+    def request_task_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Mark a task as awaiting resume from the inferred step boundary."""
+        self._require_valid_task_id(task_id)
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        now = _now_ms()
+        resume_from_step = self.infer_resume_from_step(task_id)
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        recovery.update({
+            "source": source,
+            "action": "resume_requested",
+            "manual_review_required": False,
+            "requested_at_ms": now,
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_requested",
+            reason=f"resume requested from {resume_from_step or 'task boundary'}",
+            details={"resume_from_step": resume_from_step or "", "previous_status": str(task.get("status") or "")},
+            at_ms=now,
+        )
+        self.update_task(
+            task_id,
+            status="waiting",
+            current_stage="resume_requested",
+            resume_from_step=resume_from_step,
+            error=None,
+            metadata=metadata,
+        )
+        return self.read_task(task_id)
 
     def enqueue_outbox(
         self,
