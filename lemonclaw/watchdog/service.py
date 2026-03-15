@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
+    from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -90,6 +91,7 @@ class WatchdogService:
         check_interval: int = DEFAULT_CHECK_INTERVAL,
         memory_limit_mb: int = MEMORY_LIMIT_MB,
         session_manager: object | None = None,
+        channel_manager: "ChannelManager" | None = None,
         task_ledger: "TaskLedger" | None = None,
         task_stuck_threshold_s: int = TASK_STUCK_THRESHOLD,
     ) -> None:
@@ -97,6 +99,7 @@ class WatchdogService:
         self._interval = check_interval
         self._memory_limit_mb = memory_limit_mb
         self._session_manager = session_manager
+        self._channel_manager = channel_manager
         self._task_ledger = task_ledger
         self._task_stuck_threshold_s = task_stuck_threshold_s
         self._state = WatchdogState()
@@ -130,6 +133,7 @@ class WatchdogService:
                 "count": len(stale_tasks),
                 "task_ids": [str(task.get("task_id") or "") for task in stale_tasks[:10]],
             },
+            "channels": self._channel_manager.get_status() if self._channel_manager else {},
         }
 
     # ------------------------------------------------------------------
@@ -265,13 +269,16 @@ class WatchdogService:
         # 2. Session stuck detection
         results.append(self._check_session_stuck())
 
-        # 3. Memory pressure
+        # 3. Channel runtime health
+        results.append(self._check_channels())
+
+        # 4. Memory pressure
         results.append(self._check_memory())
 
-        # 4. Error rate
+        # 5. Error rate
         results.append(self._check_error_rate())
 
-        # 5. Task ledger stale scan
+        # 6. Task ledger stale scan
         results.append(await asyncio.to_thread(self._check_task_stuck))
 
         return results
@@ -321,6 +328,16 @@ class WatchdogService:
             return HealthCheck("memory", True, f"RSS={rss_mb:.0f}MB")
         except Exception as e:
             return HealthCheck("memory", True, f"check error: {e}")
+
+    def _check_channels(self) -> HealthCheck:
+        """Detect configured channels that are not running."""
+        if not self._channel_manager:
+            return HealthCheck("channel_down", True, "no channel manager")
+        status = self._channel_manager.get_status()
+        down = [name for name, info in status.items() if not bool(info.get("running"))]
+        if down:
+            return HealthCheck("channel_down", False, f"down: {', '.join(down[:5])}")
+        return HealthCheck("channel_down", True)
 
     def _check_error_rate(self) -> HealthCheck:
         """Check error rate in the sliding window."""
@@ -413,6 +430,15 @@ class WatchdogService:
                 recovered = await asyncio.to_thread(self._recover_stale_tasks, source="watchdog_soft_recovery")
                 if recovered:
                     logger.warning("watchdog: stale-task recovery annotated {} task(s)", recovered)
+            if c.name == "channel_down" and self._channel_manager is not None:
+                for name, info in self._channel_manager.get_status().items():
+                    if bool(info.get("running")):
+                        continue
+                    try:
+                        result = await self._channel_manager.restart_channel(name)
+                        logger.warning("watchdog: restarted channel {} -> {}", name, result)
+                    except Exception as e:
+                        logger.error("watchdog: failed to restart channel {}: {}", name, e)
 
     async def _hard_recovery(self, checks: list[HealthCheck]) -> None:
         """Hard recovery: exit process (K8s/launchd/systemd will restart).
@@ -432,6 +458,18 @@ class WatchdogService:
         self._state.last_hard_restart_time = now
         names = ", ".join(c.name for c in checks)
         logger.critical(f"watchdog: HARD RESTART — {self._state.consecutive_failures} consecutive failures ({names})")
+
+        if self._task_ledger:
+            try:
+                marked = await asyncio.to_thread(
+                    self._task_ledger.mark_tasks_for_process_restart,
+                    source="watchdog_hard_recovery",
+                    reason=f"hard recovery triggered by watchdog checks: {names}",
+                )
+                if marked:
+                    logger.warning("watchdog: marked {} task(s) before hard recovery", len(marked))
+            except Exception as e:
+                logger.error(f"watchdog: failed to mark tasks before hard recovery: {e}")
 
         # Flush all cached sessions to disk before killing the process
         if self._session_manager is not None:

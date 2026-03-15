@@ -33,6 +33,7 @@ class ChannelManager:
         self.bus = bus
         self.activity_bus = activity_bus
         self.channels: dict[str, BaseChannel] = {}
+        self._channel_tasks: dict[str, asyncio.Task] = {}
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
@@ -191,6 +192,11 @@ class ChannelManager:
             logger.error("Failed to start channel {}: {}", name, e)
             channel._running = False
 
+    def _spawn_channel_task(self, name: str, channel: BaseChannel) -> asyncio.Task:
+        task = asyncio.create_task(self._start_channel(name, channel))
+        self._channel_tasks[name] = task
+        return task
+
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
         if not self.channels:
@@ -204,7 +210,7 @@ class ChannelManager:
         tasks = []
         for name, channel in self.channels.items():
             logger.info("Starting {} channel...", name)
-            tasks.append(asyncio.create_task(self._start_channel(name, channel)))
+            tasks.append(self._spawn_channel_task(name, channel))
 
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -228,6 +234,45 @@ class ChannelManager:
                 logger.info("Stopped {} channel", name)
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
+        for name, task in list(self._channel_tasks.items()):
+            if task.done():
+                continue
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._channel_tasks.pop(name, None)
+
+    async def restart_channel(self, name: str) -> dict[str, Any]:
+        """Stop and restart a single channel without touching others."""
+        channel = self.channels.get(name)
+        if channel is None:
+            raise KeyError(name)
+
+        task = self._channel_tasks.get(name)
+        await channel.stop()
+        if task and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            finally:
+                self._channel_tasks.pop(name, None)
+
+        logger.info("Restarting {} channel...", name)
+        restart_task = self._spawn_channel_task(name, channel)
+        await asyncio.sleep(0)
+        return {
+            "channel": name,
+            "running": channel.is_running,
+            "task_done": restart_task.done(),
+        }
 
     @staticmethod
     def _activity_session_key(msg: OutboundMessage) -> str:

@@ -277,6 +277,42 @@ class TaskLedger:
         self.update_task(task_id, **updates)
         return self.read_task(task_id)
 
+    def mark_tasks_for_process_restart(
+        self,
+        *,
+        source: str,
+        reason: str,
+        statuses: tuple[str, ...] = ("running", "verifying", "waiting"),
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Annotate active tasks before a hard process restart."""
+        marked: list[dict[str, Any]] = []
+        for status in statuses:
+            for task in self.list_tasks(limit=limit, status=status):
+                task_id = str(task.get("task_id") or "")
+                if not task_id:
+                    continue
+                metadata = dict(task.get("metadata") or {})
+                recovery = dict(metadata.get("recovery") or {})
+                recovery.update({
+                    "source": source,
+                    "reason": reason[:500],
+                    "detected_at_ms": _now_ms(),
+                    "previous_status": str(task.get("status") or ""),
+                    "previous_stage": str(task.get("current_stage") or ""),
+                    "action": "process_restart_review" if status == "waiting" else "mark_failed",
+                    "manual_review_required": status == "waiting",
+                })
+                metadata["recovery"] = recovery
+                updates: dict[str, Any] = {"metadata": metadata}
+                if status in {"running", "verifying"}:
+                    updates.update(status="failed", current_stage="hard_recovery", error=reason[:500])
+                self.update_task(task_id, **updates)
+                updated = self.read_task(task_id)
+                if updated:
+                    marked.append(updated)
+        return marked
+
     def read_task_view(self, task_id: str) -> dict[str, Any] | None:
         """Return task + materialized steps + summary for observer UIs."""
         task = self.read_task(task_id)

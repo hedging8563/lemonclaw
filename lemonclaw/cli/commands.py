@@ -440,6 +440,7 @@ def gateway(
     watchdog = WatchdogService(
         port=port,
         session_manager=session_manager,
+        channel_manager=channels,
         task_ledger=agent.ledger,
     )
     # Feed error log events to watchdog for rate tracking

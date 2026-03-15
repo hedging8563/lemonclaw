@@ -438,3 +438,42 @@ def test_task_ledger_lists_and_marks_stale_tasks(tmp_path: Path):
     view = ledger.read_task_view("task_1")
     assert view is not None
     assert view["summary"]["recovery"]["source"] == "watchdog_soft_recovery"
+
+
+def test_task_ledger_marks_active_tasks_for_process_restart(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_run",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="run",
+        status="running",
+        current_stage="execute",
+    )
+    ledger.ensure_task(
+        task_id="task_wait",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="wait",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+
+    marked = ledger.mark_tasks_for_process_restart(
+        source="watchdog_hard_recovery",
+        reason="hard recovery for tests",
+    )
+
+    assert {task["task_id"] for task in marked} == {"task_run", "task_wait"}
+    run_task = ledger.read_task("task_run")
+    wait_task = ledger.read_task("task_wait")
+    assert run_task["status"] == "failed"
+    assert run_task["current_stage"] == "hard_recovery"
+    assert run_task["metadata"]["recovery"]["source"] == "watchdog_hard_recovery"
+    assert wait_task["status"] == "waiting"
+    assert wait_task["metadata"]["recovery"]["action"] == "process_restart_review"
+    assert wait_task["metadata"]["recovery"]["manual_review_required"] is True

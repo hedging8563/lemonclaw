@@ -86,3 +86,48 @@ async def test_watchdog_start_offloads_startup_scan_to_thread(tmp_path: Path, mo
     await __import__("asyncio").sleep(0)
 
     to_thread.assert_awaited_once()
+
+
+def test_watchdog_detects_down_channels():
+    manager = type("Mgr", (), {"get_status": lambda self: {"telegram": {"enabled": True, "running": False}}})()
+    watchdog = WatchdogService(channel_manager=manager)
+
+    check = watchdog._check_channels()
+
+    assert check == HealthCheck("channel_down", False, "down: telegram")
+
+
+@pytest.mark.asyncio
+async def test_watchdog_soft_recovery_restarts_down_channels():
+    manager = type("Mgr", (), {
+        "get_status": lambda self: {"telegram": {"enabled": True, "running": False}},
+        "restart_channel": AsyncMock(return_value={"channel": "telegram", "running": True, "task_done": False}),
+    })()
+    watchdog = WatchdogService(channel_manager=manager)
+
+    await watchdog._soft_recovery([HealthCheck("channel_down", False, "down: telegram")])
+
+    manager.restart_channel.assert_awaited_once_with("telegram")
+
+
+@pytest.mark.asyncio
+async def test_watchdog_hard_recovery_marks_active_tasks_before_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger = TaskLedger(tmp_path)
+    _seed_stale_task(ledger, task_id="task_1", status="running", current_stage="execute")
+    watchdog = WatchdogService(task_ledger=ledger)
+
+    async def _sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("lemonclaw.watchdog.service.asyncio.sleep", _sleep)
+    monkeypatch.setattr("lemonclaw.watchdog.service.os.kill", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("lemonclaw.watchdog.service.os._exit", lambda _code: (_ for _ in ()).throw(SystemExit(_code)))
+
+    with pytest.raises(SystemExit):
+        await watchdog._hard_recovery([HealthCheck("memory", False, "RSS high")])
+
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "failed"
+    assert task["current_stage"] == "hard_recovery"
+    assert task["metadata"]["recovery"]["source"] == "watchdog_hard_recovery"

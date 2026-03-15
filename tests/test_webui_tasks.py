@@ -13,7 +13,7 @@ from lemonclaw.session.manager import SessionManager
 from lemonclaw.watchdog.service import WatchdogService
 
 
-def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None):
+def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None, channel_manager=None):
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
     ledger = ledger or TaskLedger(tmp_path)
@@ -22,6 +22,7 @@ def _build_app(tmp_path, *, auth_token=None, watchdog=None, ledger=None):
     app = create_app(
         config_path=config_path,
         auth_token=auth_token,
+        channel_manager=channel_manager,
         agent_loop=agent_loop,
         session_manager=session_manager,
         webui_enabled=True,
@@ -352,3 +353,18 @@ def test_outbox_retry_api_rejects_sent_event(tmp_path):
     resp = client.post(f"/api/outbox/{event['event_id']}/retry")
     assert resp.status_code == 409
     assert resp.json()["error"] == "cannot retry a sent outbox event"
+
+
+def test_channel_restart_api_calls_manager(tmp_path):
+    manager = SimpleNamespace(
+        restart_channel=__import__("unittest").mock.AsyncMock(return_value={"channel": "telegram", "running": True, "task_done": False}),
+        get_status=lambda: {"telegram": {"enabled": True, "running": True}},
+    )
+    app, _ledger = _build_app(tmp_path, channel_manager=manager)
+
+    client = TestClient(app)
+    resp = client.post("/api/channels/telegram/restart")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["result"]["channel"] == "telegram"
+    manager.restart_channel.assert_awaited_once_with("telegram")

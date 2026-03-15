@@ -32,6 +32,7 @@ from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, 
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
+    from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.agent.usage import UsageTracker
     from lemonclaw.watchdog.service import WatchdogService
@@ -138,6 +139,7 @@ def get_webui_routes(
     *,
     auth_token: str | None,
     agent_loop: AgentLoop,
+    channel_manager: ChannelManager | None = None,
     session_manager: SessionManager,
     usage_tracker: UsageTracker | None = None,
     version: str = "unknown",
@@ -1130,6 +1132,26 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    # ── POST /api/channels/{name}/restart — reconnect one channel ──────
+
+    async def restart_channel(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if channel_manager is None:
+            return _json({"error": "channel manager not available"}, 503)
+
+        name = request.path_params.get("name", "")
+        if not name:
+            return _json({"error": "channel name is required"}, 400)
+        try:
+            result = await channel_manager.restart_channel(name)
+        except KeyError:
+            return _json({"error": "unknown channel"}, 404)
+        resp = _json({"result": result, "channels": channel_manager.get_status()})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     # ── GET /api/recovery — recovery summary + tasks needing attention ──
 
     async def get_recovery(request: Request) -> Response:
@@ -1291,6 +1313,7 @@ def get_webui_routes(
         Route("/api/sessions/{key:path}", update_session, methods=["PATCH"]),
         Route("/api/sessions/{key:path}", delete_session, methods=["DELETE"]),
         Route("/api/models", list_models, methods=["GET"]),
+        Route("/api/channels/{name}/restart", restart_channel, methods=["POST"]),
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),

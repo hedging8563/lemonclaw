@@ -296,6 +296,7 @@ def create_app(
         routes.extend(get_webui_routes(
             auth_token=auth_token,
             agent_loop=agent_loop,
+            channel_manager=channel_manager,
             session_manager=session_manager,
             usage_tracker=usage_tracker,
             version=version,
