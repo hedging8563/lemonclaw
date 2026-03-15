@@ -148,6 +148,8 @@ async def test_cron_service_writes_task_ledger(tmp_path) -> None:
     assert task["resume_context"]["channel"] == "cli"
     assert task["resume_context"]["chat_id"] == "direct"
     assert task["resume_context"]["session_key"] == f"cron:{job.id}"
+    assert task["resume_context"]["auto_resume_allowed"] is False
+    assert "explicit delivery target" in task["resume_context"]["resume_disabled_reason"]
     assert task["completion_gate"]["passed"] is True
 
 
@@ -185,4 +187,5 @@ async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -
     assert task["resume_context"]["channel"] == "telegram"
     assert task["resume_context"]["chat_id"] == "123"
     assert task["resume_context"]["session_key"] == "telegram:123:456"
+    assert task["resume_context"]["auto_resume_allowed"] is True
     assert task["resume_context"]["delivery_context"]["route"]["message_thread_id"] == 456

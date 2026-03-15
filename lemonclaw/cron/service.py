@@ -254,6 +254,7 @@ class CronService:
 
         start_ms = _now_ms()
         task_id = f"task_cron_{job.id}_{start_ms}"
+        has_explicit_resume_target = bool(job.payload.channel and job.payload.to)
         effective_session_key = job.payload.session_key or f"cron:{job.id}"
         effective_channel = job.payload.channel or "cli"
         effective_chat_id = job.payload.to or "direct"
@@ -277,6 +278,11 @@ class CronService:
                     timezone=str(payload_metadata.get("timezone") or ""),
                     message_id="",
                     delivery_context=delivery_context,
+                    auto_resume_allowed=has_explicit_resume_target,
+                    resume_disabled_reason=(
+                        "" if has_explicit_resume_target
+                        else "cron job has no explicit delivery target; resume requires operator review"
+                    ),
                 ),
                 metadata={"job_id": job.id},
             )

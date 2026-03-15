@@ -453,11 +453,11 @@ class AgentLoop:
         if not task:
             return None
 
-        prepared = self.ledger.prepare_replay_failed_steps(task_id, source=source)
-        if not prepared:
-            return None
-
         resume_context = dict(task.get("resume_context") or {})
+        if not bool(resume_context.get("auto_resume_allowed", True)):
+            raise ValueError(
+                str(resume_context.get("resume_disabled_reason") or "automatic resume is disabled for this task")
+            )
         delivery_context = resume_context.get("delivery_context")
         channel = str(resume_context.get("channel") or task.get("channel") or "")
         session_key = str(resume_context.get("session_key") or task.get("session_key") or "")
@@ -468,6 +468,10 @@ class AgentLoop:
         )
         if not channel or not chat_id or not session_key:
             raise ValueError("resume executor lacks channel/chat/session context")
+
+        prepared = self.ledger.prepare_replay_failed_steps(task_id, source=source)
+        if not prepared:
+            return None
 
         metadata: dict[str, Any] = {
             "_task_id": task_id,
@@ -492,7 +496,16 @@ class AgentLoop:
             metadata=metadata,
             session_key_override=session_key,
         )
-        dispatch_task = self._spawn_dispatch_task(resume_msg)
+        try:
+            dispatch_task = self._spawn_dispatch_task(resume_msg)
+        except Exception as exc:
+            self.ledger.rollback_prepared_replay_resume(
+                task_id,
+                source=source,
+                reason=f"resume dispatch failed: {type(exc).__name__}: {exc}",
+                superseded_steps=list(prepared.get("superseded_steps") or []),
+            )
+            raise ValueError(f"resume dispatch failed: {exc}") from exc
         self._resume_tasks[task_id] = dispatch_task
 
         def _clear_resume_task(t: asyncio.Task, resume_task_id: str = task_id) -> None:

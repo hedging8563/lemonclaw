@@ -32,6 +32,8 @@ def build_task_resume_context(
     timezone: str = "",
     message_id: str = "",
     delivery_context: dict[str, Any] | None = None,
+    auto_resume_allowed: bool = True,
+    resume_disabled_reason: str = "",
 ) -> dict[str, Any]:
     """Build a stable resume context payload for later task recovery."""
     return {
@@ -42,6 +44,8 @@ def build_task_resume_context(
         "timezone": str(timezone or ""),
         "message_id": str(message_id or ""),
         "delivery_context": dict(delivery_context or {}),
+        "auto_resume_allowed": bool(auto_resume_allowed),
+        "resume_disabled_reason": str(resume_disabled_reason or ""),
     }
 
 
@@ -1025,7 +1029,7 @@ class TaskLedger:
             raise ValueError(str(candidate.get("reason") or "manual intervention required"))
 
         steps = self.materialize_steps(task_id)
-        superseded_steps: list[str] = []
+        superseded_steps: list[dict[str, Any]] = []
         for step in steps:
             if str(step.get("status") or "") != "failed":
                 continue
@@ -1041,7 +1045,11 @@ class TaskLedger:
                 error="superseded by replay resume",
             )
             if updated:
-                superseded_steps.append(step_id)
+                superseded_steps.append({
+                    "step_id": step_id,
+                    "name": str(step.get("name") or ""),
+                    "error": str(step.get("error") or ""),
+                })
 
         if not superseded_steps:
             raise ValueError("no replayable failed steps remain to resume")
@@ -1069,7 +1077,7 @@ class TaskLedger:
                 "task_id": task_id,
                 "mode": "replay_failed_steps",
                 "resume_from_step": str(candidate.get("resume_from_step") or ""),
-                "superseded_steps": superseded_steps[:20],
+                "superseded_steps": [step["step_id"] for step in superseded_steps[:20]],
             },
             at_ms=now,
         )
@@ -1086,6 +1094,59 @@ class TaskLedger:
             "superseded_steps": superseded_steps,
             "task": self.read_task(task_id),
         }
+
+    def rollback_prepared_replay_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        reason: str,
+        superseded_steps: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Rollback a prepared replay resume when dispatch could not be scheduled."""
+        self._require_valid_task_id(task_id)
+        restored_steps: list[str] = []
+        for step in list(superseded_steps or []):
+            step_id = str(step.get("step_id") or "")
+            if not step_id:
+                continue
+            updated = self.update_step_state(
+                task_id,
+                step_id,
+                status="failed",
+                error=str(step.get("error") or "") or "replay resume rollback",
+            )
+            if updated:
+                restored_steps.append(step_id)
+
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        recovery.update({
+            "source": source,
+            "action": "resume_dispatch_failed",
+            "manual_review_required": False,
+            "reason": reason[:500],
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_dispatch_failed",
+            reason=reason,
+            details={"task_id": task_id, "restored_steps": restored_steps[:20]},
+        )
+        self.update_task(
+            task_id,
+            status="failed",
+            current_stage="error",
+            error=reason[:500],
+            metadata=metadata,
+        )
+        return self.read_task(task_id)
 
     def read_outbox_event(self, event_id: str) -> dict[str, Any] | None:
         self._require_valid_outbox_id(event_id)
