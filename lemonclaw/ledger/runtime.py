@@ -1,4 +1,4 @@
-"""Local JSON-backed task ledger runtime."""
+"""Task ledger runtime facade and JSON-backed store."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def build_task_resume_context(
     }
 
 
-class TaskLedger:
+class JsonTaskLedger:
     """Simple JSON-backed task and step ledger."""
 
     def __init__(self, workspace: Path):
@@ -429,6 +429,7 @@ class TaskLedger:
             return None
         enriched = dict(task)
         enriched["display_state"] = self.describe_task_display_state(task)
+        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
         return enriched
 
     def mark_task_stale(
@@ -550,6 +551,7 @@ class TaskLedger:
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
+                "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
             },
         }
 
@@ -1278,3 +1280,65 @@ class TaskLedger:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+class TaskLedger:
+    """Facade that selects a concrete ledger backend."""
+
+    def __init__(self, workspace: Path, backend: str = "auto"):
+        resolved = self._resolve_backend(workspace, backend)
+        if resolved == "sqlite":
+            from lemonclaw.ledger.sqlite_store import SQLiteTaskLedger
+
+            self._impl = SQLiteTaskLedger(workspace)
+        else:
+            self._impl = JsonTaskLedger(workspace)
+        self.backend = resolved
+
+    @staticmethod
+    def _resolve_backend(workspace: Path, backend: str) -> str:
+        normalized = str(backend or "auto").strip().lower()
+        if normalized not in {"auto", "json", "sqlite"}:
+            raise ValueError("invalid ledger backend")
+        if normalized != "auto":
+            return normalized
+
+        state_dir = workspace / ".lemonclaw-state" / "tasks"
+        sqlite_path = state_dir / "ledger.sqlite3"
+        if sqlite_path.exists():
+            return "sqlite"
+        if state_dir.exists():
+            has_json_state = any(
+                any(state_dir.glob(pattern))
+                for pattern in ("task_*.json", "*.steps.jsonl", "outbox.jsonl")
+            )
+            if has_json_state:
+                return "json"
+        return "sqlite"
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._impl, name)
+
+    @staticmethod
+    def describe_task_display_state(task: dict[str, Any]) -> dict[str, str]:
+        return JsonTaskLedger.describe_task_display_state(task)
+
+    @staticmethod
+    def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
+        return JsonTaskLedger.summarize_recovery_tasks(tasks)
+
+    @staticmethod
+    def is_valid_task_id(task_id: str) -> bool:
+        return JsonTaskLedger.is_valid_task_id(task_id)
+
+    @staticmethod
+    def is_valid_outbox_id(event_id: str) -> bool:
+        return JsonTaskLedger.is_valid_outbox_id(event_id)
+
+    @staticmethod
+    def is_valid_step_id(step_id: str) -> bool:
+        return JsonTaskLedger.is_valid_step_id(step_id)
+
+    @staticmethod
+    def now_ms() -> int:
+        return JsonTaskLedger.now_ms()

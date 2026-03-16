@@ -524,7 +524,7 @@ class TestConsolidationDeduplicationGuard:
 
         consolidation_calls = 0
 
-        async def _fake_consolidate(_session, archive_all: bool = False) -> None:
+        async def _fake_consolidate(_session, archive_all: bool = False, **_kwargs) -> None:
             nonlocal consolidation_calls
             consolidation_calls += 1
             await asyncio.sleep(0.05)
@@ -567,16 +567,10 @@ class TestConsolidationDeduplicationGuard:
         loop.sessions.save(session)
 
         consolidation_calls = 0
-        active = 0
-        max_active = 0
-
-        async def _fake_consolidate(_session, archive_all: bool = False) -> None:
-            nonlocal consolidation_calls, active, max_active
+        async def _fake_consolidate(_session, archive_all: bool = False, **_kwargs) -> None:
+            nonlocal consolidation_calls
             consolidation_calls += 1
-            active += 1
-            max_active = max(max_active, active)
             await asyncio.sleep(0.05)
-            active -= 1
 
         loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
 
@@ -587,11 +581,8 @@ class TestConsolidationDeduplicationGuard:
         await loop._process_message(new_msg)
         await asyncio.sleep(0.1)
 
-        assert consolidation_calls == 2, (
-            f"Expected normal + /new consolidations, got {consolidation_calls}"
-        )
-        assert max_active == 1, (
-            f"Expected serialized consolidation, observed concurrency={max_active}"
+        assert consolidation_calls >= 1, (
+            f"Expected at least one background consolidation/archive call, got {consolidation_calls}"
         )
 
     @pytest.mark.asyncio
@@ -620,7 +611,7 @@ class TestConsolidationDeduplicationGuard:
 
         started = asyncio.Event()
 
-        async def _slow_consolidate(_session, archive_all: bool = False) -> None:
+        async def _slow_consolidate(_session, archive_all: bool = False, **_kwargs) -> None:
             started.set()
             await asyncio.sleep(0.1)
 
@@ -638,10 +629,10 @@ class TestConsolidationDeduplicationGuard:
         )
 
     @pytest.mark.asyncio
-    async def test_new_waits_for_inflight_consolidation_and_preserves_messages(
+    async def test_new_returns_immediately_while_background_archive_runs(
         self, tmp_path: Path
     ) -> None:
-        """/new waits for in-flight consolidation and archives before clear."""
+        """/new should return before the archive-all background task finishes."""
         from lemonclaw.agent.loop import AgentLoop
         from lemonclaw.bus.events import InboundMessage
         from lemonclaw.bus.queue import MessageBus
@@ -667,83 +658,39 @@ class TestConsolidationDeduplicationGuard:
         release = asyncio.Event()
         archived_count = 0
 
-        async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
+        async def _fake_consolidate(sess, archive_all: bool = False, **_kwargs) -> bool:
             nonlocal archived_count
             if archive_all:
+                started.set()
                 archived_count = len(sess.messages)
+                await release.wait()
                 return True
-            started.set()
-            await release.wait()
             return True
 
         loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
-
-        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
-        await loop._process_message(msg)
-        await started.wait()
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         pending_new = asyncio.create_task(loop._process_message(new_msg))
 
         await asyncio.sleep(0.02)
-        assert not pending_new.done(), "/new should wait while consolidation is in-flight"
+        assert pending_new.done(), "/new should return immediately"
 
-        release.set()
-        response = await pending_new
+        response = pending_new.result()
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert archived_count > 0, "Expected /new archival to process a non-empty snapshot"
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert session_after.messages == [], "Session should be cleared after successful archival"
+        assert session_after.messages == [], "Session should be cleared before archive completes"
+
+        await started.wait()
+        assert archived_count > 0, "Expected background archive to receive the old snapshot"
+        release.set()
 
     @pytest.mark.asyncio
-    async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
-        """/new must keep session data if archive step reports failure."""
-        from lemonclaw.agent.loop import AgentLoop
-        from lemonclaw.bus.events import InboundMessage
-        from lemonclaw.bus.queue import MessageBus
-        from lemonclaw.providers.base import LLMResponse
-
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
-            bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
-        )
-
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
-
-        session = loop.sessions.get_or_create("cli:test")
-        for i in range(5):
-            session.add_message("user", f"msg{i}")
-            session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
-        before_count = len(session.messages)
-
-        async def _failing_consolidate(sess, archive_all: bool = False) -> bool:
-            if archive_all:
-                return False
-            return True
-
-        loop._consolidate_memory = _failing_consolidate  # type: ignore[method-assign]
-
-        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
-        response = await loop._process_message(new_msg)
-
-        assert response is not None
-        assert "failed" in response.content.lower()
-        session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == before_count, (
-            "Session must remain intact when /new archival fails"
-        )
-
-    @pytest.mark.asyncio
-    async def test_new_archives_only_unconsolidated_messages_after_inflight_task(
+    async def test_new_supersedes_inflight_consolidation_without_rehydrating_session(
         self, tmp_path: Path
     ) -> None:
-        """/new should archive only messages not yet consolidated by prior task."""
+        """/new should not wait on or be overwritten by an in-flight consolidation."""
         from lemonclaw.agent.loop import AgentLoop
         from lemonclaw.bus.events import InboundMessage
         from lemonclaw.bus.queue import MessageBus
@@ -767,17 +714,19 @@ class TestConsolidationDeduplicationGuard:
 
         started = asyncio.Event()
         release = asyncio.Event()
-        archived_count = -1
+        archive_started = asyncio.Event()
 
-        async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
-            nonlocal archived_count
+        async def _fake_consolidate(sess, archive_all: bool = False, **kwargs) -> bool:
             if archive_all:
+                archive_started.set()
                 archived_count = len(sess.messages)
+                await asyncio.sleep(0)
                 return True
-
             started.set()
             await release.wait()
-            sess.last_consolidated = len(sess.messages) - 3
+            should_commit = kwargs.get("should_commit")
+            if callable(should_commit):
+                assert should_commit() is False
             return True
 
         loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
@@ -788,17 +737,63 @@ class TestConsolidationDeduplicationGuard:
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         pending_new = asyncio.create_task(loop._process_message(new_msg))
-        await asyncio.sleep(0.02)
-        assert not pending_new.done()
 
+        await asyncio.sleep(0.02)
+        assert pending_new.done(), "/new should not wait for the in-flight consolidation"
+
+        response = pending_new.result()
+        assert response is not None
+        assert "new session started" in response.content.lower()
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert session_after.messages == [], "Session should be cleared immediately"
+
+        await archive_started.wait()
         release.set()
-        response = await pending_new
+        await asyncio.sleep(0.05)
+
+        session_final = loop.sessions.get_or_create("cli:test")
+        assert session_final.messages == [], "Superseded consolidation must not rehydrate the cleared session"
+
+    @pytest.mark.asyncio
+    async def test_new_keeps_cleared_session_when_background_archive_fails(self, tmp_path: Path) -> None:
+        """/new should still clear the session even if background archival later fails."""
+        from lemonclaw.agent.loop import AgentLoop
+        from lemonclaw.bus.events import InboundMessage
+        from lemonclaw.bus.queue import MessageBus
+        from lemonclaw.providers.base import LLMResponse
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(
+            bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
+        )
+
+        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(5):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        async def _failing_consolidate(sess, archive_all: bool = False, **_kwargs) -> bool:
+            if archive_all:
+                return False
+            return True
+
+        loop._consolidate_memory = _failing_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response = await loop._process_message(new_msg)
+        await asyncio.sleep(0.02)
 
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert archived_count == 3, (
-            f"Expected only unconsolidated tail to archive, got {archived_count}"
-        )
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert session_after.messages == [], "Session must stay cleared even if archival fails later"
 
     @pytest.mark.asyncio
     async def test_new_cleans_up_consolidation_lock_for_invalidated_session(
@@ -830,7 +825,7 @@ class TestConsolidationDeduplicationGuard:
         loop._consolidation_locks.setdefault(session.key, asyncio.Lock())
         assert session.key in loop._consolidation_locks
 
-        async def _ok_consolidate(sess, archive_all: bool = False) -> bool:
+        async def _ok_consolidate(sess, archive_all: bool = False, **_kwargs) -> bool:
             return True
 
         loop._consolidate_memory = _ok_consolidate  # type: ignore[method-assign]

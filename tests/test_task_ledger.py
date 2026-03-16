@@ -6,7 +6,7 @@ from lemonclaw.ledger.runtime import TaskLedger
 
 
 def test_task_ledger_writes_task_and_steps(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
 
     ledger.ensure_task(
         task_id="task_1",
@@ -32,7 +32,7 @@ def test_task_ledger_writes_task_and_steps(tmp_path: Path):
 
 
 def test_task_ledger_materializes_latest_step_state(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
 
     ledger.ensure_task(
         task_id="task_1",
@@ -52,7 +52,7 @@ def test_task_ledger_materializes_latest_step_state(tmp_path: Path):
 
 
 def test_task_ledger_read_task_view_summarizes_status_counts(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     ledger.ensure_task(
         task_id="task_1",
         session_key="cli:direct",
@@ -494,7 +494,7 @@ def test_task_ledger_rejects_invalid_step_id_for_outbox_enqueue(tmp_path: Path):
 
 
 def test_task_ledger_lists_and_marks_stale_tasks(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     ledger.ensure_task(
         task_id="task_1",
         session_key="cli:direct",

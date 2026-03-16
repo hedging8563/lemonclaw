@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
@@ -167,6 +167,7 @@ class MemoryStore:
         archive_all: bool = False,
         memory_window: int = 50,
         timeout: float = CONSOLIDATION_TIMEOUT,
+        should_commit: Callable[[], bool] | None = None,
     ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
@@ -232,6 +233,10 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
 
                 if not response.has_tool_calls:
                     logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
+                    return False
+
+                if should_commit is not None and not should_commit():
+                    logger.info("Memory consolidation superseded before commit, skipping write")
                     return False
 
                 args = response.tool_calls[0].arguments

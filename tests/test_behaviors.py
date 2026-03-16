@@ -215,6 +215,48 @@ class TestSlashCommands:
         refreshed = loop.sessions.get_or_create("test:c1")
         assert refreshed.metadata.get("current_model") is None
 
+    @pytest.mark.asyncio
+    async def test_process_message_records_retrieval_observability(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        loop.context.resolve_retrieval_context = AsyncMock(return_value=(
+            "## Relevant Memory\n\n### tech\nPython 3.13",
+            "## Experience Rules\n\n**python 部署**: 需要 venv → 先创建 venv",
+            {
+                "strategy": "hybrid",
+                "latency_ms": 12,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "card_count": 1,
+                "rule_count": 1,
+                "hit_sources": ["hybrid"],
+                "card_sources": {"tech": "hybrid"},
+                "rule_sources": {"## Rule #1": "hybrid"},
+            },
+        ))
+        loop.ledger.ensure_task(
+            task_id="task_1",
+            session_key="test:c1",
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="hello",
+        )
+
+        msg = InboundMessage(
+            channel="test",
+            sender_id="u1",
+            chat_id="c1",
+            content="hello",
+            metadata={"_task_id": "task_1", "_mode": "chat", "_agent_id": "default"},
+        )
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        task = loop.ledger.read_task("task_1")
+        assert task is not None
+        assert task["metadata"]["retrieval"]["strategy"] == "hybrid"
+        assert task["metadata"]["retrieval"]["latency_ms"] == 12
+
 
 # ── 2c. Token Tracking (P2-A) ──
 

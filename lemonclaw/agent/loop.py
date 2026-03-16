@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 import uuid
@@ -172,6 +173,7 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._consolidation_epochs: dict[str, int] = {}  # session_key -> supersede generation
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._resume_tasks: dict[str, asyncio.Task] = {}  # task_id -> background resume task
         self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
@@ -179,6 +181,100 @@ class AgentLoop:
         self._session_lock_order: list[str] = []  # LRU tracking for session locks
         self._MAX_SESSION_LOCKS = 1000  # Upper bound to prevent unbounded growth
         self._register_default_tools()
+
+    def _track_background_task(self, task: asyncio.Task, *, bucket: set[asyncio.Task], label: str) -> None:
+        """Keep a strong ref for background tasks and log failures consistently."""
+        bucket.add(task)
+
+        def _done(completed: asyncio.Task) -> None:
+            bucket.discard(completed)
+            try:
+                exc = completed.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None:
+                logger.opt(exception=exc).error("Background task failed [{}]", label)
+
+        task.add_done_callback(_done)
+
+    @staticmethod
+    def _clone_session(session: Session, *, messages: list[dict[str, Any]] | None = None, last_consolidated: int | None = None) -> Session:
+        return Session(
+            key=session.key,
+            messages=copy.deepcopy(messages if messages is not None else session.messages),
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            metadata=copy.deepcopy(session.metadata),
+            last_consolidated=session.last_consolidated if last_consolidated is None else last_consolidated,
+            version=session.version,
+        )
+
+    @staticmethod
+    def _history_prefix_matches(live_messages: list[dict[str, Any]], original_messages: list[dict[str, Any]]) -> bool:
+        return len(live_messages) >= len(original_messages) and live_messages[: len(original_messages)] == original_messages
+
+    async def _run_background_consolidation(self, session_key: str) -> None:
+        """Consolidate a session snapshot without blocking the live session."""
+        lock = self._consolidation_locks.setdefault(session_key, asyncio.Lock())
+        try:
+            async with lock:
+                live = self.sessions.get_or_create(session_key)
+                snapshot = self._clone_session(live)
+                original_messages = copy.deepcopy(live.messages)
+                epoch = self._consolidation_epochs.get(session_key, 0)
+
+            if not original_messages:
+                return
+
+            consolidated = await self._consolidate_memory(
+                snapshot,
+                should_commit=lambda: self._consolidation_epochs.get(session_key, 0) == epoch,
+            )
+            if not consolidated:
+                return
+
+            async with lock:
+                live = self.sessions.get_or_create(session_key)
+                if not self._history_prefix_matches(live.messages, original_messages):
+                    logger.debug("Skip applying stale consolidation snapshot for {}", session_key)
+                    return
+
+                if snapshot.messages == original_messages and snapshot.last_consolidated == live.last_consolidated:
+                    return
+
+                preserved_tail = copy.deepcopy(live.messages[len(original_messages):])
+                live.messages = copy.deepcopy(snapshot.messages) + preserved_tail
+                live.last_consolidated = snapshot.last_consolidated
+                live.updated_at = datetime.now()
+                self.sessions.save(live)
+        finally:
+            self._consolidating.discard(session_key)
+            if not lock.locked():
+                self._consolidation_locks.pop(session_key, None)
+
+    def _schedule_background_consolidation(self, session_key: str) -> None:
+        task = asyncio.create_task(self._run_background_consolidation(session_key))
+        self._track_background_task(task, bucket=self._consolidation_tasks, label=f"session_consolidation:{session_key}")
+
+    async def _archive_session_snapshot(self, session_key: str, snapshot: Session) -> None:
+        """Persist a cleared session immediately, and archive memory in the background."""
+        if not snapshot.messages:
+            return
+        ok = await self._consolidate_memory(snapshot, archive_all=True)
+        if not ok:
+            logger.warning("Background /new archival failed for {}", session_key)
+
+    def _schedule_archive_snapshot(self, session_key: str, snapshot: Session) -> None:
+        task = asyncio.create_task(self._archive_session_snapshot(session_key, snapshot))
+        self._track_background_task(task, bucket=self._consolidation_tasks, label=f"session_archive:{session_key}")
+
+    def _record_retrieval_meta(self, task_id: str, retrieval_meta: dict[str, Any]) -> None:
+        task = self.ledger.read_task(task_id)
+        if not task:
+            return
+        metadata = dict(task.get("metadata") or {})
+        metadata["retrieval"] = dict(retrieval_meta)
+        self.ledger.update_task(task_id, metadata=metadata)
 
     def update_defaults(
         self,
@@ -975,10 +1071,15 @@ class AgentLoop:
             session_model = session.metadata.get("current_model")
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), session_key=key)
             history = session.get_history(max_messages=self.memory_window)
+            memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
+            logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 timezone=msg.metadata.get("timezone") or self.default_timezone,
+                memory_context_override=memory_ctx,
+                rules_context_override=rules_ctx,
+                skip_local_retrieval=True,
             )
             # Token-level compaction for system messages too
             from lemonclaw.session.compaction import compact, needs_compaction
@@ -1039,36 +1140,35 @@ class AgentLoop:
         cmd = msg.content.strip().lower()
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-            self._consolidating.add(session.key)
             try:
                 async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
-                                content=t("memory_archival_failed", lang),
-                            )
+                    snapshot_messages = copy.deepcopy(session.messages[session.last_consolidated :])
+                    self._consolidation_epochs[session.key] = self._consolidation_epochs.get(session.key, 0) + 1
+                    if snapshot_messages:
+                        archive_snapshot = self._clone_session(
+                            session,
+                            messages=snapshot_messages,
+                            last_consolidated=0,
+                        )
+                        self._schedule_archive_snapshot(session.key, archive_snapshot)
+
+                    # Archive old session file so it remains visible in activity feed,
+                    # then create a fresh session with the same key.
+                    self.sessions.archive_session(session.key)
+                    session.clear()
+                    session.metadata.pop("current_model", None)
+                    self.sessions.save(session)
+                    self.sessions.invalidate(session.key)
             except Exception:
-                logger.exception("/new archival failed for {}", session.key)
+                logger.exception("/new archival setup failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content=t("memory_archival_failed", lang),
                 )
             finally:
-                self._consolidating.discard(session.key)
                 if not lock.locked():
                     self._consolidation_locks.pop(session.key, None)
 
-            # Archive old session file so it remains visible in activity feed,
-            # then create a fresh session with the same key.
-            self.sessions.archive_session(session.key)
-            session.clear()
-            session.metadata.pop("current_model", None)
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
             return self._command_reply(msg, t("new_session", lang), kind="new_session")
         if cmd == "/usage":
             reply = self._command_reply(msg, self.usage_tracker.format_session_usage(session.metadata), kind="usage")
@@ -1117,24 +1217,7 @@ class AgentLoop:
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        if await self._consolidate_memory(session):
-                            # Save after consolidation — messages may have been truncated
-                            self.sessions.save(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    if not lock.locked():
-                        self._consolidation_locks.pop(session.key, None)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)
+            self._schedule_background_consolidation(session.key)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), session_key=key)
         message_turn_state: dict[str, Any] | None = None
@@ -1146,6 +1229,10 @@ class AgentLoop:
         session_model = session.metadata.get("current_model")
 
         history = session.get_history(max_messages=self.memory_window)
+        memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
+        logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
+        if task_id:
+            self._record_retrieval_meta(task_id, retrieval_meta)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -1154,6 +1241,9 @@ class AgentLoop:
             timezone=msg.metadata.get("timezone") or self.default_timezone,
             mode=str(msg.metadata.get("_mode", "chat")),
             session_prompt_override=str(session.metadata.get("system_prompt_override", "")),
+            memory_context_override=memory_ctx,
+            rules_context_override=rules_ctx,
+            skip_local_retrieval=True,
         )
 
         # Token-level compaction: summarize middle messages if over threshold
@@ -1381,12 +1471,19 @@ class AgentLoop:
                 session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(
+        self,
+        session,
+        archive_all: bool = False,
+        *,
+        should_commit: Callable[[], bool] | None = None,
+    ) -> bool:
         """Delegate to MemoryStore.consolidate(). Uses Groq for speed + cost."""
         from lemonclaw.config.defaults import DEFAULT_CONSOLIDATION_MODEL
         return await self.context.memory.consolidate(
             session, self.provider, DEFAULT_CONSOLIDATION_MODEL,
             archive_all=archive_all, memory_window=self.memory_window,
+            should_commit=should_commit,
         )
 
     async def process_direct(

@@ -51,6 +51,36 @@ def test_trigger_hybrid_fallback_to_keyword(tmp_path):
     assert rules == []
 
 
+def test_trigger_hybrid_trace_preserves_keyword_hits(tmp_path):
+    """Exact keyword hits should survive even when hybrid results return other cards."""
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.trigger import MemoryTrigger
+
+    class _FakeSearch:
+        available = True
+
+        async def search_entities(self, query, provider, limit=3):
+            return [{"name": "semantic"}]
+
+        async def search_rules(self, query, provider, limit=2):
+            return []
+
+    store = EntityStore(tmp_path / "memory")
+    store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    store.create_card("semantic", "semantic", ["llm"], body="# Semantic\nPy runtime\n")
+
+    trigger = MemoryTrigger(store, search_index=_FakeSearch())
+    cards, rules, trace = asyncio.run(
+        trigger.hybrid_match_with_trace("python version?", AsyncMock())
+    )
+
+    assert rules == []
+    assert [card.name for card in cards] == ["tech", "semantic"]
+    assert trace["strategy"] == "hybrid"
+    assert trace["card_sources"]["tech"] == "keyword"
+    assert trace["card_sources"]["semantic"] == "hybrid"
+
+
 def test_trigger_keyword_match_still_works(tmp_path):
     """Existing keyword match API unchanged after trigger.py update."""
     from lemonclaw.memory.entities import EntityStore

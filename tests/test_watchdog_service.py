@@ -31,7 +31,7 @@ def _seed_stale_task(
 
 
 def test_watchdog_detects_stale_tasks_from_ledger(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     _seed_stale_task(ledger, task_id="task_1", status="running", current_stage="execute")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
 
@@ -42,7 +42,7 @@ def test_watchdog_detects_stale_tasks_from_ledger(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_watchdog_soft_recovery_marks_running_task_failed(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     _seed_stale_task(ledger, task_id="task_1", status="running", current_stage="execute")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
 
@@ -57,7 +57,7 @@ async def test_watchdog_soft_recovery_marks_running_task_failed(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_watchdog_soft_recovery_keeps_waiting_task_in_manual_review(tmp_path: Path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     _seed_stale_task(ledger, task_id="task_1", status="waiting", current_stage="waiting_outbox")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
 
@@ -74,7 +74,7 @@ async def test_watchdog_soft_recovery_keeps_waiting_task_in_manual_review(tmp_pa
 
 @pytest.mark.asyncio
 async def test_watchdog_start_offloads_startup_scan_to_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
     to_thread = AsyncMock(return_value=0)
 
@@ -114,7 +114,7 @@ async def test_watchdog_soft_recovery_restarts_down_channels():
 
 @pytest.mark.asyncio
 async def test_watchdog_hard_recovery_marks_active_tasks_before_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     _seed_stale_task(ledger, task_id="task_1", status="running", current_stage="execute")
     watchdog = WatchdogService(task_ledger=ledger)
 

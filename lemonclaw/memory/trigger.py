@@ -24,7 +24,13 @@ class MemoryTrigger:
         self._store = entity_store
         self._search = search_index
 
-    def match(self, message: str, *, max_cards: int = 3) -> list[EntityCard]:
+    def _keyword_match(
+        self,
+        message: str,
+        *,
+        max_cards: int = 3,
+        record_access: bool = True,
+    ) -> list[EntityCard]:
         """Return entity cards whose keywords appear in the message.
 
         Cards are ranked by number of keyword hits, then by access_count.
@@ -43,9 +49,15 @@ class MemoryTrigger:
 
         results: list[EntityCard] = []
         for _, _, card in scored[:max_cards]:
-            card.record_access()
-            card.save()
+            if record_access:
+                card.record_access()
+                card.save()
             results.append(card)
+        return results
+
+    def match(self, message: str, *, max_cards: int = 3) -> list[EntityCard]:
+        """Return keyword-matched cards using the legacy sync fast path."""
+        results = self._keyword_match(message, max_cards=max_cards, record_access=True)
 
         if results:
             logger.debug(
@@ -63,13 +75,44 @@ class MemoryTrigger:
         max_cards: int = 3,
         max_rules: int = 2,
     ) -> tuple[list[EntityCard], list[dict]]:
+        cards, rules, _trace = await self.hybrid_match_with_trace(
+            message,
+            provider,
+            max_cards=max_cards,
+            max_rules=max_rules,
+        )
+        return cards, rules
+
+    async def hybrid_match_with_trace(
+        self,
+        message: str,
+        provider: LLMProvider,
+        *,
+        max_cards: int = 3,
+        max_rules: int = 2,
+    ) -> tuple[list[EntityCard], list[dict], dict]:
         """Enhanced match using hybrid search (BM25 + vector).
 
-        Returns (matched_cards, matched_rules).
+        Returns (matched_cards, matched_rules, trace).
         Falls back to keyword match if search index is unavailable.
         """
+        keyword_cards = self._keyword_match(message, max_cards=max_cards, record_access=False)
+        trace = {
+            "strategy": "keyword",
+            "fallbacks": [],
+            "card_sources": {card.name: "keyword" for card in keyword_cards},
+            "rule_sources": {},
+            "keyword_card_count": len(keyword_cards),
+            "hybrid_card_count": 0,
+            "hybrid_rule_count": 0,
+        }
+
         if not self._search or not self._search.available:
-            return self.match(message, max_cards=max_cards), []
+            trace["fallbacks"].append("lancedb_unavailable")
+            for card in keyword_cards:
+                card.record_access()
+                card.save()
+            return keyword_cards, [], trace
 
         try:
             entity_results = await self._search.search_entities(
@@ -80,31 +123,52 @@ class MemoryTrigger:
             )
         except Exception as e:
             logger.debug("Hybrid search failed, falling back to keyword: {}", e)
-            return self.match(message, max_cards=max_cards), []
+            trace["fallbacks"].append(f"search_error:{type(e).__name__}")
+            for card in keyword_cards:
+                card.record_access()
+                card.save()
+            return keyword_cards, [], trace
 
-        # Load actual EntityCard objects for matched entities
+        trace["strategy"] = "hybrid"
+        trace["hybrid_card_count"] = len(entity_results)
+        trace["hybrid_rule_count"] = len(rule_results)
+
+        # Preserve exact keyword hits first, then fill with hybrid semantic hits.
         cards: list[EntityCard] = []
         seen: set[str] = set()
+        for card in keyword_cards:
+            cards.append(card)
+            seen.add(card.name)
+
         for result in entity_results:
             name = result.get("name", "")
             if name in seen:
+                trace["card_sources"][name] = "hybrid+keyword"
                 continue
             card = self._store.get_card(name)
-            if card:
-                card.record_access()
-                card.save()
-                cards.append(card)
-                seen.add(name)
+            if not card:
+                continue
+            cards.append(card)
+            seen.add(name)
+            trace["card_sources"][name] = "hybrid"
+            if len(cards) >= max_cards:
+                break
 
-        # Supplement with keyword matches if hybrid returned few results
-        if len(cards) < max_cards:
-            kw_cards = self.match(message, max_cards=max_cards - len(cards))
-            for card in kw_cards:
-                if card.name not in seen:
-                    cards.append(card)
-                    seen.add(card.name)
+        for card in cards:
+            card.record_access()
+            card.save()
 
-        return cards[:max_cards], rule_results
+        merged_rules: list[dict] = []
+        seen_rules: set[str] = set()
+        for rule in rule_results:
+            key = str(rule.get("header") or rule.get("trigger") or "")
+            if not key:
+                continue
+            seen_rules.add(key)
+            trace["rule_sources"][key] = "hybrid"
+            merged_rules.append(rule)
+
+        return cards[:max_cards], merged_rules[:max_rules], trace
 
     @staticmethod
     def format_for_context(cards: list[EntityCard]) -> str:

@@ -1,6 +1,7 @@
 """Tests for bionic memory system — P3-D Step 1."""
 
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -382,6 +383,63 @@ async def test_context_builder_injects_matched_rules(tmp_path):
     user_msg = messages[-1]["content"]
     assert "Experience Rules" in user_msg
     assert "需要 venv" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_context_builder_resolve_retrieval_context_uses_hybrid_trace(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    ctx.memory.entities.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    await ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
+    ctx.memory.set_provider(AsyncMock())
+
+    async def _fake_hybrid_match(message, provider, *, max_cards=3, max_rules=2):
+        return (
+            [ctx.memory.entities.get_card("tech")],
+            [{"header": "## Rule #1", "trigger": "python 部署", "lesson": "需要 venv", "action": "先创建 venv"}],
+            {
+                "strategy": "hybrid",
+                "fallbacks": [],
+                "card_sources": {"tech": "hybrid"},
+                "rule_sources": {"## Rule #1": "hybrid"},
+            },
+        )
+
+    ctx.memory.trigger.hybrid_match_with_trace = _fake_hybrid_match  # type: ignore[method-assign]
+
+    memory_ctx, rules_ctx, meta = await ctx.resolve_retrieval_context("python 部署到服务器")
+    assert "Relevant Memory" in memory_ctx
+    assert "Python 3.13" in memory_ctx
+    assert "Experience Rules" in rules_ctx
+    assert "需要 venv" in rules_ctx
+    assert meta["strategy"] == "hybrid"
+    assert meta["fallback_count"] == 0
+    assert "hybrid" in meta["hit_sources"]
+
+
+@pytest.mark.asyncio
+async def test_context_builder_resolve_retrieval_context_falls_back_without_provider(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    ctx.memory.entities.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    await ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
+
+    memory_ctx, rules_ctx, meta = await ctx.resolve_retrieval_context("python 部署到服务器")
+    assert "Python 3.13" in memory_ctx
+    assert "需要 venv" in rules_ctx
+    assert meta["strategy"] == "keyword"
+    assert meta["fallback_count"] == 1
+    assert meta["fallbacks"] == ["provider_unbound"]
 
 
 # ── Core Promotion / Demotion ────────────────────────────────────────────────

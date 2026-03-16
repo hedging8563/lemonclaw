@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -73,6 +74,8 @@ class Session:
         else:
             sliced = []
 
+        sliced = self._sanitize_llm_history(sliced)
+
         out: list[dict[str, Any]] = []
         for message in sliced:
             content = append_attachment_inventory(str(message.get("content", "") or ""), message.get("media"))
@@ -82,6 +85,57 @@ class Session:
                     entry[key] = message[key]
             out.append(entry)
         return out
+
+    @staticmethod
+    def _is_tool_result_message(message: dict[str, Any]) -> bool:
+        role = str(message.get("role") or "")
+        return role == "tool" or (role == "user" and message.get("tool_call_id") is not None)
+
+    @classmethod
+    def _sanitize_llm_history(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop malformed tool-call fragments before sending history to the LLM.
+
+        Session storage is append-only and may contain legacy or partially-written
+        tool sequences. Here we only keep complete assistant(tool_calls) ->
+        tool_result chains, and drop orphaned tool_result / incomplete tool_use
+        fragments so providers do not reject the payload.
+        """
+        sanitized: list[dict[str, Any]] = []
+        pending_turn: list[dict[str, Any]] = []
+        pending_ids: set[str] = set()
+
+        for message in messages:
+            if cls._is_tool_result_message(message):
+                tool_call_id = message.get("tool_call_id")
+                tool_call_id = str(tool_call_id) if tool_call_id is not None else ""
+                if pending_turn and tool_call_id and tool_call_id in pending_ids:
+                    pending_turn.append(copy.deepcopy(message))
+                    pending_ids.discard(tool_call_id)
+                    if not pending_ids:
+                        sanitized.extend(pending_turn)
+                        pending_turn = []
+                continue
+
+            # Any normal message means an incomplete buffered tool-call turn is invalid.
+            if pending_turn:
+                pending_turn = []
+                pending_ids = set()
+
+            tool_calls = message.get("tool_calls")
+            if message.get("role") == "assistant" and isinstance(tool_calls, list) and tool_calls:
+                ids = {
+                    str(call.get("id"))
+                    for call in tool_calls
+                    if isinstance(call, dict) and call.get("id") is not None
+                }
+                if ids:
+                    pending_turn = [copy.deepcopy(message)]
+                    pending_ids = set(ids)
+                    continue
+
+            sanitized.append(copy.deepcopy(message))
+
+        return sanitized
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""

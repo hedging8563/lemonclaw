@@ -266,6 +266,38 @@ class TestSessionGetHistory:
         # Should only include messages from index 6 onwards
         assert len(history) <= 4
 
+    def test_drops_orphan_tool_results_inside_history(self):
+        from lemonclaw.session.manager import Session
+
+        s = Session(key="test")
+        s.messages = [
+            {"role": "user", "content": "question"},
+            {"role": "tool", "tool_call_id": "missing", "name": "read_file", "content": "orphan"},
+            {"role": "assistant", "content": "answer"},
+        ]
+
+        history = s.get_history()
+        assert history == [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "answer"},
+        ]
+
+    def test_drops_incomplete_assistant_tool_call_turn(self):
+        from lemonclaw.session.manager import Session
+
+        s = Session(key="test")
+        s.messages = [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "calling tool", "tool_calls": [{"id": "call1", "function": {"name": "read_file"}}]},
+            {"role": "assistant", "content": "fallback answer"},
+        ]
+
+        history = s.get_history()
+        assert history == [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "fallback answer"},
+        ]
+
 
 # ── 5. Conductor Retry + Degradation ─────────────────────────────────────
 

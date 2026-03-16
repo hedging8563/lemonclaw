@@ -183,6 +183,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         timezone: str | None = None,
         mode: str | None = None,
         session_prompt_override: str = "",
+        memory_context_override: str | None = None,
+        rules_context_override: str | None = None,
+        skip_local_retrieval: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
 
@@ -207,15 +210,18 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
 
-        # Keyword trigger: match LTM entity cards against user message
         from lemonclaw.memory.reflect import ProceduralMemory
         from lemonclaw.memory.trigger import MemoryTrigger
-        matched_cards = self.memory.trigger.match(current_message)
-        memory_ctx = MemoryTrigger.format_for_context(matched_cards)
+        if skip_local_retrieval:
+            memory_ctx = memory_context_override or ""
+            rules_ctx = rules_context_override or ""
+        else:
+            matched_cards = self.memory.trigger.match(current_message)
+            memory_ctx = memory_context_override if memory_context_override is not None else MemoryTrigger.format_for_context(matched_cards)
 
-        # Procedural memory: match experience rules against user message
-        matched_rules = self.memory.procedural.match_rules(current_message)
-        rules_ctx = ProceduralMemory.format_for_context(matched_rules)
+            # Procedural memory: match experience rules against user message
+            matched_rules = self.memory.procedural.match_rules(current_message)
+            rules_ctx = rules_context_override if rules_context_override is not None else ProceduralMemory.format_for_context(matched_rules)
 
         user_content = self._build_user_content(current_message, media)
         # For text-only messages, merge runtime context + memory context into user message.
@@ -240,6 +246,85 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             *history,
             user_msg,
         ]
+
+    async def resolve_retrieval_context(
+        self,
+        current_message: str,
+        *,
+        max_cards: int = 3,
+        max_rules: int = 2,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Resolve memory/rule retrieval for the current message with graceful fallback."""
+        from lemonclaw.memory.reflect import ProceduralMemory
+        from lemonclaw.memory.trigger import MemoryTrigger
+
+        started = time.perf_counter()
+        keyword_rules = self.memory.procedural.match_rules(current_message, max_rules=max_rules)
+        provider = self.memory._provider
+
+        if provider is None:
+            cards = self.memory.trigger.match(current_message, max_cards=max_cards)
+            rules = keyword_rules
+            trace = {
+                "strategy": "keyword",
+                "fallbacks": ["provider_unbound"],
+                "card_sources": {card.name: "keyword" for card in cards},
+                "rule_sources": {
+                    str(rule.get("header") or rule.get("trigger") or ""): "keyword"
+                    for rule in rules
+                    if str(rule.get("header") or rule.get("trigger") or "")
+                },
+            }
+        else:
+            cards, hybrid_rules, trace = await self.memory.trigger.hybrid_match_with_trace(
+                current_message,
+                provider,
+                max_cards=max_cards,
+                max_rules=max_rules,
+            )
+            rule_sources = dict(trace.get("rule_sources") or {})
+            merged_rules: list[dict[str, Any]] = []
+            seen_rules: set[str] = set()
+            for rule in keyword_rules:
+                key = str(rule.get("header") or rule.get("trigger") or "")
+                if not key:
+                    continue
+                seen_rules.add(key)
+                merged_rules.append(rule)
+                existing = str(rule_sources.get(key) or "")
+                rule_sources[key] = "hybrid+keyword" if existing == "hybrid" else "keyword"
+            for rule in hybrid_rules:
+                key = str(rule.get("header") or rule.get("trigger") or "")
+                if not key or key in seen_rules:
+                    continue
+                seen_rules.add(key)
+                merged_rules.append(rule)
+            rules = merged_rules[:max_rules]
+            trace["rule_sources"] = rule_sources
+
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        memory_ctx = MemoryTrigger.format_for_context(cards)
+        rules_ctx = ProceduralMemory.format_for_context(rules)
+        hit_sources = sorted({
+            str(source)
+            for source in (
+                list((trace.get("card_sources") or {}).values()) +
+                list((trace.get("rule_sources") or {}).values())
+            )
+            if source
+        })
+        meta = {
+            "strategy": str(trace.get("strategy") or "keyword"),
+            "latency_ms": elapsed_ms,
+            "fallback_count": len(trace.get("fallbacks") or []),
+            "fallbacks": list(trace.get("fallbacks") or []),
+            "card_count": len(cards),
+            "rule_count": len(rules),
+            "hit_sources": hit_sources,
+            "card_sources": dict(trace.get("card_sources") or {}),
+            "rule_sources": dict(trace.get("rule_sources") or {}),
+        }
+        return memory_ctx, rules_ctx, meta
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with attachment inventory and optional image blocks."""

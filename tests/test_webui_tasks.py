@@ -79,6 +79,7 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
         channel="telegram",
         goal="say hello",
         current_stage="execute",
+        metadata={"retrieval": {"strategy": "hybrid", "latency_ms": 9, "hit_sources": ["hybrid"]}},
     )
     step = ledger.start_step("task_1", step_type="tool_call", name="read_file", input_summary='{"path":"x"}')
     ledger.finish_step(step, status="completed")
@@ -90,10 +91,12 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     data = resp.json()
     assert data["task"]["task_id"] == "task_1"
     assert data["task"]["display_state"]["key"] == "completed"
+    assert data["task"]["retrieval"]["strategy"] == "hybrid"
     assert data["summary"]["step_count"] == 1
     assert data["summary"]["status_counts"]["completed"] == 1
     assert data["summary"]["display_state"]["key"] == "completed"
     assert data["summary"]["last_successful_step"] == "read_file"
+    assert data["summary"]["retrieval"]["latency_ms"] == 9
 
 
 def test_tasks_api_rejects_invalid_task_id(tmp_path):
@@ -229,7 +232,7 @@ def test_safe_resume_execute_api_retries_failed_outbox(tmp_path):
 
 
 def test_safe_resume_execute_api_uses_agent_loop_resume_executor_when_available(tmp_path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     agent_loop = SimpleNamespace(
         workspace=tmp_path,
         ledger=ledger,
@@ -442,7 +445,7 @@ def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tm
 
 
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):
-    ledger = TaskLedger(tmp_path)
+    ledger = TaskLedger(tmp_path, backend="json")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
     app, _ = _build_app(tmp_path, watchdog=watchdog, ledger=ledger)
     ledger.ensure_task(
