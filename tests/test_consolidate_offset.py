@@ -527,6 +527,29 @@ class TestEmptyAndBoundarySessions:
 class TestConsolidationDeduplicationGuard:
     """Test that consolidation tasks are deduplicated and serialized."""
 
+    def test_history_prefix_matches_uses_stable_digest(self) -> None:
+        from lemonclaw.agent.loop import AgentLoop
+
+        original = [
+            {"role": "user", "content": "hello", "timestamp": "2026-03-17T00:00:00"},
+            {"role": "assistant", "content": "hi", "timestamp": "2026-03-17T00:00:01"},
+        ]
+        digest = AgentLoop._history_prefix_digest(original)
+
+        assert AgentLoop._history_prefix_matches(
+            original + [{"role": "user", "content": "next", "timestamp": "2026-03-17T00:00:02"}],
+            original,
+            original_digest=digest,
+        )
+        assert not AgentLoop._history_prefix_matches(
+            [
+                {"role": "user", "content": "hello", "timestamp": "2026-03-17T00:00:00"},
+                {"role": "assistant", "content": "changed", "timestamp": "2026-03-17T00:00:01"},
+            ],
+            original,
+            original_digest=digest,
+        )
+
     @pytest.mark.asyncio
     async def test_consolidation_guard_prevents_duplicate_tasks(self, tmp_path: Path) -> None:
         """Concurrent messages above memory_window spawn only one consolidation task."""

@@ -67,6 +67,52 @@ class MemoryTrigger:
             )
         return results
 
+    @staticmethod
+    def _rule_key(rule: dict) -> str:
+        return str(rule.get("header") or rule.get("trigger") or "")
+
+    @staticmethod
+    def _merge_source_label(existing: str, incoming: str) -> str:
+        parts = [part for part in str(existing or "").split("+") if part]
+        if incoming and incoming not in parts:
+            parts.append(incoming)
+        return "+".join(parts)
+
+    @classmethod
+    def merge_rule_matches(
+        cls,
+        *,
+        preferred_rules: list[dict],
+        preferred_source: str,
+        secondary_rules: list[dict] | None = None,
+        secondary_source: str = "",
+        existing_sources: dict[str, str] | None = None,
+        max_rules: int = 2,
+    ) -> tuple[list[dict], dict[str, str]]:
+        merged: list[dict] = []
+        seen: set[str] = set()
+        sources = dict(existing_sources or {})
+
+        def _append(rule: dict, source: str) -> None:
+            if len(merged) >= max_rules:
+                return
+            key = cls._rule_key(rule)
+            if not key:
+                return
+            existing = str(sources.get(key) or "")
+            sources[key] = cls._merge_source_label(existing, source) if existing else source
+            if key in seen:
+                return
+            seen.add(key)
+            merged.append(rule)
+
+        for rule in preferred_rules:
+            _append(rule, preferred_source)
+        for rule in secondary_rules or []:
+            _append(rule, secondary_source)
+
+        return merged, sources
+
     async def hybrid_match(
         self,
         message: str,
@@ -90,6 +136,7 @@ class MemoryTrigger:
         *,
         max_cards: int = 3,
         max_rules: int = 2,
+        keyword_rules: list[dict] | None = None,
     ) -> tuple[list[EntityCard], list[dict], dict]:
         """Enhanced match using hybrid search (BM25 + vector).
 
@@ -112,7 +159,13 @@ class MemoryTrigger:
             for card in keyword_cards:
                 card.record_access()
                 card.save()
-            return keyword_cards, [], trace
+            merged_rules, rule_sources = self.merge_rule_matches(
+                preferred_rules=keyword_rules or [],
+                preferred_source="keyword",
+                max_rules=max_rules,
+            )
+            trace["rule_sources"] = rule_sources
+            return keyword_cards, merged_rules, trace
 
         try:
             entity_results = await self._search.search_entities(
@@ -127,7 +180,13 @@ class MemoryTrigger:
             for card in keyword_cards:
                 card.record_access()
                 card.save()
-            return keyword_cards, [], trace
+            merged_rules, rule_sources = self.merge_rule_matches(
+                preferred_rules=keyword_rules or [],
+                preferred_source="keyword",
+                max_rules=max_rules,
+            )
+            trace["rule_sources"] = rule_sources
+            return keyword_cards, merged_rules, trace
 
         trace["strategy"] = "hybrid"
         trace["hybrid_card_count"] = len(entity_results)
@@ -158,17 +217,16 @@ class MemoryTrigger:
             card.record_access()
             card.save()
 
-        merged_rules: list[dict] = []
-        seen_rules: set[str] = set()
-        for rule in rule_results:
-            key = str(rule.get("header") or rule.get("trigger") or "")
-            if not key:
-                continue
-            seen_rules.add(key)
-            trace["rule_sources"][key] = "hybrid"
-            merged_rules.append(rule)
+        merged_rules, rule_sources = self.merge_rule_matches(
+            preferred_rules=keyword_rules or [],
+            preferred_source="keyword",
+            secondary_rules=rule_results,
+            secondary_source="hybrid",
+            max_rules=max_rules,
+        )
+        trace["rule_sources"] = rule_sources
 
-        return cards[:max_cards], merged_rules[:max_rules], trace
+        return cards[:max_cards], merged_rules, trace
 
     @staticmethod
     def format_for_context(cards: list[EntityCard]) -> str:

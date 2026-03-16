@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import re
 import uuid
@@ -210,8 +211,29 @@ class AgentLoop:
         )
 
     @staticmethod
-    def _history_prefix_matches(live_messages: list[dict[str, Any]], original_messages: list[dict[str, Any]]) -> bool:
-        return len(live_messages) >= len(original_messages) and live_messages[: len(original_messages)] == original_messages
+    def _message_digest(message: dict[str, Any]) -> bytes:
+        payload = json.dumps(message, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return hashlib.blake2b(payload, digest_size=16).digest()
+
+    @classmethod
+    def _history_prefix_digest(cls, messages: list[dict[str, Any]]) -> bytes:
+        digest = hashlib.blake2b(digest_size=20)
+        for message in messages:
+            digest.update(cls._message_digest(message))
+        return digest.digest()
+
+    @classmethod
+    def _history_prefix_matches(
+        cls,
+        live_messages: list[dict[str, Any]],
+        original_messages: list[dict[str, Any]],
+        *,
+        original_digest: bytes | None = None,
+    ) -> bool:
+        if len(live_messages) < len(original_messages):
+            return False
+        live_digest = cls._history_prefix_digest(live_messages[: len(original_messages)])
+        return live_digest == (original_digest or cls._history_prefix_digest(original_messages))
 
     async def _run_background_consolidation(self, session_key: str) -> None:
         """Consolidate a session snapshot without blocking the live session."""
@@ -220,7 +242,8 @@ class AgentLoop:
             async with lock:
                 live = self.sessions.get_or_create(session_key)
                 snapshot = self._clone_session(live)
-                original_messages = copy.deepcopy(live.messages)
+                original_messages = snapshot.messages
+                original_digest = self._history_prefix_digest(original_messages)
                 epoch = self._consolidation_epochs.get(session_key, 0)
 
             if not original_messages:
@@ -235,7 +258,7 @@ class AgentLoop:
 
             async with lock:
                 live = self.sessions.get_or_create(session_key)
-                if not self._history_prefix_matches(live.messages, original_messages):
+                if not self._history_prefix_matches(live.messages, original_messages, original_digest=original_digest):
                     logger.debug("Skip applying stale consolidation snapshot for {}", session_key)
                     return
 

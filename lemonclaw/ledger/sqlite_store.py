@@ -15,12 +15,12 @@ from lemonclaw.ledger.runtime import (
     _SAFE_STEP_ID,
     _SAFE_TASK_ID,
     _now_ms,
-    JsonTaskLedger,
+    TaskLedgerSharedMixin,
 )
 from lemonclaw.ledger.types import OutboxEventRecord, StepRecord, TaskRecord
 
 
-class SQLiteTaskLedger(JsonTaskLedger):
+class SQLiteTaskLedger(TaskLedgerSharedMixin):
     """SQLite-backed ledger and outbox persistence."""
 
     def __init__(self, workspace: Path):
@@ -497,6 +497,8 @@ class SQLiteTaskLedger(JsonTaskLedger):
             ))
 
             with self._db_lock, self._conn:
+                # Single transaction: either the compacted event set fully replaces the
+                # old log, or SQLite rolls back the entire rewrite.
                 self._conn.execute("DELETE FROM outbox_events")
                 for event in kept:
                     self._insert_outbox_event(event, commit=False)
@@ -652,17 +654,20 @@ class SQLiteTaskLedger(JsonTaskLedger):
         return [self._row_to_outbox(row) for row in rows]
 
     def _materialize_outbox_events_unlocked(self) -> list[dict[str, Any]]:
-        latest_by_event: dict[str, dict[str, Any]] = {}
-        for event in self._read_outbox_events_unlocked():
-            event_id = str(event.get("event_id", "")).strip()
-            if not event_id:
-                continue
-            latest_by_event[event_id] = event
-        return sorted(
-            latest_by_event.values(),
-            key=lambda item: int(item.get("updated_at_ms") or 0),
-            reverse=True,
-        )
+        with self._db_lock:
+            rows = self._conn.execute(
+                """
+                SELECT *
+                FROM outbox_events
+                WHERE seq IN (
+                    SELECT MAX(seq)
+                    FROM outbox_events
+                    GROUP BY event_id
+                )
+                ORDER BY updated_at_ms DESC
+                """
+            ).fetchall()
+        return [self._row_to_outbox(row) for row in rows]
 
     def _read_outbox_event_unlocked(self, event_id: str) -> dict[str, Any] | None:
         with self._db_lock:

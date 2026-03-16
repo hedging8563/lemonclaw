@@ -81,6 +81,26 @@ def test_trigger_hybrid_trace_preserves_keyword_hits(tmp_path):
     assert trace["card_sources"]["semantic"] == "hybrid"
 
 
+def test_merge_rule_matches_dedupes_and_preserves_existing_sources():
+    from lemonclaw.memory.trigger import MemoryTrigger
+
+    keyword_rule = {"header": "## Rule #1", "trigger": "python 部署", "lesson": "需要 venv"}
+    hybrid_rule = {"header": "## Rule #2", "trigger": "部署回滚", "lesson": "先确认版本"}
+
+    merged, sources = MemoryTrigger.merge_rule_matches(
+        preferred_rules=[keyword_rule],
+        preferred_source="keyword",
+        secondary_rules=[keyword_rule, hybrid_rule],
+        secondary_source="hybrid",
+        existing_sources={"## Rule #1": "hybrid"},
+        max_rules=2,
+    )
+
+    assert merged == [keyword_rule, hybrid_rule]
+    assert sources["## Rule #1"] == "hybrid+keyword"
+    assert sources["## Rule #2"] == "hybrid"
+
+
 def test_trigger_keyword_match_still_works(tmp_path):
     """Existing keyword match API unchanged after trigger.py update."""
     from lemonclaw.memory.entities import EntityStore

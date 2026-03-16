@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import shutil
@@ -91,6 +90,33 @@ class Session:
         role = str(message.get("role") or "")
         return role == "tool" or (role == "user" and message.get("tool_call_id") is not None)
 
+    @staticmethod
+    def _clone_llm_message(message: dict[str, Any]) -> dict[str, Any]:
+        """Clone only the nested structures the provider layer may touch."""
+        cloned = dict(message)
+        content = cloned.get("content")
+        if isinstance(content, list):
+            cloned["content"] = [
+                dict(item) if isinstance(item, dict) else item
+                for item in content
+            ]
+        tool_calls = cloned.get("tool_calls")
+        if isinstance(tool_calls, list):
+            cloned["tool_calls"] = [
+                {
+                    **call,
+                    **(
+                        {"function": dict(call.get("function") or {})}
+                        if isinstance(call.get("function"), dict)
+                        else {}
+                    ),
+                }
+                if isinstance(call, dict)
+                else call
+                for call in tool_calls
+            ]
+        return cloned
+
     @classmethod
     def _sanitize_llm_history(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Drop malformed tool-call fragments before sending history to the LLM.
@@ -109,7 +135,7 @@ class Session:
                 tool_call_id = message.get("tool_call_id")
                 tool_call_id = str(tool_call_id) if tool_call_id is not None else ""
                 if pending_turn and tool_call_id and tool_call_id in pending_ids:
-                    pending_turn.append(copy.deepcopy(message))
+                    pending_turn.append(cls._clone_llm_message(message))
                     pending_ids.discard(tool_call_id)
                     if not pending_ids:
                         sanitized.extend(pending_turn)
@@ -129,11 +155,11 @@ class Session:
                     if isinstance(call, dict) and call.get("id") is not None
                 }
                 if ids:
-                    pending_turn = [copy.deepcopy(message)]
+                    pending_turn = [cls._clone_llm_message(message)]
                     pending_ids = set(ids)
                     continue
 
-            sanitized.append(copy.deepcopy(message))
+            sanitized.append(cls._clone_llm_message(message))
 
         return sanitized
 

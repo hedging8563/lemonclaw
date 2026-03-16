@@ -264,43 +264,25 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         if provider is None:
             cards = self.memory.trigger.match(current_message, max_cards=max_cards)
-            rules = keyword_rules
+            rules, rule_sources = MemoryTrigger.merge_rule_matches(
+                preferred_rules=keyword_rules,
+                preferred_source="keyword",
+                max_rules=max_rules,
+            )
             trace = {
                 "strategy": "keyword",
                 "fallbacks": ["provider_unbound"],
                 "card_sources": {card.name: "keyword" for card in cards},
-                "rule_sources": {
-                    str(rule.get("header") or rule.get("trigger") or ""): "keyword"
-                    for rule in rules
-                    if str(rule.get("header") or rule.get("trigger") or "")
-                },
+                "rule_sources": rule_sources,
             }
         else:
-            cards, hybrid_rules, trace = await self.memory.trigger.hybrid_match_with_trace(
+            cards, rules, trace = await self.memory.trigger.hybrid_match_with_trace(
                 current_message,
                 provider,
                 max_cards=max_cards,
                 max_rules=max_rules,
+                keyword_rules=keyword_rules,
             )
-            rule_sources = dict(trace.get("rule_sources") or {})
-            merged_rules: list[dict[str, Any]] = []
-            seen_rules: set[str] = set()
-            for rule in keyword_rules:
-                key = str(rule.get("header") or rule.get("trigger") or "")
-                if not key:
-                    continue
-                seen_rules.add(key)
-                merged_rules.append(rule)
-                existing = str(rule_sources.get(key) or "")
-                rule_sources[key] = "hybrid+keyword" if existing == "hybrid" else "keyword"
-            for rule in hybrid_rules:
-                key = str(rule.get("header") or rule.get("trigger") or "")
-                if not key or key in seen_rules:
-                    continue
-                seen_rules.add(key)
-                merged_rules.append(rule)
-            rules = merged_rules[:max_rules]
-            trace["rule_sources"] = rule_sources
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         memory_ctx = MemoryTrigger.format_for_context(cards)

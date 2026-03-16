@@ -141,9 +141,9 @@ async def test_cron_service_writes_task_ledger(tmp_path) -> None:
     await service._execute_job(job)
 
     task_id_prefix = f"task_cron_{job.id}_"
-    task_files = list((tmp_path / ".lemonclaw-state" / "tasks").glob(f"{task_id_prefix}*.json"))
-    assert len(task_files) == 1
-    task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
+    tasks = [task for task in ledger.list_tasks(limit=10) if str(task.get("task_id") or "").startswith(task_id_prefix)]
+    assert len(tasks) == 1
+    task = tasks[0]
     assert task["status"] == "completed"
     assert task["resume_context"]["channel"] == "cli"
     assert task["resume_context"]["chat_id"] == "direct"
@@ -181,9 +181,9 @@ async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -
     await service._execute_job(job)
 
     task_id_prefix = f"task_cron_{job.id}_"
-    task_files = list((tmp_path / ".lemonclaw-state" / "tasks").glob(f"{task_id_prefix}*.json"))
-    assert len(task_files) == 1
-    task = __import__("json").loads(task_files[0].read_text(encoding="utf-8"))
+    tasks = [task for task in ledger.list_tasks(limit=10) if str(task.get("task_id") or "").startswith(task_id_prefix)]
+    assert len(tasks) == 1
+    task = tasks[0]
     assert task["resume_context"]["channel"] == "telegram"
     assert task["resume_context"]["chat_id"] == "123"
     assert task["resume_context"]["session_key"] == "telegram:123:456"

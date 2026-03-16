@@ -2,6 +2,7 @@ from pathlib import Path
 
 from lemonclaw.ledger.migrate import migrate_json_to_sqlite
 from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.sqlite_store import SQLiteTaskLedger
 
 
 def test_task_ledger_auto_selects_sqlite_for_fresh_workspace(tmp_path: Path):
@@ -178,7 +179,7 @@ def test_migrate_json_to_sqlite_preserves_task_steps_and_outbox(tmp_path: Path):
     json_ledger.update_task("task_1", completion_gate={"passed": False, "reason": "pending outbox"})
 
     result = migrate_json_to_sqlite(tmp_path)
-    assert result == {"tasks": 1, "step_events": 2, "outbox_events": 1, "skipped": False}
+    assert result == {"tasks": 1, "step_events": 2, "outbox_events": 1, "skipped": False, "dry_run": False}
 
     auto_ledger = TaskLedger(tmp_path)
     assert auto_ledger.backend == "sqlite"
@@ -195,3 +196,30 @@ def test_migrate_json_to_sqlite_preserves_task_steps_and_outbox(tmp_path: Path):
     assert migrated_event is not None
     assert migrated_event["status"] == "retrying"
     assert migrated_event["next_attempt_at_ms"] == 12345
+
+
+def test_migrate_json_to_sqlite_dry_run_reports_counts_without_writing(tmp_path: Path):
+    json_ledger = TaskLedger(tmp_path, backend="json")
+    json_ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="dry run",
+    )
+    step = json_ledger.start_step("task_1", step_type="tool_call", name="notify")
+    json_ledger.finish_step(step, status="completed")
+    json_ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+
+    result = migrate_json_to_sqlite(tmp_path, dry_run=True)
+
+    assert result == {"tasks": 1, "step_events": 2, "outbox_events": 1, "skipped": False, "dry_run": True}
+    sqlite_ledger = SQLiteTaskLedger(tmp_path)
+    assert sqlite_ledger.has_any_data() is False

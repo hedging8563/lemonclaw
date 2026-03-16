@@ -398,7 +398,7 @@ async def test_context_builder_resolve_retrieval_context_uses_hybrid_trace(tmp_p
     await ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
     ctx.memory.set_provider(AsyncMock())
 
-    async def _fake_hybrid_match(message, provider, *, max_cards=3, max_rules=2):
+    async def _fake_hybrid_match(message, provider, *, max_cards=3, max_rules=2, keyword_rules=None):
         return (
             [ctx.memory.entities.get_card("tech")],
             [{"header": "## Rule #1", "trigger": "python 部署", "lesson": "需要 venv", "action": "先创建 venv"}],

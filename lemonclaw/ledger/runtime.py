@@ -49,7 +49,893 @@ def build_task_resume_context(
     }
 
 
-class JsonTaskLedger:
+class TaskLedgerSharedMixin:
+    """Shared ledger behavior that is backend-agnostic."""
+
+    def materialize_steps(self, task_id: str) -> list[dict[str, Any]]:
+        """Collapse step event history into the latest state per step_id."""
+        latest_by_step: dict[str, dict[str, Any]] = {}
+        for event in self.read_steps(task_id):
+            step_id = str(event.get("step_id", "")).strip()
+            if not step_id:
+                continue
+            latest_by_step[step_id] = event
+        return sorted(
+            latest_by_step.values(),
+            key=lambda item: (
+                int(item.get("started_at_ms") or 0),
+                int(item.get("ended_at_ms") or 0),
+            ),
+        )
+
+    def get_recovery_summary(self) -> dict[str, int]:
+        """Return aggregate counters for recovery-oriented observability."""
+        tasks = self.list_recovery_tasks(limit=500)
+        return self.summarize_recovery_tasks(tasks)
+
+    @staticmethod
+    def _append_recovery_history(
+        metadata: dict[str, Any],
+        *,
+        source: str,
+        action: str,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        history = list(metadata.get("recovery_history") or [])
+        history.append({
+            "source": source,
+            "action": action,
+            "reason": reason[:500],
+            "details": dict(details or {}),
+            "at_ms": at_ms or _now_ms(),
+        })
+        metadata["recovery_history"] = history[-20:]
+        return metadata
+
+    @staticmethod
+    def append_recovery_history(
+        metadata: dict[str, Any],
+        *,
+        source: str,
+        action: str,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Public wrapper for appending structured recovery history entries."""
+        return TaskLedgerSharedMixin._append_recovery_history(
+            metadata,
+            source=source,
+            action=action,
+            reason=reason,
+            details=details,
+            at_ms=at_ms,
+        )
+
+    @staticmethod
+    def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
+        """Aggregate counters for a preloaded recovery task list."""
+        summary = {
+            "tasks_with_recovery": len(tasks),
+            "manual_review_required": 0,
+            "stale_recovery_failed": 0,
+            "waiting_manual_review": 0,
+        }
+        for task in tasks:
+            recovery = (task.get("metadata") or {}).get("recovery") or {}
+            status = str(task.get("status") or "")
+            stage = str(task.get("current_stage") or "")
+            if recovery.get("manual_review_required"):
+                summary["manual_review_required"] += 1
+            if status == "failed" and stage == "stale_recovery":
+                summary["stale_recovery_failed"] += 1
+            if status == "waiting" and recovery.get("manual_review_required"):
+                summary["waiting_manual_review"] += 1
+        return summary
+
+    @staticmethod
+    def describe_task_display_state(task: dict[str, Any]) -> dict[str, str]:
+        """Return a UI-friendly task state descriptor from ledger state."""
+        status = str(task.get("status") or "")
+        stage = str(task.get("current_stage") or "")
+        recovery = (task.get("metadata") or {}).get("recovery") or {}
+        resume_context = dict(task.get("resume_context") or {})
+
+        if str(recovery.get("action") or "") == "resume_dispatch_failed":
+            return {
+                "key": "resume_dispatch_failed",
+                "label": "Resume Dispatch Failed",
+                "tone": "error",
+                "detail": str(recovery.get("reason") or task.get("error") or "Resume dispatch could not be scheduled."),
+            }
+
+        if stage == "resume_requested":
+            return {
+                "key": "resume_requested",
+                "label": "Manual Resume Queued",
+                "tone": "warning",
+                "detail": "Queued for operator follow-up before any replay resume is attempted.",
+            }
+        if stage == "resume_queued":
+            return {
+                "key": "resume_queued",
+                "label": "Resume Queued",
+                "tone": "accent",
+                "detail": "Waiting for the resume executor to pick up this task.",
+            }
+        if stage == "resume_execute" and status == "running":
+            return {
+                "key": "resume_running",
+                "label": "Resume Running",
+                "tone": "accent",
+                "detail": "A resumed execution is currently in progress.",
+            }
+        if recovery.get("manual_review_required"):
+            return {
+                "key": "manual_review",
+                "label": "Needs Review",
+                "tone": "warning",
+                "detail": str(recovery.get("reason") or "Manual review is required before resume."),
+            }
+        if not bool(resume_context.get("auto_resume_allowed", True)) and status in {"failed", "waiting"}:
+            return {
+                "key": "resume_manual_only",
+                "label": "Manual Resume Only",
+                "tone": "warning",
+                "detail": str(
+                    resume_context.get("resume_disabled_reason")
+                    or "Automatic resume is disabled for this task; operator action is required."
+                ),
+            }
+        if stage == "waiting_outbox" or (status == "waiting" and stage == "waiting_outbox"):
+            return {
+                "key": "waiting_outbox",
+                "label": "Waiting Outbox",
+                "tone": "warning",
+                "detail": "Delivery or retry is still pending in the outbox.",
+            }
+        if status == "completed":
+            return {
+                "key": "completed",
+                "label": "Completed",
+                "tone": "success",
+                "detail": "All known steps and outbox events are settled.",
+            }
+        if status == "failed":
+            return {
+                "key": "failed",
+                "label": "Failed",
+                "tone": "error",
+                "detail": str(task.get("error") or "Task execution failed."),
+            }
+        if status == "verifying":
+            return {
+                "key": "verifying",
+                "label": "Verifying",
+                "tone": "accent",
+                "detail": "Completion gate is still evaluating the task state.",
+            }
+        if status == "waiting":
+            return {
+                "key": "waiting",
+                "label": "Waiting",
+                "tone": "warning",
+                "detail": "Task is blocked on an external dependency or operator action.",
+            }
+        if status == "running":
+            return {
+                "key": "running",
+                "label": "Running",
+                "tone": "accent",
+                "detail": "Task execution is currently in progress.",
+            }
+        if status == "abandoned":
+            return {
+                "key": "abandoned",
+                "label": "Abandoned",
+                "tone": "muted",
+                "detail": "Task was intentionally abandoned or superseded.",
+            }
+        return {
+            "key": status or "unknown",
+            "label": (status or "unknown").replace("_", " ").title(),
+            "tone": "muted",
+            "detail": "",
+        }
+
+    def enrich_task_for_observer(self, task: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Add observer-friendly derived fields without mutating stored task data."""
+        if not task:
+            return None
+        enriched = dict(task)
+        enriched["display_state"] = self.describe_task_display_state(task)
+        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
+        return enriched
+
+    def mark_task_stale(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        reason: str,
+        stale_after_ms: int,
+    ) -> dict[str, Any] | None:
+        """Annotate stale-task recovery state and fail closed when safe to do so."""
+        self._require_valid_task_id(task_id)
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        previous_status = str(task.get("status") or "")
+        previous_stage = str(task.get("current_stage") or "")
+        metadata = dict(task.get("metadata") or {})
+        detected_at_ms = _now_ms()
+        metadata["recovery"] = {
+            "source": source,
+            "reason": reason[:500],
+            "detected_at_ms": detected_at_ms,
+            "stale_after_ms": stale_after_ms,
+            "previous_status": previous_status,
+            "previous_stage": previous_stage,
+            "action": "mark_failed" if previous_status in {"running", "verifying"} else "manual_review",
+            "manual_review_required": previous_status == "waiting",
+        }
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action=str(metadata["recovery"]["action"]),
+            reason=reason,
+            details={"stale_after_ms": stale_after_ms, "previous_status": previous_status, "previous_stage": previous_stage},
+            at_ms=detected_at_ms,
+        )
+
+        updates: dict[str, Any] = {"metadata": metadata}
+        if previous_status in {"running", "verifying"}:
+            updates.update(
+                status="failed",
+                current_stage="stale_recovery",
+                error=reason[:500],
+            )
+
+        self.update_task(task_id, **updates)
+        return self.read_task(task_id)
+
+    def mark_tasks_for_process_restart(
+        self,
+        *,
+        source: str,
+        reason: str,
+        statuses: tuple[str, ...] = ("running", "verifying", "waiting"),
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Annotate active tasks before a hard process restart."""
+        marked: list[dict[str, Any]] = []
+        for status in statuses:
+            for task in self.list_tasks(limit=limit, status=status):
+                task_id = str(task.get("task_id") or "")
+                if not task_id:
+                    continue
+                metadata = dict(task.get("metadata") or {})
+                recovery = dict(metadata.get("recovery") or {})
+                detected_at_ms = _now_ms()
+                recovery.update({
+                    "source": source,
+                    "reason": reason[:500],
+                    "detected_at_ms": detected_at_ms,
+                    "previous_status": str(task.get("status") or ""),
+                    "previous_stage": str(task.get("current_stage") or ""),
+                    "action": "process_restart_review" if status == "waiting" else "mark_failed",
+                    "manual_review_required": status == "waiting",
+                })
+                metadata["recovery"] = recovery
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action=str(recovery["action"]),
+                    reason=reason,
+                    details={"previous_status": recovery["previous_status"], "previous_stage": recovery["previous_stage"]},
+                    at_ms=detected_at_ms,
+                )
+                updates: dict[str, Any] = {"metadata": metadata}
+                if status in {"running", "verifying"}:
+                    updates.update(status="failed", current_stage="hard_recovery", error=reason[:500])
+                self.update_task(task_id, **updates)
+                updated = self.read_task(task_id)
+                if updated:
+                    marked.append(updated)
+        return marked
+
+    def read_task_view(self, task_id: str) -> dict[str, Any] | None:
+        """Return task + materialized steps + summary for observer UIs."""
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        steps = self.materialize_steps(task_id)
+        display_state = self.describe_task_display_state(task)
+        status_counts: dict[str, int] = {}
+        for step in steps:
+            status = str(step.get("status") or "unknown")
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+        outbox = self.materialize_outbox_events_for_task(task_id)
+        outbox_status_counts: dict[str, int] = {}
+        for event in outbox:
+            status = str(event.get("status") or "unknown")
+            outbox_status_counts[status] = outbox_status_counts.get(status, 0) + 1
+
+        return {
+            "task": self.enrich_task_for_observer(task),
+            "steps": steps,
+            "summary": {
+                "step_count": len(steps),
+                "status_counts": status_counts,
+                "last_successful_step": task.get("last_successful_step"),
+                "display_state": display_state,
+                "outbox_count": len(outbox),
+                "outbox_status_counts": outbox_status_counts,
+                "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
+            },
+        }
+
+    def infer_resume_from_step(self, task_id: str) -> str | None:
+        """Infer the safest step boundary to resume from for a task."""
+        self._require_valid_task_id(task_id)
+        steps = self.materialize_steps(task_id)
+        for status in ("waiting_outbox", "failed", "waiting", "retrying", "running", "pending"):
+            for step in reversed(steps):
+                if str(step.get("status") or "") == status:
+                    return str(step.get("step_id") or "")
+        return None
+
+    def request_task_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Mark a task as awaiting resume from the inferred step boundary."""
+        self._require_valid_task_id(task_id)
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        resume_from_step = self.infer_resume_from_step(task_id)
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        now = _now_ms()
+        recovery.update({
+            "source": source,
+            "action": "resume_requested",
+            "manual_review_required": False,
+            "requested_at_ms": now,
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_requested",
+            reason=f"resume requested from {resume_from_step or 'task boundary'}",
+            details={"resume_from_step": resume_from_step or "", "previous_status": str(task.get('status') or "")},
+            at_ms=now,
+        )
+        self.update_task(
+            task_id,
+            status="waiting",
+            current_stage="resume_requested",
+            resume_from_step=resume_from_step,
+            metadata=metadata,
+            error=None,
+        )
+        return self.read_task(task_id)
+
+    def build_resume_candidate(self, task_id: str) -> dict[str, Any] | None:
+        """Describe the safest next recovery action for a task."""
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        steps = self.materialize_steps(task_id)
+        outbox_events = self.materialize_outbox_events_for_task(task_id)
+        resume_context = dict(task.get("resume_context") or {})
+        status = str(task.get("status") or "")
+        current_stage = str(task.get("current_stage") or "")
+        resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
+        resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
+        failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
+        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in {"pending", "retrying", "claimed"}]
+        replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and step.get("replayable", True)]
+        non_replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and not step.get("replayable", True)]
+
+        recommended_action = "manual_resume"
+        safe_to_execute = False
+        reason = "manual intervention required"
+        if failed_outbox:
+            recommended_action = "retry_outbox"
+            safe_to_execute = True
+            reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
+        elif non_replayable_failed:
+            recommended_action = "manual_resume"
+            safe_to_execute = False
+            reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
+        elif replayable_failed and not open_outbox:
+            if not bool(resume_context.get("auto_resume_allowed", True)):
+                recommended_action = "manual_resume"
+                safe_to_execute = False
+                reason = str(
+                    resume_context.get("resume_disabled_reason")
+                    or "Automatic resume is disabled for this task; operator action is required."
+                )
+            else:
+                recommended_action = "replay_failed_steps"
+                safe_to_execute = True
+                reason = (
+                    f"{len(replayable_failed)} failed step(s) are replayable and can be resumed safely. "
+                    "A dedicated resume executor will supersede those failed steps and continue the task in-place."
+                )
+        elif not open_outbox and status in {"waiting", "verifying"}:
+            recommended_action = "recheck"
+            safe_to_execute = True
+            reason = "task can be safely rechecked through CompletionGate"
+        elif open_outbox:
+            recommended_action = "wait_outbox"
+            safe_to_execute = False
+            reason = "outbox delivery is still in progress"
+
+        return {
+            "task_id": task_id,
+            "status": status,
+            "current_stage": current_stage,
+            "resume_from_step": resume_from_step or None,
+            "resume_step": dict(resume_step or {}) if resume_step else None,
+            "failed_outbox_count": len(failed_outbox),
+            "open_outbox_count": len(open_outbox),
+            "replayable_failed_count": len(replayable_failed),
+            "non_replayable_failed_count": len(non_replayable_failed),
+            "recommended_action": recommended_action,
+            "safe_to_execute": safe_to_execute,
+            "reason": reason,
+        }
+
+    def execute_safe_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Execute the current safe recovery action when one exists."""
+        candidate = self.build_resume_candidate(task_id)
+        if not candidate:
+            return None
+        action = str(candidate.get("recommended_action") or "")
+        if not candidate.get("safe_to_execute"):
+            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
+
+        if action == "retry_outbox":
+            for event in self.materialize_outbox_events_for_task(task_id):
+                if str(event.get("status") or "") != "failed":
+                    continue
+                self.request_outbox_retry(str(event["event_id"]), source=source)
+            task = self.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action="safe_resume_execute",
+                    reason="retry failed outbox events",
+                    details={"task_id": task_id},
+                )
+                self.update_task(task_id, metadata=metadata)
+            return self.build_resume_candidate(task_id)
+
+        if action == "replay_failed_steps":
+            raise ValueError("replay_failed_steps is not executable until a dedicated resume executor is wired")
+
+        if action == "recheck":
+            from lemonclaw.ledger.completion_gate import finalize_task
+
+            result = finalize_task(self, task_id)
+            task = self.read_task(task_id)
+            if task:
+                metadata = dict(task.get("metadata") or {})
+                self._append_recovery_history(
+                    metadata,
+                    source=source,
+                    action="safe_resume_execute",
+                    reason=str((result.to_dict() if result else {}).get("reason") or ""),
+                    details={"task_id": task_id, "mode": "recheck"},
+                )
+                self.update_task(task_id, metadata=metadata)
+            return self.build_resume_candidate(task_id)
+
+        raise ValueError(f"unsupported safe resume action: {action}")
+
+    def materialize_outbox_events_for_task(self, task_id: str) -> list[dict[str, Any]]:
+        self._require_valid_task_id(task_id)
+        return [event for event in self.materialize_outbox_events() if event.get("task_id") == task_id]
+
+    def list_outbox_events(
+        self,
+        *,
+        limit: int = 50,
+        status: str | None = None,
+        task_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        events = self.materialize_outbox_events()
+        if status:
+            events = [event for event in events if event.get("status") == status]
+        if task_id:
+            events = [event for event in events if event.get("task_id") == task_id]
+        return events[:max(1, int(limit))]
+
+    def claim_due_outbox_events(
+        self,
+        *,
+        limit: int = 20,
+        now_ms: int | None = None,
+        claim_owner: str = "outbox_dispatcher",
+    ) -> list[dict[str, Any]]:
+        """Claim due pending/retrying outbox events for delivery.
+
+        `attempts` counts total delivery attempts, so it increments when an
+        event is claimed for a real send attempt, not when it is rescheduled.
+        """
+        with self._outbox_lock:
+            now = now_ms if now_ms is not None else _now_ms()
+            due: list[dict[str, Any]] = []
+            for event in self._materialize_outbox_events_unlocked():
+                status = str(event.get("status") or "")
+                if status not in {"pending", "retrying"}:
+                    continue
+                next_attempt = event.get("next_attempt_at_ms")
+                if next_attempt is not None and int(next_attempt) > now:
+                    continue
+                due.append(event)
+
+            due.sort(key=lambda item: (
+                int(item.get("next_attempt_at_ms") or item.get("created_at_ms") or 0),
+                int(item.get("updated_at_ms") or 0),
+            ))
+
+            claimed: list[dict[str, Any]] = []
+            for event in due[:max(1, int(limit))]:
+                metadata = dict(event.get("metadata") or {})
+                metadata["claimed_by"] = claim_owner
+                metadata["claimed_at_ms"] = now
+                updated = self._update_outbox_event_unlocked(
+                    str(event["event_id"]),
+                    status="claimed",
+                    attempts=int(event.get("attempts") or 0) + 1,
+                    next_attempt_at_ms=None,
+                    error=None,
+                    metadata=metadata,
+                )
+                if updated:
+                    claimed.append(updated)
+            return claimed
+
+    def mark_outbox_sent(
+        self,
+        event_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Mark a claimed outbox event as delivered."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+        metadata = dict(current.get("metadata") or {})
+        metadata["sent_at_ms"] = _now_ms()
+        if result is not None:
+            metadata["delivery_result"] = result
+        return self.update_outbox_event(
+            event_id,
+            status="sent",
+            next_attempt_at_ms=None,
+            error=None,
+            metadata=metadata,
+        )
+
+    def mark_outbox_retry(
+        self,
+        event_id: str,
+        *,
+        error: str,
+        retry_at_ms: int,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Reschedule an outbox event or mark it terminally failed.
+
+        `max_attempts` is the maximum total delivery attempts, not "retries
+        after the first attempt". Once the current claimed attempt reaches the
+        cap, the event becomes terminally failed.
+        """
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        attempts = int(current.get("attempts") or 0)
+        terminal = bool(max_attempts and max_attempts > 0 and attempts >= max_attempts)
+        metadata = dict(current.get("metadata") or {})
+        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_claimed_by"] = metadata.get("claimed_by")
+
+        return self.update_outbox_event(
+            event_id,
+            status="failed" if terminal else "retrying",
+            next_attempt_at_ms=None if terminal else int(retry_at_ms),
+            error=error[:500],
+            metadata=metadata,
+        )
+
+    def mark_outbox_failed(
+        self,
+        event_id: str,
+        *,
+        error: str,
+    ) -> dict[str, Any] | None:
+        """Mark an outbox event as terminally failed without retry."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        metadata = dict(current.get("metadata") or {})
+        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_claimed_by"] = metadata.get("claimed_by")
+        metadata["terminal"] = True
+
+        return self.update_outbox_event(
+            event_id,
+            status="failed",
+            next_attempt_at_ms=None,
+            error=error[:500],
+            metadata=metadata,
+        )
+
+    def request_outbox_retry(
+        self,
+        event_id: str,
+        *,
+        source: str,
+        delay_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        """Manually reschedule an outbox event and clear manual-review state."""
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        status = str(current.get("status") or "")
+        if status == "sent":
+            raise ValueError("cannot retry a sent outbox event")
+
+        now = _now_ms()
+        metadata = dict(current.get("metadata") or {})
+        last_manual_retry = int(metadata.get("manual_retry_requested_at_ms") or 0)
+        if (
+            status in {"pending", "retrying", "claimed"}
+            and last_manual_retry
+            and (now - last_manual_retry) < _OUTBOX_MANUAL_RETRY_DEBOUNCE_MS
+        ):
+            return current
+        metadata.pop("terminal", None)
+        metadata["manual_retry_requested_at_ms"] = now
+        metadata["manual_retry_source"] = source
+
+        updated = self.update_outbox_event(
+            event_id,
+            status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
+            next_attempt_at_ms=now + max(0, int(delay_ms)),
+            error=None,
+            metadata=metadata,
+        )
+
+        task_id = str(current.get("task_id") or "")
+        if updated and task_id and self.is_valid_task_id(task_id):
+            task = self.read_task(task_id)
+            if task:
+                task_metadata = dict(task.get("metadata") or {})
+                recovery = dict(task_metadata.get("recovery") or {})
+                recovery["action"] = "manual_retry_requested"
+                recovery["manual_review_required"] = False
+                recovery["requested_at_ms"] = now
+                recovery["source"] = source
+                task_metadata["recovery"] = recovery
+                self._append_recovery_history(
+                    task_metadata,
+                    source=source,
+                    action="manual_retry_requested",
+                    reason="manual outbox retry requested",
+                    details={"event_id": event_id, "status": status},
+                    at_ms=now,
+                )
+                self.update_task(
+                    task_id,
+                    status="waiting",
+                    current_stage="waiting_outbox",
+                    error=None,
+                    metadata=task_metadata,
+                )
+            step_id = str(current.get("step_id") or "")
+            if step_id and self.is_valid_step_id(step_id):
+                self.update_step_state(
+                    task_id,
+                    step_id,
+                    status="waiting_outbox",
+                    error=None,
+                )
+        return updated
+
+    def prepare_replay_failed_steps(
+        self,
+        task_id: str,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Supersede replayable failed steps before a real resume execution."""
+        self._require_valid_task_id(task_id)
+        candidate = self.build_resume_candidate(task_id)
+        if not candidate:
+            return None
+        if str(candidate.get("recommended_action") or "") != "replay_failed_steps" or not candidate.get("safe_to_execute"):
+            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
+
+        steps = self.materialize_steps(task_id)
+        superseded_steps: list[dict[str, Any]] = []
+        for step in steps:
+            if str(step.get("status") or "") != "failed":
+                continue
+            if not step.get("replayable", True):
+                continue
+            step_id = str(step.get("step_id") or "")
+            if not step_id:
+                continue
+            updated = self.update_step_state(
+                task_id,
+                step_id,
+                status="abandoned",
+                error="superseded by replay resume",
+            )
+            if updated:
+                superseded_steps.append({
+                    "step_id": step_id,
+                    "name": str(step.get("name") or ""),
+                    "error": str(step.get("error") or ""),
+                })
+
+        if not superseded_steps:
+            raise ValueError("no replayable failed steps remain to resume")
+
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        now = _now_ms()
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        recovery.update({
+            "source": source,
+            "action": "resume_execute_requested",
+            "manual_review_required": False,
+            "requested_at_ms": now,
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_execute_requested",
+            reason=f"resume execution requested for {len(superseded_steps)} replayable failed step(s)",
+            details={
+                "task_id": task_id,
+                "mode": "replay_failed_steps",
+                "resume_from_step": str(candidate.get("resume_from_step") or ""),
+                "superseded_steps": [step["step_id"] for step in superseded_steps[:20]],
+            },
+            at_ms=now,
+        )
+        self.update_task(
+            task_id,
+            status="running",
+            current_stage="resume_queued",
+            error=None,
+            metadata=metadata,
+        )
+        return {
+            "task_id": task_id,
+            "resume_from_step": candidate.get("resume_from_step"),
+            "superseded_steps": superseded_steps,
+            "task": self.read_task(task_id),
+        }
+
+    def rollback_prepared_replay_resume(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        reason: str,
+        superseded_steps: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Rollback a prepared replay resume when dispatch could not be scheduled."""
+        self._require_valid_task_id(task_id)
+        restored_steps: list[str] = []
+        for step in list(superseded_steps or []):
+            step_id = str(step.get("step_id") or "")
+            if not step_id:
+                continue
+            updated = self.update_step_state(
+                task_id,
+                step_id,
+                status="failed",
+                error=str(step.get("error") or "") or "replay resume rollback",
+            )
+            if updated:
+                restored_steps.append(step_id)
+
+        task = self.read_task(task_id)
+        if not task:
+            return None
+
+        metadata = dict(task.get("metadata") or {})
+        recovery = dict(metadata.get("recovery") or {})
+        recovery.update({
+            "source": source,
+            "action": "resume_dispatch_failed",
+            "manual_review_required": False,
+            "reason": reason[:500],
+        })
+        metadata["recovery"] = recovery
+        self._append_recovery_history(
+            metadata,
+            source=source,
+            action="resume_dispatch_failed",
+            reason=reason,
+            details={"task_id": task_id, "restored_steps": restored_steps[:20]},
+        )
+        self.update_task(
+            task_id,
+            status="failed",
+            current_stage="error",
+            error=reason[:500],
+            metadata=metadata,
+        )
+        return self.read_task(task_id)
+
+    @staticmethod
+    def is_valid_task_id(task_id: str) -> bool:
+        return bool(_SAFE_TASK_ID.match(task_id))
+
+    @staticmethod
+    def now_ms() -> int:
+        return _now_ms()
+
+    def _require_valid_task_id(self, task_id: str) -> None:
+        if not self.is_valid_task_id(task_id):
+            raise ValueError("invalid task_id")
+
+    @staticmethod
+    def is_valid_outbox_id(event_id: str) -> bool:
+        return bool(_SAFE_OUTBOX_ID.match(event_id))
+
+    def _require_valid_outbox_id(self, event_id: str) -> None:
+        if not self.is_valid_outbox_id(event_id):
+            raise ValueError("invalid event_id")
+
+    @staticmethod
+    def is_valid_step_id(step_id: str) -> bool:
+        return bool(_SAFE_STEP_ID.match(step_id))
+
+    def _require_valid_step_id(self, step_id: str) -> None:
+        if not self.is_valid_step_id(step_id):
+            raise ValueError("invalid step_id")
+
+
+class JsonTaskLedger(TaskLedgerSharedMixin):
     """Simple JSON-backed task and step ledger."""
 
     def __init__(self, workspace: Path):
@@ -1305,6 +2191,44 @@ class JsonTaskLedger:
 class TaskLedger:
     """Facade that selects a concrete ledger backend."""
 
+    _DELEGATED_METHOD_NAMES = (
+        "ensure_task",
+        "update_task",
+        "start_step",
+        "finish_step",
+        "update_step_state",
+        "task_exists",
+        "read_task",
+        "read_steps",
+        "materialize_steps",
+        "list_tasks",
+        "list_stale_tasks",
+        "list_recovery_tasks",
+        "get_recovery_summary",
+        "mark_task_stale",
+        "mark_tasks_for_process_restart",
+        "read_task_view",
+        "infer_resume_from_step",
+        "request_task_resume",
+        "build_resume_candidate",
+        "execute_safe_resume",
+        "enqueue_outbox",
+        "update_outbox_event",
+        "materialize_outbox_events",
+        "materialize_outbox_events_for_task",
+        "read_outbox_events",
+        "compact_outbox",
+        "list_outbox_events",
+        "claim_due_outbox_events",
+        "mark_outbox_sent",
+        "mark_outbox_retry",
+        "mark_outbox_failed",
+        "request_outbox_retry",
+        "prepare_replay_failed_steps",
+        "rollback_prepared_replay_resume",
+        "read_outbox_event",
+    )
+
     def __init__(self, workspace: Path, backend: str = "auto"):
         resolved = self._resolve_backend(workspace, backend)
         if resolved == "sqlite":
@@ -1314,6 +2238,12 @@ class TaskLedger:
         else:
             self._impl = JsonTaskLedger(workspace)
         self.backend = resolved
+        for name in self._DELEGATED_METHOD_NAMES:
+            setattr(self, name, getattr(self._impl, name))
+
+    @property
+    def impl(self) -> TaskLedgerSharedMixin:
+        return self._impl
 
     @staticmethod
     def _resolve_backend(workspace: Path, backend: str) -> str:
@@ -1335,9 +2265,6 @@ class TaskLedger:
             if has_json_state:
                 return "json"
         return "sqlite"
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._impl, name)
 
     @staticmethod
     def describe_task_display_state(task: dict[str, Any]) -> dict[str, str]:
@@ -1381,3 +2308,20 @@ class TaskLedger:
     @staticmethod
     def now_ms() -> int:
         return JsonTaskLedger.now_ms()
+
+    def _task_path(self, task_id: str) -> Path:
+        return self._impl._task_path(task_id)
+
+    def _steps_path(self, task_id: str) -> Path:
+        return self._impl._steps_path(task_id)
+
+    def _outbox_path(self) -> Path:
+        return self._impl._outbox_path()
+
+    @staticmethod
+    def _write_json(path: Path, payload: dict[str, Any]) -> None:
+        JsonTaskLedger._write_json(path, payload)
+
+    @staticmethod
+    def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+        JsonTaskLedger._append_jsonl(path, payload)
