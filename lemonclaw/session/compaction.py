@@ -10,6 +10,9 @@ Strategy: keep system prompt + recent N messages → LLM summarize middle
 
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 from typing import Any
 
 from loguru import logger
@@ -23,6 +26,9 @@ THRESHOLD_RATIO = 0.7       # trigger compaction at 70% of context window
 RECENT_KEEP = 8             # keep last N messages (4 user-assistant turns)
 FALLBACK_CONTEXT_WINDOW = 128_000  # when model info unavailable
 SUMMARY_MAX_TOKENS = 1024   # max tokens for the summary output
+SUMMARY_FAILURE_COOLDOWN_MS = 60_000
+
+_SUMMARY_FAILURE_CACHE: dict[str, int] = {}
 
 SUMMARY_SYSTEM_PROMPT = (
     "You are a conversation summarizer. Summarize the following conversation "
@@ -94,6 +100,18 @@ def _find_safe_split(messages: list[dict[str, Any]], target_idx: int) -> int:
     return target_idx
 
 
+def _current_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _summary_cache_key(messages: list[dict[str, Any]], model: str) -> str:
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(model.encode("utf-8"))
+    for message in messages:
+        digest.update(json.dumps(message, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return digest.hexdigest()
+
+
 async def compact(
     messages: list[dict[str, Any]],
     model: str,
@@ -135,6 +153,12 @@ async def compact(
     system = messages[0]
     middle = messages[1:split_idx]
     tail = messages[split_idx:]
+    cache_key = _summary_cache_key(middle, model)
+    last_failed_at = _SUMMARY_FAILURE_CACHE.get(cache_key, 0)
+    now_ms = _current_ms()
+    if last_failed_at and (now_ms - last_failed_at) < SUMMARY_FAILURE_COOLDOWN_MS:
+        logger.debug("compaction: skipping summarize retry during cooldown")
+        return messages
 
     logger.info(
         "compaction: {} tokens > {} threshold, summarizing {} middle messages",
@@ -143,8 +167,10 @@ async def compact(
 
     summary_text = await _summarize(middle, model, provider, max_tokens)
     if summary_text is None:
+        _SUMMARY_FAILURE_CACHE[cache_key] = now_ms
         logger.warning("compaction: summarization failed, keeping original messages")
         return messages
+    _SUMMARY_FAILURE_CACHE.pop(cache_key, None)
 
     compacted = [
         system,

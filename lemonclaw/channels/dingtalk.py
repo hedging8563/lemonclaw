@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from urllib.parse import urlparse
 from typing import Any
 
 from loguru import logger
@@ -264,6 +265,10 @@ class DingTalkChannel(BaseChannel):
             return
         if not self._http:
             logger.warning("DingTalk HTTP client not initialized, cannot send via sessionWebhook")
+            return
+        parsed = urlparse(session_webhook)
+        if parsed.scheme != "https" or parsed.hostname not in {"oapi.dingtalk.com"}:
+            logger.warning("Refusing DingTalk sessionWebhook outside allowlist: {}", session_webhook)
             return
         try:
             resp = await self._http.post(

@@ -101,3 +101,12 @@ async def test_channel_manager_restart_records_reason_and_history():
 
     await fake.stop()
     await asyncio.sleep(0.05)
+
+
+def test_channel_manager_disabled_channels_start_unavailable():
+    manager = ChannelManager(Config(), MessageBus())
+
+    status = manager.get_channel_status()
+
+    assert status["telegram"]["configured_enabled"] is False
+    assert status["telegram"]["available"] is False

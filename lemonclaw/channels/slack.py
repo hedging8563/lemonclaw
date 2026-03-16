@@ -230,12 +230,7 @@ class SlackChannel(BaseChannel):
             mentioned = event_type == "app_mention" or (self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text)
             if not mentioned and event is not None:
                 parent_user_id = str(event.get("parent_user_id") or "")
-                referenced_author = ((event.get("referenced_message") or {}).get("author") or {})
-                referenced_author_id = str(referenced_author.get("id") or "")
-                mentioned = bool(
-                    self._bot_user_id
-                    and (parent_user_id == self._bot_user_id or referenced_author_id == self._bot_user_id)
-                )
+                mentioned = bool(self._bot_user_id and parent_user_id == self._bot_user_id)
         return self._group_policy_allows(
             policy,
             in_allowlist=chat_id in (self.config.group_allow_from or []),

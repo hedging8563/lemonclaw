@@ -64,7 +64,9 @@ class ChannelManager:
                 "configured_enabled": enabled,
                 "registered": False,
                 "running": False,
-                "available": not enabled,
+                # `available` means a configured runtime is actually importable/usable.
+                # Disabled channels stay unavailable instead of looking healthy-by-default.
+                "available": False,
                 "error": "",
             }
 

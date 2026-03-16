@@ -69,9 +69,27 @@ async def test_dingtalk_send_prefers_session_webhook(dingtalk_channel: DingTalkC
             channel="dingtalk",
             chat_id="conv_group_1",
             content="hello group",
-            metadata={"dingtalk": {"session_webhook": "https://example.invalid/webhook"}},
+            metadata={"dingtalk": {"session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc"}},
         )
     )
 
     dingtalk_channel._http.post.assert_awaited_once()
+    dingtalk_channel._get_access_token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_send_rejects_non_allowlisted_session_webhook(dingtalk_channel: DingTalkChannel) -> None:
+    dingtalk_channel._http = SimpleNamespace(post=AsyncMock(return_value=SimpleNamespace(raise_for_status=lambda: None)))
+    dingtalk_channel._get_access_token = AsyncMock(return_value="token")
+
+    await dingtalk_channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="conv_group_1",
+            content="hello group",
+            metadata={"dingtalk": {"session_webhook": "https://example.invalid/webhook"}},
+        )
+    )
+
+    dingtalk_channel._http.post.assert_not_awaited()
     dingtalk_channel._get_access_token.assert_not_awaited()

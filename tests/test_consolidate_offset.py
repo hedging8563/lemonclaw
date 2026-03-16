@@ -185,6 +185,43 @@ async def test_compact_keeps_original_messages_when_summary_fails() -> None:
     assert result == messages
 
 
+@pytest.mark.asyncio
+async def test_compact_applies_failure_cooldown_after_summary_error() -> None:
+    import lemonclaw.session.compaction as compaction
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+        {"role": "user", "content": "u3"},
+        {"role": "assistant", "content": "a3"},
+        {"role": "user", "content": "u4"},
+        {"role": "assistant", "content": "a4"},
+        {"role": "user", "content": "u5"},
+        {"role": "assistant", "content": "a5"},
+        {"role": "user", "content": "u6"},
+    ]
+    provider = AsyncMock()
+    provider.chat.side_effect = RuntimeError("summary failed")
+
+    with pytest.MonkeyPatch.context() as mp:
+        compaction._SUMMARY_FAILURE_CACHE.clear()
+        mp.setattr("lemonclaw.session.compaction.get_context_window", lambda _model: 10)
+        mp.setattr("lemonclaw.session.compaction.count_tokens", lambda _messages, _model: 100)
+        now_values = iter([1_000, 2_000, 70_000])
+        mp.setattr("lemonclaw.session.compaction._current_ms", lambda: next(now_values))
+        first = await compaction.compact(messages, "test-model", provider)
+        second = await compaction.compact(messages, "test-model", provider)
+        third = await compaction.compact(messages, "test-model", provider)
+
+    assert first == messages
+    assert second == messages
+    assert third == messages
+    assert provider.chat.await_count == 2
+
+
 class TestSessionPersistence:
     """Test Session persistence and reload."""
 
