@@ -851,6 +851,7 @@ def get_webui_routes(
             "history": history_entries[:50],  # cap at 50 for UI
             "entities": entities,
             "rules": rules,
+            "search_index": _memory.search_index.status(),
         })
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -1046,6 +1047,8 @@ def get_webui_routes(
         # Instance uptime
         if usage_tracker:
             data.update(usage_tracker.get_instance_summary())
+        if channel_manager is not None and hasattr(channel_manager, "get_channel_status"):
+            data["channels"] = channel_manager.get_channel_status()
 
         # Per-session usage if ?session=key
         session_key = request.query_params.get("session")
@@ -1137,7 +1140,7 @@ def get_webui_routes(
             task = ledger.read_task(task_id)
             if task:
                 metadata = dict(task.get("metadata") or {})
-                ledger._append_recovery_history(  # type: ignore[attr-defined]
+                ledger.append_recovery_history(
                     metadata,
                     source="webui_task_recheck",
                     action="task_recheck",

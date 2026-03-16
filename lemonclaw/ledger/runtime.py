@@ -293,6 +293,26 @@ class JsonTaskLedger:
         return metadata
 
     @staticmethod
+    def append_recovery_history(
+        metadata: dict[str, Any],
+        *,
+        source: str,
+        action: str,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Public wrapper for appending structured recovery history entries."""
+        return JsonTaskLedger._append_recovery_history(
+            metadata,
+            source=source,
+            action=action,
+            reason=reason,
+            details=details,
+            at_ms=at_ms,
+        )
+
+    @staticmethod
     def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
         """Aggregate counters for a preloaded recovery task list."""
         summary = {
@@ -1326,6 +1346,25 @@ class TaskLedger:
     @staticmethod
     def summarize_recovery_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
         return JsonTaskLedger.summarize_recovery_tasks(tasks)
+
+    @staticmethod
+    def append_recovery_history(
+        metadata: dict[str, Any],
+        *,
+        source: str,
+        action: str,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        return JsonTaskLedger.append_recovery_history(
+            metadata,
+            source=source,
+            action=action,
+            reason=reason,
+            details=details,
+            at_ms=at_ms,
+        )
 
     @staticmethod
     def is_valid_task_id(task_id: str) -> bool:

@@ -99,6 +99,48 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["retrieval"]["latency_ms"] == 9
 
 
+def test_info_api_includes_channel_status_snapshot(tmp_path):
+    channel_manager = SimpleNamespace(
+        get_channel_status=lambda: {
+            "telegram": {
+                "configured_enabled": True,
+                "registered": True,
+                "running": True,
+                "available": True,
+                "error": "",
+            },
+            "wecom": {
+                "configured_enabled": True,
+                "registered": False,
+                "running": False,
+                "available": False,
+                "error": "missing dependency",
+            },
+        }
+    )
+    app, _ledger = _build_app(tmp_path, channel_manager=channel_manager)
+    client = TestClient(app)
+
+    resp = client.get("/api/info")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["channels"]["telegram"]["running"] is True
+    assert data["channels"]["wecom"]["available"] is False
+    assert data["channels"]["wecom"]["error"] == "missing dependency"
+
+
+def test_memory_api_includes_search_index_status(tmp_path):
+    app, _ledger = _build_app(tmp_path)
+    client = TestClient(app)
+
+    resp = client.get("/api/memory")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "search_index" in data
+    assert "available" in data["search_index"]
+    assert "last_operation" in data["search_index"]
+
+
 def test_tasks_api_rejects_invalid_task_id(tmp_path):
     app, _ledger = _build_app(tmp_path)
     client = TestClient(app)

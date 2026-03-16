@@ -96,10 +96,13 @@ class MemoryStore:
     def _on_entity_write(self, name: str, body: str) -> None:
         """Fire-and-forget search index update when an entity card is written."""
         if not self.search_index.available or self._provider is None:
+            reason = "lancedb_unavailable" if not self.search_index.available else "provider_unbound"
+            self.search_index._record_status(operation="upsert_entity", error=reason)  # type: ignore[attr-defined]
             return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            self.search_index._record_status(operation="upsert_entity", error="no_event_loop")  # type: ignore[attr-defined]
             return  # No event loop — skip (e.g. migration scripts)
         task = loop.create_task(self.search_index.upsert_entity(name, body, self._provider))
         task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)

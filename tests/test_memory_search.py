@@ -106,3 +106,29 @@ def test_memory_store_has_search_index(tmp_path):
     store = MemoryStore(tmp_path)
     assert store.search_index is not None
     assert store.trigger._search is store.search_index
+
+
+def test_search_index_status_tracks_unavailable_state(tmp_path):
+    from lemonclaw.memory.search import MemorySearchIndex
+
+    idx = MemorySearchIndex(tmp_path / "memory")
+    with patch("lemonclaw.memory.search._lancedb_available", return_value=False):
+        result = asyncio.run(idx.search("test", AsyncMock()))
+        status = idx.status()
+
+    assert result == []
+    assert status["available"] is False
+    assert status["last_operation"] == "search"
+    assert status["last_error"] == "lancedb_unavailable"
+
+
+def test_memory_store_entity_write_records_provider_unbound_status(tmp_path):
+    from lemonclaw.agent.memory import MemoryStore
+
+    store = MemoryStore(tmp_path)
+    with patch("lemonclaw.memory.search._lancedb_available", return_value=True):
+        store._on_entity_write("tech", "# Tech")
+        status = store.search_index.status()
+
+    assert status["last_operation"] == "upsert_entity"
+    assert status["last_error"] == "provider_unbound"

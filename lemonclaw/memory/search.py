@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+import time
 
 from loguru import logger
 
@@ -45,10 +46,32 @@ class MemorySearchIndex:
         self._embedding_dim = embedding_dim
         self._db = None
         self._table = None
+        self._last_error: str = ""
+        self._last_operation: str = ""
+        self._last_updated_ms: int = 0
+        self._last_indexed_docs: int = 0
 
     @property
     def available(self) -> bool:
         return _lancedb_available()
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "available": self.available,
+            "db_path": str(self._db_path),
+            "db_exists": self._db_path.exists(),
+            "last_operation": self._last_operation,
+            "last_error": self._last_error,
+            "last_updated_ms": self._last_updated_ms,
+            "last_indexed_docs": self._last_indexed_docs,
+        }
+
+    def _record_status(self, *, operation: str, error: str = "", indexed_docs: int | None = None) -> None:
+        self._last_operation = operation
+        self._last_error = error[:500]
+        self._last_updated_ms = int(time.time() * 1000)
+        if indexed_docs is not None:
+            self._last_indexed_docs = max(0, int(indexed_docs))
 
     def _connect(self):
         """Lazy connect to lancedb."""
@@ -94,6 +117,7 @@ class MemorySearchIndex:
         """
         if not self.available:
             logger.debug("lancedb not available, skipping index rebuild")
+            self._record_status(operation="rebuild", error="lancedb_unavailable", indexed_docs=0)
             return 0
 
         from lemonclaw.memory.entities import EntityStore
@@ -138,6 +162,7 @@ class MemorySearchIndex:
 
         if not docs:
             logger.debug("No documents to index")
+            self._record_status(operation="rebuild", indexed_docs=0)
             return 0
 
         # Get embeddings
@@ -146,6 +171,7 @@ class MemorySearchIndex:
             vectors = await self._embed(texts, provider, model)
         except Exception as e:
             logger.warning("Embedding failed, index not rebuilt: {}", e)
+            self._record_status(operation="rebuild", error=f"embed_failed:{type(e).__name__}", indexed_docs=0)
             return 0
 
         for doc, vec in zip(docs, vectors):
@@ -166,6 +192,7 @@ class MemorySearchIndex:
             logger.warning("FTS index creation failed (BM25 disabled): {}", e)
 
         logger.info("Memory search index rebuilt: {} documents", len(docs))
+        self._record_status(operation="rebuild", indexed_docs=len(docs))
         return len(docs)
 
     async def search(
@@ -183,17 +210,21 @@ class MemorySearchIndex:
         Returns list of dicts with id, source, name, text, _relevance_score.
         """
         if not self.available:
+            self._record_status(operation="search", error="lancedb_unavailable")
             return []
 
         self._get_or_create_table()
         if self._table is None:
+            self._record_status(operation="search", error="table_unavailable")
             return []
 
         # Check if table has data
         try:
             if self._table.count_rows() == 0:
+                self._record_status(operation="search", indexed_docs=0)
                 return []
         except Exception:
+            self._record_status(operation="search", error="count_rows_failed")
             return []
 
         # Try hybrid search (BM25 + vector)
@@ -214,6 +245,7 @@ class MemorySearchIndex:
                 )
             except Exception as e:
                 logger.debug("Search failed entirely: {}", e)
+                self._record_status(operation="search", error=f"search_failed:{type(e).__name__}")
                 return []
 
         # Filter by source if requested
@@ -230,6 +262,7 @@ class MemorySearchIndex:
                 "text": r.get("text", ""),
                 "_relevance_score": r.get("_relevance_score", r.get("_distance", 0)),
             })
+        self._record_status(operation="search", indexed_docs=len(output))
         return output
 
     async def upsert_entity(
@@ -241,11 +274,13 @@ class MemorySearchIndex:
         Returns True on success, False on failure (non-fatal).
         """
         if not self.available:
+            self._record_status(operation="upsert_entity", error="lancedb_unavailable")
             return False
 
         try:
             self._get_or_create_table()
             if self._table is None:
+                self._record_status(operation="upsert_entity", error="table_unavailable")
                 return False
 
             text = f"{name}: {body.strip()}"
@@ -265,9 +300,11 @@ class MemorySearchIndex:
                 pass  # Table may be empty or entry may not exist
             self._table.add([doc])
             logger.debug("Search index updated for entity: {}", name)
+            self._record_status(operation="upsert_entity", indexed_docs=1)
             return True
         except Exception as e:
             logger.debug("Failed to upsert entity in search index: {}", e)
+            self._record_status(operation="upsert_entity", error=f"upsert_failed:{type(e).__name__}")
             return False
 
     async def search_entities(

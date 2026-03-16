@@ -156,6 +156,35 @@ def test_find_safe_split_skips_orphaned_tool_results() -> None:
     assert _find_safe_split(messages, 3) == 1
 
 
+@pytest.mark.asyncio
+async def test_compact_keeps_original_messages_when_summary_fails() -> None:
+    from lemonclaw.session.compaction import compact
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+        {"role": "user", "content": "u3"},
+        {"role": "assistant", "content": "a3"},
+        {"role": "user", "content": "u4"},
+        {"role": "assistant", "content": "a4"},
+        {"role": "user", "content": "u5"},
+        {"role": "assistant", "content": "a5"},
+        {"role": "user", "content": "u6"},
+    ]
+    provider = AsyncMock()
+    provider.chat.side_effect = RuntimeError("summary failed")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("lemonclaw.session.compaction.get_context_window", lambda _model: 10)
+        mp.setattr("lemonclaw.session.compaction.count_tokens", lambda _messages, _model: 100)
+        result = await compact(messages, "test-model", provider)
+
+    assert result == messages
+
+
 class TestSessionPersistence:
     """Test Session persistence and reload."""
 

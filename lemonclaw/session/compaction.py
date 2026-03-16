@@ -142,6 +142,9 @@ async def compact(
     )
 
     summary_text = await _summarize(middle, model, provider, max_tokens)
+    if summary_text is None:
+        logger.warning("compaction: summarization failed, keeping original messages")
+        return messages
 
     compacted = [
         system,
@@ -169,7 +172,7 @@ async def _summarize(
     model: str,
     provider: Any,
     max_tokens: int,
-) -> str:
+) -> str | None:
     """Use the LLM to summarize a block of messages."""
     # Format middle messages into readable text for the summarizer
     lines: list[str] = []
@@ -208,4 +211,4 @@ async def _summarize(
         return response.content or "(summary unavailable)"
     except Exception as e:
         logger.warning("compaction: summarization failed: {}", e)
-        return "[Earlier conversation could not be summarized — context condensed]"
+        return None

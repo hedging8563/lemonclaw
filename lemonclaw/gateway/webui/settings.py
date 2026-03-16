@@ -408,6 +408,7 @@ def get_settings_routes(
     config_path: Path,
     config_watcher: ConfigWatcher | None = None,
     agent_loop: Any | None = None,
+    channel_manager: Any | None = None,
 ) -> list[Route]:
     """Build Settings API routes."""
 
@@ -513,6 +514,8 @@ def get_settings_routes(
                 "coding": {"installed": bool(coding_bin), "binary": coding_bin},
             },
         }
+        if channel_manager is not None and hasattr(channel_manager, "get_channel_status"):
+            result["channel_status"] = channel_manager.get_channel_status()
         if effective_model:
             result["effective_model"] = effective_model
 

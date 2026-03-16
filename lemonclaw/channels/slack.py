@@ -168,7 +168,7 @@ class SlackChannel(BaseChannel):
         elif not self._is_allowed(sender_id, chat_id, channel_type):
             return
 
-        if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):
+        if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id, event=event):
             return
 
         text = self._strip_bot_mention(text)
@@ -223,11 +223,19 @@ class SlackChannel(BaseChannel):
             return chat_id in (self.config.group_allow_from or [])
         return True
 
-    def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
+    def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str, *, event: dict[str, Any] | None = None) -> bool:
         policy, require_mention = self._resolve_group_gate()
         mentioned = False
         if require_mention:
             mentioned = event_type == "app_mention" or (self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text)
+            if not mentioned and event is not None:
+                parent_user_id = str(event.get("parent_user_id") or "")
+                referenced_author = ((event.get("referenced_message") or {}).get("author") or {})
+                referenced_author_id = str(referenced_author.get("id") or "")
+                mentioned = bool(
+                    self._bot_user_id
+                    and (parent_user_id == self._bot_user_id or referenced_author_id == self._bot_user_id)
+                )
         return self._group_policy_allows(
             policy,
             in_allowlist=chat_id in (self.config.group_allow_from or []),
@@ -290,4 +298,3 @@ class SlackChannel(BaseChannel):
             if parts:
                 rows.append(" · ".join(parts))
         return "\n".join(rows)
-

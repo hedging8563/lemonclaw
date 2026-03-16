@@ -16,6 +16,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.config.schema import (
     DiscordConfig,
     FeishuConfig,
+    QQConfig,
     TelegramConfig,
     WhatsAppConfig,
 )
@@ -36,7 +37,7 @@ def _tg_channel(*, group_policy="mention", group_allow_from=None, group_require_
     )
     ch = TelegramChannel(config, MessageBus())
     # Stub bot with username for mention detection
-    ch._app = SimpleNamespace(bot=SimpleNamespace(username="testbot"))
+    ch._app = SimpleNamespace(bot=SimpleNamespace(username="testbot", id=123456))
     return ch
 
 
@@ -65,6 +66,24 @@ class TestTelegramGroupPolicy:
     def test_mention_responds_when_bot_mentioned(self):
         ch = _tg_channel(group_policy="mention")
         assert ch._should_respond_in_group("@testbot hello", "-100123") is True
+
+    def test_mention_responds_when_mention_entity_targets_bot(self):
+        ch = _tg_channel(group_policy="mention")
+        message = SimpleNamespace(
+            entities=[SimpleNamespace(type="mention", offset=0, length=8)],
+            caption_entities=[],
+            reply_to_message=None,
+        )
+        assert ch._should_respond_in_group("@TestBot hello", "-100123", message=message) is True
+
+    def test_mention_responds_when_replying_to_bot(self):
+        ch = _tg_channel(group_policy="mention")
+        message = SimpleNamespace(
+            entities=[],
+            caption_entities=[],
+            reply_to_message=SimpleNamespace(from_user=SimpleNamespace(id=123456, username="testbot")),
+        )
+        assert ch._should_respond_in_group("hello", "-100123", message=message) is True
 
     def test_mention_ignores_without_bot_mention(self):
         ch = _tg_channel(group_policy="mention")
@@ -201,6 +220,22 @@ class TestDiscordGroupPolicy:
         ch._handle_message.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_mention_accepts_reply_to_bot_message(self):
+        ch = _discord_channel(group_policy="mention")
+        ch._handle_message = AsyncMock()
+        payload = {
+            "author": {"id": "USER1", "bot": False},
+            "channel_id": "CH1",
+            "content": "hello",
+            "guild_id": "GUILD1",
+            "id": "MSG1",
+            "mentions": [],
+            "referenced_message": {"id": "BOTMSG1", "author": {"id": "BOT123"}},
+        }
+        await ch._handle_message_create(payload)
+        ch._handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_dm_bypasses_group_policy(self):
         """DM (no guild_id) should not be affected by group_policy=disabled."""
         ch = _discord_channel(group_policy="disabled")
@@ -214,6 +249,80 @@ class TestDiscordGroupPolicy:
         }
         await ch._handle_message_create(payload)
         ch._handle_message.assert_awaited_once()
+
+
+# ─── QQ ─────────────────────────────────────────────────────────────────
+
+
+def _qq_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True):
+    from lemonclaw.channels.qq import QQChannel
+
+    config = QQConfig(
+        enabled=True,
+        app_id="app",
+        secret="secret",
+        group_policy=group_policy,
+        group_allow_from=group_allow_from or [],
+        group_require_mention=group_require_mention,
+    )
+    ch = QQChannel(config, MessageBus())
+    return ch
+
+
+class TestQQGroupPolicy:
+    @pytest.mark.asyncio
+    async def test_group_at_event_allows_listed_group(self):
+        ch = _qq_channel(group_policy="allowlist", group_allow_from=["GROUP1"])
+        ch._handle_message = AsyncMock()
+        data = SimpleNamespace(
+            id="MSG1",
+            content="@bot hello",
+            group_openid="GROUP1",
+            author=SimpleNamespace(member_openid="USER1"),
+            message_reference=SimpleNamespace(message_id="ROOT1"),
+        )
+        await ch._on_message(data)
+        ch._handle_message.assert_awaited_once()
+        kwargs = ch._handle_message.await_args.kwargs
+        assert kwargs["chat_id"] == "GROUP1"
+        assert kwargs["sender_id"] == "USER1"
+        assert kwargs["metadata"]["qq"]["is_group"] is True
+
+    @pytest.mark.asyncio
+    async def test_group_at_event_blocks_unlisted_group(self):
+        ch = _qq_channel(group_policy="allowlist", group_allow_from=["OTHER"])
+        ch._handle_message = AsyncMock()
+        data = SimpleNamespace(
+            id="MSG1",
+            content="@bot hello",
+            group_openid="GROUP1",
+            author=SimpleNamespace(member_openid="USER1"),
+            message_reference=SimpleNamespace(message_id="ROOT1"),
+        )
+        await ch._on_message(data)
+        ch._handle_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_uses_group_api_when_metadata_marks_group(self):
+        ch = _qq_channel()
+        api = SimpleNamespace(
+            post_group_message=AsyncMock(),
+            post_c2c_message=AsyncMock(),
+        )
+        ch._client = SimpleNamespace(api=api)
+        from lemonclaw.bus.events import OutboundMessage
+
+        await ch.send(
+            OutboundMessage(
+                channel="qq",
+                chat_id="GROUP1",
+                content="hello",
+                metadata={"qq": {"is_group": True, "reply_to": "MSG1"}},
+            )
+        )
+
+        api.post_group_message.assert_awaited_once()
+        api.post_c2c_message.assert_not_awaited()
 
 
 # ─── WhatsApp ────────────────────────────────────────────────────────────
@@ -230,6 +339,7 @@ def _whatsapp_channel(*, group_policy="mention", group_allow_from=None, group_re
     from lemonclaw.channels.whatsapp import WhatsAppChannel
 
     ch = WhatsAppChannel(config, MessageBus())
+    ch._remember_bot_account({"id": "1234567890:1@s.whatsapp.net", "phone": "1234567890"})
     return ch
 
 
@@ -302,9 +412,42 @@ class TestWhatsAppGroupPolicy:
         ch._handle_message.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_mention_degrades_to_disabled(self):
-        """WhatsApp mention mode degrades to disabled (bridge lacks bot JID)."""
+    async def test_mention_accepts_group_when_bridge_reports_bot_mention(self):
         ch = _whatsapp_channel(group_policy="mention")
+        ch._handle_message = AsyncMock()
+        raw = json.dumps({
+            "type": "message",
+            "sender": "120363xxx@g.us",
+            "pn": "",
+            "content": "@1234567890 hello",
+            "isGroup": True,
+            "id": "MSG1",
+            "mentions": ["1234567890@s.whatsapp.net"],
+        })
+        await ch._handle_bridge_message(raw)
+        ch._handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_mention_accepts_reply_to_bot(self):
+        ch = _whatsapp_channel(group_policy="mention")
+        ch._handle_message = AsyncMock()
+        raw = json.dumps({
+            "type": "message",
+            "sender": "120363xxx@g.us",
+            "pn": "",
+            "content": "hello",
+            "isGroup": True,
+            "id": "MSG1",
+            "quotedParticipant": "1234567890@s.whatsapp.net",
+        })
+        await ch._handle_bridge_message(raw)
+        ch._handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_mention_degrades_when_bot_identity_unknown(self):
+        """WhatsApp mention mode still fails loud when bridge status never reported bot identity."""
+        ch = _whatsapp_channel(group_policy="mention")
+        ch._bot_identity_tokens.clear()
         ch._handle_message = AsyncMock()
         raw = json.dumps({
             "type": "message",
@@ -322,6 +465,7 @@ class TestWhatsAppGroupPolicy:
     async def test_mention_warns_only_once(self):
         """Warn-once flag prevents log spam."""
         ch = _whatsapp_channel(group_policy="mention")
+        ch._bot_identity_tokens.clear()
         ch._handle_message = AsyncMock()
         raw = json.dumps({
             "type": "message",

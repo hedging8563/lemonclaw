@@ -71,7 +71,21 @@ class LemonClawDingTalkHandler(CallbackHandler):
             # Forward to LemonClaw via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content,
+                    sender_id,
+                    sender_name,
+                    metadata={
+                        "message_id": chatbot_msg.message_id,
+                        "session_webhook": chatbot_msg.session_webhook,
+                        "conversation_id": chatbot_msg.conversation_id,
+                        "conversation_type": chatbot_msg.conversation_type,
+                        "is_in_at_list": chatbot_msg.is_in_at_list,
+                        "sender_staff_id": chatbot_msg.sender_staff_id,
+                        "sender_id": chatbot_msg.sender_id,
+                        "sender_nick": chatbot_msg.sender_nick,
+                    },
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -80,6 +94,7 @@ class LemonClawDingTalkHandler(CallbackHandler):
 
         except Exception as e:
             logger.error("Error processing DingTalk message: {}", e)
+            logger.warning("DingTalk handler ACKing error to avoid upstream retry storm; message may require manual review")
             # Return OK to avoid retry loop from DingTalk server
             return AckMessage.STATUS_OK, "Error"
 
@@ -139,6 +154,10 @@ class DingTalkChannel(BaseChannel):
             self._client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
             logger.info("DingTalk bot started with Stream Mode")
+            logger.warning(
+                "DingTalk channel currently routes messages as private 1:1 chats. "
+                "Group reply, mention, and thread semantics are not implemented yet."
+            )
 
             # Reconnect loop: restart stream if SDK exits or crashes
             while self._running:
@@ -199,6 +218,13 @@ class DingTalkChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
+        metadata = msg.metadata or {}
+        dingtalk_meta = metadata.get("dingtalk", {}) if isinstance(metadata, dict) else {}
+        session_webhook = str((dingtalk_meta or {}).get("session_webhook") or metadata.get("session_webhook") or "")
+        if session_webhook:
+            await self._send_via_session_webhook(session_webhook, msg.content or "")
+            return
+
         token = await self._get_access_token()
         if not token:
             return
@@ -232,7 +258,27 @@ class DingTalkChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending DingTalk message: {}", e)
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _send_via_session_webhook(self, session_webhook: str, content: str) -> None:
+        """Reply into the originating DingTalk conversation via sessionWebhook."""
+        if not session_webhook or not content:
+            return
+        if not self._http:
+            logger.warning("DingTalk HTTP client not initialized, cannot send via sessionWebhook")
+            return
+        try:
+            resp = await self._http.post(
+                session_webhook,
+                json={
+                    "msgtype": "text",
+                    "text": {"content": content},
+                },
+                headers={"Content-Type": "application/json", "Accept": "*/*"},
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            logger.error("DingTalk sessionWebhook send failed: {}", e)
+
+    async def _on_message(self, content: str, sender_id: str, sender_name: str, metadata: dict[str, Any] | None = None) -> None:
         """Handle incoming message (called by LemonClawDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -240,13 +286,26 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            meta = dict(metadata or {})
+            is_group = str(meta.get("conversation_type") or "") == "2"
+            if is_group and not bool(meta.get("is_in_at_list")):
+                logger.debug("DingTalk group gate ignored non-@ message from {}", sender_id)
+                return
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=sender_id,  # For private chat, chat_id == sender_id
+                chat_id=str(meta.get("conversation_id") or sender_id),
                 content=str(content),
                 metadata={
+                    **meta,
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "is_group": is_group,
+                    "dingtalk": {
+                        "session_webhook": str(meta.get("session_webhook") or ""),
+                        "conversation_id": str(meta.get("conversation_id") or ""),
+                        "conversation_type": str(meta.get("conversation_type") or ""),
+                        "is_in_at_list": bool(meta.get("is_in_at_list")),
+                    },
                 },
             )
         except Exception as e:

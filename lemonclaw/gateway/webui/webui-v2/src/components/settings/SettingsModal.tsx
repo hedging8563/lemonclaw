@@ -14,6 +14,7 @@ type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
 type GroupRuntimeMap = Record<string, { effective_group_policy?: string; effective_group_require_mention?: boolean; group_allow_from_count?: number }>;
+type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registered?: boolean; running?: boolean; available?: boolean; error?: string }>;
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
@@ -219,6 +220,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [toolStatus, setToolStatus] = useState<ToolStatusMap | null>(null);
   const [channelRuntime, setChannelRuntime] = useState<ChannelRuntimeMap | null>(null);
   const [groupRuntime, setGroupRuntime] = useState<GroupRuntimeMap | null>(null);
+  const [channelStatus, setChannelStatus] = useState<ChannelStatusMap | null>(null);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -245,6 +247,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setToolStatus(data.tool_status || null);
       setChannelRuntime(data.channel_runtime || null);
       setGroupRuntime(data.group_runtime || null);
+      setChannelStatus(data.channel_status || null);
       setChangedPaths(new Set());
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -573,6 +576,41 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     return renderNotice(parts.join(' · '), tone);
   };
 
+  const renderChannelCapabilityNotice = (channelKey: string) => {
+    const keyMap: Record<string, string> = {
+      telegram: 'channel_capability_telegram',
+      whatsapp: 'channel_capability_whatsapp',
+      slack: 'channel_capability_slack',
+      discord: 'channel_capability_discord',
+      qq: 'channel_capability_qq',
+      dingtalk: 'channel_capability_dingtalk',
+      wecom: 'channel_capability_wecom',
+      mochat: 'channel_capability_mochat',
+    };
+    const key = keyMap[channelKey];
+    if (!key) return null;
+    const text = (t as any)(key);
+    if (!text || text === key) return null;
+    const tone = ['qq', 'dingtalk', 'wecom', 'mochat'].includes(channelKey) ? 'warning' : 'info';
+    return renderNotice(text, tone);
+  };
+
+  const renderChannelHealthNotice = (channelKey: string) => {
+    const status = channelStatus?.[channelKey];
+    if (!status || !status.configured_enabled) return null;
+    if (status.available === false) {
+      const detail = status.error ? ` · ${status.error}` : '';
+      return renderNotice(`Channel runtime unavailable${detail}`, 'warning');
+    }
+    if (status.registered && status.running) {
+      return renderNotice('Channel runtime is registered and running.', 'info');
+    }
+    if (status.registered && !status.running) {
+      return renderNotice('Channel runtime is registered but currently stopped.', 'warning');
+    }
+    return null;
+  };
+
   const renderChannelPairingCard = (channelKey: string) => {
     const runtime = channelRuntime?.[channelKey];
     if (!runtime) return null;
@@ -684,6 +722,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
             {path[0] === 'channels' && renderChannelRuntimeNotice(displayKey)}
+            {path[0] === 'channels' && renderChannelHealthNotice(displayKey)}
+            {path[0] === 'channels' && renderChannelCapabilityNotice(displayKey)}
             {path[0] === 'channels' && renderChannelPairingCard(displayKey)}
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'http' && renderNotice(t('http_tool_note'), 'info')}

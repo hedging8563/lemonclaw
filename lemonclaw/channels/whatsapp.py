@@ -27,7 +27,53 @@ class WhatsAppChannel(BaseChannel):
         self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False
-        self._mention_warned = False  # Only warn once about mention mode limitation
+        self._mention_warned = False  # Only warn once when mention mode lacks enough bridge identity
+        self._bot_identity_tokens: set[str] = set()
+
+    @staticmethod
+    def _jid_tokens(value: str) -> set[str]:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return set()
+        tokens = {raw}
+        if "@" in raw:
+            local, domain = raw.split("@", 1)
+            tokens.add(local)
+            if ":" in local:
+                base_local = local.split(":", 1)[0]
+                tokens.add(base_local)
+                tokens.add(f"{base_local}@{domain}")
+        else:
+            tokens.add(raw.split(":", 1)[0])
+        return {token for token in tokens if token}
+
+    def _remember_bot_account(self, account: dict[str, Any] | None) -> None:
+        if not isinstance(account, dict):
+            return
+        for key in ("id", "phone"):
+            value = account.get(key)
+            if isinstance(value, str):
+                self._bot_identity_tokens.update(self._jid_tokens(value))
+
+    def _group_message_mentions_bot(self, data: dict[str, Any], content: str) -> bool:
+        mention_tokens: set[str] = set()
+        for item in data.get("mentions") or []:
+            if isinstance(item, str):
+                mention_tokens.update(self._jid_tokens(item))
+        if mention_tokens and self._bot_identity_tokens.intersection(mention_tokens):
+            return True
+
+        quoted_participant = data.get("quotedParticipant")
+        if isinstance(quoted_participant, str):
+            if self._bot_identity_tokens.intersection(self._jid_tokens(quoted_participant)):
+                return True
+
+        phone_tokens = {
+            token for token in self._bot_identity_tokens
+            if token.isdigit() and len(token) >= 5
+        }
+        text_lower = (content or "").lower()
+        return any(f"@{token}" in text_lower for token in phone_tokens)
     
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -129,21 +175,23 @@ class WhatsAppChannel(BaseChannel):
             # Group policy gate
             if is_group:
                 policy, require_mention = self._resolve_group_gate()
+                bot_mentioned = False
                 if require_mention:
-                    # Bridge does not expose bot's own JID, so we cannot do
-                    # precise bot-mention detection. Degrade to disabled and warn once.
-                    if not self._mention_warned:
-                        logger.warning(
-                            "WhatsApp group mention requirement needs bot JID from bridge "
-                            "(not yet supported). Group messages will be ignored until bridge adds bot JID support or mention requirement is disabled.",
-                        )
-                        self._mention_warned = True
-                    return
+                    if self._bot_identity_tokens:
+                        bot_mentioned = self._group_message_mentions_bot(data, content)
+                    else:
+                        if not self._mention_warned:
+                            logger.warning(
+                                "WhatsApp group mention requirement needs bot account identity from bridge status. "
+                                "Group messages will be ignored until the bridge reports the connected account or mention requirement is disabled.",
+                            )
+                            self._mention_warned = True
+                        return
                 if not self._group_policy_allows(
                     policy,
                     in_allowlist=group_jid in (self.config.group_allow_from or []),
-                    require_mention=False,
-                    was_mentioned=False,
+                    require_mention=require_mention,
+                    was_mentioned=bot_mentioned,
                 ):
                     return
 
@@ -163,6 +211,7 @@ class WhatsAppChannel(BaseChannel):
             # Connection status update
             status = data.get("status")
             logger.info("WhatsApp status: {}", status)
+            self._remember_bot_account(data.get("account"))
             
             if status == "connected":
                 self._connected = True

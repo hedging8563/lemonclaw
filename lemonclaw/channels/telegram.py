@@ -634,7 +634,7 @@ class TelegramChannel(BaseChannel):
         is_group = message.chat.type != "private"
 
         # Group policy gate for commands too
-        if is_group and not self._should_respond_in_group(message.text or "", str(message.chat_id)):
+        if is_group and not self._should_respond_in_group(message.text or "", str(message.chat_id), message=message):
             return
 
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
@@ -740,20 +740,84 @@ class TelegramChannel(BaseChannel):
                 session_key=session_key,
             )
 
-    def _should_respond_in_group(self, text: str, chat_id: str) -> bool:
+    def _message_mentions_bot(self, message, text: str) -> bool:
+        """Detect @mentions using Telegram entities first, then raw text fallback."""
+        if not self._app or not self._app.bot:
+            return False
+        bot_username = str(getattr(self._app.bot, "username", "") or "")
+        if not bot_username:
+            return False
+        normalized = bot_username.casefold()
+        haystack = text or ""
+
+        for entities_attr in ("entities", "caption_entities"):
+            entities = getattr(message, entities_attr, None) or []
+            for entity in entities:
+                entity_type = str(getattr(entity, "type", "") or "")
+                if entity_type == "mention":
+                    offset = int(getattr(entity, "offset", 0) or 0)
+                    length = int(getattr(entity, "length", 0) or 0)
+                    candidate = haystack[offset : offset + length]
+                    if candidate.lstrip("@").casefold() == normalized:
+                        return True
+                elif entity_type == "text_mention":
+                    user = getattr(entity, "user", None)
+                    if user is None:
+                        continue
+                    if str(getattr(user, "username", "") or "").casefold() == normalized:
+                        return True
+                    bot_id = getattr(self._app.bot, "id", None)
+                    if bot_id is not None and getattr(user, "id", None) == bot_id:
+                        return True
+
+        return f"@{normalized}" in haystack.casefold()
+
+    def _message_replies_to_bot(self, message) -> bool:
+        """Treat replies to a bot-authored message as explicit group triggers."""
+        if not self._app or not self._app.bot:
+            return False
+        reply = getattr(message, "reply_to_message", None)
+        if reply is None:
+            return False
+        reply_user = getattr(reply, "from_user", None)
+        if reply_user is None:
+            return False
+        bot_username = str(getattr(self._app.bot, "username", "") or "").casefold()
+        reply_username = str(getattr(reply_user, "username", "") or "").casefold()
+        if bot_username and reply_username == bot_username:
+            return True
+        bot_id = getattr(self._app.bot, "id", None)
+        return bot_id is not None and getattr(reply_user, "id", None) == bot_id
+
+    def _should_respond_in_group(self, text: str, chat_id: str, *, message=None) -> bool:
         """Check if the bot should respond to a group message based on normalized group settings."""
         policy, require_mention = self._resolve_group_gate()
         in_allowlist = chat_id in (self.config.group_allow_from or [])
         mentioned = False
-        if require_mention and self._app and self._app.bot:
-            bot_username = self._app.bot.username
-            mentioned = bool(bot_username and f"@{bot_username}" in (text or ""))
-        return self._group_policy_allows(
+        if require_mention:
+            if message is not None:
+                mentioned = self._message_mentions_bot(message, text or "")
+                if not mentioned:
+                    mentioned = self._message_replies_to_bot(message)
+            elif self._app and self._app.bot and getattr(self._app.bot, "username", None):
+                mentioned = f"@{self._app.bot.username}".casefold() in (text or "").casefold()
+        allowed = self._group_policy_allows(
             policy,
             in_allowlist=in_allowlist,
             require_mention=require_mention,
             was_mentioned=mentioned,
         )
+        if not allowed:
+            logger.debug(
+                "Telegram group gate blocked chat_id={} policy={} allowlist_hit={} require_mention={} mentioned={} text={!r}",
+                chat_id,
+                policy,
+                in_allowlist,
+                require_mention,
+                mentioned,
+                (text or "")[:120],
+            )
+        return allowed
 
     def _strip_bot_mention(self, text: str) -> str:
         """Remove @bot_username from message text."""
@@ -762,7 +826,7 @@ class TelegramChannel(BaseChannel):
         bot_username = self._app.bot.username
         if not bot_username:
             return text
-        return re.sub(rf"@{re.escape(bot_username)}\s*", "", text).strip()
+        return re.sub(rf"@{re.escape(bot_username)}\s*", "", text, flags=re.IGNORECASE).strip()
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
@@ -778,7 +842,7 @@ class TelegramChannel(BaseChannel):
         is_group = message.chat.type != "private"
 
         # Group policy gate: check before any processing
-        if is_group and not self._should_respond_in_group(message.text or message.caption or "", str(chat_id)):
+        if is_group and not self._should_respond_in_group(message.text or message.caption or "", str(chat_id), message=message):
             return
 
         # Forum topic support: use message_thread_id for topic-scoped sessions

@@ -33,6 +33,7 @@ class ChannelManager:
         self.bus = bus
         self.activity_bus = activity_bus
         self.channels: dict[str, BaseChannel] = {}
+        self._channel_status: dict[str, dict[str, Any]] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
         self._restart_locks: dict[str, asyncio.Lock] = {}
         self._restart_state: dict[str, dict[str, Any]] = {}
@@ -57,6 +58,15 @@ class ChannelManager:
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
+        for name in ("telegram", "whatsapp", "discord", "feishu", "mochat", "dingtalk", "email", "slack", "qq", "matrix", "wecom"):
+            enabled = bool(getattr(getattr(self.config.channels, name, None), "enabled", False))
+            self._channel_status[name] = {
+                "configured_enabled": enabled,
+                "registered": False,
+                "running": False,
+                "available": not enabled,
+                "error": "",
+            }
 
         # Telegram channel
         if self.config.channels.telegram.enabled:
@@ -69,8 +79,10 @@ class ChannelManager:
                     api_base=self.config.lemondata.api_base_url,
                     activity_bus=self.activity_bus,
                 )
+                self._channel_status["telegram"].update({"registered": True, "available": True})
                 logger.info("Telegram channel enabled")
             except ImportError as e:
+                self._channel_status["telegram"].update({"available": False, "error": str(e)})
                 logger.warning("Telegram channel not available: {}", e)
 
         # WhatsApp channel
@@ -80,8 +92,10 @@ class ChannelManager:
                 self.channels["whatsapp"] = WhatsAppChannel(
                     self.config.channels.whatsapp, self.bus
                 )
+                self._channel_status["whatsapp"].update({"registered": True, "available": True})
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:
+                self._channel_status["whatsapp"].update({"available": False, "error": str(e)})
                 logger.warning("WhatsApp channel not available: {}", e)
 
         # Discord channel
@@ -91,8 +105,10 @@ class ChannelManager:
                 self.channels["discord"] = DiscordChannel(
                     self.config.channels.discord, self.bus
                 )
+                self._channel_status["discord"].update({"registered": True, "available": True})
                 logger.info("Discord channel enabled")
             except ImportError as e:
+                self._channel_status["discord"].update({"available": False, "error": str(e)})
                 logger.warning("Discord channel not available: {}", e)
 
         # Feishu channel
@@ -102,8 +118,10 @@ class ChannelManager:
                 self.channels["feishu"] = FeishuChannel(
                     self.config.channels.feishu, self.bus
                 )
+                self._channel_status["feishu"].update({"registered": True, "available": True})
                 logger.info("Feishu channel enabled")
             except ImportError as e:
+                self._channel_status["feishu"].update({"available": False, "error": str(e)})
                 logger.warning("Feishu channel not available: {}", e)
 
         # Mochat channel
@@ -114,8 +132,10 @@ class ChannelManager:
                 self.channels["mochat"] = MochatChannel(
                     self.config.channels.mochat, self.bus
                 )
+                self._channel_status["mochat"].update({"registered": True, "available": True})
                 logger.info("Mochat channel enabled")
             except ImportError as e:
+                self._channel_status["mochat"].update({"available": False, "error": str(e)})
                 logger.warning("Mochat channel not available: {}", e)
 
         # DingTalk channel
@@ -125,8 +145,10 @@ class ChannelManager:
                 self.channels["dingtalk"] = DingTalkChannel(
                     self.config.channels.dingtalk, self.bus
                 )
+                self._channel_status["dingtalk"].update({"registered": True, "available": True})
                 logger.info("DingTalk channel enabled")
             except ImportError as e:
+                self._channel_status["dingtalk"].update({"available": False, "error": str(e)})
                 logger.warning("DingTalk channel not available: {}", e)
 
         # Email channel
@@ -136,8 +158,10 @@ class ChannelManager:
                 self.channels["email"] = EmailChannel(
                     self.config.channels.email, self.bus
                 )
+                self._channel_status["email"].update({"registered": True, "available": True})
                 logger.info("Email channel enabled")
             except ImportError as e:
+                self._channel_status["email"].update({"available": False, "error": str(e)})
                 logger.warning("Email channel not available: {}", e)
 
         # Slack channel
@@ -147,8 +171,10 @@ class ChannelManager:
                 self.channels["slack"] = SlackChannel(
                     self.config.channels.slack, self.bus
                 )
+                self._channel_status["slack"].update({"registered": True, "available": True})
                 logger.info("Slack channel enabled")
             except ImportError as e:
+                self._channel_status["slack"].update({"available": False, "error": str(e)})
                 logger.warning("Slack channel not available: {}", e)
 
         # QQ channel
@@ -159,8 +185,10 @@ class ChannelManager:
                     self.config.channels.qq,
                     self.bus,
                 )
+                self._channel_status["qq"].update({"registered": True, "available": True})
                 logger.info("QQ channel enabled")
             except ImportError as e:
+                self._channel_status["qq"].update({"available": False, "error": str(e)})
                 logger.warning("QQ channel not available: {}", e)
 
         # Matrix channel
@@ -171,8 +199,10 @@ class ChannelManager:
                     self.config.channels.matrix,
                     self.bus,
                 )
+                self._channel_status["matrix"].update({"registered": True, "available": True})
                 logger.info("Matrix channel enabled")
             except ImportError as e:
+                self._channel_status["matrix"].update({"available": False, "error": str(e)})
                 logger.warning("Matrix channel not available: {}", e)
 
         # WeCom channel
@@ -182,17 +212,23 @@ class ChannelManager:
                 self.channels["wecom"] = WeComChannel(
                     self.config.channels.wecom, self.bus
                 )
+                self._channel_status["wecom"].update({"registered": True, "available": True})
                 logger.info("WeCom channel enabled")
             except ImportError as e:
+                self._channel_status["wecom"].update({"available": False, "error": str(e)})
                 logger.warning("WeCom channel not available: {}", e)
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
+            self._channel_status.setdefault(name, {}).update({"running": True, "error": ""})
             await channel.start()
         except Exception as e:
             logger.error("Failed to start channel {}: {}", name, e)
             channel._running = False
+            self._channel_status.setdefault(name, {}).update({"running": False, "available": False, "error": str(e)})
+        else:
+            self._channel_status.setdefault(name, {}).update({"running": False})
 
     def _spawn_channel_task(self, name: str, channel: BaseChannel) -> asyncio.Task:
         task = asyncio.create_task(self._start_channel(name, channel))
@@ -233,19 +269,25 @@ class ChannelManager:
         for name, channel in self.channels.items():
             try:
                 await channel.stop()
+                self._channel_status.setdefault(name, {}).update({"running": False})
                 logger.info("Stopped {} channel", name)
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
+                self._channel_status.setdefault(name, {}).update({"running": False, "error": str(e)})
         for name, task in list(self._channel_tasks.items()):
             if task.done():
+                self._channel_tasks.pop(name, None)
                 continue
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-            finally:
-                self._channel_tasks.pop(name, None)
+            self._channel_tasks.pop(name, None)
+
+    def get_channel_status(self) -> dict[str, dict[str, Any]]:
+        """Return a structured snapshot of configured channel availability."""
+        return {name: dict(status) for name, status in self._channel_status.items()}
 
     async def restart_channel(self, name: str, *, reason: str = "", source: str = "system") -> dict[str, Any]:
         """Stop and restart a single channel without touching others."""

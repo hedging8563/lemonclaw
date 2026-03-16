@@ -201,6 +201,10 @@ class WeComChannel(BaseChannel):
         logger.info(
             "Configure webhook URL in WeCom admin: https://<your-domain>/webhook/wecom"
         )
+        logger.warning(
+            "WeCom channel currently operates as user-scoped 1:1 messaging. "
+            "Group reply, mention, and thread semantics are not implemented yet."
+        )
 
         # Pre-fetch access_token to validate credentials early
         token = await self._get_access_token()

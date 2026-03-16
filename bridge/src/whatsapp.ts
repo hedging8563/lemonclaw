@@ -24,6 +24,8 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  mentions?: string[];
+  quotedParticipant?: string;
 }
 
 export interface WhatsAppAccountSummary {
@@ -128,6 +130,7 @@ export class WhatsAppClient {
 
         const content = this.extractMessageContent(msg);
         if (!content) continue;
+        const context = this.extractContextInfo(msg);
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -138,6 +141,8 @@ export class WhatsAppClient {
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          mentions: context.mentions,
+          quotedParticipant: context.quotedParticipant,
         });
       }
     });
@@ -178,6 +183,31 @@ export class WhatsAppClient {
     }
 
     return null;
+  }
+
+  private extractContextInfo(msg: any): { mentions: string[]; quotedParticipant: string } {
+    const message = msg.message || {};
+    const candidates = [
+      message.extendedTextMessage,
+      message.imageMessage,
+      message.videoMessage,
+      message.documentMessage,
+      message.audioMessage,
+      message.stickerMessage,
+    ];
+
+    for (const candidate of candidates) {
+      const contextInfo = candidate?.contextInfo;
+      if (!contextInfo) continue;
+      return {
+        mentions: Array.isArray(contextInfo.mentionedJid)
+          ? contextInfo.mentionedJid.filter((value: unknown) => typeof value === 'string')
+          : [],
+        quotedParticipant: typeof contextInfo.participant === 'string' ? contextInfo.participant : '',
+      };
+    }
+
+    return { mentions: [], quotedParticipant: '' };
   }
 
   async sendMessage(to: string, text: string): Promise<void> {

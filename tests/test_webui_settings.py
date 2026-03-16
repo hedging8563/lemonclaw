@@ -194,6 +194,43 @@ def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, 
     assert runtime['approved_count'] == 1
 
 
+def test_settings_exposes_channel_status_snapshot(tmp_path):
+    from types import SimpleNamespace
+
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    save_config(cfg, config_path)
+
+    channel_manager = SimpleNamespace(
+        get_channel_status=lambda: {
+            'telegram': {
+                'configured_enabled': True,
+                'registered': True,
+                'running': True,
+                'available': True,
+                'error': '',
+            },
+            'wecom': {
+                'configured_enabled': True,
+                'registered': False,
+                'running': False,
+                'available': False,
+                'error': 'missing dependency',
+            },
+        }
+    )
+
+    app = create_app(config_path=config_path, auth_token=None, channel_manager=channel_manager)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data['channel_status']['telegram']['running'] is True
+    assert data['channel_status']['wecom']['available'] is False
+    assert data['channel_status']['wecom']['error'] == 'missing dependency'
+
+
 def test_patch_settings_accepts_operator_tool_paths(tmp_path):
     config_path = tmp_path / 'config.json'
     save_config(Config(), config_path)

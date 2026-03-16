@@ -245,6 +245,7 @@ class MochatChannel(BaseChannel):
         self._panel_fallback_tasks: dict[str, asyncio.Task] = {}
         self._refresh_task: asyncio.Task | None = None
         self._target_locks: dict[str, asyncio.Lock] = {}
+        self._mention_warned = False
 
     # ---- lifecycle ---------------------------------------------------------
 
@@ -686,6 +687,14 @@ class MochatChannel(BaseChannel):
         was_mentioned = resolve_was_mentioned(payload, self.config.agent_user_id)
         require_mention = target_kind == "panel" and is_group and resolve_require_mention(self.config, target_id, group_id)
         use_delay = target_kind == "panel" and self.config.reply_delay_mode == "non-mention"
+
+        if require_mention and not self.config.agent_user_id:
+            if not self._mention_warned:
+                logger.warning(
+                    "Mochat mention requirement is enabled but agent_user_id is empty; "
+                    "panel group mention detection is degraded and may silently miss bot mentions."
+                )
+                self._mention_warned = True
 
         if require_mention and not was_mentioned and not use_delay:
             return

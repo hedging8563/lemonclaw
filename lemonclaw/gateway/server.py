@@ -290,6 +290,7 @@ def create_app(
             config_path=runtime.config_path,
             config_watcher=runtime.config_watcher,
             agent_loop=runtime.agent_loop,
+            channel_manager=runtime.channel_manager,
         ))
 
     # Static assets for WebUI v2 (JS/CSS bundles)

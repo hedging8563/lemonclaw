@@ -233,6 +233,11 @@ class DiscordChannel(BaseChannel):
             bot_mentioned = any(
                 str(m.get("id")) == self._bot_user_id for m in mentions
             ) if (require_mention and self._bot_user_id) else False
+            if require_mention and not bot_mentioned:
+                referenced_author = ((payload.get("referenced_message") or {}).get("author") or {})
+                bot_mentioned = bool(
+                    self._bot_user_id and str(referenced_author.get("id") or "") == self._bot_user_id
+                )
             if not self._group_policy_allows(
                 policy,
                 in_allowlist=channel_id in (self.config.group_allow_from or []),
