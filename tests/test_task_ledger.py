@@ -96,6 +96,24 @@ def test_task_ledger_list_tasks_orders_by_updated_at_desc(tmp_path: Path):
     assert [task["task_id"] for task in tasks] == ["task_b", "task_a"]
 
 
+def test_task_ledger_facade_exposes_enrich_task_for_observer(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="cli:a",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="a",
+    )
+
+    task = ledger.read_task("task_a")
+    enriched = ledger.enrich_task_for_observer(task)
+
+    assert enriched is not None
+    assert enriched["display_state"]["key"] == "running"
+
+
 def test_task_ledger_rejects_invalid_task_id(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
 

@@ -2202,6 +2202,7 @@ class TaskLedger:
         "read_steps",
         "materialize_steps",
         "list_tasks",
+        "enrich_task_for_observer",
         "list_stale_tasks",
         "list_recovery_tasks",
         "get_recovery_summary",
