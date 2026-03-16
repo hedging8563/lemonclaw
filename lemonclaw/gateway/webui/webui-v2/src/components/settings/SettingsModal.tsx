@@ -600,13 +600,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!status || !status.configured_enabled) return null;
     if (status.available === false) {
       const detail = status.error ? ` · ${status.error}` : '';
-      return renderNotice(`Channel runtime unavailable${detail}`, 'warning');
+      return renderNotice(`${t('channel_health_unavailable')}${detail}`, 'warning');
     }
     if (status.registered && status.running) {
-      return renderNotice('Channel runtime is registered and running.', 'info');
+      return renderNotice(t('channel_health_running'), 'info');
     }
     if (status.registered && !status.running) {
-      return renderNotice('Channel runtime is registered but currently stopped.', 'warning');
+      return renderNotice(t('channel_health_stopped'), 'warning');
     }
     return null;
   };
