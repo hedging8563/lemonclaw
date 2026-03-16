@@ -21,7 +21,7 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
   
   --sidebar-w: 240px;
-  --inspector-w: 320px;
+  --inspector-w: 440px;
   --topbar-h: 48px;
 }
 
@@ -94,6 +94,21 @@ body {
   border-left: none;
 }
 
+.inspector-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.inspector-span-full {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.inspector-col {
+  min-width: 0;
+}
+
 /* Premium Animations */
 @keyframes slideUpFade {
   from { opacity: 0; transform: translateY(10px); }
@@ -146,6 +161,9 @@ body {
 .sidebar-mobile-close { display: none; }
 
 @media (max-width: 1024px) {
+  .inspector-grid {
+    grid-template-columns: 1fr;
+  }
   .layout-inspector {
     position: fixed;
     right: 0;

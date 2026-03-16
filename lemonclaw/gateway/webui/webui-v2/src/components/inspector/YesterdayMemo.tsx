@@ -31,7 +31,6 @@ export function YesterdayMemo() {
   }, [hasContent, memo]);
 
   if (loading) return null;
-  if (!hasContent) return null;
 
   const showToggle = overflows;
 
@@ -44,39 +43,45 @@ export function YesterdayMemo() {
       </div>
 
       {/* Content */}
-      <div
-        ref={contentRef}
-        style={{
-          maxHeight: expanded ? 'none' : `${COLLAPSED_MAX_HEIGHT}px`,
-          overflow: 'hidden',
-          position: 'relative',
-        }}
-      >
-        {memo.yesterday && memo.yesterday.length > 0 && (
-          <div style={{ marginBottom: memo.today?.length ? '12px' : '0' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_yesterday')}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-              {memo.yesterday.map((item: string, i: number) => (
-                <div key={i} style={{ marginBottom: i < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>{item}</div>
-              ))}
+      {!hasContent ? (
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          {t('memo_empty')}
+        </div>
+      ) : (
+        <div
+          ref={contentRef}
+          style={{
+            maxHeight: expanded ? 'none' : `${COLLAPSED_MAX_HEIGHT}px`,
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+        >
+          {memo.yesterday && memo.yesterday.length > 0 && (
+            <div style={{ marginBottom: memo.today?.length ? '12px' : '0' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_yesterday')}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                {memo.yesterday.map((item: string, i: number) => (
+                  <div key={i} style={{ marginBottom: i < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>{item}</div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {memo.today && memo.today.length > 0 && (
-          <div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_today')}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-              {memo.today.map((item: string, i: number) => (
-                <div key={i} style={{ marginBottom: i < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>{item}</div>
-              ))}
+          {memo.today && memo.today.length > 0 && (
+            <div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_today')}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                {memo.today.map((item: string, i: number) => (
+                  <div key={i} style={{ marginBottom: i < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>{item}</div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Fade overlay + bottom toggle */}
-      {showToggle && (
+      {hasContent && showToggle && (
         <div style={{ position: 'relative' }}>
           {!expanded && (
             <div style={{

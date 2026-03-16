@@ -27,11 +27,23 @@ export function Inspector() {
           </div>
         </div>
         <div style={{ flex: 1, padding: isMobile ? '12px' : '16px', overflowY: 'auto' }}>
-          <YesterdayMemo />
-          <StarOffice />
-          <ConductorPanel />
-          <TaskRecoveryPanel />
-          <MemoryPanel />
+          <div class="inspector-grid">
+            <div class="inspector-span-full">
+              <YesterdayMemo />
+            </div>
+            <div class="inspector-span-full">
+              <TaskRecoveryPanel />
+            </div>
+            <div class="inspector-col">
+              <ConductorPanel />
+            </div>
+            <div class="inspector-col">
+              <MemoryPanel />
+            </div>
+            <div class="inspector-span-full">
+              <StarOffice />
+            </div>
+          </div>
         </div>
       </aside>
     </>

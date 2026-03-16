@@ -39,6 +39,12 @@ function formatDisplayState(state?: TaskDisplayState | null): string {
   return translated === `task_state_${state.key}` ? state.label : translated;
 }
 
+function formatDisplayDetail(state?: TaskDisplayState | null): string {
+  if (!state) return '—';
+  const translated = t(`task_state_detail_${state.key}` as any);
+  return translated === `task_state_detail_${state.key}` ? (state.detail || '—') : translated;
+}
+
 function formatUpdatedAt(task: TaskRecord): string {
   const stamp = Number(task.updated_at_ms || 0);
   if (!stamp) return '—';
@@ -160,7 +166,7 @@ function taskCard(
           padding: '8px 10px',
           fontFamily: 'var(--font-mono)',
         }}>
-          {state.detail}
+          {formatDisplayDetail(state)}
         </div>
       )}
 
@@ -254,7 +260,7 @@ function taskCard(
       {isExpanded && detail && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px dashed var(--border)', paddingTop: '10px' }}>
           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
-            {detail.summary?.display_state?.detail || state?.detail || '—'}
+            {formatDisplayDetail(detail.summary?.display_state || state)}
           </div>
           {candidate && (
             <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.55' }}>

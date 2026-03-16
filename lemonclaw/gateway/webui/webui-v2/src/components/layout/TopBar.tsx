@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { logout } from '../../stores/auth';
-import { currentModel, globalDefaultModel, getCurrentModelMeta, loadModels, models } from '../../stores/models';
+import { currentModel, globalDefaultModel, loadModels, models } from '../../stores/models';
 import { activeSessionKey, loadSessions, sessions } from '../../stores/sessions';
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector } from '../../stores/ui';
-import { modelMetaLabel, modelOptionLabel } from './modelPresentation';
+import { modelOptionLabel } from './modelPresentation';
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -21,8 +21,6 @@ export function TopBar() {
 
   const isWebUI = activeSessionKey.value.startsWith('webui:');
   const currentSession = sessions.value.find((session) => session.key === activeSessionKey.value);
-  const currentModelMeta = getCurrentModelMeta();
-
   useEffect(() => {
     loadModels();
   }, []);
@@ -151,11 +149,6 @@ export function TopBar() {
                 {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
                 {models.value.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, t)}</option>)}
               </select>
-              {currentModelMeta && (
-                <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                  {modelMetaLabel(currentModelMeta, t)}
-                </span>
-              )}
             </>
           )}
 
@@ -187,7 +180,6 @@ export function TopBar() {
             {models.value.length === 0 && <option value={currentModel.value}>{currentModel.value || 'Loading...'}</option>}
             {models.value.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, t)}</option>)}
           </select>
-          {currentModelMeta && <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{modelMetaLabel(currentModelMeta, t)}</span>}
         </div>
       )}
 
