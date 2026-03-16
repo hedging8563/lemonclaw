@@ -339,6 +339,7 @@ def _derive_group_runtime(config) -> dict[str, dict[str, object]]:
         'whatsapp': config.channels.whatsapp,
         'slack': config.channels.slack,
         'matrix': config.channels.matrix,
+        'qq': config.channels.qq,
     }
     for channel_name, channel_cfg in group_channels.items():
         if not getattr(channel_cfg, 'enabled', False):

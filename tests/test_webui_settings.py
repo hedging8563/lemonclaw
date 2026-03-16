@@ -194,6 +194,26 @@ def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, 
     assert runtime['approved_count'] == 1
 
 
+def test_settings_exposes_qq_group_runtime_state(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.qq.enabled = True
+    cfg.channels.qq.group_policy = 'allowlist'
+    cfg.channels.qq.group_require_mention = True
+    cfg.channels.qq.group_allow_from = ['GROUP1', 'GROUP2']
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+
+    assert resp.status_code == 200
+    group_runtime = resp.json()['group_runtime']['qq']
+    assert group_runtime['effective_group_policy'] == 'allowlist'
+    assert group_runtime['effective_group_require_mention'] is True
+    assert group_runtime['group_allow_from_count'] == 2
+
+
 def test_settings_exposes_channel_status_snapshot(tmp_path):
     from types import SimpleNamespace
 
