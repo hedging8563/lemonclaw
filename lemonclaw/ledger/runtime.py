@@ -1566,6 +1566,10 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             recommended_action = "wait_outbox"
             safe_to_execute = False
             reason = "outbox delivery is still in progress"
+        elif str(task.get("status") or "") in {"completed", "abandoned"}:
+            recommended_action = "noop"
+            safe_to_execute = False
+            reason = "task already settled"
 
         return {
             "task_id": task_id,

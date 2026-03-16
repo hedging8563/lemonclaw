@@ -62,6 +62,36 @@ function suggestedActionLabel(candidate: Record<string, any> | null | undefined)
   return translated === `task_action_${key}` ? t('task_action_run_safe_resume') : translated;
 }
 
+function formatCandidateReason(candidate: Record<string, any> | null | undefined): string {
+  if (!candidate) return '—';
+  const action = String(candidate.recommended_action || '');
+  const failedOutboxCount = Number(candidate.failed_outbox_count || 0);
+  const replayableFailedCount = Number(candidate.replayable_failed_count || 0);
+  const nonReplayableFailedCount = Number(candidate.non_replayable_failed_count || 0);
+  switch (action) {
+    case 'retry_outbox':
+      return t('task_candidate_reason_retry_outbox').replace('{count}', String(failedOutboxCount));
+    case 'replay_failed_steps':
+      return t('task_candidate_reason_replay_failed_steps').replace('{count}', String(replayableFailedCount));
+    case 'recheck':
+      return t('task_candidate_reason_recheck');
+    case 'wait_outbox':
+      return t('task_candidate_reason_wait_outbox');
+    case 'manual_resume':
+      if (nonReplayableFailedCount > 0) {
+        return t('task_candidate_reason_manual_resume_non_replayable').replace('{count}', String(nonReplayableFailedCount));
+      }
+      if (String(candidate.reason || '') === 'manual intervention required') {
+        return t('task_candidate_reason_manual_intervention');
+      }
+      return String(candidate.reason || '—');
+    case 'noop':
+      return t('task_candidate_reason_noop');
+    default:
+      return String(candidate.reason || '—');
+  }
+}
+
 function formatEventTime(value?: number | null): string {
   const stamp = Number(value || 0);
   if (!stamp) return '—';
@@ -109,6 +139,7 @@ function taskCard(
   const state = task.display_state;
   const tone = toneStyles(state?.tone || 'muted');
   const recovery = task.metadata?.recovery || {};
+  const candidateAction = String(candidate?.recommended_action || '');
 
   const canRunSafeResume = Boolean(candidate?.safe_to_execute);
   const canRecheck = ['waiting', 'verifying'].includes(task.status || '') && (!candidate || candidate?.recommended_action === 'recheck');
@@ -116,6 +147,13 @@ function taskCard(
   const showRetryDispatchCta = state?.key === 'resume_dispatch_failed' && canRunSafeResume && !isResumeLive;
   const showManualResumeCta = state?.key === 'resume_manual_only' && !isResumeLive;
   const showWorkflow = ['resume_requested', 'resume_dispatch_failed', 'resume_manual_only'].includes(state?.key || '');
+  const showSuggestedAction = Boolean(
+    candidate &&
+    candidateAction &&
+    candidateAction !== 'noop' &&
+    !['completed', 'abandoned'].includes(task.status || '')
+  );
+  const showResumeStats = Boolean(detail?.summary?.last_successful_step || detail?.summary?.resume_from_step);
 
   return (
     <div key={task.task_id} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -262,13 +300,13 @@ function taskCard(
           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
             {formatDisplayDetail(detail.summary?.display_state || state)}
           </div>
-          {candidate && (
+          {showSuggestedAction && candidate && (
             <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.55' }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
                 {t('task_suggested_action')}
               </div>
               <div>{suggestedActionLabel(candidate)}</div>
-              <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{candidate.reason || '—'}</div>
+              <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{formatCandidateReason(candidate)}</div>
             </div>
           )}
           {(showRetryDispatchCta || showManualResumeCta) && (
@@ -308,24 +346,26 @@ function taskCard(
               </div>
             </div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
-                {t('task_last_successful_step')}
+          {showResumeStats && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+                  {t('task_last_successful_step')}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  {detail.summary?.last_successful_step || '—'}
+                </div>
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                {detail.summary?.last_successful_step || '—'}
+              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+                  {t('task_resume_from_step')}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  {detail.summary?.resume_from_step || '—'}
+                </div>
               </div>
             </div>
-            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
-                {t('task_resume_from_step')}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                {detail.summary?.resume_from_step || '—'}
-              </div>
-            </div>
-          </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
               {t('task_outbox_title')}
