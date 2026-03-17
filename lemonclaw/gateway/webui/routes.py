@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
@@ -1266,34 +1266,6 @@ def get_webui_routes(
 
     # ── GET /api/recovery — recovery summary + tasks needing attention ──
 
-    def _build_recovery_queue_item(ledger_obj, task: dict[str, Any], *, candidate: dict[str, Any] | None = None) -> dict[str, Any]:
-        enriched = ledger_obj.enrich_task_for_observer(task) or task
-        recovery = ((enriched.get("metadata") or {}).get("recovery") or {}) if isinstance(enriched, dict) else {}
-        resume_context = dict(enriched.get("resume_context") or {}) if isinstance(enriched, dict) else {}
-        queued_at_ms = int(
-            recovery.get("requested_at_ms")
-            or recovery.get("detected_at_ms")
-            or enriched.get("updated_at_ms")
-            or 0
-        )
-        channel = str(resume_context.get("channel") or enriched.get("channel") or "")
-        chat_id = str(resume_context.get("chat_id") or "")
-        route = f"{channel}:{chat_id}" if channel and chat_id else str(enriched.get("session_key") or "")
-        queue = {
-            "queued_at_ms": queued_at_ms,
-            "source": str(recovery.get("source") or ""),
-            "reason": str(recovery.get("reason") or enriched.get("error") or ""),
-            "manual_review_required": bool(recovery.get("manual_review_required")),
-            "recommended_action": str((candidate or {}).get("recommended_action") or ""),
-            "safe_to_execute": bool((candidate or {}).get("safe_to_execute")),
-            "failed_outbox_count": int((candidate or {}).get("failed_outbox_count") or 0),
-            "last_successful_step": str(enriched.get("last_successful_step") or ""),
-            "route": route,
-        }
-        item = dict(enriched)
-        item["queue"] = queue
-        return item
-
     async def get_recovery(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1310,25 +1282,75 @@ def get_webui_routes(
 
         manual_review_only = str(request.query_params.get("manual_review_only", "")).lower() in {"1", "true", "yes"}
         all_tasks = ledger.list_recovery_tasks(limit=500)
-        all_tasks = [_build_recovery_queue_item(ledger, task) for task in all_tasks]
-        all_tasks.sort(key=lambda task: int(((task.get("queue") or {}).get("queued_at_ms") or task.get("updated_at_ms") or 0)), reverse=True)
-        tasks = all_tasks
-        if manual_review_only:
-            tasks = [
-                task
-                for task in all_tasks
-                if ((task.get("metadata") or {}).get("recovery") or {}).get("manual_review_required")
-            ]
-        visible_tasks: list[dict[str, Any]] = []
-        for task in tasks[:max(1, int(limit))]:
-            candidate = ledger.build_resume_candidate(str(task.get("task_id") or ""))
-            visible_tasks.append(_build_recovery_queue_item(ledger, task, candidate=candidate))
+        visible_tasks = ledger.list_operator_queue_view(limit=limit, manual_review_only=manual_review_only)
         resp = _json({
             "summary": ledger.summarize_recovery_tasks(all_tasks),
             "tasks": visible_tasks,
         })
         _maybe_refresh_cookie(request, resp)
         return resp
+
+    async def get_operator_queue(request: Request) -> Response:
+        return await get_recovery(request)
+
+    async def export_task(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+
+        export_view = ledger.build_task_export_view(task_id)
+        if not export_view:
+            return _json({"error": "task not found"}, 404)
+
+        fmt = str(request.query_params.get("format", "json") or "json").lower()
+        if fmt == "json":
+            resp = _json(export_view)
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        if fmt == "md":
+            summary = export_view.get("summary") or {}
+            task = export_view.get("task") or {}
+            lines = [
+                f"# Task Export: {task.get('task_id') or task_id}",
+                "",
+                f"- Goal: {task.get('goal') or ''}",
+                f"- Status: {task.get('status') or ''}",
+                f"- Stage: {task.get('current_stage') or ''}",
+                f"- Last Successful Step: {summary.get('last_successful_step') or '—'}",
+                f"- Resume From Step: {summary.get('resume_from_step') or '—'}",
+                "",
+                "## Recovery History",
+            ]
+            recovery_history = list(summary.get("recovery_history") or [])
+            if recovery_history:
+                for item in recovery_history:
+                    lines.extend([
+                        f"- {item.get('action') or 'unknown'} · {item.get('source') or '—'} · {item.get('reason') or '—'}",
+                    ])
+            else:
+                lines.append("- none")
+            lines.extend([
+                "",
+                "## Candidate",
+                "",
+                "```json",
+                json.dumps(export_view.get("candidate") or {}, ensure_ascii=False, indent=2),
+                "```",
+            ])
+            resp = PlainTextResponse("\n".join(lines), media_type="text/markdown; charset=utf-8")
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        return _json({"error": "unsupported format"}, 400)
 
     # ── GET /api/watchdog — watchdog runtime snapshot ───────────────────
 
@@ -1492,11 +1514,13 @@ def get_webui_routes(
         Route("/api/channels/{name}/restart", restart_channel, methods=["POST"]),
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
+        Route("/api/tasks/{task_id}/export", export_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
         Route("/api/tasks/{task_id}/resume-candidate", get_resume_candidate, methods=["GET"]),
         Route("/api/tasks/{task_id}/resume", resume_task, methods=["POST"]),
         Route("/api/tasks/{task_id}/resume/execute", execute_safe_resume, methods=["POST"]),
         Route("/api/recovery", get_recovery, methods=["GET"]),
+        Route("/api/operator-queue", get_operator_queue, methods=["GET"]),
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),
         Route("/api/outbox/compact", compact_outbox, methods=["POST"]),

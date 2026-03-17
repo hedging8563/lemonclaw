@@ -918,6 +918,36 @@ export function TaskRecoveryPanel() {
     }
   };
 
+  const exportTask = async (taskId: string, format: 'json' | 'md', mode: 'copy' | 'download') => {
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export?format=${format}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        throw new Error('Failed to export task');
+      }
+      const content = await res.text();
+      const label = `${mode}:${format}:${taskId}`;
+      if (mode === 'copy') {
+        await navigator.clipboard.writeText(content);
+        setCopiedLabel(label);
+        window.setTimeout(() => {
+          setCopiedLabel((current) => (current === label ? null : current));
+        }, 1500);
+        return;
+      }
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/markdown;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = `${taskId}.${format}`;
+      anchor.click();
+      URL.revokeObjectURL(href);
+    } catch (err) {
+      console.error('Failed to export task detail', err);
+    }
+  };
+
   return (
     <div style={{ marginBottom: '24px' }}>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1038,6 +1068,38 @@ export function TaskRecoveryPanel() {
                 }}
               >
                 {t('task_detail_panel_close')}
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => exportTask(selectedTask.task_id, 'md', 'copy')}
+                style={{
+                  padding: '6px 10px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: copiedLabel === `copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {copiedLabel === `copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_summary')}
+              </button>
+              <button
+                onClick={() => exportTask(selectedTask.task_id, 'json', 'download')}
+                style={{
+                  padding: '6px 10px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('task_export_json')}
               </button>
             </div>
             {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, copiedLabel, copyValue, false)}

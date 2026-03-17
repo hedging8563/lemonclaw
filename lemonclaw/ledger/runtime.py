@@ -20,6 +20,7 @@ def _now_ms() -> int:
 _SAFE_TASK_ID = re.compile(r"^task_[A-Za-z0-9_-]{1,64}$")
 _SAFE_OUTBOX_ID = re.compile(r"^ob_[A-Za-z0-9_-]{1,64}$")
 _SAFE_STEP_ID = re.compile(r"^step_[A-Za-z0-9_-]{1,64}$")
+_SENSITIVE_EXPORT_KEY = re.compile(r"(^|[_-])(authorization|token|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)($|[_-])", re.IGNORECASE)
 _OUTBOX_MANUAL_RETRY_DEBOUNCE_MS = 1500
 
 
@@ -134,6 +135,79 @@ class TaskLedgerSharedMixin:
             if status == "waiting" and recovery.get("manual_review_required"):
                 summary["waiting_manual_review"] += 1
         return summary
+
+    @staticmethod
+    def _sanitize_export_value(value: Any) -> Any:
+        if isinstance(value, list):
+            return [TaskLedgerSharedMixin._sanitize_export_value(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: ("[redacted]" if _SENSITIVE_EXPORT_KEY.search(str(key)) else TaskLedgerSharedMixin._sanitize_export_value(nested))
+                for key, nested in value.items()
+            }
+        return value
+
+    def build_operator_queue_item(
+        self,
+        task: dict[str, Any],
+        *,
+        candidate: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        enriched = self.enrich_task_for_observer(task) or task
+        recovery = ((enriched.get("metadata") or {}).get("recovery") or {}) if isinstance(enriched, dict) else {}
+        resume_context = dict(enriched.get("resume_context") or {}) if isinstance(enriched, dict) else {}
+        queued_at_ms = int(
+            recovery.get("requested_at_ms")
+            or recovery.get("detected_at_ms")
+            or enriched.get("updated_at_ms")
+            or 0
+        )
+        channel = str(resume_context.get("channel") or enriched.get("channel") or "")
+        chat_id = str(resume_context.get("chat_id") or "")
+        route = f"{channel}:{chat_id}" if channel and chat_id else str(enriched.get("session_key") or "")
+        queue = {
+            "queued_at_ms": queued_at_ms,
+            "source": str(recovery.get("source") or ""),
+            "reason": str(recovery.get("reason") or enriched.get("error") or ""),
+            "manual_review_required": bool(recovery.get("manual_review_required")),
+            "recommended_action": str((candidate or {}).get("recommended_action") or ""),
+            "safe_to_execute": bool((candidate or {}).get("safe_to_execute")),
+            "failed_outbox_count": int((candidate or {}).get("failed_outbox_count") or 0),
+            "last_successful_step": str(enriched.get("last_successful_step") or ""),
+            "route": route,
+        }
+        item = dict(enriched)
+        item["queue"] = queue
+        return item
+
+    def list_operator_queue_view(
+        self,
+        *,
+        limit: int = 50,
+        manual_review_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        all_tasks = self.list_recovery_tasks(limit=500, manual_review_only=manual_review_only)
+        queue_items = [self.build_operator_queue_item(task) for task in all_tasks]
+        queue_items.sort(key=lambda task: int(((task.get("queue") or {}).get("queued_at_ms") or task.get("updated_at_ms") or 0)), reverse=True)
+        visible: list[dict[str, Any]] = []
+        for task in queue_items[:max(1, int(limit))]:
+            candidate = self.build_resume_candidate(str(task.get("task_id") or ""))
+            visible.append(self.build_operator_queue_item(task, candidate=candidate))
+        return visible
+
+    def build_task_export_view(self, task_id: str) -> dict[str, Any] | None:
+        task_view = self.read_task_view(task_id)
+        if not task_view:
+            return None
+        export = {
+            "task": task_view.get("task"),
+            "summary": task_view.get("summary"),
+            "steps": task_view.get("steps") or [],
+            "outbox_events": self.materialize_outbox_events_for_task(task_id),
+            "candidate": self.build_resume_candidate(task_id),
+            "exported_at_ms": _now_ms(),
+        }
+        return self._sanitize_export_value(export)
 
     @staticmethod
     def describe_task_display_state(task: dict[str, Any]) -> dict[str, str]:
@@ -2223,10 +2297,12 @@ class TaskLedger:
         "enrich_task_for_observer",
         "list_stale_tasks",
         "list_recovery_tasks",
+        "list_operator_queue_view",
         "get_recovery_summary",
         "mark_task_stale",
         "mark_tasks_for_process_restart",
         "read_task_view",
+        "build_task_export_view",
         "infer_resume_from_step",
         "request_task_resume",
         "build_resume_candidate",

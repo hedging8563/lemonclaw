@@ -121,7 +121,7 @@ export async function loadTaskPanel(sessionKey = activeSessionKey.value) {
   try {
     const [tasksRes, recoveryRes] = await Promise.all([
       apiFetch(`/api/tasks?limit=12${sessionKey ? `&session_key=${encodeURIComponent(sessionKey)}` : ''}`),
-      apiFetch('/api/recovery?limit=8&manual_review_only=true'),
+      apiFetch('/api/operator-queue?limit=8&manual_review_only=true'),
     ]);
     const tasksData = await tasksRes.json();
     const recoveryData = await recoveryRes.json();

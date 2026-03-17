@@ -505,6 +505,65 @@ def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tm
     assert data["tasks"][0]["queue"]["recommended_action"] in {"recheck", "wait_outbox", "manual_resume", "retry_outbox"}
 
 
+def test_operator_queue_alias_returns_recovery_queue(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_q",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="queue me",
+        status="waiting",
+        current_stage="resume_requested",
+        metadata={"recovery": {"source": "webui", "manual_review_required": True, "requested_at_ms": 123}},
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/operator-queue", params={"manual_review_only": "true"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tasks"][0]["task_id"] == "task_q"
+    assert data["tasks"][0]["queue"]["source"] == "webui"
+
+
+def test_task_export_api_redacts_sensitive_payload_and_supports_markdown(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_export",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="export me",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_export", step_type="tool_call", name="notify", input_summary='{"path":"x"}')
+    ledger.finish_step(step, status="waiting_outbox", error="boom")
+    ledger.enqueue_outbox(
+        task_id="task_export",
+        step_id=step.step_id,
+        effect_type="webhook_json",
+        target="https://example.com/hook",
+        payload={"Authorization": "Bearer secret-token", "body": {"api_key": "abc", "ok": True}},
+        metadata={"secret": "top-secret"},
+        status="failed",
+        error="boom",
+    )
+
+    client = TestClient(app)
+    json_resp = client.get("/api/tasks/task_export/export", params={"format": "json"})
+    assert json_resp.status_code == 200
+    data = json_resp.json()
+    assert data["outbox_events"][0]["payload"]["Authorization"] == "[redacted]"
+    assert data["outbox_events"][0]["payload"]["body"]["api_key"] == "[redacted]"
+    assert data["outbox_events"][0]["metadata"]["secret"] == "[redacted]"
+
+    md_resp = client.get("/api/tasks/task_export/export", params={"format": "md"})
+    assert md_resp.status_code == 200
+    assert "## Recovery History" in md_resp.text
+
+
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):
     ledger = TaskLedger(tmp_path, backend="json")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)
