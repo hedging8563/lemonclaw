@@ -355,8 +355,16 @@ export function MemoryPanel() {
                   <span style={pillStyle()}>{activeKnowledgeDocument.value.source_type || '—'}</span>
                   <span style={pillStyle()}>{activeKnowledgeDocument.value.status || 'registered'}</span>
                   <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeKnowledgeDocument.value.chunk_count || 0}`}</span>
+                  <span style={pillStyle()}>{`facts:${activeKnowledgeDocument.value.fact_count || 0}`}</span>
                 </div>
                 {activeKnowledgeDocument.value.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeKnowledgeDocument.value.note}</div>}
+                {activeKnowledgeDocument.value.metadata && Object.keys(activeKnowledgeDocument.value.metadata).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {Object.entries(activeKnowledgeDocument.value.metadata).map(([key, value]) => (
+                      <span key={key} style={pillStyle()}>{`${key}:${String(value)}`}</span>
+                    ))}
+                  </div>
+                )}
                 <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_chunks')}</div>
                 {activeKnowledgeChunks.value.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

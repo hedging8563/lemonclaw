@@ -12,7 +12,9 @@ export interface KnowledgeDocumentRecord {
   updated_at_ms?: number;
   ingested_at_ms?: number;
   chunk_count?: number;
+  fact_count?: number;
   last_error?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface KnowledgeSummary {

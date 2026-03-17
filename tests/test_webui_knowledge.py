@@ -130,3 +130,30 @@ def test_knowledge_document_patch_resets_ingest_state(tmp_path: Path) -> None:
     detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
     assert detail_resp.status_code == 200
     assert detail_resp.json()["chunks"] == []
+
+
+def test_knowledge_file_ingest_extracts_html_title_and_metadata(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    html_path = tmp_path / "guide.html"
+    html_path.write_text(
+        "<html><head><title>Deploy Guide</title></head><body><h1>Deploy Guide</h1><p>Retry queue jobs after rollout.</p></body></html>",
+        encoding="utf-8",
+    )
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "",
+            "source": str(html_path),
+            "source_type": "file",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    document = ingest_resp.json()["document"]
+    assert document["title"] == "Deploy Guide"
+    assert document["metadata"]["extractor"] == "html-file"
+    assert document["chunk_count"] >= 1

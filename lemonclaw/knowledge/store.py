@@ -9,6 +9,7 @@ This is the first productized layer for knowledge management:
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import threading
 import time
@@ -23,10 +24,19 @@ _ALLOWED_TYPES = {"url", "file", "manual"}
 _TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?\.])\s+")
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _pypdf_available() -> bool:
+    try:
+        import pypdf  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 class KnowledgeStore:
@@ -93,6 +103,7 @@ class KnowledgeStore:
             "status": "registered",
             "chunk_count": 0,
             "fact_count": 0,
+            "metadata": {},
             "created_at_ms": now,
             "updated_at_ms": now,
         }
@@ -164,6 +175,7 @@ class KnowledgeStore:
                 target["chunk_count"] = 0
                 target["fact_count"] = 0
                 target["last_error"] = ""
+                target["metadata"] = {}
                 target.pop("ingested_at_ms", None)
                 self._delete_chunks_unlocked(doc_id)
                 self._delete_facts_unlocked(doc_id)
@@ -183,18 +195,25 @@ class KnowledgeStore:
 
             try:
                 raw = self._load_document_content(target)
-                chunks = self._chunk_text(raw, title=str(target.get("title") or ""))
-                facts = self._extract_facts(raw, title=str(target.get("title") or ""))
+                text = str(raw.get("text") or "")
+                detected_title = str(raw.get("title") or "")
+                detected_meta = dict(raw.get("metadata") or {})
+                if not str(target.get("title") or "").strip() or str(target.get("title") or "") == str(target.get("source") or ""):
+                    target["title"] = (detected_title or str(target.get("title") or "")).strip()[:200]
+                chunks = self._chunk_text(text, title=str(target.get("title") or ""))
+                facts = self._extract_facts(text, title=str(target.get("title") or ""))
                 target["status"] = "ingested"
                 target["chunk_count"] = len(chunks)
                 target["fact_count"] = len(facts)
                 target["last_error"] = ""
+                target["metadata"] = detected_meta
                 target["ingested_at_ms"] = _now_ms()
             except Exception as exc:
                 target["status"] = "error"
                 target["chunk_count"] = 0
                 target["fact_count"] = 0
                 target["last_error"] = str(exc)[:500]
+                target["metadata"] = {}
                 target["updated_at_ms"] = _now_ms()
                 self._write_manifest_unlocked(data)
                 raise
@@ -208,7 +227,7 @@ class KnowledgeStore:
     def search(self, query: str, *, limit: int = 5) -> list[dict[str, Any]]:
         query = str(query or "").strip()
         if not query:
-          return []
+            return []
         tokens = [tok for tok in re.split(r"[^\w\u4e00-\u9fff]+", query.lower()) if tok]
         if not tokens:
             return []
@@ -289,32 +308,109 @@ class KnowledgeStore:
             parts.append(f"\n### {title}\n- Source: {source}\n- Type: {result_type}\n- Snippet: {snippet}")
         return "\n".join(parts)
 
-    def _load_document_content(self, document: dict[str, Any]) -> str:
+    def _load_document_content(self, document: dict[str, Any]) -> dict[str, Any]:
         source_type = str(document.get("source_type") or "")
         if source_type == "manual":
             content = str(document.get("content") or document.get("note") or "")
             if not content.strip():
                 raise ValueError("manual content is empty")
-            return content
+            return {
+                "text": content,
+                "title": str(document.get("title") or ""),
+                "metadata": {
+                    "extractor": "manual",
+                    "content_bytes": len(content.encode("utf-8")),
+                    "content_hash": hashlib.sha1(content.encode("utf-8")).hexdigest()[:12],
+                },
+            }
         if source_type == "file":
             source = str(document.get("source") or "")
             path = Path(source).expanduser()
             if not path.exists():
                 raise FileNotFoundError("file not found")
-            return path.read_text(encoding="utf-8", errors="ignore")
+            suffix = path.suffix.lower()
+            if suffix == ".pdf":
+                text, meta = self._extract_pdf_text(path)
+                return {"text": text, "title": meta.get("title") or path.stem, "metadata": meta}
+            content = path.read_text(encoding="utf-8", errors="ignore")
+            if suffix in {".html", ".htm"}:
+                title = self._extract_html_title(content) or path.stem
+                return {
+                    "text": self._html_to_text(content),
+                    "title": title,
+                    "metadata": {
+                        "extractor": "html-file",
+                        "path": str(path),
+                        "suffix": suffix,
+                        "content_bytes": len(content.encode("utf-8")),
+                    },
+                }
+            return {
+                "text": content,
+                "title": path.stem,
+                "metadata": {
+                    "extractor": "text-file",
+                    "path": str(path),
+                    "suffix": suffix or "(none)",
+                    "content_bytes": len(content.encode("utf-8")),
+                },
+            }
         if source_type == "url":
             source = str(document.get("source") or "")
             req = Request(source, headers={"User-Agent": "LemonClawKnowledge/1.0"})
             with urlopen(req, timeout=10) as response:
                 raw = response.read().decode("utf-8", errors="ignore")
-            raw = re.sub(r"<script[\s\S]*?</script>", " ", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"<style[\s\S]*?</style>", " ", raw, flags=re.IGNORECASE)
-            text = unescape(_TAG_RE.sub(" ", raw))
-            text = _WHITESPACE_RE.sub(" ", text).strip()
+            title = self._extract_html_title(raw) or str(document.get("title") or source)
+            text = self._html_to_text(raw)
             if not text:
                 raise ValueError("url content is empty")
-            return text
+            return {
+                "text": text,
+                "title": title,
+                "metadata": {
+                    "extractor": "url-html",
+                    "source_url": source,
+                    "content_bytes": len(raw.encode("utf-8")),
+                },
+            }
         raise ValueError("invalid source_type")
+
+    @staticmethod
+    def _extract_html_title(raw: str) -> str:
+        match = _TITLE_RE.search(raw or "")
+        if not match:
+            return ""
+        return _WHITESPACE_RE.sub(" ", unescape(match.group(1))).strip()[:200]
+
+    @staticmethod
+    def _html_to_text(raw: str) -> str:
+        raw = re.sub(r"<script[\s\S]*?</script>", " ", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"<style[\s\S]*?</style>", " ", raw, flags=re.IGNORECASE)
+        text = unescape(_TAG_RE.sub(" ", raw))
+        return _WHITESPACE_RE.sub(" ", text).strip()
+
+    @staticmethod
+    def _extract_pdf_text(path: Path) -> tuple[str, dict[str, Any]]:
+        if not _pypdf_available():
+            raise RuntimeError("pypdf is required for pdf ingestion")
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        pages: list[str] = []
+        for page in reader.pages:
+            pages.append(page.extract_text() or "")
+        text = "\n\n".join(part.strip() for part in pages if part.strip())
+        if not text:
+            raise ValueError("pdf content is empty")
+        metadata = reader.metadata or {}
+        return text, {
+            "extractor": "pdf",
+            "path": str(path),
+            "suffix": ".pdf",
+            "page_count": len(reader.pages),
+            "title": str(metadata.get("/Title") or "").strip(),
+            "content_bytes": path.stat().st_size,
+        }
 
     def _chunk_text(self, text: str, *, title: str = "", size: int = 1200) -> list[dict[str, Any]]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
