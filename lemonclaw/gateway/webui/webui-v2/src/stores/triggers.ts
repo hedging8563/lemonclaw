@@ -4,6 +4,7 @@ import { apiFetch } from '../api/client';
 export interface TriggerRecord {
   trigger_id: string;
   source: string;
+  family?: string;
   kind: string;
   status: string;
   payload_summary?: string;

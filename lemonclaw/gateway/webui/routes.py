@@ -904,10 +904,11 @@ def get_webui_routes(
         except (TypeError, ValueError):
             limit = 50
         source = request.query_params.get("source") or None
+        family = request.query_params.get("family") or None
         status = request.query_params.get("status") or None
         resp = _json({
             "summary": trigger_runtime.summarize_triggers(limit=500),
-            "triggers": trigger_runtime.list_triggers(limit=limit, source=source, status=status),
+            "triggers": trigger_runtime.list_triggers(limit=limit, source=source, family=family, status=status),
         })
         _maybe_refresh_cookie(request, resp)
         return resp

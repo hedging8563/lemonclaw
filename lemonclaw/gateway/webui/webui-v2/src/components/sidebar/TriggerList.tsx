@@ -43,6 +43,9 @@ export function TriggerList() {
         <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(10, 186, 181, 0.24)', background: 'rgba(10, 186, 181, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)' }}>
           {t('trigger_source_count')}: {Object.keys(triggerSummary.value?.by_source || {}).length}
         </div>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(124, 58, 237, 0.2)', background: 'rgba(124, 58, 237, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent)' }}>
+          family: {Object.keys(triggerSummary.value?.by_family || {}).length}
+        </div>
       </div>
 
       {triggerPanelError.value && (
@@ -87,6 +90,9 @@ export function TriggerList() {
           >
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid rgba(124, 58, 237, 0.18)', borderRadius: '3px', color: 'var(--accent)', background: 'rgba(124, 58, 237, 0.08)' }}>
+                  {item.family || 'runtime'}
+                </span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
                   {item.source || 'trigger'}
                 </span>

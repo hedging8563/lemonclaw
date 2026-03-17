@@ -40,10 +40,12 @@ def test_trigger_runtime_roundtrip(tmp_path: Path):
     assert finished is not None
     assert finished["task_id"] == "task_1"
     assert finished["status"] == "completed"
+    assert finished["family"] == "scheduled"
     listed = runtime.list_triggers(limit=10)
     assert listed[0]["trigger_id"] == trigger["trigger_id"]
     summary = runtime.summarize_triggers(limit=10)
     assert summary["by_source"]["cron"] == 1
+    assert summary["by_family"]["scheduled"] == 1
     assert summary["by_status"]["completed"] == 1
 
 
@@ -111,7 +113,9 @@ def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
     assert list_resp.status_code == 200
     data = list_resp.json()
     assert data["summary"]["by_source"]["heartbeat"] == 1
+    assert data["summary"]["by_family"]["scheduled"] == 1
     assert data["triggers"][0]["trigger_id"] == trigger["trigger_id"]
+    assert data["triggers"][0]["family"] == "scheduled"
 
     detail_resp = client.get(f"/api/triggers/{trigger['trigger_id']}")
     assert detail_resp.status_code == 200
@@ -173,6 +177,7 @@ async def test_wecom_event_trigger_is_recorded(tmp_path: Path) -> None:
 
     records = trigger_runtime.list_triggers(limit=10)
     assert records[0]["source"] == "webhook.wecom"
+    assert records[0]["family"] == "webhook"
     assert records[0]["kind"] == "wecom.event.subscribe"
 
 
@@ -199,4 +204,23 @@ async def test_wecom_verify_trigger_is_recorded(tmp_path: Path) -> None:
 
     assert result == "hello"
     records = trigger_runtime.list_triggers(limit=10)
+    assert records[0]["family"] == "webhook"
     assert records[0]["kind"] == "wecom.verify"
+
+
+def test_trigger_runtime_filters_by_family(tmp_path: Path) -> None:
+    runtime = TriggerRuntime(tmp_path)
+    runtime.record_trigger(source="webhook.wecom", kind="wecom.event.subscribe")
+    runtime.record_trigger(source="queue.internal", kind="queue.dispatch")
+    runtime.record_trigger(source="alert.watchdog", kind="watchdog.soft_recovery")
+
+    webhook = runtime.list_triggers(limit=10, family="webhook")
+    alerts = runtime.list_triggers(limit=10, family="alert")
+    queue = runtime.list_triggers(limit=10, family="queue")
+
+    assert len(webhook) == 1
+    assert webhook[0]["source"] == "webhook.wecom"
+    assert len(alerts) == 1
+    assert alerts[0]["source"] == "alert.watchdog"
+    assert len(queue) == 1
+    assert queue[0]["source"] == "queue.internal"

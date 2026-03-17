@@ -31,6 +31,25 @@ def build_trigger_metadata(trigger: dict[str, Any], extra: dict[str, Any] | None
     return payload
 
 
+def _derive_trigger_family(source: str, kind: str) -> str:
+    source_value = str(source or "").strip().lower()
+    kind_value = str(kind or "").strip().lower()
+    if source_value in {"cron", "heartbeat"}:
+        return "scheduled"
+    if source_value.startswith("alert.") or source_value.startswith("watchdog") or kind_value.startswith("watchdog."):
+        return "alert"
+    for prefix, family in (
+        ("webhook.", "webhook"),
+        ("stream.", "stream"),
+        ("socket.", "socket"),
+        ("poll.", "poll"),
+        ("queue.", "queue"),
+    ):
+        if source_value.startswith(prefix):
+            return family
+    return "runtime"
+
+
 class TriggerRuntime:
     """Append-only local trigger ledger for cron, webhook, and internal events."""
 
@@ -60,6 +79,7 @@ class TriggerRuntime:
         record = {
             "trigger_id": f"tr_{uuid.uuid4().hex[:12]}",
             "source": str(source or ""),
+            "family": _derive_trigger_family(source, kind),
             "kind": str(kind or ""),
             "status": str(status or "received"),
             "payload_summary": str(payload_summary or "")[:500],
@@ -139,12 +159,15 @@ class TriggerRuntime:
         *,
         limit: int = 50,
         source: str | None = None,
+        family: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             records = self._materialize_unlocked()
         if source:
             records = [item for item in records if str(item.get("source") or "") == source]
+        if family:
+            records = [item for item in records if str(item.get("family") or "") == family]
         if status:
             records = [item for item in records if str(item.get("status") or "") == status]
         return [self._sanitize(item) for item in records[:max(1, int(limit))]]
@@ -152,18 +175,22 @@ class TriggerRuntime:
     def summarize_triggers(self, *, limit: int = 500) -> dict[str, Any]:
         records = self.list_triggers(limit=limit)
         by_source: dict[str, int] = {}
+        by_family: dict[str, int] = {}
         by_status: dict[str, int] = {}
         by_kind: dict[str, int] = {}
         for item in records:
             source = str(item.get("source") or "unknown")
+            family = str(item.get("family") or "unknown")
             status = str(item.get("status") or "unknown")
             kind = str(item.get("kind") or "unknown")
             by_source[source] = by_source.get(source, 0) + 1
+            by_family[family] = by_family.get(family, 0) + 1
             by_status[status] = by_status.get(status, 0) + 1
             by_kind[kind] = by_kind.get(kind, 0) + 1
         return {
             "total": len(records),
             "by_source": by_source,
+            "by_family": by_family,
             "by_status": by_status,
             "by_kind": by_kind,
         }
