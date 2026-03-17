@@ -19,6 +19,7 @@ import struct
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -27,6 +28,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import WeComConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 try:
     from Crypto.Cipher import AES
@@ -163,9 +165,10 @@ class WeComChannel(BaseChannel):
 
     name = "wecom"
 
-    def __init__(self, config: WeComConfig, bus: MessageBus):
+    def __init__(self, config: WeComConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: WeComConfig = config
+        self._trigger_runtime = trigger_runtime
         self._http: httpx.AsyncClient | None = None
         self._crypto: WeComCrypto | None = None
 
@@ -358,6 +361,23 @@ class WeComChannel(BaseChannel):
         if not content and not media:
             return
 
+        trigger_metadata: dict[str, Any] = {}
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="webhook.wecom",
+                kind=f"wecom.{msg_type or 'message'}",
+                payload_summary=content[:500] if content else f"[{msg_type}]",
+                session_key=f"wecom:{from_user}",
+                channel="wecom",
+                chat_id=from_user,
+                metadata={
+                    "msg_type": msg_type,
+                    "msg_id": msg.get("MsgId", ""),
+                    "platform": "wecom",
+                },
+            )
+            trigger_metadata = build_trigger_metadata(trigger)
+
         await self._handle_message(
             sender_id=from_user,
             chat_id=from_user,  # WeCom uses UserId for both
@@ -367,6 +387,7 @@ class WeComChannel(BaseChannel):
                 "msg_type": msg_type,
                 "msg_id": msg.get("MsgId", ""),
                 "platform": "wecom",
+                **trigger_metadata,
             },
         )
 

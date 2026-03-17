@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from lemonclaw.ledger.outbox import OutboxDispatcher
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.telemetry.usage import UsageTracker
+    from lemonclaw.triggers.runtime import TriggerRuntime
     from lemonclaw.watchdog.service import WatchdogService
 
 
@@ -37,6 +38,7 @@ class GatewayRuntimeContext:
     watchdog: "WatchdogService | None" = None
     activity_bus: "ActivityBus | None" = None
     outbox_dispatcher: "OutboxDispatcher | None" = None
+    trigger_runtime: "TriggerRuntime | None" = None
     orchestrator: Any | None = None
     registry: Any | None = None
     config_path: "Path | Any | None" = None

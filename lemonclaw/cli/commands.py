@@ -282,6 +282,7 @@ def gateway(
     from lemonclaw.ledger.runtime import TaskLedger
     from lemonclaw.heartbeat.service import HeartbeatService
     from lemonclaw.gateway.server import create_app, GatewayServer, GracefulShutdown
+    from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
     setup_logging()
 
@@ -309,6 +310,7 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    trigger_runtime = TriggerRuntime(config.workspace_path)
 
     # Create usage tracker with budget config
     from lemonclaw.telemetry.usage import UsageTracker
@@ -355,19 +357,37 @@ def gateway(
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
         governance_config=config.governance,
+        trigger_runtime=trigger_runtime,
     )
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent or internal handler."""
+        trigger = trigger_runtime.record_trigger(
+            source="cron",
+            kind=str(job.payload.kind or "agent_turn"),
+            payload_summary=job.payload.message[:500],
+            session_key=job.payload.session_key or f"cron:{job.id}",
+            channel=job.payload.channel or "cli",
+            chat_id=job.payload.to or "direct",
+            metadata={"job_id": job.id, "schedule_kind": job.schedule.kind, "deliver": bool(job.payload.deliver)},
+        )
         if job.payload.kind == "system_event":
             from lemonclaw.memory.cron import is_memory_event, run_memory_event
             if is_memory_event(job.payload.message):
-                return await run_memory_event(job.payload.message, config.workspace_path)
+                try:
+                    response = await run_memory_event(job.payload.message, config.workspace_path)
+                except Exception as exc:
+                    trigger_runtime.finish_trigger(trigger["trigger_id"], status="failed", error=str(exc))
+                    raise
+                trigger_runtime.finish_trigger(trigger["trigger_id"], status="completed", result_summary=str(response or "")[:500])
+                return response
             logger.warning("Unknown system_event: {}", job.payload.message)
+            trigger_runtime.finish_trigger(trigger["trigger_id"], status="skipped", result_summary="unknown system_event")
             return None
 
         runtime_metadata = _normalize_runtime_delivery_metadata(dict(job.payload.metadata or {}))
+        runtime_metadata.update(build_trigger_metadata(trigger))
         response = await agent.process_direct(
             job.payload.message,
             session_key=job.payload.session_key or f"cron:{job.id}",
@@ -391,7 +411,7 @@ def gateway(
     register_memory_jobs(cron)
 
     # Create channel manager
-    channels = ChannelManager(config, bus, activity_bus=activity_bus)
+    channels = ChannelManager(config, bus, activity_bus=activity_bus, trigger_runtime=trigger_runtime)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -413,6 +433,14 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        trigger = trigger_runtime.record_trigger(
+            source="heartbeat",
+            kind="heartbeat.run",
+            payload_summary=tasks[:500],
+            session_key="heartbeat",
+            channel=channel,
+            chat_id=chat_id,
+        )
 
         async def _silent(*_args, **_kwargs):
             pass
@@ -423,6 +451,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            metadata=build_trigger_metadata(trigger, {"_mode": "operator"}),
         )
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -506,6 +535,7 @@ def gateway(
         watchdog=watchdog,
         activity_bus=activity_bus,
         outbox_dispatcher=outbox_dispatcher,
+        trigger_runtime=trigger_runtime,
         config_path=get_config_path(),
         config_watcher=config_watcher,
     )

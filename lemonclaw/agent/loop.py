@@ -54,6 +54,7 @@ from lemonclaw.agent.prompting import infer_mode
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
+from lemonclaw.triggers import TriggerRuntime
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -120,6 +121,7 @@ class AgentLoop:
         system_prompt: str = "",
         disabled_skills: list[str] | None = None,
         governance_config: Any | None = None,
+        trigger_runtime: TriggerRuntime | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.agent_id = agent_id
@@ -153,6 +155,7 @@ class AgentLoop:
             config=governance_config,
             agent_id=agent_id,
         )
+        self.trigger_runtime = trigger_runtime
         self.tools = ToolRegistry(governance=self.governance, ledger=self.ledger)
         self.subagents = SubagentManager(
             provider=provider,
@@ -955,6 +958,7 @@ class AgentLoop:
         metadata.setdefault("_mode", self._infer_mode(msg))
         metadata.setdefault("_agent_id", self.agent_id)
         msg.metadata = metadata
+        task_metadata = self._task_trigger_metadata(metadata)
         self.ledger.ensure_task(
             task_id=str(metadata["_task_id"]),
             session_key=msg.session_key,
@@ -964,7 +968,9 @@ class AgentLoop:
             goal=msg.content[:500],
             current_stage="dispatch",
             resume_context=self._build_task_resume_context(msg),
+            metadata=task_metadata or None,
         )
+        self._link_trigger_task(metadata, str(metadata["_task_id"]), msg.session_key)
 
         # Per-session lock: different sessions can run concurrently
         if msg.session_key not in self._session_locks:
@@ -986,6 +992,12 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg, stop_event=stop_event)
                 finalize_task(self.ledger, str(metadata["_task_id"]))
+                self._finish_trigger_success(
+                    metadata,
+                    task_id=str(metadata["_task_id"]),
+                    session_key=msg.session_key,
+                    result_summary=(response.content if response else "")[:500],
+                )
 
                 # Internal request-response: resolve Future instead of outbound
                 if request_id:
@@ -1020,6 +1032,12 @@ class AgentLoop:
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 self.ledger.update_task(str(metadata["_task_id"]), status="abandoned", current_stage="cancelled")
+                self._finish_trigger_failure(
+                    metadata,
+                    task_id=str(metadata["_task_id"]),
+                    session_key=msg.session_key,
+                    error="cancelled",
+                )
                 if request_id:
                     self.bus.resolve_response(request_id, "[cancelled]")
                 raise
@@ -1040,6 +1058,12 @@ class AgentLoop:
                     status="failed",
                     current_stage="error",
                     error=str(exc)[:500],
+                )
+                self._finish_trigger_failure(
+                    metadata,
+                    task_id=str(metadata["_task_id"]),
+                    session_key=msg.session_key,
+                    error=str(exc),
                 )
                 if request_id:
                     self.bus.resolve_response(request_id, "[error]")
@@ -1539,6 +1563,7 @@ class AgentLoop:
             direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
             direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
             direct_metadata.setdefault("_agent_id", self.agent_id)
+            task_metadata = self._task_trigger_metadata(direct_metadata)
             self.ledger.ensure_task(
                 task_id=str(direct_metadata["_task_id"]),
                 session_key=session_key,
@@ -1556,7 +1581,9 @@ class AgentLoop:
                     message_id=str(direct_metadata.get("message_id") or ""),
                     delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
                 ),
+                metadata=task_metadata or None,
             )
+            self._link_trigger_task(direct_metadata, str(direct_metadata["_task_id"]), session_key)
             if outbound_sink:
                 direct_metadata["_outbound_sink"] = outbound_sink
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
@@ -1564,6 +1591,12 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
                 finalize_task(self.ledger, str(direct_metadata["_task_id"]))
+                self._finish_trigger_success(
+                    direct_metadata,
+                    task_id=str(direct_metadata["_task_id"]),
+                    session_key=session_key,
+                    result_summary=(response.content if response else "")[:500],
+                )
             except Exception as exc:
                 self.ledger.update_task(
                     str(direct_metadata["_task_id"]),
@@ -1571,5 +1604,90 @@ class AgentLoop:
                     current_stage="error",
                     error=str(exc)[:500],
                 )
+                self._finish_trigger_failure(
+                    direct_metadata,
+                    task_id=str(direct_metadata["_task_id"]),
+                    session_key=session_key,
+                    error=str(exc),
+                )
                 raise
         return response.content if response else ""
+
+    @staticmethod
+    def _task_trigger_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+        trigger_id = str(metadata.get("_trigger_id") or "")
+        if not trigger_id:
+            return {}
+        return {
+            "trigger": {
+                "trigger_id": trigger_id,
+                "source": str(metadata.get("_trigger_source") or ""),
+                "kind": str(metadata.get("_trigger_kind") or ""),
+            }
+        }
+
+    def _link_trigger_task(self, metadata: dict[str, Any], task_id: str, session_key: str) -> None:
+        if not self.trigger_runtime:
+            return
+        trigger_id = str(metadata.get("_trigger_id") or "")
+        if not trigger_id:
+            return
+        self.trigger_runtime.link_task(
+            trigger_id,
+            task_id=task_id,
+            session_key=session_key,
+            status="dispatching",
+            metadata={"mode": str(metadata.get("_mode") or "chat")},
+        )
+
+    def _finish_trigger_success(
+        self,
+        metadata: dict[str, Any],
+        *,
+        task_id: str,
+        session_key: str,
+        result_summary: str,
+    ) -> None:
+        if not self.trigger_runtime:
+            return
+        trigger_id = str(metadata.get("_trigger_id") or "")
+        if not trigger_id:
+            return
+        task = self.ledger.read_task(task_id) or {}
+        self.trigger_runtime.finish_trigger(
+            trigger_id,
+            status="completed",
+            result_summary=result_summary,
+            metadata={
+                "task_id": task_id,
+                "session_key": session_key,
+                "task_status": str(task.get("status") or ""),
+                "task_stage": str(task.get("current_stage") or ""),
+            },
+        )
+
+    def _finish_trigger_failure(
+        self,
+        metadata: dict[str, Any],
+        *,
+        task_id: str,
+        session_key: str,
+        error: str,
+    ) -> None:
+        if not self.trigger_runtime:
+            return
+        trigger_id = str(metadata.get("_trigger_id") or "")
+        if not trigger_id:
+            return
+        task = self.ledger.read_task(task_id) or {}
+        self.trigger_runtime.finish_trigger(
+            trigger_id,
+            status="failed",
+            error=error[:500],
+            metadata={
+                "task_id": task_id,
+                "session_key": session_key,
+                "task_status": str(task.get("status") or "failed"),
+                "task_stage": str(task.get("current_stage") or "error"),
+            },
+        )

@@ -13,6 +13,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.delivery_context import apply_delivery_route, resolve_delivery_session_key
 from lemonclaw.config.schema import Config
+from lemonclaw.triggers import TriggerRuntime
 
 if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
@@ -28,10 +29,17 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus, activity_bus: ActivityBus | None = None):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        activity_bus: ActivityBus | None = None,
+        trigger_runtime: TriggerRuntime | None = None,
+    ):
         self.config = config
         self.bus = bus
         self.activity_bus = activity_bus
+        self.trigger_runtime = trigger_runtime
         self.channels: dict[str, BaseChannel] = {}
         self._channel_status: dict[str, dict[str, Any]] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
@@ -212,7 +220,7 @@ class ChannelManager:
             try:
                 from lemonclaw.channels.wecom import WeComChannel
                 self.channels["wecom"] = WeComChannel(
-                    self.config.channels.wecom, self.bus
+                    self.config.channels.wecom, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["wecom"].update({"registered": True, "available": True})
                 logger.info("WeCom channel enabled")

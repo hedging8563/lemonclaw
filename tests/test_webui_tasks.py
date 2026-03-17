@@ -634,6 +634,44 @@ def test_outbox_abandon_api_marks_event_and_task_abandoned(tmp_path):
     assert resp.json()["task"]["status"] == "abandoned"
 
 
+def test_outbox_abandon_api_uses_to_thread(tmp_path, monkeypatch):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_ab",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="abandon me",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_ab", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox")
+    event = ledger.enqueue_outbox(
+        task_id="task_ab",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="retrying",
+    )
+
+    calls = []
+
+    async def _fake_to_thread(func, *args, **kwargs):
+        calls.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("lemonclaw.gateway.webui.routes.asyncio.to_thread", _fake_to_thread)
+
+    client = TestClient(app)
+    resp = client.post(f"/api/outbox/{event['event_id']}/abandon", json={"reason": "operator stop"})
+
+    assert resp.status_code == 200
+    assert "abandon_outbox_event" in calls
+
+
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):
     ledger = TaskLedger(tmp_path, backend="json")
     watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1)

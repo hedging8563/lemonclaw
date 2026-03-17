@@ -143,6 +143,7 @@ def get_webui_routes(
     channel_manager = runtime.channel_manager
     usage_tracker = runtime.usage_tracker
     watchdog = runtime.watchdog
+    trigger_runtime = getattr(runtime, "trigger_runtime", None)
     version = runtime.version
     assert agent_loop is not None
     assert session_manager is not None
@@ -856,6 +857,45 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def list_triggers(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if trigger_runtime is None:
+            return _json({"error": "trigger runtime not available"}, 503)
+
+        try:
+            limit = min(int(request.query_params.get("limit", "50")), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        source = request.query_params.get("source") or None
+        status = request.query_params.get("status") or None
+        resp = _json({
+            "summary": trigger_runtime.summarize_triggers(limit=500),
+            "triggers": trigger_runtime.list_triggers(limit=limit, source=source, status=status),
+        })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def get_trigger(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if trigger_runtime is None:
+            return _json({"error": "trigger runtime not available"}, 503)
+
+        trigger_id = request.path_params.get("trigger_id", "")
+        if not trigger_id:
+            return _json({"error": "trigger_id is required"}, 400)
+        if not trigger_runtime.is_valid_trigger_id(trigger_id):
+            return _json({"error": "invalid trigger_id"}, 400)
+        record = trigger_runtime.read_trigger(trigger_id)
+        if not record:
+            return _json({"error": "trigger not found"}, 404)
+        resp = _json({"trigger": record})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def update_memory_core(request: Request) -> Response:
         """9.2: Update core.md."""
         ok, err = _require_auth(request)
@@ -1475,11 +1515,13 @@ def get_webui_routes(
         except (TypeError, ValueError):
             return _json({"error": "invalid compaction parameters"}, 400)
 
-        result = ledger.compact_outbox(
+        result = await asyncio.to_thread(
+            ledger.compact_outbox,
             keep_terminal=keep_terminal,
             min_terminal_age_ms=min_terminal_age_ms,
         )
-        resp = _json({"result": result, "events": [ledger.enrich_outbox_event_for_observer(event) for event in ledger.list_outbox_events(limit=200)]})
+        events = await asyncio.to_thread(ledger.list_outbox_events, limit=200)
+        resp = _json({"result": result, "events": [ledger.enrich_outbox_event_for_observer(event) for event in events]})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1497,7 +1539,10 @@ def get_webui_routes(
         except Exception:
             body = {}
         source = str(body.get("source") or "webui_expire")
-        expired = ledger.expire_due_outbox_events(source=source)
+        expired = await asyncio.to_thread(
+            ledger.expire_due_outbox_events,
+            source=source,
+        )
         resp = _json({"events": [ledger.enrich_outbox_event_for_observer(event) for event in expired]})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -1549,7 +1594,11 @@ def get_webui_routes(
             return _json({"error": "event not found"}, 404)
 
         try:
-            updated = ledger.request_outbox_retry(event_id, source="webui_manual_retry")
+            updated = await asyncio.to_thread(
+                ledger.request_outbox_retry,
+                event_id,
+                source="webui_manual_retry",
+            )
         except ValueError as exc:
             return _json({"error": str(exc)}, 409)
         if not updated:
@@ -1581,7 +1630,12 @@ def get_webui_routes(
         except Exception:
             body = {}
         reason = str(body.get("reason") or "operator abandoned outbox event")
-        updated = ledger.abandon_outbox_event(event_id, source="webui_manual_abandon", reason=reason)
+        updated = await asyncio.to_thread(
+            ledger.abandon_outbox_event,
+            event_id,
+            source="webui_manual_abandon",
+            reason=reason,
+        )
         if not updated:
             return _json({"error": "event not found"}, 404)
         task_id = str(updated.get("task_id") or "")
@@ -1605,6 +1659,8 @@ def get_webui_routes(
         Route("/api/chat/upload", upload_file, methods=["POST"]),
         Route("/api/media", get_media, methods=["GET"]),
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
+        Route("/api/triggers", list_triggers, methods=["GET"]),
+        Route("/api/triggers/{trigger_id}", get_trigger, methods=["GET"]),
         Route("/api/memory", get_memory, methods=["GET"]),
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),

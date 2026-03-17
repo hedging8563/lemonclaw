@@ -230,6 +230,7 @@ def create_app(
     config_path: Any | None = None,
     config_watcher: Any | None = None,
     watchdog: WatchdogService | None = None,
+    trigger_runtime: Any | None = None,
     runtime: GatewayRuntimeContext | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
@@ -244,6 +245,7 @@ def create_app(
         agent_loop=agent_loop,
         watchdog=watchdog,
         activity_bus=activity_bus,
+        trigger_runtime=trigger_runtime,
         orchestrator=orchestrator,
         registry=registry,
         config_path=config_path,
