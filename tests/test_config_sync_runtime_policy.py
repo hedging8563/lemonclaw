@@ -15,7 +15,7 @@ def test_sync_runtime_model_policy_updates_local_files_and_defaults(monkeypatch,
     config = Config()
     config.providers.lemondata.api_key = 'sk-test'
     config.lemondata.api_base_url = 'https://api.lemondata.cc'
-    config.agents.defaults.model = 'claude-sonnet-4-6'
+    config.agents.defaults.model = 'gpt-5.4'
 
     fake_config_path = tmp_path / 'config.json'
     fake_config_path.write_text('{}', encoding='utf-8')
@@ -91,9 +91,9 @@ def test_sync_runtime_model_policy_clears_stale_override_without_hosted_credenti
     changed = _sync_runtime_model_policy(config)
 
     assert changed is True
-    assert get_runtime_default_model('chat') == 'claude-sonnet-4-6'
-    assert config.agents.defaults.model == 'claude-sonnet-4-6'
-    assert config.lemondata.default_model == 'claude-sonnet-4-6'
+    assert get_runtime_default_model('chat') == 'gpt-5.4'
+    assert config.agents.defaults.model == 'gpt-5.4'
+    assert config.lemondata.default_model == 'gpt-5.4'
     assert not (tmp_path / 'runtime-model-policy.json').exists()
     assert not (tmp_path / '.managed-runtime-default-model').exists()
 
@@ -149,9 +149,8 @@ def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(
     changed = _sync_runtime_model_policy(config)
 
     assert changed is True
-    assert get_runtime_default_model('chat') == 'claude-sonnet-4-6'
-    assert config.agents.defaults.model == 'claude-sonnet-4-6'
-    assert config.lemondata.default_model == 'claude-sonnet-4-6'
+    assert get_runtime_default_model('chat') == 'gpt-5.4'
+    assert config.agents.defaults.model == 'gpt-5.4'
+    assert config.lemondata.default_model == 'gpt-5.4'
     assert not (tmp_path / 'runtime-model-policy.json').exists()
     assert not (tmp_path / '.managed-runtime-default-model').exists()
-

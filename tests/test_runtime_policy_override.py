@@ -41,7 +41,7 @@ def test_apply_runtime_policy_resets_to_builtin_when_none():
         'modelProfileOverrides': {},
     })
     apply_runtime_model_policy(None)
-    assert get_runtime_default_model('chat') == 'claude-sonnet-4-6'
+    assert get_runtime_default_model('chat') == 'gpt-5.4'
 
 def test_disabled_runtime_models_are_filtered_and_tagged_with_runtime_metadata():
     policy = {
@@ -82,4 +82,3 @@ def test_runtime_policy_falls_back_to_builtin_for_inactive_non_chat_defaults():
 
     assert get_runtime_default_model('chat') == 'gpt-5.2'
     assert get_runtime_default_model('vision') == 'gpt-4.1-mini'
-

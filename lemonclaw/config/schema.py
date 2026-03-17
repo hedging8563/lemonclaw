@@ -242,7 +242,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.lemonclaw/workspace"
-    model: str = "claude-sonnet-4-6"
+    model: str = "gpt-5.4"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     timezone: str = ""  # IANA timezone (e.g. "Asia/Shanghai"), empty = UTC
     max_tokens: int = 8192

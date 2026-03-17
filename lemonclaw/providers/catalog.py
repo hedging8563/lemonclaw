@@ -22,6 +22,7 @@ class ModelEntry:
 
 
 _BUILTIN_MODEL_CATALOG: list[ModelEntry] = [
+    ModelEntry("gpt-5.4", "GPT-5.4", "flagship", "Latest frontier model", fallback="gpt-5.2"),
     ModelEntry("claude-opus-4-6", "Claude Opus 4.6", "flagship", "Most capable", fallback="claude-opus-4-5"),
     ModelEntry("claude-opus-4-5", "Claude Opus 4.5", "flagship", "Strong all-rounder", fallback="claude-sonnet-4-6"),
     ModelEntry("gpt-5.2", "GPT-5.2", "flagship", "Strong reasoning", fallback="gpt-4.1-mini"),
@@ -45,7 +46,7 @@ _BUILTIN_MODEL_CATALOG: list[ModelEntry] = [
 
 MODEL_CATALOG: list[ModelEntry] = list(_BUILTIN_MODEL_CATALOG)
 MODEL_MAP: dict[str, ModelEntry] = {m.id: m for m in MODEL_CATALOG}
-DEFAULT_MODEL: str = "claude-sonnet-4-6"
+DEFAULT_MODEL: str = "gpt-5.4"
 _RUNTIME_DEFAULTS: dict[str, str] = {
     "chat": DEFAULT_MODEL,
     "vision": "gpt-4.1-mini",
@@ -66,7 +67,7 @@ TIER_LABELS: dict[str, str] = {"flagship": "Flagship", "standard": "Standard", "
 
 def _builtin_defaults() -> dict[str, str]:
     return {
-        "chat": "claude-sonnet-4-6",
+        "chat": "gpt-5.4",
         "vision": "gpt-4.1-mini",
         "fast": "gpt-4.1-mini",
         "reasoning": "claude-opus-4-6",
