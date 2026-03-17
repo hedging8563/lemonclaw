@@ -109,6 +109,8 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["last_successful_step"] == "read_file"
     assert data["summary"]["resume_from_step"] == step.step_id
     assert data["summary"]["recovery_history"][-1]["source"] == "unit_test"
+    assert data["summary"]["recovery_history"][-1]["recovery_id"].startswith("rc_")
+    assert data["summary"]["recovery_history"][-1]["ref"]["step_id"] == step.step_id
     assert data["summary"]["retrieval"]["latency_ms"] == 9
 
 

@@ -10,11 +10,18 @@ export interface TaskDisplayState {
 }
 
 export interface RecoveryHistoryEntry {
+  recovery_id?: string;
   source?: string;
   action?: string;
   reason?: string;
   details?: Record<string, any>;
   at_ms?: number;
+  ref?: {
+    step_id?: string;
+    outbox_event_id?: string;
+    step_ids?: string[];
+    outbox_event_ids?: string[];
+  };
 }
 
 export interface TaskStepRecord {

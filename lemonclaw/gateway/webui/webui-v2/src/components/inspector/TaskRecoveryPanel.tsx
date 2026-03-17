@@ -142,7 +142,59 @@ function isSettledTask(task: TaskRecord): boolean {
   return ['completed', 'abandoned'].includes(String(task.status || ''));
 }
 
-function renderStepTimeline(steps: TaskStepRecord[] | undefined) {
+type LinkedFocus = {
+  origin: 'step' | 'outbox' | 'recovery';
+  stepIds: string[];
+  outboxEventIds: string[];
+  recoveryId?: string;
+};
+
+function sameLinkedFocus(a: LinkedFocus | null, b: LinkedFocus | null): boolean {
+  return JSON.stringify(a || null) === JSON.stringify(b || null);
+}
+
+function makeStepFocus(step: TaskStepRecord): LinkedFocus {
+  return {
+    origin: 'step',
+    stepIds: step.step_id ? [step.step_id] : [],
+    outboxEventIds: [],
+  };
+}
+
+function makeOutboxFocus(event: { event_id?: string; step_id?: string }): LinkedFocus {
+  return {
+    origin: 'outbox',
+    stepIds: event.step_id ? [event.step_id] : [],
+    outboxEventIds: event.event_id ? [event.event_id] : [],
+  };
+}
+
+function makeRecoveryFocus(entry: RecoveryHistoryEntry): LinkedFocus {
+  const ref = entry.ref || {};
+  const stepIds = [ref.step_id, ...(ref.step_ids || [])].filter(Boolean) as string[];
+  const outboxEventIds = [ref.outbox_event_id, ...(ref.outbox_event_ids || [])].filter(Boolean) as string[];
+  return {
+    origin: 'recovery',
+    stepIds,
+    outboxEventIds,
+    recoveryId: entry.recovery_id,
+  };
+}
+
+function linkedCardStyle(active: boolean) {
+  if (!active) return {};
+  return {
+    borderColor: 'var(--teal)',
+    boxShadow: '0 0 0 1px rgba(10, 186, 181, 0.35), inset 0 0 0 1px rgba(10, 186, 181, 0.12)',
+    background: 'rgba(10, 186, 181, 0.06)',
+  };
+}
+
+function renderStepTimeline(
+  steps: TaskStepRecord[] | undefined,
+  linkedFocus: LinkedFocus | null,
+  setLinkedFocus: (next: LinkedFocus | null) => void,
+) {
   if (!steps || steps.length === 0) {
     return (
       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -155,8 +207,14 @@ function renderStepTimeline(steps: TaskStepRecord[] | undefined) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {steps.map((step) => {
         const tone = stepTone(step.status);
+        const focus = makeStepFocus(step);
+        const isLinked = !!step.step_id && linkedFocus?.stepIds.includes(step.step_id);
         return (
-          <div key={step.step_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'grid', gap: '8px' }}>
+          <div
+            key={step.step_id}
+            onClick={() => setLinkedFocus(sameLinkedFocus(linkedFocus, focus) ? null : focus)}
+            style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'grid', gap: '8px', cursor: 'pointer', ...linkedCardStyle(Boolean(isLinked)) }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{step.name || step.step_id}</div>
@@ -199,7 +257,12 @@ function renderStepTimeline(steps: TaskStepRecord[] | undefined) {
   );
 }
 
-function renderRecoveryHistory(history: RecoveryHistoryEntry[] | undefined) {
+function renderRecoveryHistory(
+  history: RecoveryHistoryEntry[] | undefined,
+  linkedFocus: LinkedFocus | null,
+  setLinkedFocus: (next: LinkedFocus | null) => void,
+  setExpandedOutboxId: (eventId: string | null) => void,
+) {
   if (!history || history.length === 0) {
     return (
       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -211,7 +274,33 @@ function renderRecoveryHistory(history: RecoveryHistoryEntry[] | undefined) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {history.slice().reverse().map((entry, idx) => (
-        <div key={`${entry.action || 'history'}-${entry.at_ms || idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'grid', gap: '8px' }}>
+        <div
+          key={entry.recovery_id || `${entry.action || 'history'}-${entry.at_ms || idx}`}
+          onClick={() => {
+            const focus = makeRecoveryFocus(entry);
+            const next = sameLinkedFocus(linkedFocus, focus) ? null : focus;
+            setLinkedFocus(next);
+            if (next && next.outboxEventIds.length === 1) {
+              setExpandedOutboxId(next.outboxEventIds[0]);
+            }
+          }}
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '6px',
+            background: 'var(--bg-secondary)',
+            padding: '8px 10px',
+            display: 'grid',
+            gap: '8px',
+            cursor: 'pointer',
+            ...linkedCardStyle(Boolean(
+              (!!entry.recovery_id && linkedFocus?.recoveryId === entry.recovery_id)
+              || (!!entry.ref?.step_id && linkedFocus?.stepIds.includes(entry.ref.step_id))
+              || ((entry.ref?.step_ids || []).some((id) => linkedFocus?.stepIds.includes(id)))
+              || (!!entry.ref?.outbox_event_id && linkedFocus?.outboxEventIds.includes(entry.ref.outbox_event_id))
+              || ((entry.ref?.outbox_event_ids || []).some((id) => linkedFocus?.outboxEventIds.includes(id)))
+            )),
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
@@ -316,6 +405,8 @@ function renderTaskDetailBody(
   busy: string | undefined,
   expandedOutboxId: string | null,
   setExpandedOutboxId: (eventId: string | null) => void,
+  linkedFocus: LinkedFocus | null,
+  setLinkedFocus: (next: LinkedFocus | null) => void,
   copiedLabel: string | null,
   copyValue: (label: string, value: unknown) => Promise<void>,
   withTopDivider = true,
@@ -330,6 +421,25 @@ function renderTaskDetailBody(
       <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
         {formatDisplayDetail(detail.summary?.display_state || state)}
       </div>
+      {linkedFocus && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => setLinkedFocus(null)}
+            style={{
+              padding: '5px 8px',
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              cursor: 'pointer',
+            }}
+          >
+            {t('task_clear_focus')}
+          </button>
+        </div>
+      )}
       {(detail.summary?.status_counts || detail.summary?.outbox_status_counts) && (
         <div style={{ display: 'grid', gap: '8px' }}>
           {detail.summary?.status_counts && (
@@ -422,13 +532,13 @@ function renderTaskDetailBody(
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_steps_title')}
         </div>
-        {renderStepTimeline(detail.steps)}
+        {renderStepTimeline(detail.steps, linkedFocus, setLinkedFocus)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_recovery_history_title')}
         </div>
-        {renderRecoveryHistory(detail.summary?.recovery_history)}
+        {renderRecoveryHistory(detail.summary?.recovery_history, linkedFocus, setLinkedFocus, setExpandedOutboxId)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -440,8 +550,14 @@ function renderTaskDetailBody(
           const isOutboxOpen = expandedOutboxId === event.event_id;
           const eventTone = toneStyles(event.status === 'failed' ? 'error' : event.status === 'sent' ? 'success' : event.status === 'retrying' ? 'warning' : 'accent');
           const outboxBusy = busy === `outbox:${event.event_id}`;
+          const focus = makeOutboxFocus(event);
+          const isLinked = (!!event.event_id && linkedFocus?.outboxEventIds.includes(event.event_id)) || (!!event.step_id && linkedFocus?.stepIds.includes(event.step_id));
           return (
-            <div key={event.event_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div
+              key={event.event_id}
+              onClick={() => setLinkedFocus(sameLinkedFocus(linkedFocus, focus) ? null : focus)}
+              style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px', cursor: 'pointer', ...linkedCardStyle(Boolean(isLinked)) }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
@@ -870,6 +986,7 @@ function recoveryQueueCard(
 
 export function TaskRecoveryPanel() {
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
+  const [linkedFocus, setLinkedFocus] = useState<LinkedFocus | null>(null);
   const [showSettledTasks, setShowSettledTasks] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const timerRef = useRef<any>(null);
@@ -890,6 +1007,11 @@ export function TaskRecoveryPanel() {
   useEffect(() => {
     loadTaskPanel(activeSessionKey.value);
   }, [activeSessionKey.value]);
+
+  useEffect(() => {
+    setLinkedFocus(null);
+    setExpandedOutboxId(null);
+  }, [expandedTaskId]);
 
   useEffect(() => {
     loadOperatorQueue();
@@ -1112,7 +1234,7 @@ export function TaskRecoveryPanel() {
                 {t('task_export_json')}
               </button>
             </div>
-            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, copiedLabel, copyValue, false)}
+            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, linkedFocus, setLinkedFocus, copiedLabel, copyValue, false)}
           </div>
         )}
       </div>

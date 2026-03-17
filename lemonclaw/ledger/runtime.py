@@ -75,6 +75,36 @@ class TaskLedgerSharedMixin:
         return self.summarize_recovery_tasks(tasks)
 
     @staticmethod
+    def _derive_recovery_ref(details: dict[str, Any] | None) -> dict[str, Any] | None:
+        detail_map = dict(details or {})
+        ref: dict[str, Any] = {}
+        if detail_map.get("step_id"):
+            ref["step_id"] = str(detail_map["step_id"])
+        elif detail_map.get("resume_from_step"):
+            ref["step_id"] = str(detail_map["resume_from_step"])
+        if detail_map.get("event_id"):
+            ref["outbox_event_id"] = str(detail_map["event_id"])
+        elif detail_map.get("outbox_event_id"):
+            ref["outbox_event_id"] = str(detail_map["outbox_event_id"])
+        if isinstance(detail_map.get("step_ids"), list):
+            step_ids = [str(item) for item in detail_map.get("step_ids") or [] if item]
+            if step_ids:
+                ref["step_ids"] = step_ids
+        if isinstance(detail_map.get("superseded_steps"), list):
+            step_ids = [str(item) for item in detail_map.get("superseded_steps") or [] if item]
+            if step_ids:
+                ref["step_ids"] = step_ids
+        if isinstance(detail_map.get("restored_steps"), list):
+            step_ids = [str(item) for item in detail_map.get("restored_steps") or [] if item]
+            if step_ids:
+                ref["step_ids"] = step_ids
+        if isinstance(detail_map.get("outbox_event_ids"), list):
+            event_ids = [str(item) for item in detail_map.get("outbox_event_ids") or [] if item]
+            if event_ids:
+                ref["outbox_event_ids"] = event_ids
+        return ref or None
+
+    @staticmethod
     def _append_recovery_history(
         metadata: dict[str, Any],
         *,
@@ -85,13 +115,18 @@ class TaskLedgerSharedMixin:
         at_ms: int | None = None,
     ) -> dict[str, Any]:
         history = list(metadata.get("recovery_history") or [])
-        history.append({
+        entry = {
+            "recovery_id": f"rc_{uuid.uuid4().hex[:10]}",
             "source": source,
             "action": action,
             "reason": reason[:500],
             "details": dict(details or {}),
             "at_ms": at_ms or _now_ms(),
-        })
+        }
+        ref = TaskLedgerSharedMixin._derive_recovery_ref(details)
+        if ref:
+            entry["ref"] = ref
+        history.append(entry)
         metadata["recovery_history"] = history[-20:]
         return metadata
 
@@ -1246,16 +1281,14 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         details: dict[str, Any] | None = None,
         at_ms: int | None = None,
     ) -> dict[str, Any]:
-        history = list(metadata.get("recovery_history") or [])
-        history.append({
-            "source": source,
-            "action": action,
-            "reason": reason[:500],
-            "details": dict(details or {}),
-            "at_ms": at_ms or _now_ms(),
-        })
-        metadata["recovery_history"] = history[-20:]
-        return metadata
+        return TaskLedgerSharedMixin._append_recovery_history(
+            metadata,
+            source=source,
+            action=action,
+            reason=reason,
+            details=details,
+            at_ms=at_ms,
+        )
 
     @staticmethod
     def append_recovery_history(
