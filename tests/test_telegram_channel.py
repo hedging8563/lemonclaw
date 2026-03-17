@@ -106,6 +106,28 @@ def _group_sender_chat_update(text: str, *, message_id: int = 4001):
     return SimpleNamespace(update_id=3001, message=message, effective_user=None)
 
 
+def _group_user_update(text: str, *, message_id: int = 4002):
+    user = SimpleNamespace(id=999999999, username="outsider", first_name="Outsider")
+    chat = SimpleNamespace(id=-1003819834760, type="supergroup")
+    message = SimpleNamespace(
+        chat_id=chat.id,
+        chat=chat,
+        message_id=message_id,
+        text=text,
+        caption=None,
+        photo=None,
+        voice=None,
+        audio=None,
+        document=None,
+        reply_to_message=None,
+        entities=[],
+        caption_entities=[],
+        sender_chat=None,
+        from_user=user,
+    )
+    return SimpleNamespace(update_id=3004, message=message, effective_user=user)
+
+
 def _group_sender_chat_command_update(text: str, *, message_id: int = 5001):
     chat = SimpleNamespace(id=-1003819834760, type="supergroup")
     sender_chat = SimpleNamespace(id=-1003819834760, title="dicloak ai运营团队", username=None, type="supergroup")
@@ -298,6 +320,26 @@ async def test_on_message_accepts_channel_post_sender_chat_without_effective_use
     assert kwargs["sender_id"] == "-1003819834760|dicloak ai运营团队"
     assert kwargs["chat_id"] == "-1003819834760"
     assert kwargs["content"] == "群里继续"
+
+
+@pytest.mark.asyncio
+async def test_group_message_bypasses_dm_pairing_allowlist(telegram_channel: TelegramChannel) -> None:
+    update = _group_user_update("@dic_supperpower_bot 在吗")
+    telegram_channel._app = SimpleNamespace(bot=SimpleNamespace(username="dic_supperpower_bot", id=8573580959))
+    telegram_channel.config.dm_policy = "pairing"
+    telegram_channel.config.allow_from = ["5215352940"]
+    telegram_channel.config.group_policy = "allowlist"
+    telegram_channel.config.group_require_mention = True
+    telegram_channel.config.group_allow_from = ["-1003819834760"]
+    telegram_channel.bus.publish_inbound = AsyncMock()
+
+    await telegram_channel._on_message(update, None)
+
+    telegram_channel.bus.publish_inbound.assert_awaited_once()
+    inbound = telegram_channel.bus.publish_inbound.await_args.args[0]
+    assert inbound.chat_id == "-1003819834760"
+    assert inbound.sender_id == "999999999|outsider"
+    assert inbound.content == "在吗"
 
 
 @pytest.mark.asyncio

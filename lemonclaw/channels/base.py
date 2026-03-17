@@ -231,17 +231,21 @@ class BaseChannel(ABC):
         and forwards to the bus.
         """
         stripped = content.strip()
+        is_group_message = bool((metadata or {}).get("is_group"))
         if not stripped.startswith(("/approve ", "/deny ")) and self._is_rate_limited(str(sender_id)):
             return
 
-        if not await self._run_pairing_flow(
-            sender_id=str(sender_id),
-            notify_target=str(chat_id),
-            content=content,
-            display_name=str(sender_id),
-            policy=pairing_policy,
-        ):
-            return
+        # Group ingress is governed by group_policy / group_allow_from upstream in the
+        # channel implementation. Do not re-apply DM allow_from / pairing here.
+        if not is_group_message:
+            if not await self._run_pairing_flow(
+                sender_id=str(sender_id),
+                notify_target=str(chat_id),
+                content=content,
+                display_name=str(sender_id),
+                policy=pairing_policy,
+            ):
+                return
 
         msg = InboundMessage(
             channel=self.name,
