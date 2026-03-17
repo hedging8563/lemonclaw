@@ -83,6 +83,17 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     )
     step = ledger.start_step("task_1", step_type="tool_call", name="read_file", input_summary='{"path":"x"}')
     ledger.finish_step(step, status="completed")
+    task = ledger.read_task("task_1")
+    assert task is not None
+    metadata = dict(task.get("metadata") or {})
+    ledger.append_recovery_history(
+        metadata,
+        source="unit_test",
+        action="task_recheck",
+        reason="verified by test",
+        details={"step_id": step.step_id},
+    )
+    ledger.update_task("task_1", metadata=metadata, resume_from_step=step.step_id)
     ledger.update_task("task_1", status="completed", current_stage="done")
 
     client = TestClient(app)
@@ -96,6 +107,8 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["status_counts"]["completed"] == 1
     assert data["summary"]["display_state"]["key"] == "completed"
     assert data["summary"]["last_successful_step"] == "read_file"
+    assert data["summary"]["resume_from_step"] == step.step_id
+    assert data["summary"]["recovery_history"][-1]["source"] == "unit_test"
     assert data["summary"]["retrieval"]["latency_ms"] == 9
 
 
@@ -440,6 +453,9 @@ def test_recovery_api_lists_tasks_with_recovery_metadata(tmp_path):
     assert data["summary"]["tasks_with_recovery"] == 1
     assert data["summary"]["stale_recovery_failed"] == 1
     assert [item["task_id"] for item in data["tasks"]] == ["task_a"]
+    assert data["tasks"][0]["queue"]["source"] == "watchdog_soft_recovery"
+    assert data["tasks"][0]["queue"]["manual_review_required"] is False
+    assert data["tasks"][0]["queue"]["queued_at_ms"] > 0
 
 
 def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tmp_path):
@@ -484,6 +500,8 @@ def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tm
     assert data["summary"]["tasks_with_recovery"] == 2
     assert data["summary"]["manual_review_required"] == 1
     assert [item["task_id"] for item in data["tasks"]] == ["task_waiting"]
+    assert data["tasks"][0]["queue"]["manual_review_required"] is True
+    assert data["tasks"][0]["queue"]["recommended_action"] in {"recheck", "wait_outbox", "manual_resume", "retry_outbox"}
 
 
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):

@@ -256,22 +256,24 @@ function workflowNextStep(task: TaskRecord): string {
   return `${t('task_workflow_next_review_outbox')} ${route}`;
 }
 
-function taskCard(
-  task: TaskRecord,
-  expandedTaskId: string | null,
-  setExpandedTaskId: (taskId: string | null) => void,
-  expandedOutboxId: string | null,
-  setExpandedOutboxId: (eventId: string | null) => void,
-) {
-  const isExpanded = expandedTaskId === task.task_id;
-  const detail = taskDetails.value[task.task_id];
-  const candidate = detail?.candidate;
-  const busy = taskActionBusy.value[task.task_id];
-  const state = task.display_state;
-  const tone = toneStyles(state?.tone || 'muted');
-  const recovery = task.metadata?.recovery || {};
-  const candidateAction = String(candidate?.recommended_action || '');
+function renderCountChips(counts: Record<string, number> | undefined, formatter: (key: string) => string) {
+  const entries = Object.entries(counts || {}).filter(([, count]) => Number(count || 0) > 0);
+  if (entries.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      {entries.map(([key, count]) => (
+        <span key={key} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+          {formatter(key)} · {count}
+        </span>
+      ))}
+    </div>
+  );
+}
 
+function getTaskActionState(task: TaskRecord, detail: ReturnType<typeof taskDetails.peek>[string] | undefined) {
+  const candidate = detail?.candidate;
+  const state = task.display_state;
+  const candidateAction = String(candidate?.recommended_action || '');
   const canRunSafeResume = Boolean(candidate?.safe_to_execute);
   const canRecheck = ['waiting', 'verifying'].includes(task.status || '') && (!candidate || candidate?.recommended_action === 'recheck');
   const isResumeLive = ['resume_requested', 'resume_queued', 'resume_running'].includes(state?.key || '');
@@ -284,7 +286,230 @@ function taskCard(
     candidateAction !== 'noop' &&
     !['completed', 'abandoned'].includes(task.status || '')
   );
-  const showResumeStats = Boolean(detail?.summary?.last_successful_step || detail?.summary?.resume_from_step);
+  return { candidate, state, canRunSafeResume, canRecheck, isResumeLive, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction };
+}
+
+function renderTaskDetailBody(
+  task: TaskRecord,
+  detail: NonNullable<ReturnType<typeof taskDetails.peek>[string]>,
+  busy: string | undefined,
+  expandedOutboxId: string | null,
+  setExpandedOutboxId: (eventId: string | null) => void,
+) {
+  const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
+  const recovery = task.metadata?.recovery || {};
+  const route = formatResumeRoute(task);
+  const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px dashed var(--border)', paddingTop: '10px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
+        {formatDisplayDetail(detail.summary?.display_state || state)}
+      </div>
+      {(detail.summary?.status_counts || detail.summary?.outbox_status_counts) && (
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {detail.summary?.status_counts && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {t('task_step_status_summary')}
+              </div>
+              {renderCountChips(detail.summary.status_counts, formatStepStatus)}
+            </div>
+          )}
+          {detail.summary?.outbox_status_counts && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {t('task_outbox_status_summary')}
+              </div>
+              {renderCountChips(detail.summary.outbox_status_counts, (key) => key)}
+            </div>
+          )}
+        </div>
+      )}
+      {showSuggestedAction && candidate && (
+        <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.55' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+            {t('task_suggested_action')}
+          </div>
+          <div>{suggestedActionLabel(candidate)}</div>
+          <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{formatCandidateReason(candidate)}</div>
+        </div>
+      )}
+      {(showRetryDispatchCta || showManualResumeCta) && (
+        <div style={{
+          fontSize: '11px',
+          lineHeight: '1.55',
+          color: showRetryDispatchCta ? 'var(--error)' : 'var(--accent)',
+          background: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 53, 0.08)',
+          border: '1px solid',
+          borderColor: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.24)' : 'rgba(255, 107, 53, 0.24)',
+          borderRadius: '6px',
+          padding: '8px 10px',
+          fontFamily: 'var(--font-mono)',
+        }}>
+          {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
+        </div>
+      )}
+      {showWorkflow && (
+        <div style={{
+          display: 'grid',
+          gap: '8px',
+          padding: '10px',
+          borderRadius: '6px',
+          border: '1px solid var(--border)',
+          background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_workflow_title')}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_by')}</div>
+            <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{recovery.source || '—'}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_at')}</div>
+            <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(recovery.requested_at_ms || recovery.detected_at_ms)}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_next_step')}</div>
+            <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{workflowNextStep(task)}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_route')}</div>
+            <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
+          </div>
+        </div>
+      )}
+      {showResumeStats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+              {t('task_last_successful_step')}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+              {detail.summary?.last_successful_step || '—'}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+              {t('task_resume_from_step')}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+              {detail.summary?.resume_from_step || '—'}
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          {t('task_steps_title')}
+        </div>
+        {renderStepTimeline(detail.steps)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          {t('task_recovery_history_title')}
+        </div>
+        {renderRecoveryHistory(detail.summary?.recovery_history)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          {t('task_outbox_title')}
+        </div>
+        {!detail.outboxEvents || detail.outboxEvents.length === 0 ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
+        ) : detail.outboxEvents.map((event) => {
+          const isOutboxOpen = expandedOutboxId === event.event_id;
+          const eventTone = toneStyles(event.status === 'failed' ? 'error' : event.status === 'sent' ? 'success' : event.status === 'retrying' ? 'warning' : 'accent');
+          const outboxBusy = busy === `outbox:${event.event_id}`;
+          return (
+            <div key={event.event_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                    {event.effect_type}
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                    {event.event_id}
+                  </div>
+                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '10px', fontFamily: 'var(--font-mono)', ...eventTone }}>
+                  {event.status}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setExpandedOutboxId(isOutboxOpen ? null : event.event_id)}
+                  style={{
+                    padding: '5px 8px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isOutboxOpen ? t('task_outbox_hide') : t('task_outbox_show')}
+                </button>
+                {event.status === 'failed' && (
+                  <button
+                    onClick={() => triggerOutboxRetry(task.task_id, event.event_id)}
+                    disabled={outboxBusy}
+                    style={{
+                      padding: '5px 8px',
+                      background: 'transparent',
+                      border: '1px solid var(--accent)',
+                      borderRadius: '6px',
+                      color: 'var(--accent)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      cursor: outboxBusy ? 'wait' : 'pointer',
+                      opacity: outboxBusy ? 0.7 : 1,
+                    }}
+                  >
+                    {outboxBusy ? t('task_action_running') : t('task_outbox_retry')}
+                  </button>
+                )}
+              </div>
+              {isOutboxOpen && (
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_target')}</div>
+                    <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.target || '—'}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_attempts')}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{event.attempts ?? 0}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_step_id')}</div>
+                    <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>{event.step_id || '—'}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_updated_at')}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.updated_at_ms)}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_error')}</div>
+                    <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.error || '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
+                    <pre style={{ margin: 0, maxHeight: '180px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(event.payload || {}, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function taskCard(
+  task: TaskRecord,
+  expandedTaskId: string | null,
+  setExpandedTaskId: (taskId: string | null) => void,
+  expandedOutboxId: string | null,
+  setExpandedOutboxId: (eventId: string | null) => void,
+) {
+  const isExpanded = expandedTaskId === task.task_id;
+  const detail = taskDetails.value[task.task_id];
+  const busy = taskActionBusy.value[task.task_id];
+  const { candidate, state, canRunSafeResume, canRecheck, isResumeLive, showRetryDispatchCta, showManualResumeCta } = getTaskActionState(task, detail);
+  const tone = toneStyles(state?.tone || 'muted');
+  const route = formatResumeRoute(task);
 
   return (
     <div key={task.task_id} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -336,6 +561,158 @@ function taskCard(
           fontFamily: 'var(--font-mono)',
         }}>
           {formatDisplayDetail(state)}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {task.task_id}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>
+            {route}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={async () => {
+              if (!isExpanded) await loadTaskDetail(task.task_id);
+              setExpandedTaskId(isExpanded ? null : task.task_id);
+            }}
+            style={{
+              padding: '6px 10px',
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              cursor: 'pointer',
+            }}
+          >
+            {isExpanded ? t('task_hide_details') : t('task_show_details')}
+          </button>
+          {showManualResumeCta && (
+            <button
+              onClick={() => triggerManualResume(task.task_id)}
+              disabled={!!busy}
+              style={{
+                padding: '6px 10px',
+                background: 'transparent',
+                border: '1px solid var(--accent)',
+                borderRadius: '6px',
+                color: 'var(--accent)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                cursor: busy ? 'wait' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy === 'manual_resume' ? t('task_action_running') : t('task_action_queue_manual_resume')}
+            </button>
+          )}
+          {canRunSafeResume && !isResumeLive && (
+            <button
+              onClick={() => triggerSafeResume(task.task_id)}
+              disabled={!!busy}
+              style={{
+                padding: '6px 10px',
+                background: 'var(--accent)',
+                border: '1px solid var(--accent)',
+                borderRadius: '6px',
+                color: '#fff',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                cursor: busy ? 'wait' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy === 'resume'
+                ? t('task_action_running')
+                : showRetryDispatchCta
+                  ? t('task_action_retry_resume_dispatch')
+                  : suggestedActionLabel(candidate)}
+            </button>
+          )}
+          {canRecheck && !canRunSafeResume && !isResumeLive && (
+            <button
+              onClick={() => triggerTaskRecheck(task.task_id)}
+              disabled={!!busy}
+              style={{
+                padding: '6px 10px',
+                background: 'transparent',
+                border: '1px solid var(--teal)',
+                borderRadius: '6px',
+                color: 'var(--teal)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                cursor: busy ? 'wait' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy === 'recheck' ? t('task_action_running') : t('task_action_recheck')}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isExpanded && detail && renderTaskDetailBody(task, detail, busy, expandedOutboxId, setExpandedOutboxId)}
+    </div>
+  );
+}
+
+function recoveryQueueCard(
+  task: TaskRecord,
+  expandedTaskId: string | null,
+  setExpandedTaskId: (taskId: string | null) => void,
+  expandedOutboxId: string | null,
+  setExpandedOutboxId: (eventId: string | null) => void,
+) {
+  const isExpanded = expandedTaskId === task.task_id;
+  const detail = taskDetails.value[task.task_id];
+  const busy = taskActionBusy.value[task.task_id];
+  const { candidate, state, canRunSafeResume, canRecheck, isResumeLive, showRetryDispatchCta, showManualResumeCta } = getTaskActionState(task, detail);
+  const tone = toneStyles(state?.tone || 'warning');
+  const queue = task.queue || {};
+
+  return (
+    <div key={`recovery-${task.task_id}`} style={{ background: tone.background, border: '1px solid', borderColor: tone.borderColor, borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
+            {task.goal || task.task_id}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '10px', fontFamily: 'var(--font-mono)', ...tone }}>
+              {formatDisplayState(state)}
+            </span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {queue.recommended_action || task.current_stage}
+            </span>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {t('task_workflow_queued_at')}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+            {formatEventTime(queue.queued_at_ms)}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_by')}</div>
+        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{queue.source || '—'}</div>
+        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_route')}</div>
+        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{queue.route || formatResumeRoute(task)}</div>
+        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_next_step')}</div>
+        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{workflowNextStep(task)}</div>
+      </div>
+
+      {queue.reason && (
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
+          {queue.reason}
         </div>
       )}
 
@@ -426,187 +803,7 @@ function taskCard(
         </div>
       </div>
 
-      {isExpanded && detail && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px dashed var(--border)', paddingTop: '10px' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
-            {formatDisplayDetail(detail.summary?.display_state || state)}
-          </div>
-          {showSuggestedAction && candidate && (
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.55' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                {t('task_suggested_action')}
-              </div>
-              <div>{suggestedActionLabel(candidate)}</div>
-              <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{formatCandidateReason(candidate)}</div>
-            </div>
-          )}
-          {(showRetryDispatchCta || showManualResumeCta) && (
-            <div style={{
-              fontSize: '11px',
-              lineHeight: '1.55',
-              color: showRetryDispatchCta ? 'var(--error)' : 'var(--accent)',
-              background: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 53, 0.08)',
-              border: '1px solid',
-              borderColor: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.24)' : 'rgba(255, 107, 53, 0.24)',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontFamily: 'var(--font-mono)',
-            }}>
-              {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
-            </div>
-          )}
-          {showWorkflow && (
-            <div style={{
-              display: 'grid',
-              gap: '8px',
-              padding: '10px',
-              borderRadius: '6px',
-              border: '1px solid var(--border)',
-              background: 'var(--bg-secondary)',
-            }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                {t('task_workflow_title')}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
-                <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_by')}</div>
-                <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{recovery.source || '—'}</div>
-                <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_at')}</div>
-                <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(recovery.requested_at_ms || recovery.detected_at_ms)}</div>
-                <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_next_step')}</div>
-                <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{workflowNextStep(task)}</div>
-              </div>
-            </div>
-          )}
-          {showResumeStats && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
-                  {t('task_last_successful_step')}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                  {detail.summary?.last_successful_step || '—'}
-                </div>
-              </div>
-              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
-                  {t('task_resume_from_step')}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                  {detail.summary?.resume_from_step || '—'}
-                </div>
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              {t('task_steps_title')}
-            </div>
-            {renderStepTimeline(detail.steps)}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              {t('task_recovery_history_title')}
-            </div>
-            {renderRecoveryHistory(detail.summary?.recovery_history)}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              {t('task_outbox_title')}
-            </div>
-            {!detail.outboxEvents || detail.outboxEvents.length === 0 ? (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
-            ) : detail.outboxEvents.map((event) => {
-              const isOutboxOpen = expandedOutboxId === event.event_id;
-              const eventTone = toneStyles(event.status === 'failed' ? 'error' : event.status === 'sent' ? 'success' : event.status === 'retrying' ? 'warning' : 'accent');
-              const outboxBusy = busy === `outbox:${event.event_id}`;
-              return (
-                <div key={event.event_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                        {event.effect_type}
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                        {event.event_id}
-                      </div>
-                    </div>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                      border: '1px solid',
-                      fontSize: '10px',
-                      fontFamily: 'var(--font-mono)',
-                      ...eventTone,
-                    }}>
-                      {event.status}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => setExpandedOutboxId(isOutboxOpen ? null : event.event_id)}
-                      style={{
-                        padding: '5px 8px',
-                        background: 'transparent',
-                        border: '1px solid var(--border)',
-                        borderRadius: '6px',
-                        color: 'var(--text-secondary)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '10px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {isOutboxOpen ? t('task_outbox_hide') : t('task_outbox_show')}
-                    </button>
-                    {event.status === 'failed' && (
-                      <button
-                        onClick={() => triggerOutboxRetry(task.task_id, event.event_id)}
-                        disabled={outboxBusy}
-                        style={{
-                          padding: '5px 8px',
-                          background: 'transparent',
-                          border: '1px solid var(--accent)',
-                          borderRadius: '6px',
-                          color: 'var(--accent)',
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '10px',
-                          cursor: outboxBusy ? 'wait' : 'pointer',
-                          opacity: outboxBusy ? 0.7 : 1,
-                        }}
-                      >
-                        {outboxBusy ? t('task_action_running') : t('task_outbox_retry')}
-                      </button>
-                    )}
-                  </div>
-                  {isOutboxOpen && (
-                    <div style={{ display: 'grid', gap: '8px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
-                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_target')}</div>
-                        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.target || '—'}</div>
-                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_attempts')}</div>
-                        <div style={{ color: 'var(--text-primary)' }}>{event.attempts ?? 0}</div>
-                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_step_id')}</div>
-                        <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>{event.step_id || '—'}</div>
-                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_updated_at')}</div>
-                        <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.updated_at_ms)}</div>
-                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_error')}</div>
-                        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.error || '—'}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
-                        <pre style={{ margin: 0, maxHeight: '180px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {JSON.stringify(event.payload || {}, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {isExpanded && detail && renderTaskDetailBody(task, detail, busy, expandedOutboxId, setExpandedOutboxId)}
     </div>
   );
 }
@@ -619,6 +816,7 @@ export function TaskRecoveryPanel() {
 
   const actionableTasks = sessionTasks.value.filter((task) => !isSettledTask(task));
   const settledTasks = sessionTasks.value.filter((task) => isSettledTask(task));
+  const recoveryQueueTasks = recoveryTasks.value.filter((task) => !sessionTasks.value.some((sessionTask) => sessionTask.task_id === task.task_id));
 
   useEffect(() => {
     loadTaskPanel(activeSessionKey.value);
@@ -723,7 +921,11 @@ export function TaskRecoveryPanel() {
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginTop: '4px' }}>
               {t('tasks_panel_manual_review')}
             </div>
-            {recoveryTasks.value.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
+            {recoveryQueueTasks.length === 0 ? (
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('tasks_panel_manual_review_in_session')}</div>
+            ) : (
+              recoveryQueueTasks.map((task) => recoveryQueueCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))
+            )}
           </div>
         )}
       </div>

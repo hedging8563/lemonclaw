@@ -1266,6 +1266,36 @@ def get_webui_routes(
 
     # ── GET /api/recovery — recovery summary + tasks needing attention ──
 
+    def _build_recovery_queue_item(ledger_obj, task: dict[str, Any]) -> dict[str, Any]:
+        enriched = ledger_obj.enrich_task_for_observer(task) or task
+        recovery = ((enriched.get("metadata") or {}).get("recovery") or {}) if isinstance(enriched, dict) else {}
+        candidate = ledger_obj.build_resume_candidate(str(enriched.get("task_id") or "")) if isinstance(enriched, dict) else None
+        resume_context = dict(enriched.get("resume_context") or {}) if isinstance(enriched, dict) else {}
+        queued_at_ms = int(
+            recovery.get("requested_at_ms")
+            or recovery.get("detected_at_ms")
+            or enriched.get("updated_at_ms")
+            or 0
+        )
+        channel = str(resume_context.get("channel") or enriched.get("channel") or "")
+        chat_id = str(resume_context.get("chat_id") or "")
+        route = f"{channel}:{chat_id}" if channel and chat_id else str(enriched.get("session_key") or "")
+        queue = {
+            "queued_at_ms": queued_at_ms,
+            "source": str(recovery.get("source") or ""),
+            "reason": str(recovery.get("reason") or enriched.get("error") or ""),
+            "manual_review_required": bool(recovery.get("manual_review_required")),
+            "recommended_action": str((candidate or {}).get("recommended_action") or ""),
+            "safe_to_execute": bool((candidate or {}).get("safe_to_execute")),
+            "failed_outbox_count": int((candidate or {}).get("failed_outbox_count") or 0),
+            "last_successful_step": str(enriched.get("last_successful_step") or ""),
+            "route": route,
+            "next_step": str((candidate or {}).get("recommended_action") or ""),
+        }
+        item = dict(enriched)
+        item["queue"] = queue
+        return item
+
     async def get_recovery(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1282,7 +1312,8 @@ def get_webui_routes(
 
         manual_review_only = str(request.query_params.get("manual_review_only", "")).lower() in {"1", "true", "yes"}
         all_tasks = ledger.list_recovery_tasks(limit=500)
-        all_tasks = [ledger.enrich_task_for_observer(task) or task for task in all_tasks]
+        all_tasks = [_build_recovery_queue_item(ledger, task) for task in all_tasks]
+        all_tasks.sort(key=lambda task: int(((task.get("queue") or {}).get("queued_at_ms") or task.get("updated_at_ms") or 0)), reverse=True)
         tasks = all_tasks
         if manual_review_only:
             tasks = [

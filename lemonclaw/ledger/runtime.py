@@ -373,10 +373,15 @@ class TaskLedgerSharedMixin:
                 "step_count": len(steps),
                 "status_counts": status_counts,
                 "last_successful_step": task.get("last_successful_step"),
+                "resume_from_step": task.get("resume_from_step"),
+                "current_stage": task.get("current_stage"),
                 "display_state": display_state,
                 "outbox_count": len(outbox),
                 "outbox_status_counts": outbox_status_counts,
+                "completion_gate": task.get("completion_gate"),
+                "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
+                "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
             },
         }
 
@@ -1444,6 +1449,12 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             key = str(step.get("status") or "unknown")
             status_counts[key] = status_counts.get(key, 0) + 1
 
+        outbox = self.materialize_outbox_events_for_task(task_id)
+        outbox_status_counts: dict[str, int] = {}
+        for event in outbox:
+            status = str(event.get("status") or "unknown")
+            outbox_status_counts[status] = outbox_status_counts.get(status, 0) + 1
+
         return {
             "task": self.enrich_task_for_observer(task),
             "steps": steps,
@@ -1456,7 +1467,10 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "display_state": display_state,
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
+                "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
                 "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
+                "outbox_count": len(outbox),
+                "outbox_status_counts": outbox_status_counts,
                 "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
             },
         }

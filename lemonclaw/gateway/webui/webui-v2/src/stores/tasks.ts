@@ -69,6 +69,18 @@ export interface TaskRecord {
   display_state?: TaskDisplayState;
   resume_context?: Record<string, any>;
   metadata?: Record<string, any>;
+  queue?: {
+    queued_at_ms?: number;
+    source?: string;
+    reason?: string;
+    manual_review_required?: boolean;
+    recommended_action?: string;
+    safe_to_execute?: boolean;
+    failed_outbox_count?: number;
+    last_successful_step?: string;
+    route?: string;
+    next_step?: string;
+  };
 }
 
 export interface TaskDetail {
