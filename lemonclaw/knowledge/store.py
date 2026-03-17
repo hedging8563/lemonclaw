@@ -224,7 +224,35 @@ class KnowledgeStore:
             self._replace_facts_unlocked(doc_id, facts)
             return dict(target)
 
-    def search(self, query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    def reingest_all(self) -> dict[str, Any]:
+        docs = self.list_documents()
+        updated = 0
+        failed = 0
+        errors: list[dict[str, str]] = []
+        for doc in docs:
+            try:
+                self.ingest_document(str(doc.get("doc_id") or ""))
+                updated += 1
+            except Exception as exc:
+                failed += 1
+                errors.append({
+                    "doc_id": str(doc.get("doc_id") or ""),
+                    "error": str(exc)[:200],
+                })
+        return {
+            "updated": updated,
+            "failed": failed,
+            "errors": errors,
+        }
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        source_type: str | None = None,
+        result_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         query = str(query or "").strip()
         if not query:
             return []
@@ -243,9 +271,18 @@ class KnowledgeStore:
             score = 0
             if query.lower() in hay:
                 score += 50
+            title = str(documents.get(str(chunk.get("doc_id") or ""), {}).get("title") or "").lower()
+            if query.lower() in title:
+                score += 25
             for token in tokens:
                 score += hay.count(token)
+                score += title.count(token) * 2
             if score <= 0:
+                continue
+            doc = documents.get(str(chunk.get("doc_id") or ""), {})
+            if source_type and str(doc.get("source_type") or "") != source_type:
+                continue
+            if result_type and result_type != "chunk":
                 continue
             ranked.append((score, {**chunk, "result_type": "chunk"}))
         for fact in facts:
@@ -254,13 +291,28 @@ class KnowledgeStore:
             score = 0
             if query.lower() in hay:
                 score += 80
+            title = str(documents.get(str(fact.get("doc_id") or ""), {}).get("title") or "").lower()
+            if query.lower() in title:
+                score += 20
             for token in tokens:
                 score += hay.count(token) * 2
+                score += title.count(token)
             if score <= 0:
+                continue
+            doc = documents.get(str(fact.get("doc_id") or ""), {})
+            if source_type and str(doc.get("source_type") or "") != source_type:
+                continue
+            if result_type and result_type != "fact":
                 continue
             ranked.append((score, {**fact, "result_type": "fact"}))
 
-        ranked.sort(key=lambda item: item[0], reverse=True)
+        ranked.sort(
+            key=lambda item: (
+                item[0],
+                int(documents.get(str(item[1].get("doc_id") or ""), {}).get("updated_at_ms") or 0),
+            ),
+            reverse=True,
+        )
         results: list[dict[str, Any]] = []
         for score, chunk in ranked[:max(1, int(limit))]:
             doc = documents.get(str(chunk.get("doc_id") or ""), {})

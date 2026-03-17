@@ -157,3 +157,44 @@ def test_knowledge_file_ingest_extracts_html_title_and_metadata(tmp_path: Path) 
     assert document["title"] == "Deploy Guide"
     assert document["metadata"]["extractor"] == "html-file"
     assert document["chunk_count"] >= 1
+
+
+def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    first = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Manual Recovery",
+            "source": "manual://recover",
+            "source_type": "manual",
+            "content": "Retry outbox first before manual resume.",
+        },
+    ).json()["document"]
+    second = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Ops File",
+            "source": "manual://ops",
+            "source_type": "manual",
+            "content": "Trigger history can explain alert spikes.",
+        },
+    ).json()["document"]
+
+    reingest_resp = client.post("/api/knowledge/reingest")
+    assert reingest_resp.status_code == 200
+    body = reingest_resp.json()
+    assert body["updated"] == 2
+    assert body["failed"] == 0
+
+    fact_resp = client.get("/api/knowledge/search?q=retry outbox&result_type=fact")
+    assert fact_resp.status_code == 200
+    fact_results = fact_resp.json()["results"]
+    assert len(fact_results) >= 1
+    assert all(item["result_type"] == "fact" for item in fact_results)
+
+    source_resp = client.get("/api/knowledge/search?q=trigger history&source_type=manual")
+    assert source_resp.status_code == 200
+    source_results = source_resp.json()["results"]
+    assert len(source_results) >= 1
+    assert all(item["source_type"] == "manual" for item in source_results)

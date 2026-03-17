@@ -30,6 +30,8 @@ export const knowledgeResults = signal<Array<Record<string, any>>>([]);
 export const activeKnowledgeDocument = signal<KnowledgeDocumentRecord | null>(null);
 export const activeKnowledgeChunks = signal<Array<Record<string, any>>>([]);
 export const activeKnowledgeFacts = signal<Array<Record<string, any>>>([]);
+export const selectedKnowledgeSourceType = signal<string>('');
+export const selectedKnowledgeResultType = signal<string>('');
 
 export async function loadKnowledge() {
   knowledgeError.value = null;
@@ -62,7 +64,7 @@ export async function loadKnowledgeDocument(docId: string) {
   }
 }
 
-export async function searchKnowledge(query: string) {
+export async function searchKnowledge(query: string, filters?: { source_type?: string; result_type?: string }) {
   knowledgeError.value = null;
   try {
     const q = String(query || '').trim();
@@ -70,7 +72,12 @@ export async function searchKnowledge(query: string) {
       knowledgeResults.value = [];
       return;
     }
-    const res = await apiFetch(`/api/knowledge/search?q=${encodeURIComponent(q)}&limit=8`);
+    if (filters?.source_type !== undefined) selectedKnowledgeSourceType.value = filters.source_type || '';
+    if (filters?.result_type !== undefined) selectedKnowledgeResultType.value = filters.result_type || '';
+    const params = new URLSearchParams({ q, limit: '8' });
+    if (selectedKnowledgeSourceType.value) params.set('source_type', selectedKnowledgeSourceType.value);
+    if (selectedKnowledgeResultType.value) params.set('result_type', selectedKnowledgeResultType.value);
+    const res = await apiFetch(`/api/knowledge/search?${params.toString()}`);
     const data = await res.json();
     knowledgeResults.value = data.results || [];
   } catch (err: any) {

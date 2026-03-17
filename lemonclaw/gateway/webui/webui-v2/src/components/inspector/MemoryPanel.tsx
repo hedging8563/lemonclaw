@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge } from '../../stores/knowledge';
+import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge, selectedKnowledgeResultType, selectedKnowledgeSourceType } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -200,6 +200,19 @@ export function MemoryPanel() {
     }
   };
 
+  const handleReingestAll = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/reingest', { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_ingest_failed'));
+    }
+  };
+
   const snapshot = memory.value;
   const query = filter.trim().toLowerCase();
   const filteredEntities = useMemo(() => (
@@ -261,7 +274,10 @@ export function MemoryPanel() {
           <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('knowledge_sources')}</div>
-              <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button onClick={() => void handleReingestAll()} style={pillStyle()}>{t('knowledge_reingest_all')}</button>
+                <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
+              </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
               <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
@@ -289,6 +305,16 @@ export function MemoryPanel() {
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <input value={knowledgeQuery} onInput={(e) => setKnowledgeQuery((e.target as HTMLInputElement).value)} placeholder={t('knowledge_search_placeholder')} style={{ flex: 1, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
               <button onClick={() => void handleSearchKnowledge()} style={pillStyle()}>{t('knowledge_search')}</button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+              <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_source')}</span>
+              {['', 'url', 'file', 'manual'].map((value) => (
+                <button key={`src-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { source_type: value })} style={pillStyle(selectedKnowledgeSourceType.value === value)}>{value || 'all'}</button>
+              ))}
+              <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_result')}</span>
+              {['', 'chunk', 'fact'].map((value) => (
+                <button key={`res-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { result_type: value })} style={pillStyle(selectedKnowledgeResultType.value === value)}>{value || 'all'}</button>
+              ))}
             </div>
             {knowledgeDocuments.value.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

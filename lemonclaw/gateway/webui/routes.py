@@ -1053,6 +1053,15 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def reingest_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        result = await asyncio.to_thread(_knowledge.reingest_all)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def get_knowledge_document(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1154,7 +1163,15 @@ def get_webui_routes(
             limit = min(int(request.query_params.get("limit", "5")), 20)
         except (TypeError, ValueError):
             limit = 5
-        results = await asyncio.to_thread(_knowledge.search, query, limit=limit)
+        source_type = str(request.query_params.get("source_type", "") or "").strip() or None
+        result_type = str(request.query_params.get("result_type", "") or "").strip() or None
+        results = await asyncio.to_thread(
+            _knowledge.search,
+            query,
+            limit=limit,
+            source_type=source_type,
+            result_type=result_type,
+        )
         resp = _json({"results": results})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -2019,6 +2036,7 @@ def get_webui_routes(
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
         Route("/api/knowledge", get_knowledge, methods=["GET"]),
         Route("/api/knowledge/search", search_knowledge, methods=["GET"]),
+        Route("/api/knowledge/reingest", reingest_knowledge, methods=["POST"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", get_knowledge_document, methods=["GET"]),
         Route("/api/knowledge/documents/{doc_id}", update_knowledge_document, methods=["PATCH"]),
