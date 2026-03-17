@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { activeKnowledgeChunks, activeKnowledgeDocument, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge } from '../../stores/knowledge';
+import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -367,6 +367,22 @@ export function MemoryPanel() {
                           <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+                )}
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginTop: '10px', marginBottom: '8px' }}>{t('knowledge_facts')}</div>
+                {activeKnowledgeFacts.value.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {activeKnowledgeFacts.value.map((fact) => (
+                      <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
+                          <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
                       </div>
                     ))}
                   </div>

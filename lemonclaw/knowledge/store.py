@@ -22,6 +22,7 @@ _SAFE_DOC_ID = re.compile(r"^kd_[A-Za-z0-9_-]{1,64}$")
 _ALLOWED_TYPES = {"url", "file", "manual"}
 _TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?\.])\s+")
 
 
 def _now_ms() -> int:
@@ -35,6 +36,7 @@ class KnowledgeStore:
         self._dir = workspace / "knowledge"
         self._manifest = self._dir / "documents.json"
         self._chunks = self._dir / "chunks.json"
+        self._facts = self._dir / "facts.json"
         self._lock = threading.RLock()
 
     @staticmethod
@@ -90,6 +92,7 @@ class KnowledgeStore:
             "content": str(content or "")[:20000],
             "status": "registered",
             "chunk_count": 0,
+            "fact_count": 0,
             "created_at_ms": now,
             "updated_at_ms": now,
         }
@@ -110,6 +113,7 @@ class KnowledgeStore:
                 return False
             self._write_manifest_unlocked(data)
             self._delete_chunks_unlocked(doc_id)
+            self._delete_facts_unlocked(doc_id)
             return True
 
     def update_document(
@@ -158,9 +162,11 @@ class KnowledgeStore:
             if needs_reingest:
                 target["status"] = "registered"
                 target["chunk_count"] = 0
+                target["fact_count"] = 0
                 target["last_error"] = ""
                 target.pop("ingested_at_ms", None)
                 self._delete_chunks_unlocked(doc_id)
+                self._delete_facts_unlocked(doc_id)
 
             target["updated_at_ms"] = _now_ms()
             self._write_manifest_unlocked(data)
@@ -178,13 +184,16 @@ class KnowledgeStore:
             try:
                 raw = self._load_document_content(target)
                 chunks = self._chunk_text(raw, title=str(target.get("title") or ""))
+                facts = self._extract_facts(raw, title=str(target.get("title") or ""))
                 target["status"] = "ingested"
                 target["chunk_count"] = len(chunks)
+                target["fact_count"] = len(facts)
                 target["last_error"] = ""
                 target["ingested_at_ms"] = _now_ms()
             except Exception as exc:
                 target["status"] = "error"
                 target["chunk_count"] = 0
+                target["fact_count"] = 0
                 target["last_error"] = str(exc)[:500]
                 target["updated_at_ms"] = _now_ms()
                 self._write_manifest_unlocked(data)
@@ -193,6 +202,7 @@ class KnowledgeStore:
             target["updated_at_ms"] = _now_ms()
             self._write_manifest_unlocked(data)
             self._replace_chunks_unlocked(doc_id, chunks)
+            self._replace_facts_unlocked(doc_id, facts)
             return dict(target)
 
     def search(self, query: str, *, limit: int = 5) -> list[dict[str, Any]]:
@@ -204,6 +214,7 @@ class KnowledgeStore:
             return []
         with self._lock:
             chunks = self._read_chunks_unlocked()
+            facts = self._read_facts_unlocked()
             documents = {item["doc_id"]: item for item in self._read_manifest_unlocked()["documents"]}
 
         ranked: list[tuple[int, dict[str, Any]]] = []
@@ -217,16 +228,30 @@ class KnowledgeStore:
                 score += hay.count(token)
             if score <= 0:
                 continue
-            ranked.append((score, chunk))
+            ranked.append((score, {**chunk, "result_type": "chunk"}))
+        for fact in facts:
+            claim = str(fact.get("claim") or "")
+            hay = claim.lower()
+            score = 0
+            if query.lower() in hay:
+                score += 80
+            for token in tokens:
+                score += hay.count(token) * 2
+            if score <= 0:
+                continue
+            ranked.append((score, {**fact, "result_type": "fact"}))
 
         ranked.sort(key=lambda item: item[0], reverse=True)
         results: list[dict[str, Any]] = []
         for score, chunk in ranked[:max(1, int(limit))]:
             doc = documents.get(str(chunk.get("doc_id") or ""), {})
-            text = str(chunk.get("text") or "")
+            result_type = str(chunk.get("result_type") or "chunk")
+            text = str(chunk.get("text") or chunk.get("claim") or "")
             results.append({
                 "doc_id": chunk.get("doc_id"),
                 "chunk_id": chunk.get("chunk_id"),
+                "fact_id": chunk.get("fact_id"),
+                "result_type": result_type,
                 "title": doc.get("title") or chunk.get("title") or "",
                 "source": doc.get("source") or "",
                 "source_type": doc.get("source_type") or "",
@@ -243,6 +268,14 @@ class KnowledgeStore:
         chunks.sort(key=lambda item: str(item.get("chunk_id") or ""))
         return chunks
 
+    def list_facts(self, doc_id: str) -> list[dict[str, Any]]:
+        if not self.is_valid_doc_id(doc_id):
+            raise ValueError("invalid doc_id")
+        with self._lock:
+            facts = [dict(item) for item in self._read_facts_unlocked() if item.get("doc_id") == doc_id]
+        facts.sort(key=lambda item: str(item.get("fact_id") or ""))
+        return facts
+
     @staticmethod
     def format_for_context(results: list[dict[str, Any]]) -> str:
         if not results:
@@ -252,7 +285,8 @@ class KnowledgeStore:
             title = str(item.get("title") or item.get("doc_id") or "knowledge")
             source = str(item.get("source") or "—")
             snippet = str(item.get("snippet") or "").strip()
-            parts.append(f"\n### {title}\n- Source: {source}\n- Snippet: {snippet}")
+            result_type = str(item.get("result_type") or "chunk")
+            parts.append(f"\n### {title}\n- Source: {source}\n- Type: {result_type}\n- Snippet: {snippet}")
         return "\n".join(parts)
 
     def _load_document_content(self, document: dict[str, Any]) -> str:
@@ -306,6 +340,32 @@ class KnowledgeStore:
             })
         return output
 
+    def _extract_facts(self, text: str, *, title: str = "", limit: int = 12) -> list[dict[str, Any]]:
+        normalized = _WHITESPACE_RE.sub(" ", text).strip()
+        if not normalized:
+            return []
+        candidates = _SENTENCE_SPLIT_RE.split(normalized)
+        if len(candidates) == 1:
+            candidates = re.split(r"[;\n]+", normalized)
+        output: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for idx, candidate in enumerate(candidates):
+            claim = candidate.strip(" -\t\r\n")
+            if len(claim) < 24 or len(claim) > 280:
+                continue
+            lowered = claim.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            output.append({
+                "fact_id": f"fact_{idx}",
+                "title": title,
+                "claim": claim,
+            })
+            if len(output) >= limit:
+                break
+        return output
+
     def _read_chunks_unlocked(self) -> list[dict[str, Any]]:
         if not self._chunks.exists():
             return []
@@ -333,6 +393,38 @@ class KnowledgeStore:
         data = self._read_chunks_unlocked()
         next_chunks = [item for item in data if item.get("doc_id") != doc_id]
         self._write_chunks_unlocked({"version": 1, "chunks": next_chunks})
+
+    def _read_facts_unlocked(self) -> list[dict[str, Any]]:
+        if not self._facts.exists():
+            return []
+        try:
+            raw = json.loads(self._facts.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        return list(raw.get("facts") or [])
+
+    def _replace_facts_unlocked(self, doc_id: str, facts: list[dict[str, Any]]) -> None:
+        data = self._read_facts_unlocked()
+        data = [item for item in data if item.get("doc_id") != doc_id]
+        now = _now_ms()
+        for item in facts:
+            data.append({
+                "doc_id": doc_id,
+                "fact_id": item["fact_id"],
+                "title": item.get("title") or "",
+                "claim": item.get("claim") or "",
+                "updated_at_ms": now,
+            })
+        self._write_facts_unlocked({"version": 1, "facts": data})
+
+    def _delete_facts_unlocked(self, doc_id: str) -> None:
+        data = self._read_facts_unlocked()
+        next_facts = [item for item in data if item.get("doc_id") != doc_id]
+        self._write_facts_unlocked({"version": 1, "facts": next_facts})
+
+    def _write_facts_unlocked(self, payload: dict[str, Any]) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._facts.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def _write_chunks_unlocked(self, payload: dict[str, Any]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)

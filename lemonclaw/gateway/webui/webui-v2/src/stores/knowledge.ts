@@ -27,6 +27,7 @@ export const knowledgeError = signal<string | null>(null);
 export const knowledgeResults = signal<Array<Record<string, any>>>([]);
 export const activeKnowledgeDocument = signal<KnowledgeDocumentRecord | null>(null);
 export const activeKnowledgeChunks = signal<Array<Record<string, any>>>([]);
+export const activeKnowledgeFacts = signal<Array<Record<string, any>>>([]);
 
 export async function loadKnowledge() {
   knowledgeError.value = null;
@@ -52,6 +53,7 @@ export async function loadKnowledgeDocument(docId: string) {
     const data = await res.json();
     activeKnowledgeDocument.value = data.document || null;
     activeKnowledgeChunks.value = data.chunks || [];
+    activeKnowledgeFacts.value = data.facts || [];
   } catch (err: any) {
     console.error('Failed to load knowledge document', err);
     knowledgeError.value = err?.message || 'Failed to load knowledge document';

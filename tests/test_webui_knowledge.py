@@ -85,12 +85,14 @@ def test_knowledge_manual_ingest_and_search(tmp_path: Path) -> None:
     results = search_resp.json()["results"]
     assert len(results) >= 1
     assert results[0]["doc_id"] == doc_id
+    assert results[0]["result_type"] in {"chunk", "fact"}
 
     detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
     assert detail_resp.status_code == 200
     detail = detail_resp.json()
     assert detail["document"]["doc_id"] == doc_id
     assert len(detail["chunks"]) >= 1
+    assert len(detail["facts"]) >= 1
 
 
 def test_knowledge_document_patch_resets_ingest_state(tmp_path: Path) -> None:

@@ -1063,11 +1063,12 @@ def get_webui_routes(
         try:
             doc = _knowledge.read_document(doc_id)
             chunks = _knowledge.list_chunks(doc_id)
+            facts = _knowledge.list_facts(doc_id)
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
         if not doc:
             return _json({"error": "document not found"}, 404)
-        resp = _json({"document": doc, "chunks": chunks})
+        resp = _json({"document": doc, "chunks": chunks, "facts": facts})
         _maybe_refresh_cookie(request, resp)
         return resp
 
