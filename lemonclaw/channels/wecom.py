@@ -257,7 +257,19 @@ class WeComChannel(BaseChannel):
             return None
 
         try:
-            return self._crypto.decrypt(echostr)
+            plaintext = self._crypto.decrypt(echostr)
+            if self._trigger_runtime:
+                self._trigger_runtime.record_trigger(
+                    source="webhook.wecom",
+                    kind="wecom.verify",
+                    payload_summary="verify callback",
+                    session_key="wecom:verify",
+                    channel="wecom",
+                    chat_id="verify",
+                    status="completed",
+                    metadata={"timestamp": timestamp, "nonce": nonce},
+                )
+            return plaintext
         except Exception as e:
             logger.error("WeCom verify: decrypt failed: {}", e)
             return None
@@ -353,6 +365,24 @@ class WeComChannel(BaseChannel):
         elif msg_type == "event":
             # Events like subscribe, click, etc. — ignore for now
             event_type = msg.get("Event", "")
+            if self._trigger_runtime:
+                normalized_event = (event_type or "event").strip().lower()
+                self._trigger_runtime.record_trigger(
+                    source="webhook.wecom",
+                    kind=f"wecom.event.{normalized_event}",
+                    payload_summary=f"[event] {event_type or 'event'}",
+                    session_key=f"wecom:{from_user}",
+                    channel="wecom",
+                    chat_id=from_user,
+                    status="completed",
+                    metadata={
+                        "msg_type": msg_type,
+                        "event": event_type,
+                        "event_key": msg.get("EventKey", ""),
+                        "msg_id": msg.get("MsgId", ""),
+                        "platform": "wecom",
+                    },
+                )
             logger.debug("WeCom event: {} from {}", event_type, from_user)
             return
         else:

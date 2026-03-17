@@ -1,10 +1,13 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from starlette.testclient import TestClient
 
 from lemonclaw.agent.loop import AgentLoop
 from lemonclaw.bus.queue import MessageBus
+from lemonclaw.channels.wecom import WeComChannel, WeComCrypto, verify_signature
+from lemonclaw.config.schema import WeComConfig
 from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
 from lemonclaw.session.manager import SessionManager
@@ -112,3 +115,48 @@ def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
     detail_resp = client.get(f"/api/triggers/{trigger['trigger_id']}")
     assert detail_resp.status_code == 200
     assert detail_resp.json()["trigger"]["kind"] == "heartbeat.run"
+
+
+@pytest.mark.asyncio
+async def test_wecom_event_trigger_is_recorded(tmp_path: Path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = WeComChannel(WeComConfig(), MessageBus(), trigger_runtime=trigger_runtime)
+
+    await channel._process_message(  # type: ignore[attr-defined]
+        {
+            "MsgType": "event",
+            "FromUserName": "user-1",
+            "Event": "subscribe",
+            "EventKey": "key-1",
+        }
+    )
+
+    records = trigger_runtime.list_triggers(limit=10)
+    assert records[0]["source"] == "webhook.wecom"
+    assert records[0]["kind"] == "wecom.event.subscribe"
+
+
+@pytest.mark.asyncio
+async def test_wecom_verify_trigger_is_recorded(tmp_path: Path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    cfg = WeComConfig(
+        corp_id="wx1234567890abcdef",
+        token="tok",
+        encoding_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    )
+    channel = WeComChannel(cfg, MessageBus(), trigger_runtime=trigger_runtime)
+    channel._crypto = WeComCrypto(cfg.encoding_aes_key, cfg.corp_id)
+
+    echostr = channel._crypto.encrypt("hello")
+    params = {
+        "timestamp": "123",
+        "nonce": "abc",
+        "echostr": echostr,
+        "msg_signature": verify_signature(cfg.token, "123", "abc", echostr),
+    }
+
+    result = await channel.handle_verify(params)
+
+    assert result == "hello"
+    records = trigger_runtime.list_triggers(limit=10)
+    assert records[0]["kind"] == "wecom.verify"
