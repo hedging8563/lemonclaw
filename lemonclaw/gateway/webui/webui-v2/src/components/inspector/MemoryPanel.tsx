@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { knowledgeDocuments, knowledgeError, knowledgeSummary, loadKnowledge } from '../../stores/knowledge';
+import { knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, searchKnowledge } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -54,6 +54,8 @@ export function MemoryPanel() {
   const [knowledgeSource, setKnowledgeSource] = useState('');
   const [knowledgeType, setKnowledgeType] = useState('url');
   const [knowledgeNote, setKnowledgeNote] = useState('');
+  const [knowledgeContent, setKnowledgeContent] = useState('');
+  const [knowledgeQuery, setKnowledgeQuery] = useState('');
 
   useEffect(() => {
     loadMemory();
@@ -121,6 +123,7 @@ export function MemoryPanel() {
           source: knowledgeSource,
           source_type: knowledgeType,
           note: knowledgeNote,
+          content: knowledgeContent,
         }),
       });
       setCreatingKnowledge(false);
@@ -128,9 +131,23 @@ export function MemoryPanel() {
       setKnowledgeSource('');
       setKnowledgeType('url');
       setKnowledgeNote('');
+      setKnowledgeContent('');
       await loadKnowledge();
     } catch (e: any) {
       setSaveError(e.message || t('knowledge_create_failed'));
+    }
+  };
+
+  const handleIngestKnowledge = async (docId: string) => {
+    setSaveError(null);
+    try {
+      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}/ingest`, { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_ingest_failed'));
     }
   };
 
@@ -141,6 +158,15 @@ export function MemoryPanel() {
       await loadKnowledge();
     } catch (e: any) {
       setSaveError(e.message || t('knowledge_delete_failed'));
+    }
+  };
+
+  const handleSearchKnowledge = async () => {
+    setSaveError(null);
+    try {
+      await searchKnowledge(knowledgeQuery);
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_search_failed'));
     }
   };
 
@@ -221,12 +247,19 @@ export function MemoryPanel() {
                 </select>
                 <input value={knowledgeSource} onInput={(e) => setKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
                 <textarea value={knowledgeNote} onInput={(e) => setKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+                {knowledgeType === 'manual' && (
+                  <textarea value={knowledgeContent} onInput={(e) => setKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
+                )}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                   <button onClick={() => setCreatingKnowledge(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
                   <button onClick={handleCreateKnowledge} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_create')}</button>
                 </div>
               </div>
             )}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              <input value={knowledgeQuery} onInput={(e) => setKnowledgeQuery((e.target as HTMLInputElement).value)} placeholder={t('knowledge_search_placeholder')} style={{ flex: 1, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+              <button onClick={() => void handleSearchKnowledge()} style={pillStyle()}>{t('knowledge_search')}</button>
+            </div>
             {knowledgeDocuments.value.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {knowledgeDocuments.value.map((doc) => (
@@ -236,20 +269,45 @@ export function MemoryPanel() {
                         <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
                       </div>
-                      <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px', flexShrink: 0 }}>{t('knowledge_remove')}</button>
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                        <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
+                        <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
+                      </div>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       <span style={pillStyle()}>{doc.source_type}</span>
                       <span style={pillStyle()}>{doc.status || 'registered'}</span>
+                      <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${doc.chunk_count || 0}`}</span>
                       <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
+                      {doc.ingested_at_ms ? <span style={pillStyle()}>{`${t('knowledge_ingested_at')}:${formatTime(doc.ingested_at_ms)}`}</span> : null}
                     </div>
                     {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
+                    {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
                   </div>
                 ))}
               </div>
             ) : (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
             )}
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_search_results')}</div>
+              {knowledgeResults.value.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {knowledgeResults.value.map((item, idx) => (
+                    <div key={`${item.doc_id || 'result'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.title || item.doc_id || '—'}</div>
+                        <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+              )}
+            </div>
           </div>
 
           {creating && (

@@ -21,6 +21,7 @@ export interface KnowledgeSummary {
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
 export const knowledgeDocuments = signal<KnowledgeDocumentRecord[]>([]);
 export const knowledgeError = signal<string | null>(null);
+export const knowledgeResults = signal<Array<Record<string, any>>>([]);
 
 export async function loadKnowledge() {
   knowledgeError.value = null;
@@ -32,5 +33,22 @@ export async function loadKnowledge() {
   } catch (err: any) {
     console.error('Failed to load knowledge documents', err);
     knowledgeError.value = err?.message || 'Failed to load knowledge';
+  }
+}
+
+export async function searchKnowledge(query: string) {
+  knowledgeError.value = null;
+  try {
+    const q = String(query || '').trim();
+    if (!q) {
+      knowledgeResults.value = [];
+      return;
+    }
+    const res = await apiFetch(`/api/knowledge/search?q=${encodeURIComponent(q)}&limit=8`);
+    const data = await res.json();
+    knowledgeResults.value = data.results || [];
+  } catch (err: any) {
+    console.error('Failed to search knowledge', err);
+    knowledgeError.value = err?.message || 'Failed to search knowledge';
   }
 }

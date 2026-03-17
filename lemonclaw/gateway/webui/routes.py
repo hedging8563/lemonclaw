@@ -1067,10 +1067,48 @@ def get_webui_routes(
                 source=str(body.get("source", "") or ""),
                 title=str(body.get("title", "") or ""),
                 note=str(body.get("note", "") or ""),
+                content=str(body.get("content", "") or ""),
             )
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
         resp = _json({"document": doc})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def ingest_knowledge_document(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        doc_id = str(request.path_params.get("doc_id", "") or "")
+        if not doc_id:
+            return _json({"error": "doc_id is required"}, 400)
+        try:
+            doc = await asyncio.to_thread(_knowledge.ingest_document, doc_id)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        except KeyError:
+            return _json({"error": "document not found"}, 404)
+        except FileNotFoundError as exc:
+            return _json({"error": str(exc)}, 400)
+        except Exception as exc:
+            return _json({"error": str(exc)}, 500)
+        resp = _json({"document": doc})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def search_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        query = str(request.query_params.get("q", "") or "").strip()
+        if not query:
+            return _json({"results": []})
+        try:
+            limit = min(int(request.query_params.get("limit", "5")), 20)
+        except (TypeError, ValueError):
+            limit = 5
+        results = await asyncio.to_thread(_knowledge.search, query, limit=limit)
+        resp = _json({"results": results})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1933,7 +1971,9 @@ def get_webui_routes(
         Route("/api/memory/entities", create_entity, methods=["POST"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
         Route("/api/knowledge", get_knowledge, methods=["GET"]),
+        Route("/api/knowledge/search", search_knowledge, methods=["GET"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
+        Route("/api/knowledge/documents/{doc_id}/ingest", ingest_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", delete_knowledge_document, methods=["DELETE"]),
         Route("/api/soul", get_soul, methods=["GET"]),
         Route("/api/soul", update_soul, methods=["PATCH"]),

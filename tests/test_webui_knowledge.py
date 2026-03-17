@@ -57,3 +57,31 @@ def test_knowledge_document_rejects_invalid_type(tmp_path: Path) -> None:
     )
     assert create_resp.status_code == 400
     assert create_resp.json()["error"] == "invalid source_type"
+
+
+def test_knowledge_manual_ingest_and_search(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Recovery Notes",
+            "source": "manual://recovery-notes",
+            "source_type": "manual",
+            "content": "Retry outbox events before escalating to manual recovery.",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    ingested = ingest_resp.json()["document"]
+    assert ingested["status"] == "ingested"
+    assert ingested["chunk_count"] >= 1
+
+    search_resp = client.get("/api/knowledge/search?q=retry outbox")
+    assert search_resp.status_code == 200
+    results = search_resp.json()["results"]
+    assert len(results) >= 1
+    assert results[0]["doc_id"] == doc_id
