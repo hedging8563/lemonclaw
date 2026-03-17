@@ -1376,9 +1376,41 @@ def get_webui_routes(
         postmortem = ledger.build_task_postmortem_view(task_id)
         if not postmortem:
             return _json({"error": "task not found"}, 404)
-        resp = _json(postmortem)
-        _maybe_refresh_cookie(request, resp)
-        return resp
+        fmt = str(request.query_params.get("format", "json") or "json").lower()
+        if fmt == "json":
+            resp = _json(postmortem)
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        if fmt == "md":
+            task = postmortem.get("task") or {}
+            outbox = (postmortem.get("outbox") or {})
+            lifecycle = dict(outbox.get("lifecycle") or {})
+            lines = [
+                f"# Task Postmortem: {task.get('task_id') or task_id}",
+                "",
+                f"- Goal: {task.get('goal') or ''}",
+                f"- Status: {task.get('status') or ''}",
+                f"- Stage: {task.get('current_stage') or ''}",
+                "",
+                "## Outbox Lifecycle",
+                "",
+                f"- Active Count: {lifecycle.get('active_count') or 0}",
+                f"- Terminal Count: {lifecycle.get('terminal_count') or 0}",
+                "",
+                "```json",
+                json.dumps(lifecycle, ensure_ascii=False, indent=2),
+                "```",
+                "",
+                "## Outbox Events",
+                "",
+                "```json",
+                json.dumps(outbox.get('events') or [], ensure_ascii=False, indent=2),
+                "```",
+            ]
+            resp = PlainTextResponse("\n".join(lines), media_type="text/markdown; charset=utf-8")
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        return _json({"error": "unsupported format"}, 400)
 
     # ── GET /api/watchdog — watchdog runtime snapshot ───────────────────
 

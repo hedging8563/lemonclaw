@@ -598,6 +598,11 @@ def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     assert data["outbox"]["lifecycle"]["status_counts"]["failed"] == 1
     assert data["outbox"]["events"][0]["effect"]["category"] == "webhook"
 
+    md_resp = client.get("/api/tasks/task_pm/postmortem", params={"format": "md"})
+    assert md_resp.status_code == 200
+    assert "## Outbox Lifecycle" in md_resp.text
+    assert "## Outbox Events" in md_resp.text
+
 
 def test_outbox_abandon_api_marks_event_and_task_abandoned(tmp_path):
     app, ledger = _build_app(tmp_path)
