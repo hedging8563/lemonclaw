@@ -213,10 +213,14 @@ def test_trigger_runtime_filters_by_family(tmp_path: Path) -> None:
     runtime.record_trigger(source="webhook.wecom", kind="wecom.event.subscribe")
     runtime.record_trigger(source="queue.internal", kind="queue.dispatch")
     runtime.record_trigger(source="alert.watchdog", kind="watchdog.soft_recovery")
+    runtime.record_trigger(source="bridge.whatsapp", kind="message.group")
+    runtime.record_trigger(source="sync.matrix", kind="message.room.text")
 
     webhook = runtime.list_triggers(limit=10, family="webhook")
     alerts = runtime.list_triggers(limit=10, family="alert")
     queue = runtime.list_triggers(limit=10, family="queue")
+    bridge = runtime.list_triggers(limit=10, family="bridge")
+    sync = runtime.list_triggers(limit=10, family="sync")
 
     assert len(webhook) == 1
     assert webhook[0]["source"] == "webhook.wecom"
@@ -224,3 +228,7 @@ def test_trigger_runtime_filters_by_family(tmp_path: Path) -> None:
     assert alerts[0]["source"] == "alert.watchdog"
     assert len(queue) == 1
     assert queue[0]["source"] == "queue.internal"
+    assert len(bridge) == 1
+    assert bridge[0]["source"] == "bridge.whatsapp"
+    assert len(sync) == 1
+    assert sync[0]["source"] == "sync.matrix"

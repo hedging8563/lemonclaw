@@ -44,6 +44,8 @@ def _derive_trigger_family(source: str, kind: str) -> str:
         ("socket.", "socket"),
         ("poll.", "poll"),
         ("queue.", "queue"),
+        ("bridge.", "bridge"),
+        ("sync.", "sync"),
     ):
         if source_value.startswith(prefix):
             return family
