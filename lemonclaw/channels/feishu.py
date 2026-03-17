@@ -16,6 +16,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.config.schema import FeishuConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 try:
     import lark_oapi as lark
@@ -264,9 +265,10 @@ class FeishuChannel(BaseChannel):
     
     name = "feishu"
     
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    def __init__(self, config: FeishuConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
+        self._trigger_runtime = trigger_runtime
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
@@ -917,6 +919,23 @@ class FeishuChannel(BaseChannel):
 
             # Forward to message bus
             reply_to = chat_id if is_group else sender_id
+            trigger_metadata: dict[str, Any] = {}
+            if self._trigger_runtime:
+                trigger = self._trigger_runtime.record_trigger(
+                    source="stream.feishu",
+                    kind=f"im.message.receive_v1.{msg_type or 'unknown'}",
+                    payload_summary=content[:200] if content else f"[{msg_type}]",
+                    session_key=f"{self.name}:{reply_to}",
+                    channel=self.name,
+                    chat_id=reply_to,
+                    metadata={
+                        "chat_type": chat_type,
+                        "message_id": message_id,
+                        "parent_id": getattr(message, "parent_id", None),
+                        "root_id": getattr(message, "root_id", None),
+                    },
+                )
+                trigger_metadata = build_trigger_metadata(trigger)
 
             await self._handle_message(
                 sender_id=sender_id,
@@ -924,6 +943,7 @@ class FeishuChannel(BaseChannel):
                 content=content,
                 media=media_paths,
                 metadata={
+                    **trigger_metadata,
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,

@@ -13,6 +13,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import DingTalkConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 try:
     from dingtalk_stream import (
@@ -113,9 +114,10 @@ class DingTalkChannel(BaseChannel):
 
     name = "dingtalk"
 
-    def __init__(self, config: DingTalkConfig, bus: MessageBus):
+    def __init__(self, config: DingTalkConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
+        self._trigger_runtime = trigger_runtime
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
 
@@ -296,12 +298,29 @@ class DingTalkChannel(BaseChannel):
             if is_group and not bool(meta.get("is_in_at_list")):
                 logger.debug("DingTalk group gate ignored non-@ message from {}", sender_id)
                 return
+            trigger_metadata: dict[str, Any] = {}
+            chat_target = str(meta.get("conversation_id") or sender_id)
+            if self._trigger_runtime:
+                trigger = self._trigger_runtime.record_trigger(
+                    source="stream.dingtalk",
+                    kind="chatbot.message.group" if is_group else "chatbot.message.private",
+                    payload_summary=str(content or "")[:200],
+                    session_key=f"{self.name}:{chat_target}",
+                    channel=self.name,
+                    chat_id=chat_target,
+                    metadata={
+                        "message_id": str(meta.get("message_id") or ""),
+                        "conversation_type": str(meta.get("conversation_type") or ""),
+                    },
+                )
+                trigger_metadata = build_trigger_metadata(trigger)
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=str(meta.get("conversation_id") or sender_id),
+                chat_id=chat_target,
                 content=str(content),
                 metadata={
                     **meta,
+                    **trigger_metadata,
                     "sender_name": sender_name,
                     "platform": "dingtalk",
                     "is_group": is_group,

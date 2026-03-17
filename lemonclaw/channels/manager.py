@@ -126,7 +126,7 @@ class ChannelManager:
             try:
                 from lemonclaw.channels.feishu import FeishuChannel
                 self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
+                    self.config.channels.feishu, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["feishu"].update({"registered": True, "available": True})
                 logger.info("Feishu channel enabled")
@@ -153,7 +153,7 @@ class ChannelManager:
             try:
                 from lemonclaw.channels.dingtalk import DingTalkChannel
                 self.channels["dingtalk"] = DingTalkChannel(
-                    self.config.channels.dingtalk, self.bus
+                    self.config.channels.dingtalk, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["dingtalk"].update({"registered": True, "available": True})
                 logger.info("DingTalk channel enabled")

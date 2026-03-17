@@ -9,6 +9,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.dingtalk import DingTalkChannel
 from lemonclaw.config.schema import DingTalkConfig
+from lemonclaw.triggers import TriggerRuntime
 
 
 @pytest.fixture
@@ -57,6 +58,39 @@ async def test_dingtalk_group_message_with_at_uses_conversation_id(dingtalk_chan
     assert kwargs["chat_id"] == "conv_group_1"
     assert kwargs["metadata"]["is_group"] is True
     assert kwargs["metadata"]["dingtalk"]["session_webhook"] == "https://example.invalid/webhook"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_inbound_records_stream_trigger(tmp_path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = DingTalkChannel(
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"),
+        MessageBus(),
+        trigger_runtime=trigger_runtime,
+    )
+    channel._handle_message = AsyncMock()
+
+    await channel._on_message(
+        "hello private",
+        "staff1",
+        "Alice",
+        metadata={
+            "message_id": "msg1",
+            "conversation_id": "staff1",
+            "conversation_type": "1",
+        },
+    )
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    trigger_id = kwargs["metadata"]["_trigger_id"]
+    assert kwargs["metadata"]["_trigger_source"] == "stream.dingtalk"
+    assert kwargs["metadata"]["_trigger_kind"] == "chatbot.message.private"
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record["source"] == "stream.dingtalk"
+    assert record["kind"] == "chatbot.message.private"
+    assert record["chat_id"] == "staff1"
 
 
 @pytest.mark.asyncio
