@@ -295,6 +295,7 @@ function renderTaskDetailBody(
   busy: string | undefined,
   expandedOutboxId: string | null,
   setExpandedOutboxId: (eventId: string | null) => void,
+  withTopDivider = true,
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
   const recovery = task.metadata?.recovery || {};
@@ -302,7 +303,7 @@ function renderTaskDetailBody(
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px dashed var(--border)', paddingTop: '10px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', ...(withTopDivider ? { borderTop: '1px dashed var(--border)', paddingTop: '10px' } : {}) }}>
       <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
         {formatDisplayDetail(detail.summary?.display_state || state)}
       </div>
@@ -656,7 +657,6 @@ function taskCard(
         </div>
       </div>
 
-      {isExpanded && detail && renderTaskDetailBody(task, detail, busy, expandedOutboxId, setExpandedOutboxId)}
     </div>
   );
 }
@@ -803,7 +803,6 @@ function recoveryQueueCard(
         </div>
       </div>
 
-      {isExpanded && detail && renderTaskDetailBody(task, detail, busy, expandedOutboxId, setExpandedOutboxId)}
     </div>
   );
 }
@@ -817,6 +816,11 @@ export function TaskRecoveryPanel() {
   const actionableTasks = sessionTasks.value.filter((task) => !isSettledTask(task));
   const settledTasks = sessionTasks.value.filter((task) => isSettledTask(task));
   const recoveryQueueTasks = recoveryTasks.value.filter((task) => !sessionTasks.value.some((sessionTask) => sessionTask.task_id === task.task_id));
+  const selectedTask = [...recoveryTasks.value, ...sessionTasks.value].find((task) => task.task_id === expandedTaskId) || null;
+  const selectedDetail = expandedTaskId ? taskDetails.value[expandedTaskId] : null;
+  const selectedBusy = expandedTaskId ? taskActionBusy.value[expandedTaskId] : undefined;
+  const selectedState = selectedTask?.display_state;
+  const selectedTone = toneStyles(selectedState?.tone || 'muted');
 
   useEffect(() => {
     loadTaskPanel(activeSessionKey.value);
@@ -926,6 +930,45 @@ export function TaskRecoveryPanel() {
             ) : (
               recoveryQueueTasks.map((task) => recoveryQueueCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))
             )}
+          </div>
+        )}
+
+        {selectedTask && selectedDetail && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '6px' }}>
+                  {t('task_detail_panel_title')}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
+                  {selectedTask.goal || selectedTask.task_id}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '10px', fontFamily: 'var(--font-mono)', ...selectedTone }}>
+                    {formatDisplayState(selectedState)}
+                  </span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    {formatResumeRoute(selectedTask)}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setExpandedTaskId(null)}
+                style={{
+                  padding: '6px 10px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('task_detail_panel_close')}
+              </button>
+            </div>
+            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, false)}
           </div>
         )}
       </div>
