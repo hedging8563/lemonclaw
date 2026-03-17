@@ -1117,8 +1117,12 @@ class AgentLoop:
             if turn_usage.llm_calls:
                 self.usage_tracker.record_turn(key, turn_usage, session.metadata)
             self.sessions.save(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or t("bg_task_done", session_lang(session)))
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or t("bg_task_done", session_lang(session)),
+                metadata=dict(msg.metadata or {}),
+            )
 
         key = session_key or msg.session_key
         task_id = str((msg.metadata or {}).get("_task_id", ""))

@@ -22,7 +22,17 @@ async def test_subagent_announce_result_preserves_session_key_override(tmp_path:
         label="demo",
         task="do work",
         result="done",
-        origin={"channel": "telegram", "chat_id": "123", "session_key": "telegram:123:456"},
+        origin={
+            "channel": "telegram",
+            "chat_id": "123",
+            "session_key": "telegram:123:456",
+            "delivery_context": {
+                "source_channel": "telegram",
+                "source_chat_id": "123",
+                "session_key": "telegram:123:456",
+                "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+            },
+        },
         status="ok",
     )
 
@@ -32,6 +42,7 @@ async def test_subagent_announce_result_preserves_session_key_override(tmp_path:
     assert msg.chat_id == "telegram:123"
     assert msg.session_key_override == "telegram:123:456"
     assert msg.session_key == "telegram:123:456"
+    assert msg.metadata["_delivery_context"]["route"]["message_thread_id"] == 456
 
 
 @pytest.mark.asyncio
@@ -43,6 +54,14 @@ async def test_agent_loop_system_message_uses_session_key_override(make_agent_lo
         sender_id="subagent",
         chat_id="telegram:123",
         content="background result",
+        metadata={
+            "_delivery_context": {
+                "source_channel": "telegram",
+                "source_chat_id": "123",
+                "session_key": "telegram:123:456",
+                "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+            }
+        },
         session_key_override="telegram:123:456",
     )
 
@@ -51,3 +70,4 @@ async def test_agent_loop_system_message_uses_session_key_override(make_agent_lo
     assert result is not None
     assert loop.sessions._load("telegram:123:456") is not None
     assert loop.sessions._load("telegram:123") is None
+    assert result.metadata["_delivery_context"]["route"]["message_thread_id"] == 456

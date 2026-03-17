@@ -91,20 +91,20 @@ class CronTool(Tool):
         _session_key: str | None = None,
         **kwargs: Any
     ) -> str:
-        effective_channel = _default_channel or self._channel
-        effective_chat_id = _default_chat_id or self._chat_id
         if action == "add":
             if _IN_CRON_CONTEXT.get():
                 return "Error: cannot schedule new jobs from within a cron job (prevents recursive loops)"
+            if not (_default_channel and _default_chat_id and _session_key):
+                return "Error: cron add requires explicit channel/chat_id/session_key context"
             return self._add_job(
                 message,
                 every_seconds,
                 cron_expr,
                 tz,
                 at,
-                effective_channel,
-                effective_chat_id,
-                _session_key or self._session_key or (f"{effective_channel}:{effective_chat_id}" if effective_channel and effective_chat_id else None),
+                _default_channel,
+                _default_chat_id,
+                _session_key,
                 dict(_default_delivery_context or {}),
             )
         elif action == "list":

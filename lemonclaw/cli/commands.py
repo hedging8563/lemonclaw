@@ -39,6 +39,14 @@ _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
 
 
+def _normalize_runtime_delivery_metadata(metadata: dict | None) -> dict:
+    normalized = dict(metadata or {})
+    delivery_context = normalized.get("delivery_context")
+    if isinstance(delivery_context, dict) and "_delivery_context" not in normalized:
+        normalized["_delivery_context"] = dict(delivery_context)
+    return normalized
+
+
 def _flush_pending_tty_input() -> None:
     """Drop unread keypresses typed while the model was generating output."""
     try:
@@ -359,12 +367,13 @@ def gateway(
             logger.warning("Unknown system_event: {}", job.payload.message)
             return None
 
+        runtime_metadata = _normalize_runtime_delivery_metadata(dict(job.payload.metadata or {}))
         response = await agent.process_direct(
             job.payload.message,
             session_key=job.payload.session_key or f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
-            metadata=dict(job.payload.metadata or {}),
+            metadata=runtime_metadata,
         )
         if job.payload.deliver and job.payload.to:
             from lemonclaw.bus.events import OutboundMessage
@@ -372,7 +381,7 @@ def gateway(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
                 content=response or "",
-                metadata=dict(job.payload.metadata or {}),
+                metadata=runtime_metadata,
             ))
         return response
     cron.on_job = on_cron_job
@@ -1102,11 +1111,13 @@ def cron_run(
     result_holder = []
 
     async def on_job(job: CronJob) -> str | None:
+        runtime_metadata = _normalize_runtime_delivery_metadata(dict(job.payload.metadata or {}))
         response = await agent_loop.process_direct(
             job.payload.message,
-            session_key=f"cron:{job.id}",
+            session_key=job.payload.session_key or f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            metadata=runtime_metadata,
         )
         result_holder.append(response)
         return response

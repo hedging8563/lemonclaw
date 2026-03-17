@@ -32,6 +32,7 @@ async def test_spawn_prefers_per_call_default_context_over_instance_context() ->
         "origin_channel": "fresh",
         "origin_chat_id": "target",
         "session_key": "fresh:target:thread",
+        "origin_delivery_context": {},
     }]
 
 
@@ -52,14 +53,8 @@ async def test_spawn_recomputes_session_key_from_per_call_context_when_key_missi
         _default_chat_id="target",
     )
 
-    assert result == "ok"
-    assert calls == [{
-        "task": "do work",
-        "label": None,
-        "origin_channel": "fresh",
-        "origin_chat_id": "target",
-        "session_key": "fresh:target",
-    }]
+    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -87,6 +82,7 @@ async def test_spawn_preserves_thread_scoped_session_key_when_provided() -> None
         "origin_channel": "telegram",
         "origin_chat_id": "123",
         "session_key": "telegram:123:456",
+        "origin_delivery_context": {},
     }]
 
 
@@ -103,14 +99,8 @@ async def test_spawn_falls_back_to_instance_context_when_no_overrides() -> None:
 
     result = await tool.execute(task="do work")
 
-    assert result == "ok"
-    assert calls == [{
-        "task": "do work",
-        "label": None,
-        "origin_channel": "inst",
-        "origin_chat_id": "ctx",
-        "session_key": "inst:ctx",
-    }]
+    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -126,11 +116,5 @@ async def test_spawn_ignores_partial_per_call_override_to_avoid_mixed_context() 
 
     result = await tool.execute(task="do work", _default_channel="fresh")
 
-    assert result == "ok"
-    assert calls == [{
-        "task": "do work",
-        "label": None,
-        "origin_channel": "inst",
-        "origin_chat_id": "ctx",
-        "session_key": "inst:ctx",
-    }]
+    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert calls == []

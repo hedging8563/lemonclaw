@@ -1,6 +1,7 @@
 import pytest
 
 from lemonclaw.agent.tools.cron import CronTool, _IN_CRON_CONTEXT
+from lemonclaw.cli.commands import _normalize_runtime_delivery_metadata
 from lemonclaw.cron.service import CronService
 from lemonclaw.cron.types import CronSchedule
 from lemonclaw.ledger.runtime import TaskLedger
@@ -19,6 +20,22 @@ def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     assert service.list_jobs(include_disabled=True) == []
 
 
+def test_normalize_runtime_delivery_metadata_promotes_delivery_context() -> None:
+    metadata = {
+        "delivery_context": {
+            "source_channel": "telegram",
+            "source_chat_id": "123",
+            "session_key": "telegram:123:456",
+            "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+        }
+    }
+
+    normalized = _normalize_runtime_delivery_metadata(metadata)
+
+    assert normalized["_delivery_context"]["route"]["message_thread_id"] == 456
+    assert normalized["delivery_context"]["session_key"] == "telegram:123:456"
+
+
 async def test_cron_tool_blocks_add_in_cron_context(tmp_path) -> None:
     """CronTool.execute(action='add') should be rejected inside cron context."""
     service = CronService(tmp_path / "cron" / "jobs.json")
@@ -26,19 +43,19 @@ async def test_cron_tool_blocks_add_in_cron_context(tmp_path) -> None:
     tool.set_context("test", "chat1")
 
     # Normal add should work
-    result = await tool.execute(action="add", message="hello", every_seconds=60)
+    result = await tool.execute(action="add", message="hello", every_seconds=60, _default_channel="test", _default_chat_id="chat1", _session_key="test:chat1")
     assert "Created job" in result
 
     # Inside cron context, add should be blocked
     token = _IN_CRON_CONTEXT.set(True)
     try:
-        result = await tool.execute(action="add", message="recursive", every_seconds=60)
+        result = await tool.execute(action="add", message="recursive", every_seconds=60, _default_channel="test", _default_chat_id="chat1", _session_key="test:chat1")
         assert "cannot schedule" in result
     finally:
         _IN_CRON_CONTEXT.reset(token)
 
     # After reset, add should work again
-    result = await tool.execute(action="add", message="after reset", every_seconds=120)
+    result = await tool.execute(action="add", message="after reset", every_seconds=120, _default_channel="test", _default_chat_id="chat1", _session_key="test:chat1")
     assert "Created job" in result
 
 
@@ -54,6 +71,7 @@ async def test_cron_tool_prefers_per_call_default_context_over_instance_context(
         every_seconds=60,
         _default_channel="fresh",
         _default_chat_id="target",
+        _session_key="fresh:target:thread",
     )
 
     assert "Created job" in result
@@ -61,6 +79,25 @@ async def test_cron_tool_prefers_per_call_default_context_over_instance_context(
     assert len(jobs) == 1
     assert jobs[0].payload.channel == "fresh"
     assert jobs[0].payload.to == "target"
+    assert jobs[0].payload.session_key == "fresh:target:thread"
+
+
+@pytest.mark.asyncio
+async def test_cron_tool_fails_closed_without_full_context(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    tool = CronTool(service)
+    tool.set_context("old", "stale")
+
+    result = await tool.execute(
+        action="add",
+        message="hello",
+        every_seconds=60,
+        _default_channel="fresh",
+        _default_chat_id="target",
+    )
+
+    assert result == "Error: cron add requires explicit channel/chat_id/session_key context"
+    assert service.list_jobs() == []
 
 
 @pytest.mark.asyncio
