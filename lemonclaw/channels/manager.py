@@ -88,6 +88,7 @@ class ChannelManager:
                     api_key=self.config.lemondata.api_key,
                     api_base=self.config.lemondata.api_base_url,
                     activity_bus=self.activity_bus,
+                    trigger_runtime=self.trigger_runtime,
                 )
                 self._channel_status["telegram"].update({"registered": True, "available": True})
                 logger.info("Telegram channel enabled")
@@ -179,7 +180,7 @@ class ChannelManager:
             try:
                 from lemonclaw.channels.slack import SlackChannel
                 self.channels["slack"] = SlackChannel(
-                    self.config.channels.slack, self.bus
+                    self.config.channels.slack, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["slack"].update({"registered": True, "available": True})
                 logger.info("Slack channel enabled")
@@ -208,6 +209,7 @@ class ChannelManager:
                 self.channels["matrix"] = MatrixChannel(
                     self.config.channels.matrix,
                     self.bus,
+                    trigger_runtime=self.trigger_runtime,
                 )
                 self._channel_status["matrix"].update({"registered": True, "available": True})
                 logger.info("Matrix channel enabled")

@@ -14,6 +14,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.telegram import TelegramChannel
 from lemonclaw.config.schema import TelegramConfig
+from lemonclaw.triggers import TriggerRuntime
 
 
 @pytest.fixture
@@ -251,6 +252,30 @@ async def test_model_callback_forwards_private_chat_without_thread_metadata(tele
         },
         session_key=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_telegram_inbound_records_poll_trigger(tmp_path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="test-token"),
+        MessageBus(),
+        trigger_runtime=trigger_runtime,
+    )
+    channel._handle_message = AsyncMock()
+
+    await channel._on_message(_private_text_update("hello"), None)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    trigger_id = kwargs["metadata"]["_trigger_id"]
+    assert kwargs["metadata"]["_trigger_source"] == "poll.telegram"
+    assert kwargs["metadata"]["_trigger_kind"] == "message.private"
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record["source"] == "poll.telegram"
+    assert record["kind"] == "message.private"
+    assert record["chat_id"] == "12345"
 
 
 @pytest.mark.asyncio

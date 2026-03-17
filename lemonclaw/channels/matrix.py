@@ -26,6 +26,7 @@ except ImportError as e:
 
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.loader import get_data_dir
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 from lemonclaw.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -135,7 +136,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
 
     def __init__(self, config: Any, bus, *, limit_media_to_workspace: bool = False,
-                 workspace: Path | None = None):
+                 workspace: Path | None = None, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
@@ -144,6 +145,7 @@ class MatrixChannel(BaseChannel):
         self._workspace = workspace.expanduser().resolve() if workspace else None
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
+        self._trigger_runtime = trigger_runtime
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
@@ -662,9 +664,21 @@ class MatrixChannel(BaseChannel):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
+            metadata = self._base_metadata(room, event)
+            if self._trigger_runtime:
+                trigger = self._trigger_runtime.record_trigger(
+                    source="sync.matrix",
+                    kind="message.dm.text" if self._is_direct_room(room) else "message.room.text",
+                    payload_summary=(event.body or "")[:200],
+                    session_key=f"{self.name}:{room.room_id}",
+                    channel=self.name,
+                    chat_id=room.room_id,
+                    metadata={"event_id": str(getattr(event, "event_id", "") or "")},
+                )
+                metadata.update(build_trigger_metadata(trigger))
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content=event.body, metadata=self._base_metadata(room, event),
+                content=event.body, metadata=metadata,
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
@@ -694,6 +708,17 @@ class MatrixChannel(BaseChannel):
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
+            if self._trigger_runtime:
+                trigger = self._trigger_runtime.record_trigger(
+                    source="sync.matrix",
+                    kind="message.dm.media" if self._is_direct_room(room) else "message.room.media",
+                    payload_summary="\n".join(parts)[:200],
+                    session_key=f"{self.name}:{room.room_id}",
+                    channel=self.name,
+                    chat_id=room.room_id,
+                    metadata={"event_id": str(getattr(event, "event_id", "") or "")},
+                )
+                meta.update(build_trigger_metadata(trigger))
             if attachment:
                 meta["attachments"] = [attachment]
             await self._handle_message(

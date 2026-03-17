@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.config.schema import SlackConfig
+from lemonclaw.triggers import TriggerRuntime
 
 slack_module = pytest.importorskip('lemonclaw.channels.slack', exc_type=ImportError)
 SlackChannel = slack_module.SlackChannel
@@ -38,7 +39,8 @@ async def test_slack_thread_reply_to_bot_counts_as_group_trigger(tmp_path):
     config = SlackConfig(enabled=True, bot_token='xoxb-test', app_token='xapp-test')
     config.group_policy = 'mention'
     config.group_require_mention = True
-    channel = SlackChannel(config, bus)
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = SlackChannel(config, bus, trigger_runtime=trigger_runtime)
     channel._bot_user_id = 'BOT123'
     channel._web_client = SimpleNamespace(reactions_add=AsyncMock())
     channel._handle_message = AsyncMock()
@@ -61,3 +63,9 @@ async def test_slack_thread_reply_to_bot_counts_as_group_trigger(tmp_path):
     channel._handle_message.assert_awaited_once()
     kwargs = channel._handle_message.await_args.kwargs
     assert kwargs['session_key'] == 'slack:CH1:1000.1'
+    trigger_id = kwargs['metadata']['_trigger_id']
+    assert kwargs['metadata']['_trigger_source'] == 'socket.slack'
+    assert kwargs['metadata']['_trigger_kind'] == 'message.channel'
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record['chat_id'] == 'CH1'

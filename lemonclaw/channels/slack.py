@@ -16,6 +16,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import SlackConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 
 class SlackChannel(BaseChannel):
@@ -23,9 +24,10 @@ class SlackChannel(BaseChannel):
 
     name = "slack"
 
-    def __init__(self, config: SlackConfig, bus: MessageBus):
+    def __init__(self, config: SlackConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: SlackConfig = config
+        self._trigger_runtime = trigger_runtime
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
@@ -189,19 +191,31 @@ class SlackChannel(BaseChannel):
 
         # Thread-scoped session key for channel/group messages
         session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        metadata = {
+            "slack": {
+                "event": event,
+                "thread_ts": thread_ts,
+                "channel_type": channel_type,
+            },
+        }
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="socket.slack",
+                kind=f"{event_type}.{channel_type or 'unknown'}",
+                payload_summary=text[:200],
+                session_key=session_key or f"slack:{chat_id}",
+                channel=self.name,
+                chat_id=chat_id,
+                metadata={"ts": event.get("ts"), "thread_ts": thread_ts},
+            )
+            metadata.update(build_trigger_metadata(trigger))
 
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
-                metadata={
-                    "slack": {
-                        "event": event,
-                        "thread_ts": thread_ts,
-                        "channel_type": channel_type,
-                    },
-                },
+                metadata=metadata,
                 session_key=session_key,
             )
         except Exception:

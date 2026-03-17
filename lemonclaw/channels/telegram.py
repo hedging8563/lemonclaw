@@ -30,6 +30,7 @@ from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.channels.utils import split_message as _split_message_impl
 from lemonclaw.config.schema import TelegramConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 # Telegram Bot API file size limit (50MB)
 _TG_MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -143,11 +144,13 @@ class TelegramChannel(BaseChannel):
         api_key: str = "",
         api_base: str = "",
         activity_bus = None,
+        trigger_runtime: TriggerRuntime | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.api_key = api_key
         self.api_base = api_base
+        self._trigger_runtime = trigger_runtime
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -986,6 +989,22 @@ class TelegramChannel(BaseChannel):
             "is_group": is_group,
             **self._sender_metadata(sender),
         }
+        if self._trigger_runtime:
+            trigger_kind = "message.channel_post" if getattr(update, "channel_post", None) is not None else ("message.group" if is_group else "message.private")
+            trigger = self._trigger_runtime.record_trigger(
+                source="poll.telegram",
+                kind=trigger_kind,
+                payload_summary=content[:200],
+                session_key=session_key or f"telegram:{str_chat_id}",
+                channel=self.name,
+                chat_id=str_chat_id,
+                metadata={
+                    "message_id": int(getattr(message, "message_id", 0) or 0),
+                    "update_id": int(getattr(update, "update_id", 0) or 0),
+                    "thread_id": int(thread_id or 0),
+                },
+            )
+            base_metadata.update(build_trigger_metadata(trigger))
         if reply_to_message := getattr(message, "reply_to_message", None):
             if getattr(reply_to_message, "message_id", None) is not None:
                 base_metadata["reply_to_message_id"] = reply_to_message.message_id

@@ -1,12 +1,14 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.config.schema import MatrixConfig
+from lemonclaw.triggers import TriggerRuntime
 
 matrix_module = pytest.importorskip(
     "lemonclaw.channels.matrix",
@@ -203,6 +205,27 @@ async def test_matrix_dm_pairing_routes_pending_and_approval(tmp_path) -> None:
     approve_event = SimpleNamespace(sender='@alice:matrix.org', body='/approve @bob:matrix.org', event_id='$approve', source={'content': {}})
     await channel._on_message(owner_room, approve_event)
     assert any(msg.chat_id == '!pending:matrix.org' and 'approved' in (msg.content or '').lower() for msg in outbound)
+
+
+@pytest.mark.asyncio
+async def test_matrix_text_message_records_sync_trigger(tmp_path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = MatrixChannel(_make_config(allow_from=["*"]), MessageBus(), trigger_runtime=trigger_runtime)
+    channel._handle_message = AsyncMock()
+    channel._start_typing_keepalive = AsyncMock()
+    room = SimpleNamespace(room_id='!room:matrix.org', display_name='Room', member_count=2)
+    event = SimpleNamespace(sender='@alice:matrix.org', body='hello', event_id='$evt1', source={'content': {}})
+
+    await channel._on_message(room, event)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    trigger_id = kwargs['metadata']['_trigger_id']
+    assert kwargs['metadata']['_trigger_source'] == 'sync.matrix'
+    assert kwargs['metadata']['_trigger_kind'] == 'message.dm.text'
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record['chat_id'] == '!room:matrix.org'
 
 
 @pytest.mark.asyncio
