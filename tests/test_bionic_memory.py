@@ -442,6 +442,33 @@ async def test_context_builder_resolve_retrieval_context_falls_back_without_prov
     assert meta["fallbacks"] == ["provider_unbound"]
 
 
+@pytest.mark.asyncio
+async def test_context_builder_resolve_retrieval_context_includes_knowledge_hits(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    doc = ctx.knowledge.create_document(
+        source_type="manual",
+        source="manual://deploy-notes",
+        title="Deploy Notes",
+        content="When deployment gets stuck, retry the outbox first and inspect trigger history.",
+    )
+    ctx.knowledge.ingest_document(doc["doc_id"])
+
+    memory_ctx, rules_ctx, meta = await ctx.resolve_retrieval_context("deployment trigger history and outbox retry")
+
+    assert "Relevant Knowledge" in memory_ctx
+    assert "Deploy Notes" in memory_ctx
+    assert "outbox first" in memory_ctx
+    assert rules_ctx == ""
+    assert meta["knowledge_count"] >= 1
+    assert "knowledge" in meta["hit_sources"]
+
+
 # ── Core Promotion / Demotion ────────────────────────────────────────────────
 
 

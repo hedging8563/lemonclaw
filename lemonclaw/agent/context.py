@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from lemonclaw.agent.memory import MemoryStore
+from lemonclaw.knowledge import KnowledgeStore
 from lemonclaw.agent.prompting import build_mode_overlay, parse_soul_markdown
 from lemonclaw.agent.skills import SkillsLoader
 from lemonclaw.utils.attachments import (
@@ -28,6 +29,7 @@ class ContextBuilder:
         self.workspace = workspace
         self.system_prompt = system_prompt
         self.memory = MemoryStore(workspace)
+        self.knowledge = KnowledgeStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=disabled_skills)
         self._triggered_skills: list[str] = []
 
@@ -284,8 +286,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 keyword_rules=keyword_rules,
             )
 
+        knowledge_hits = self.knowledge.search(current_message, limit=3)
+        knowledge_ctx = KnowledgeStore.format_for_context(knowledge_hits)
+
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         memory_ctx = MemoryTrigger.format_for_context(cards)
+        if knowledge_ctx:
+            memory_ctx = f"{memory_ctx}\n\n{knowledge_ctx}".strip() if memory_ctx else knowledge_ctx
         rules_ctx = ProceduralMemory.format_for_context(rules)
         hit_sources = sorted({
             str(source)
@@ -302,10 +309,14 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "fallbacks": list(trace.get("fallbacks") or []),
             "card_count": len(cards),
             "rule_count": len(rules),
+            "knowledge_count": len(knowledge_hits),
+            "knowledge_sources": [str(item.get("source") or "") for item in knowledge_hits],
             "hit_sources": hit_sources,
             "card_sources": dict(trace.get("card_sources") or {}),
             "rule_sources": dict(trace.get("rule_sources") or {}),
         }
+        if knowledge_hits and "knowledge" not in meta["hit_sources"]:
+            meta["hit_sources"] = sorted([*meta["hit_sources"], "knowledge"])
         return memory_ctx, rules_ctx, meta
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:

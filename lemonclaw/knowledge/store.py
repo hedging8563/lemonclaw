@@ -174,6 +174,18 @@ class KnowledgeStore:
             })
         return results
 
+    @staticmethod
+    def format_for_context(results: list[dict[str, Any]]) -> str:
+        if not results:
+            return ""
+        parts = ["## Relevant Knowledge (auto-loaded)"]
+        for item in results:
+            title = str(item.get("title") or item.get("doc_id") or "knowledge")
+            source = str(item.get("source") or "—")
+            snippet = str(item.get("snippet") or "").strip()
+            parts.append(f"\n### {title}\n- Source: {source}\n- Snippet: {snippet}")
+        return "\n".join(parts)
+
     def _load_document_content(self, document: dict[str, Any]) -> str:
         source_type = str(document.get("source_type") or "")
         if source_type == "manual":
