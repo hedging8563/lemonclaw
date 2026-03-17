@@ -150,6 +150,21 @@ def get_webui_routes(
     _task_recheck_locks: dict[str, asyncio.Lock] = {}
     _task_resume_locks: dict[str, asyncio.Lock] = {}
 
+    def _attach_trigger_context(payload: dict[str, Any]) -> dict[str, Any]:
+        if trigger_runtime is None:
+            return payload
+        task = dict(payload.get("task") or {})
+        trigger_meta = dict((task.get("metadata") or {}).get("trigger") or {})
+        trigger_id = str(trigger_meta.get("trigger_id") or "")
+        if not trigger_id:
+            return payload
+        trigger = trigger_runtime.read_trigger(trigger_id)
+        if not trigger:
+            return payload
+        enriched = dict(payload)
+        enriched["trigger"] = trigger
+        return enriched
+
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
         if request.url.scheme == "https":
@@ -1351,6 +1366,7 @@ def get_webui_routes(
         export_view = ledger.build_task_export_view(task_id)
         if not export_view:
             return _json({"error": "task not found"}, 404)
+        export_view = _attach_trigger_context(export_view)
 
         fmt = str(request.query_params.get("format", "json") or "json").lower()
         if fmt == "json":
@@ -1369,8 +1385,21 @@ def get_webui_routes(
                 f"- Last Successful Step: {summary.get('last_successful_step') or '—'}",
                 f"- Resume From Step: {summary.get('resume_from_step') or '—'}",
                 "",
-                "## Recovery History",
+                "## Trigger",
             ]
+            trigger = export_view.get("trigger") or {}
+            if trigger:
+                lines.extend([
+                    f"- Source: {trigger.get('source') or '—'}",
+                    f"- Kind: {trigger.get('kind') or '—'}",
+                    f"- Trigger ID: {trigger.get('trigger_id') or '—'}",
+                ])
+            else:
+                lines.append("- none")
+            lines.extend([
+                "",
+                "## Recovery History",
+            ])
             recovery_history = list(summary.get("recovery_history") or [])
             if recovery_history:
                 for item in recovery_history:
@@ -1416,6 +1445,7 @@ def get_webui_routes(
         postmortem = ledger.build_task_postmortem_view(task_id)
         if not postmortem:
             return _json({"error": "task not found"}, 404)
+        postmortem = _attach_trigger_context(postmortem)
         fmt = str(request.query_params.get("format", "json") or "json").lower()
         if fmt == "json":
             resp = _json(postmortem)
@@ -1425,12 +1455,25 @@ def get_webui_routes(
             task = postmortem.get("task") or {}
             outbox = (postmortem.get("outbox") or {})
             lifecycle = dict(outbox.get("lifecycle") or {})
+            trigger = postmortem.get("trigger") or {}
             lines = [
                 f"# Task Postmortem: {task.get('task_id') or task_id}",
                 "",
                 f"- Goal: {task.get('goal') or ''}",
                 f"- Status: {task.get('status') or ''}",
                 f"- Stage: {task.get('current_stage') or ''}",
+                "",
+                "## Trigger",
+            ]
+            if trigger:
+                lines.extend([
+                    f"- Source: {trigger.get('source') or '—'}",
+                    f"- Kind: {trigger.get('kind') or '—'}",
+                    f"- Trigger ID: {trigger.get('trigger_id') or '—'}",
+                ])
+            else:
+                lines.append("- none")
+            lines.extend([
                 "",
                 "## Outbox Lifecycle",
                 "",
@@ -1446,7 +1489,7 @@ def get_webui_routes(
                 "```json",
                 json.dumps(outbox.get('events') or [], ensure_ascii=False, indent=2),
                 "```",
-            ]
+            ])
             resp = PlainTextResponse("\n".join(lines), media_type="text/markdown; charset=utf-8")
             _maybe_refresh_cookie(request, resp)
             return resp

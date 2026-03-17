@@ -11,6 +11,7 @@ from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.auth import create_session_cookie
 from lemonclaw.ledger.runtime import TaskLedger
 from lemonclaw.session.manager import SessionManager
+from lemonclaw.triggers import TriggerRuntime
 from lemonclaw.watchdog.service import WatchdogService
 
 
@@ -565,6 +566,49 @@ def test_task_export_api_redacts_sensitive_payload_and_supports_markdown(tmp_pat
     assert md_resp.status_code == 200
     assert "## Recovery History" in md_resp.text
     assert "## Outbox Postmortem" in md_resp.text
+
+
+def test_task_export_and_postmortem_include_trigger_bundle(tmp_path):
+    trigger_runtime = TriggerRuntime(tmp_path)
+    trigger = trigger_runtime.record_trigger(
+        source="cron",
+        kind="agent_turn",
+        payload_summary="run export",
+        session_key="telegram:123",
+        channel="telegram",
+        chat_id="123",
+    )
+    app, ledger = _build_app(
+        tmp_path,
+        agent_loop=SimpleNamespace(workspace=tmp_path, ledger=TaskLedger(tmp_path), trigger_runtime=trigger_runtime),
+        ledger=TaskLedger(tmp_path),
+    )
+    ledger.ensure_task(
+        task_id="task_bundle",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="bundle me",
+        metadata={"trigger": {"trigger_id": trigger["trigger_id"], "source": trigger["source"], "kind": trigger["kind"]}},
+    )
+
+    client = TestClient(app)
+    export_json = client.get("/api/tasks/task_bundle/export", params={"format": "json"})
+    assert export_json.status_code == 200
+    assert export_json.json()["trigger"]["trigger_id"] == trigger["trigger_id"]
+
+    export_md = client.get("/api/tasks/task_bundle/export", params={"format": "md"})
+    assert export_md.status_code == 200
+    assert "## Trigger" in export_md.text
+
+    pm_json = client.get("/api/tasks/task_bundle/postmortem", params={"format": "json"})
+    assert pm_json.status_code == 200
+    assert pm_json.json()["trigger"]["kind"] == "agent_turn"
+
+    pm_md = client.get("/api/tasks/task_bundle/postmortem", params={"format": "md"})
+    assert pm_md.status_code == 200
+    assert "## Trigger" in pm_md.text
 
 
 def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):

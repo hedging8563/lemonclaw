@@ -234,6 +234,11 @@ def create_app(
     runtime: GatewayRuntimeContext | None = None,
 ) -> Starlette:
     """Build the Starlette ASGI application."""
+    if runtime is None and trigger_runtime is None and agent_loop is not None:
+        # Tests and lightweight embeddings sometimes attach the trigger ledger to
+        # the loop object directly. Mirror that into the gateway runtime so the
+        # WebUI/API surfaces can still resolve trigger bundles.
+        trigger_runtime = getattr(agent_loop, "trigger_runtime", None)
     runtime = runtime or GatewayRuntimeContext(
         version=version,
         model=model,
