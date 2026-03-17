@@ -844,8 +844,10 @@ def get_webui_routes(
 
     # ── 9.2: Memory REST API ─────────────────────────────────────────────
 
+    import re
     from lemonclaw.agent.memory import MemoryStore
     _memory = MemoryStore(agent_loop.workspace)
+    _entity_name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
     async def get_memory(request: Request) -> Response:
         """9.2: Return all memory layers."""
@@ -991,6 +993,50 @@ def get_webui_routes(
             return _json({"error": "Entity not found"}, 404)
         _memory.entities.update_card(name, content)
         resp = _json({"ok": True})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def create_entity(request: Request) -> Response:
+        """Create a new entity card."""
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+
+        name = str(body.get("name", "") or "").strip()
+        if not name:
+            return _json({"error": "name is required"}, 400)
+        if not _entity_name_re.match(name):
+            return _json({"error": "invalid entity name"}, 400)
+        if _memory.entities.get_card(name):
+            return _json({"error": "entity already exists"}, 409)
+
+        card_type = str(body.get("type", "") or "note").strip()[:64]
+        raw_keywords = body.get("keywords") or []
+        if isinstance(raw_keywords, str):
+            keywords = [item.strip() for item in raw_keywords.split(",") if item.strip()]
+        elif isinstance(raw_keywords, list):
+            keywords = [str(item).strip() for item in raw_keywords if str(item).strip()]
+        else:
+            keywords = []
+
+        content = str(body.get("body", "") or "")
+        if len(content) > 16000:
+            return _json({"error": "Content too large (max 16000 characters)"}, 400)
+
+        card = _memory.entities.create_card(name, card_type, keywords, content)
+        resp = _json({
+            "entity": {
+                "name": card.name,
+                "type": card.meta.get("type", ""),
+                "keywords": card.keywords,
+                "access_count": card.access_count,
+                "body": card.body.strip(),
+            }
+        })
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1833,6 +1879,7 @@ def get_webui_routes(
         Route("/api/triggers/{trigger_id}/bundle", get_trigger_bundle, methods=["GET"]),
         Route("/api/memory", get_memory, methods=["GET"]),
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
+        Route("/api/memory/entities", create_entity, methods=["POST"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
         Route("/api/soul", get_soul, methods=["GET"]),
         Route("/api/soul", update_soul, methods=["PATCH"]),
