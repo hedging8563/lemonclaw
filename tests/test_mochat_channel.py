@@ -14,6 +14,7 @@ from lemonclaw.channels.mochat import (
     resolve_was_mentioned,
 )
 from lemonclaw.config.schema import MochatConfig, MochatGroupRule, MochatMentionConfig
+from lemonclaw.triggers import TriggerRuntime
 
 
 def test_extract_mention_ids_handles_strings_and_dicts() -> None:
@@ -109,3 +110,37 @@ async def test_mochat_warns_only_once_when_agent_user_id_missing(tmp_path, monke
     await channel._process_inbound_event("panel1", event, "panel")
 
     assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_mochat_dispatch_records_bridge_trigger(tmp_path) -> None:
+    config = MochatConfig(
+        claw_token="token",
+        allow_from=["*"],
+        reply_delay_mode="off",
+    )
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = MochatChannel(config, MessageBus(), trigger_runtime=trigger_runtime)
+    channel._handle_message = AsyncMock()
+
+    payload = {
+        "messageId": "m2",
+        "author": "user1",
+        "content": "hello",
+        "meta": {},
+        "authorInfo": {"nickname": "Alice"},
+    }
+    event = {"type": "message.add", "payload": payload, "timestamp": "2026-03-17T00:00:00Z"}
+
+    await channel._process_inbound_event("session1", event, "session")
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    trigger_id = kwargs["metadata"]["_trigger_id"]
+    assert kwargs["metadata"]["_trigger_source"] == "bridge.mochat"
+    assert kwargs["metadata"]["_trigger_kind"] == "session.message"
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record["source"] == "bridge.mochat"
+    assert record["kind"] == "session.message"
+    assert record["chat_id"] == "session1"

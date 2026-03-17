@@ -20,6 +20,7 @@ from lemonclaw.config.schema import (
     TelegramConfig,
     WhatsAppConfig,
 )
+from lemonclaw.triggers import TriggerRuntime
 
 
 # ─── Telegram ────────────────────────────────────────────────────────────
@@ -328,7 +329,7 @@ class TestQQGroupPolicy:
 # ─── WhatsApp ────────────────────────────────────────────────────────────
 
 
-def _whatsapp_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True):
+def _whatsapp_channel(*, group_policy="mention", group_allow_from=None, group_require_mention=True, trigger_runtime=None):
     config = WhatsAppConfig(
         enabled=True,
         bridge_url="ws://localhost:3001",
@@ -338,7 +339,7 @@ def _whatsapp_channel(*, group_policy="mention", group_allow_from=None, group_re
     )
     from lemonclaw.channels.whatsapp import WhatsAppChannel
 
-    ch = WhatsAppChannel(config, MessageBus())
+    ch = WhatsAppChannel(config, MessageBus(), trigger_runtime=trigger_runtime)
     ch._remember_bot_account({"id": "1234567890:1@s.whatsapp.net", "phone": "1234567890"})
     return ch
 
@@ -495,6 +496,34 @@ class TestWhatsAppGroupPolicy:
         })
         await ch._handle_bridge_message(raw)
         ch._handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_whatsapp_bridge_message_records_trigger(self, tmp_path):
+        trigger_runtime = TriggerRuntime(tmp_path)
+        ch = _whatsapp_channel(
+            group_policy="disabled",
+            trigger_runtime=trigger_runtime,
+        )
+        ch._handle_message = AsyncMock()
+        raw = json.dumps({
+            "type": "message",
+            "sender": "1234567890@s.whatsapp.net",
+            "pn": "1234567890@s.whatsapp.net",
+            "content": "hello",
+            "isGroup": False,
+            "id": "MSG1",
+        })
+        await ch._handle_bridge_message(raw)
+        ch._handle_message.assert_awaited_once()
+        kwargs = ch._handle_message.await_args.kwargs
+        trigger_id = kwargs["metadata"]["_trigger_id"]
+        assert kwargs["metadata"]["_trigger_source"] == "bridge.whatsapp"
+        assert kwargs["metadata"]["_trigger_kind"] == "message.dm"
+        record = trigger_runtime.read_trigger(trigger_id)
+        assert record is not None
+        assert record["source"] == "bridge.whatsapp"
+        assert record["kind"] == "message.dm"
+        assert record["chat_id"] == "1234567890@s.whatsapp.net"
 
 
 # ─── Feishu ──────────────────────────────────────────────────────────────

@@ -100,7 +100,7 @@ class ChannelManager:
             try:
                 from lemonclaw.channels.whatsapp import WhatsAppChannel
                 self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
+                    self.config.channels.whatsapp, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["whatsapp"].update({"registered": True, "available": True})
                 logger.info("WhatsApp channel enabled")
@@ -140,7 +140,7 @@ class ChannelManager:
                 from lemonclaw.channels.mochat import MochatChannel
 
                 self.channels["mochat"] = MochatChannel(
-                    self.config.channels.mochat, self.bus
+                    self.config.channels.mochat, self.bus, trigger_runtime=self.trigger_runtime
                 )
                 self._channel_status["mochat"].update({"registered": True, "available": True})
                 logger.info("Mochat channel enabled")

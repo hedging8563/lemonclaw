@@ -16,6 +16,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import MochatConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 from lemonclaw.utils.helpers import get_data_path
 
 try:
@@ -217,9 +218,10 @@ class MochatChannel(BaseChannel):
 
     name = "mochat"
 
-    def __init__(self, config: MochatConfig, bus: MessageBus):
+    def __init__(self, config: MochatConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: MochatConfig = config
+        self._trigger_runtime = trigger_runtime
         self._http: httpx.AsyncClient | None = None
         self._socket: Any = None
         self._ws_connected = self._ws_ready = False
@@ -760,9 +762,27 @@ class MochatChannel(BaseChannel):
         last = entries[-1]
         is_group = bool(last.group_id)
         body = build_buffered_body(entries, is_group) or "[empty message]"
+        trigger_metadata: dict[str, Any] = {}
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="bridge.mochat",
+                kind=f"{target_kind}.message",
+                payload_summary=body[:200],
+                session_key=f"{self.name}:{target_id}",
+                channel=self.name,
+                chat_id=target_id,
+                metadata={
+                    "message_id": last.message_id,
+                    "group_id": last.group_id,
+                    "buffered_count": len(entries),
+                    "was_mentioned": was_mentioned,
+                },
+            )
+            trigger_metadata = build_trigger_metadata(trigger)
         await self._handle_message(
             sender_id=last.author, chat_id=target_id, content=body,
             metadata={
+                **trigger_metadata,
                 "message_id": last.message_id, "timestamp": last.timestamp,
                 "is_group": is_group, "group_id": last.group_id,
                 "sender_name": last.sender_name, "sender_username": last.sender_username,

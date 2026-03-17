@@ -10,6 +10,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import WhatsAppConfig
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 
 class WhatsAppChannel(BaseChannel):
@@ -22,9 +23,10 @@ class WhatsAppChannel(BaseChannel):
     
     name = "whatsapp"
     
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
+    def __init__(self, config: WhatsAppConfig, bus: MessageBus, trigger_runtime: TriggerRuntime | None = None):
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
+        self._trigger_runtime = trigger_runtime
         self._ws = None
         self._connected = False
         self._mention_warned = False  # Only warn once when mention mode lacks enough bridge identity
@@ -194,12 +196,29 @@ class WhatsAppChannel(BaseChannel):
                     was_mentioned=bot_mentioned,
                 ):
                     return
+            trigger_metadata: dict[str, Any] = {}
+            if self._trigger_runtime:
+                trigger = self._trigger_runtime.record_trigger(
+                    source="bridge.whatsapp",
+                    kind="message.group" if is_group else "message.dm",
+                    payload_summary=content[:200] if isinstance(content, str) else "",
+                    session_key=f"{self.name}:{sender}",
+                    channel=self.name,
+                    chat_id=sender,
+                    metadata={
+                        "message_id": str(data.get("id") or ""),
+                        "is_group": is_group,
+                        "bridge_sender": str(sender or ""),
+                    },
+                )
+                trigger_metadata = build_trigger_metadata(trigger)
 
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
                 content=content,
                 metadata={
+                    **trigger_metadata,
                     "message_id": data.get("id"),
                     "timestamp": data.get("timestamp"),
                     "is_group": is_group
