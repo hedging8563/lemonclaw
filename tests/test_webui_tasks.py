@@ -610,6 +610,16 @@ def test_task_export_and_postmortem_include_trigger_bundle(tmp_path):
     assert pm_md.status_code == 200
     assert "## Trigger" in pm_md.text
 
+    bundle_json = client.get("/api/tasks/task_bundle/bundle", params={"format": "json"})
+    assert bundle_json.status_code == 200
+    assert bundle_json.json()["trigger"]["trigger_id"] == trigger["trigger_id"]
+    assert bundle_json.json()["postmortem"]["task"]["task_id"] == "task_bundle"
+
+    bundle_md = client.get("/api/tasks/task_bundle/bundle", params={"format": "md"})
+    assert bundle_md.status_code == 200
+    assert "## Trigger" in bundle_md.text
+    assert "## Postmortem" in bundle_md.text
+
 
 def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     app, ledger = _build_app(tmp_path)

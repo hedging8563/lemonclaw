@@ -1182,6 +1182,36 @@ export function TaskRecoveryPanel() {
     }
   };
 
+  const exportBundle = async (taskId: string, format: 'json' | 'md', mode: 'copy' | 'download') => {
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/bundle?format=${format}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        throw new Error('Failed to export task bundle');
+      }
+      const content = await res.text();
+      const label = `bundle:${mode}:${format}:${taskId}`;
+      if (mode === 'copy') {
+        await navigator.clipboard.writeText(content);
+        setCopiedLabel(label);
+        window.setTimeout(() => {
+          setCopiedLabel((current) => (current === label ? null : current));
+        }, 1500);
+        return;
+      }
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/markdown;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = `${taskId}.bundle.${format}`;
+      anchor.click();
+      URL.revokeObjectURL(href);
+    } catch (err) {
+      console.error('Failed to export task bundle', err);
+    }
+  };
+
   return (
     <div style={{ marginBottom: '24px' }}>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1334,6 +1364,36 @@ export function TaskRecoveryPanel() {
                 }}
               >
                 {t('task_export_json')}
+              </button>
+              <button
+                onClick={() => exportBundle(selectedTask.task_id, 'md', 'copy')}
+                style={{
+                  padding: '6px 10px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_bundle_copy')}
+              </button>
+              <button
+                onClick={() => exportBundle(selectedTask.task_id, 'json', 'download')}
+                style={{
+                  padding: '6px 10px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('task_export_bundle_json')}
               </button>
               <button
                 onClick={() => exportPostmortem(selectedTask.task_id, 'md', 'copy')}

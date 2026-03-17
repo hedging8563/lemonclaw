@@ -165,6 +165,26 @@ def get_webui_routes(
         enriched["trigger"] = trigger
         return enriched
 
+    def _build_task_bundle(task_id: str) -> dict[str, Any] | None:
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return None
+        export_view = ledger.build_task_export_view(task_id)
+        if not export_view:
+            return None
+        export_view = _attach_trigger_context(export_view)
+        postmortem = ledger.build_task_postmortem_view(task_id) or {}
+        postmortem = _attach_trigger_context(postmortem) if postmortem else {}
+        trigger = export_view.get("trigger") or postmortem.get("trigger") or {}
+        return {
+            "generated_at_ms": int(time.time() * 1000),
+            "task": export_view.get("task") or {},
+            "summary": export_view.get("summary") or {},
+            "candidate": export_view.get("candidate") or {},
+            "postmortem": postmortem,
+            "trigger": trigger,
+        }
+
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
         if request.url.scheme == "https":
@@ -1427,6 +1447,85 @@ def get_webui_routes(
             return resp
         return _json({"error": "unsupported format"}, 400)
 
+    async def export_task_bundle(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+
+        bundle = _build_task_bundle(task_id)
+        if not bundle:
+            return _json({"error": "task not found"}, 404)
+
+        fmt = str(request.query_params.get("format", "json") or "json").lower()
+        if fmt == "json":
+            resp = _json(bundle)
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        if fmt == "md":
+            task = bundle.get("task") or {}
+            summary = bundle.get("summary") or {}
+            trigger = bundle.get("trigger") or {}
+            postmortem = bundle.get("postmortem") or {}
+            lines = [
+                f"# Task Bundle: {task.get('task_id') or task_id}",
+                "",
+                f"- Goal: {task.get('goal') or ''}",
+                f"- Status: {task.get('status') or ''}",
+                f"- Stage: {task.get('current_stage') or ''}",
+                f"- Last Successful Step: {summary.get('last_successful_step') or '—'}",
+                f"- Resume From Step: {summary.get('resume_from_step') or '—'}",
+                "",
+                "## Trigger",
+            ]
+            if trigger:
+                lines.extend([
+                    f"- Source: {trigger.get('source') or '—'}",
+                    f"- Kind: {trigger.get('kind') or '—'}",
+                    f"- Trigger ID: {trigger.get('trigger_id') or '—'}",
+                ])
+            else:
+                lines.append("- none")
+            lines.extend([
+                "",
+                "## Candidate",
+                "",
+                "```json",
+                json.dumps(bundle.get("candidate") or {}, ensure_ascii=False, indent=2),
+                "```",
+                "",
+                "## Recovery History",
+            ])
+            recovery_history = list(summary.get("recovery_history") or [])
+            if recovery_history:
+                for item in recovery_history:
+                    lines.append(
+                        f"- {item.get('action') or 'unknown'} · {item.get('source') or '—'} · {item.get('reason') or '—'}"
+                    )
+            else:
+                lines.append("- none")
+            lines.extend([
+                "",
+                "## Postmortem",
+                "",
+                "```json",
+                json.dumps(postmortem, ensure_ascii=False, indent=2),
+                "```",
+            ])
+            resp = PlainTextResponse("\n".join(lines), media_type="text/markdown; charset=utf-8")
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        return _json({"error": "unsupported format"}, 400)
+
     async def get_task_postmortem(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1722,6 +1821,7 @@ def get_webui_routes(
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/export", export_task, methods=["GET"]),
+        Route("/api/tasks/{task_id}/bundle", export_task_bundle, methods=["GET"]),
         Route("/api/tasks/{task_id}/postmortem", get_task_postmortem, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
         Route("/api/tasks/{task_id}/resume-candidate", get_resume_candidate, methods=["GET"]),
