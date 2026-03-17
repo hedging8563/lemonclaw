@@ -295,6 +295,8 @@ function renderTaskDetailBody(
   busy: string | undefined,
   expandedOutboxId: string | null,
   setExpandedOutboxId: (eventId: string | null) => void,
+  copiedLabel: string | null,
+  copyValue: (label: string, value: unknown) => Promise<void>,
   withTopDivider = true,
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
@@ -470,6 +472,38 @@ function renderTaskDetailBody(
               </div>
               {isOutboxOpen && (
                 <div style={{ display: 'grid', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => copyValue(`event:${event.event_id}`, event)}
+                      style={{
+                        padding: '5px 8px',
+                        background: 'transparent',
+                        border: '1px solid var(--border)',
+                        borderRadius: '6px',
+                        color: copiedLabel === `event:${event.event_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {copiedLabel === `event:${event.event_id}` ? t('task_copy_done') : t('task_copy_event_json')}
+                    </button>
+                    <button
+                      onClick={() => copyValue(`payload:${event.event_id}`, event.payload || {})}
+                      style={{
+                        padding: '5px 8px',
+                        background: 'transparent',
+                        border: '1px solid var(--border)',
+                        borderRadius: '6px',
+                        color: copiedLabel === `payload:${event.event_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {copiedLabel === `payload:${event.event_id}` ? t('task_copy_done') : t('task_copy_payload')}
+                    </button>
+                  </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_target')}</div>
                     <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.target || '—'}</div>
@@ -486,6 +520,12 @@ function renderTaskDetailBody(
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
                     <pre style={{ margin: 0, maxHeight: '180px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {JSON.stringify(event.payload || {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_metadata')}</div>
+                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(event.metadata || {}, null, 2)}
                     </pre>
                   </div>
                 </div>
@@ -811,6 +851,7 @@ export function TaskRecoveryPanel() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
   const [showSettledTasks, setShowSettledTasks] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const timerRef = useRef<any>(null);
 
   const actionableTasks = sessionTasks.value.filter((task) => !isSettledTask(task));
@@ -845,6 +886,18 @@ export function TaskRecoveryPanel() {
     startPolling();
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [activeSessionKey.value, expandedTaskId, sessionTasks.value.length, recoveryTasks.value.length]);
+
+  const copyValue = async (label: string, value: unknown) => {
+    try {
+      await navigator.clipboard.writeText(typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2));
+      setCopiedLabel(label);
+      window.setTimeout(() => {
+        setCopiedLabel((current) => (current === label ? null : current));
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to copy outbox detail', err);
+    }
+  };
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -968,7 +1021,7 @@ export function TaskRecoveryPanel() {
                 {t('task_detail_panel_close')}
               </button>
             </div>
-            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, false)}
+            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, copiedLabel, copyValue, false)}
           </div>
         )}
       </div>
