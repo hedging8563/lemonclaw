@@ -846,7 +846,9 @@ def get_webui_routes(
 
     import re
     from lemonclaw.agent.memory import MemoryStore
+    from lemonclaw.knowledge import KnowledgeStore
     _memory = MemoryStore(agent_loop.workspace)
+    _knowledge = KnowledgeStore(agent_loop.workspace)
     _entity_name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
     async def get_memory(request: Request) -> Response:
@@ -1037,6 +1039,55 @@ def get_webui_routes(
                 "body": card.body.strip(),
             }
         })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def get_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        resp = _json({
+            "summary": _knowledge.summarize(),
+            "documents": _knowledge.list_documents(),
+        })
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def create_knowledge_document(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        try:
+            doc = _knowledge.create_document(
+                source_type=str(body.get("source_type", "") or ""),
+                source=str(body.get("source", "") or ""),
+                title=str(body.get("title", "") or ""),
+                note=str(body.get("note", "") or ""),
+            )
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        resp = _json({"document": doc})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def delete_knowledge_document(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        doc_id = str(request.path_params.get("doc_id", "") or "")
+        if not doc_id:
+            return _json({"error": "doc_id is required"}, 400)
+        try:
+            removed = _knowledge.delete_document(doc_id)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        if not removed:
+            return _json({"error": "document not found"}, 404)
+        resp = _json({"ok": True})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1881,6 +1932,9 @@ def get_webui_routes(
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
         Route("/api/memory/entities", create_entity, methods=["POST"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
+        Route("/api/knowledge", get_knowledge, methods=["GET"]),
+        Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
+        Route("/api/knowledge/documents/{doc_id}", delete_knowledge_document, methods=["DELETE"]),
         Route("/api/soul", get_soul, methods=["GET"]),
         Route("/api/soul", update_soul, methods=["PATCH"]),
         Route("/api/mcp/status", get_mcp_status, methods=["GET"]),

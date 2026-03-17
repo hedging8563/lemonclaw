@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
+import { knowledgeDocuments, knowledgeError, knowledgeSummary, loadKnowledge } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -48,9 +49,15 @@ export function MemoryPanel() {
   const [newType, setNewType] = useState('note');
   const [newKeywords, setNewKeywords] = useState('');
   const [newBody, setNewBody] = useState('');
+  const [creatingKnowledge, setCreatingKnowledge] = useState(false);
+  const [knowledgeTitle, setKnowledgeTitle] = useState('');
+  const [knowledgeSource, setKnowledgeSource] = useState('');
+  const [knowledgeType, setKnowledgeType] = useState('url');
+  const [knowledgeNote, setKnowledgeNote] = useState('');
 
   useEffect(() => {
     loadMemory();
+    loadKnowledge();
   }, []);
 
   const handleSaveEntity = async (name: string) => {
@@ -104,6 +111,39 @@ export function MemoryPanel() {
     }
   };
 
+  const handleCreateKnowledge = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: knowledgeTitle,
+          source: knowledgeSource,
+          source_type: knowledgeType,
+          note: knowledgeNote,
+        }),
+      });
+      setCreatingKnowledge(false);
+      setKnowledgeTitle('');
+      setKnowledgeSource('');
+      setKnowledgeType('url');
+      setKnowledgeNote('');
+      await loadKnowledge();
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_create_failed'));
+    }
+  };
+
+  const handleDeleteKnowledge = async (docId: string) => {
+    setSaveError(null);
+    try {
+      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+      await loadKnowledge();
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_delete_failed'));
+    }
+  };
+
   const snapshot = memory.value;
   const query = filter.trim().toLowerCase();
   const filteredEntities = useMemo(() => (
@@ -154,7 +194,7 @@ export function MemoryPanel() {
         placeholder={t('memory_filter_placeholder')}
         style={{ width: '100%', marginBottom: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}
       />
-      {(saveError || memoryError.value) && <div style={{ fontSize: '11px', color: 'var(--error)', fontFamily: 'var(--font-mono)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>{saveError || memoryError.value}</div>}
+      {(saveError || memoryError.value || knowledgeError.value) && <div style={{ fontSize: '11px', color: 'var(--error)', fontFamily: 'var(--font-mono)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>{saveError || memoryError.value || knowledgeError.value}</div>}
       
       {!snapshot ? (
         <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
@@ -162,6 +202,56 @@ export function MemoryPanel() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('knowledge_sources')}</div>
+              <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+              <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
+              <span style={pillStyle()}>{t('knowledge_count_types')}: {Object.keys(knowledgeSummary.value?.by_type || {}).length}</span>
+            </div>
+            {creatingKnowledge && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+                <input value={knowledgeTitle} onInput={(e) => setKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+                <select value={knowledgeType} onInput={(e) => setKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
+                  <option value="url">url</option>
+                  <option value="file">file</option>
+                  <option value="manual">manual</option>
+                </select>
+                <input value={knowledgeSource} onInput={(e) => setKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+                <textarea value={knowledgeNote} onInput={(e) => setKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button onClick={() => setCreatingKnowledge(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
+                  <button onClick={handleCreateKnowledge} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_create')}</button>
+                </div>
+              </div>
+            )}
+            {knowledgeDocuments.value.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {knowledgeDocuments.value.map((doc) => (
+                  <div key={doc.doc_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
+                      </div>
+                      <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px', flexShrink: 0 }}>{t('knowledge_remove')}</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      <span style={pillStyle()}>{doc.source_type}</span>
+                      <span style={pillStyle()}>{doc.status || 'registered'}</span>
+                      <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
+                    </div>
+                    {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
+            )}
+          </div>
+
           {creating && (
             <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('memory_new_card')}</div>
