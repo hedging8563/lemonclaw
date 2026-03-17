@@ -629,41 +629,6 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _update_kind(update: Update) -> str:
-        if getattr(update, "message", None) is not None:
-            return "message"
-        if getattr(update, "edited_message", None) is not None:
-            return "edited_message"
-        if getattr(update, "channel_post", None) is not None:
-            return "channel_post"
-        if getattr(update, "edited_channel_post", None) is not None:
-            return "edited_channel_post"
-        return "unknown"
-
-    def _log_group_ingress(self, update: Update, message) -> None:
-        chat = getattr(message, "chat", None)
-        if chat is None or getattr(chat, "type", "private") == "private":
-            return
-        entities = []
-        for attr in ("entities", "caption_entities"):
-            for entity in getattr(message, attr, None) or []:
-                entity_type = str(getattr(entity, "type", "") or "")
-                if entity_type:
-                    entities.append(entity_type)
-        logger.info(
-            "Telegram group ingress update_id={} kind={} chat_id={} chat_type={} effective_user={} from_user={} sender_chat={} entities={} text={!r}",
-            getattr(update, "update_id", None),
-            self._update_kind(update),
-            getattr(chat, "id", None),
-            getattr(chat, "type", None),
-            bool(getattr(update, "effective_user", None)),
-            bool(getattr(message, "from_user", None)),
-            bool(getattr(message, "sender_chat", None)),
-            entities,
-            ((getattr(message, "text", None) or getattr(message, "caption", None) or "")[:120]),
-        )
-
-    @staticmethod
     def _sender_id(sender) -> str:
         """Build sender_id for user or sender_chat style Telegram actors."""
         sid = str(getattr(sender, "id", "") or "")
@@ -888,7 +853,7 @@ class TelegramChannel(BaseChannel):
             was_mentioned=mentioned,
         )
         if not allowed:
-            logger.info(
+            logger.debug(
                 "Telegram group gate blocked chat_id={} policy={} allowlist_hit={} require_mention={} mentioned={} text={!r}",
                 chat_id,
                 policy,
@@ -916,15 +881,9 @@ class TelegramChannel(BaseChannel):
         if not self._dedup_update(update):
             return
 
-        self._log_group_ingress(update, message)
         sender = self._resolve_sender(update)
         if sender is None:
-            logger.info(
-                "Telegram message dropped due to missing sender identity update_id={} kind={} chat_id={}",
-                getattr(update, "update_id", None),
-                self._update_kind(update),
-                getattr(message, "chat_id", ""),
-            )
+            logger.debug("Telegram message dropped due to missing sender identity for chat_id={}", getattr(message, "chat_id", ""))
             return
         chat_id = message.chat_id
         sender_id = self._sender_id(sender)
