@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -73,22 +74,46 @@ class ExecTool(Tool):
         }
 
     def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        """Best-effort risk classification for audit and governance reporting.
+
+        This is not a security boundary. Shell commands can always hide intent behind
+        wrappers or dynamic evaluation, so authorization/sandbox checks must not rely
+        on this classifier alone.
+        """
         del context
-        command = str(params.get("command") or "").strip().lower()
-        if not command:
+        command = str(params.get("command") or "").strip()
+        return self._classify_capability(command)
+
+    def _classify_capability(self, command: str, *, depth: int = 0) -> str:
+        normalized = command.strip().lower()
+        if not normalized:
             return "exec.write"
-        if re.search(r"\b(curl|wget|httpie|nc|ncat|telnet|ssh|scp|rsync)\b", command):
+        if depth < 2:
+            nested = self._unwrap_shell_wrapper(command)
+            if nested:
+                return self._classify_capability(nested, depth=depth + 1)
+        if re.search(r"\b(curl|wget|httpie|nc|ncat|telnet|ssh|scp|rsync)\b", normalized):
             return "exec.network"
-        if re.search(r"\b(npm|pnpm|yarn|bun|pip|pip3|poetry|uv\s+pip|apt|apt-get|yum|dnf|apk|brew)\b.*\b(install|add|remove|uninstall|update|upgrade)\b", command):
+        if re.search(r"\b(npm|pnpm|yarn|bun|pip|pip3|poetry|uv\s+pip|python(\d+(\.\d+)*)?\s+-m\s+pip|apt|apt-get|yum|dnf|apk|brew)\b.*\b(install|add|remove|uninstall|update|upgrade)\b", normalized):
             return "exec.package"
-        if re.search(r"\b(systemctl|service|launchctl|kubectl|helm|docker|podman|shutdown|reboot|poweroff|iptables|ufw|chmod|chown|mount|umount)\b", command):
+        if re.search(r"\b(systemctl|service|launchctl|kubectl|helm|docker|podman|shutdown|reboot|poweroff|iptables|ufw|chmod|chown|mount|umount)\b", normalized):
             return "exec.system"
         if (
-            re.search(r"(^|\s)(pwd|ls|cat|grep|rg|find|head|tail|sed|awk|wc|which|env|printenv|git\s+(status|log|diff|show)|python(\d+(\.\d+)*)?\s+-v|node\s+-v|date|whoami|ps)\b", command)
-            and not re.search(r"(\>\>?|\btee\b|\btouch\b|\bmkdir\b|\bmv\b|\bcp\b|\brm\b|\bgit\s+(commit|push|apply)\b)", command)
+            re.search(r"(^|\s)(pwd|ls|cat|grep|rg|find|head|tail|sed|awk|wc|which|env|printenv|git\s+(status|log|diff|show)|python(\d+(\.\d+)*)?\s+-v|node\s+-v|date|whoami|ps)\b", normalized)
+            and not re.search(r"(\>\>?|\btee\b|\btouch\b|\bmkdir\b|\bmv\b|\bcp\b|\brm\b|\bgit\s+(commit|push|apply)\b)", normalized)
         ):
             return "exec.read"
         return "exec.write"
+
+    @staticmethod
+    def _unwrap_shell_wrapper(command: str) -> str | None:
+        try:
+            tokens = shlex.split(command, posix=True)
+        except Exception:
+            return None
+        if len(tokens) >= 3 and tokens[0] in {"bash", "sh", "zsh", "fish"} and tokens[1] == "-c":
+            return str(tokens[2] or "").strip() or None
+        return None
 
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         del kwargs

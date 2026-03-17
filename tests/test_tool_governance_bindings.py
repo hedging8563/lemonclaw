@@ -25,8 +25,11 @@ def test_exec_resolves_governance_capabilities():
     tool = ExecTool()
     assert tool.resolve_capability({"command": "ls -la"}) == "exec.read"
     assert tool.resolve_capability({"command": "curl https://example.com"}) == "exec.network"
+    assert tool.resolve_capability({"command": 'bash -c "curl https://example.com"'}) == "exec.network"
     assert tool.resolve_capability({"command": "npm install"}) == "exec.package"
+    assert tool.resolve_capability({"command": "sh -c 'npm install'"}) == "exec.package"
     assert tool.resolve_capability({"command": "systemctl restart nginx"}) == "exec.system"
+    assert tool.resolve_capability({"command": "zsh -c 'systemctl restart nginx'"}) == "exec.system"
     assert tool.resolve_capability({"command": "mkdir build"}) == "exec.write"
 
 

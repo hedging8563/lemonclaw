@@ -18,8 +18,19 @@ def redact_sensitive_value(
     *,
     configured_secret_values: Iterable[str] | None = None,
 ) -> Any:
-    """Recursively redact sensitive values by key name and exact configured secret match."""
-    configured = tuple(v for v in (configured_secret_values or ()) if isinstance(v, str) and v)
+    """Recursively redact sensitive values by key name and configured secret values.
+
+    For configured secrets we intentionally use exact known values and direct
+    substring replacement, not generic regex guessing. That keeps redaction
+    predictable while still catching common wrappers like ``Bearer <token>``.
+    """
+    configured = tuple(
+        sorted(
+            (v for v in (configured_secret_values or ()) if isinstance(v, str) and v),
+            key=len,
+            reverse=True,
+        )
+    )
     return _redact(value, configured)
 
 
@@ -36,6 +47,17 @@ def _redact(value: Any, configured_secret_values: tuple[str, ...]) -> Any:
             else:
                 redacted[key] = _redact(nested, configured_secret_values)
         return redacted
-    if isinstance(value, str) and configured_secret_values and value in configured_secret_values:
-        return "[redacted]"
+    if isinstance(value, str) and configured_secret_values:
+        redacted = value
+        matched = False
+        for secret in configured_secret_values:
+            if not secret:
+                continue
+            if redacted == secret:
+                return "[redacted]"
+            if secret in redacted:
+                redacted = redacted.replace(secret, "[redacted]")
+                matched = True
+        if matched:
+            return redacted
     return value

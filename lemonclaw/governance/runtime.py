@@ -283,7 +283,6 @@ class GovernanceRuntime:
             "default_task_usd": getattr(budgets, "default_task_usd", None) if budgets is not None else None,
         }
         self._task_budget = self._budget_snapshot.get("default_task_usd")
-        self._configured_secret_values = tuple(self._iter_configured_secret_values())
 
     def issue_token(
         self,
@@ -326,6 +325,8 @@ class GovernanceRuntime:
 
         if capability.tool_name == "exec":
             command = str(params.get("command") or "")
+            # Intentional fail-closed heuristic: sandbox blocked_commands are
+            # lightweight operator guardrails, not a full shell parser.
             for pattern in blocked_commands:
                 if pattern and pattern.lower() in command.lower():
                     return False, f"command blocked by sandbox profile '{capability.sandbox_profile}'"
@@ -598,10 +599,10 @@ class GovernanceRuntime:
 
     def list_audit_view(self, *, limit: int = 50) -> list[dict[str, Any]]:
         records = read_audit_records(self._audit_log_path, limit=limit)
-        return [redact_sensitive_value(item, configured_secret_values=self._configured_secret_values) for item in records]
+        return [redact_sensitive_value(item, configured_secret_values=self._current_configured_secret_values()) for item in records]
 
     def redact_payload(self, value: Any) -> Any:
-        return redact_sensitive_value(value, configured_secret_values=self._configured_secret_values)
+        return redact_sensitive_value(value, configured_secret_values=self._current_configured_secret_values())
 
     def patch_kill_switch(self, patch: dict[str, Any]) -> dict[str, Any]:
         state = patch_kill_switch_state(self._kill_switch_path, patch)
@@ -660,6 +661,9 @@ class GovernanceRuntime:
                 if isinstance(value, str) and value:
                     values.append(value)
         return values
+
+    def _current_configured_secret_values(self) -> tuple[str, ...]:
+        return tuple(self._iter_configured_secret_values())
 
     def _identity_defaults_view(self) -> dict[str, str]:
         defaults = self.identity_defaults

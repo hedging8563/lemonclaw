@@ -150,3 +150,24 @@ def test_validate_tool_call_enforces_bound_exec_sandbox(tmp_path: Path):
 
     assert allowed is False
     assert "sandbox profile" in reason
+
+
+def test_redaction_uses_latest_secret_profiles_and_masks_substrings(tmp_path: Path):
+    cfg = DummyConfig()
+    cfg.kill_switch_file = str(tmp_path / "governance.json")
+    cfg.audit_log_path = str(tmp_path / "audit.jsonl")
+    runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
+
+    runtime.secret_profiles["ops-http"] = type(
+        "SecretProfile",
+        (),
+        {"kind": "headers", "values": {"Authorization": "Bearer rotated-secret"}, "description": "rotated"},
+    )()
+
+    payload = runtime.redact_payload({
+        "note": "prefix Bearer rotated-secret suffix",
+        "secret_profile": "ops-http",
+    })
+
+    assert payload["note"] == "prefix [redacted] suffix"
+    assert payload["secret_profile"] == "ops-http"
