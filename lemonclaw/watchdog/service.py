@@ -412,6 +412,7 @@ class WatchdogService:
         self._state.total_soft_recoveries += 1
         names = ", ".join(c.name for c in checks)
         logger.warning(f"watchdog: soft recovery triggered ({names})")
+        self._record_alert_triggers(checks, phase="soft")
         trigger = None
         if self._trigger_runtime:
             trigger = self._trigger_runtime.record_trigger(
@@ -480,6 +481,7 @@ class WatchdogService:
         self._state.last_hard_restart_time = now
         names = ", ".join(c.name for c in checks)
         logger.critical(f"watchdog: HARD RESTART — {self._state.consecutive_failures} consecutive failures ({names})")
+        self._record_alert_triggers(checks, phase="hard")
         trigger = None
         if self._trigger_runtime:
             trigger = self._trigger_runtime.record_trigger(
@@ -533,6 +535,21 @@ class WatchdogService:
         await asyncio.sleep(15)
         logger.critical("watchdog: SIGTERM did not terminate, forcing os._exit(1)")
         os._exit(1)
+
+    def _record_alert_triggers(self, checks: list[HealthCheck], *, phase: str) -> None:
+        if not self._trigger_runtime:
+            return
+        for check in checks:
+            self._trigger_runtime.record_trigger(
+                source="alert.watchdog",
+                kind=f"{phase}.{check.name}",
+                payload_summary=str(check.detail or check.name)[:500],
+                session_key="watchdog",
+                channel="system",
+                chat_id="watchdog",
+                status="raised",
+                metadata={"healthy": bool(check.healthy), "check": check.name},
+            )
 
 
 # ============================================================================

@@ -145,5 +145,5 @@ async def test_watchdog_records_trigger_runtime_entries(tmp_path: Path):
     await watchdog._soft_recovery([HealthCheck("task_stuck", False, "1 stale task(s): task_1")])
 
     records = trigger_runtime.list_triggers(limit=10)
-    assert records[0]["source"] == "watchdog"
-    assert records[0]["kind"] == "watchdog.soft_recovery"
+    assert any(item["source"] == "watchdog" and item["kind"] == "watchdog.soft_recovery" for item in records)
+    assert any(item["source"] == "alert.watchdog" and item["kind"] == "soft.task_stuck" for item in records)
