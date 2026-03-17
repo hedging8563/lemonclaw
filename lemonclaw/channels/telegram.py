@@ -619,18 +619,56 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _sender_id(user) -> str:
-        """Build sender_id with username for allowlist matching."""
-        sid = str(user.id)
-        return f"{sid}|{user.username}" if user.username else sid
+    def _sender_id(sender) -> str:
+        """Build sender_id for user or sender_chat style Telegram actors."""
+        sid = str(getattr(sender, "id", "") or "")
+        username = str(getattr(sender, "username", "") or "")
+        if username:
+            return f"{sid}|{username}"
+        title = str(getattr(sender, "title", "") or "")
+        if title:
+            return f"{sid}|{title}"
+        return sid
+
+    @staticmethod
+    def _resolve_sender(update: Update):
+        """Resolve the best available sender identity for a Telegram update."""
+        message = getattr(update, "message", None)
+        if message is None:
+            return getattr(update, "effective_user", None)
+        return (
+            getattr(update, "effective_user", None)
+            or getattr(message, "from_user", None)
+            or getattr(message, "sender_chat", None)
+        )
+
+    @staticmethod
+    def _sender_metadata(sender) -> dict[str, object]:
+        """Build metadata fields for either a user sender or sender_chat actor."""
+        metadata: dict[str, object] = {
+            "user_id": getattr(sender, "id", None),
+            "username": getattr(sender, "username", None),
+            "first_name": getattr(sender, "first_name", None),
+        }
+        sender_title = str(getattr(sender, "title", "") or "")
+        if sender_title:
+            metadata["sender_chat_title"] = sender_title
+        sender_type = str(getattr(sender, "type", "") or "")
+        if sender_type:
+            metadata["sender_chat_type"] = sender_type
+        return metadata
 
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
-        if not update.message or not update.effective_user:
+        if not update.message:
             return
         if not self._dedup_update(update):
             return
         message = update.message
+        sender = self._resolve_sender(update)
+        if sender is None:
+            logger.debug("Telegram command dropped due to missing sender identity")
+            return
         is_group = message.chat.type != "private"
 
         # Group policy gate for commands too
@@ -640,18 +678,15 @@ class TelegramChannel(BaseChannel):
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
         str_chat_id = str(message.chat_id)
         session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
-        user = update.effective_user
         metadata = {
             "message_id": message.message_id,
-            "user_id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
             "is_group": is_group,
+            **self._sender_metadata(sender),
         }
         if thread_id:
             metadata["message_thread_id"] = thread_id
         await self._handle_message(
-            sender_id=self._sender_id(update.effective_user),
+            sender_id=self._sender_id(sender),
             chat_id=str_chat_id,
             content=message.text,
             metadata=metadata,
@@ -830,15 +865,18 @@ class TelegramChannel(BaseChannel):
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
-        if not update.message or not update.effective_user:
+        if not update.message:
             return
         if not self._dedup_update(update):
             return
 
         message = update.message
-        user = update.effective_user
+        sender = self._resolve_sender(update)
+        if sender is None:
+            logger.debug("Telegram message dropped due to missing sender identity for chat_id={}", getattr(message, "chat_id", ""))
+            return
         chat_id = message.chat_id
-        sender_id = self._sender_id(user)
+        sender_id = self._sender_id(sender)
         is_group = message.chat.type != "private"
 
         # Group policy gate: check before any processing
@@ -935,10 +973,8 @@ class TelegramChannel(BaseChannel):
         session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
         base_metadata = {
             "message_id": message.message_id,
-            "user_id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
             "is_group": is_group,
+            **self._sender_metadata(sender),
         }
         if reply_to_message := getattr(message, "reply_to_message", None):
             if getattr(reply_to_message, "message_id", None) is not None:

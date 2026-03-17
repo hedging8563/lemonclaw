@@ -84,6 +84,44 @@ def _private_text_update(
     return SimpleNamespace(update_id=2001, message=message, effective_user=user)
 
 
+def _group_sender_chat_update(text: str, *, message_id: int = 4001):
+    chat = SimpleNamespace(id=-1003819834760, type="supergroup")
+    sender_chat = SimpleNamespace(id=-1003819834760, title="dicloak ai运营团队", username=None, type="supergroup")
+    message = SimpleNamespace(
+        chat_id=chat.id,
+        chat=chat,
+        message_id=message_id,
+        text=text,
+        caption=None,
+        photo=None,
+        voice=None,
+        audio=None,
+        document=None,
+        reply_to_message=None,
+        entities=[],
+        caption_entities=[],
+        sender_chat=sender_chat,
+        from_user=None,
+    )
+    return SimpleNamespace(update_id=3001, message=message, effective_user=None)
+
+
+def _group_sender_chat_command_update(text: str, *, message_id: int = 5001):
+    chat = SimpleNamespace(id=-1003819834760, type="supergroup")
+    sender_chat = SimpleNamespace(id=-1003819834760, title="dicloak ai运营团队", username=None, type="supergroup")
+    message = SimpleNamespace(
+        chat_id=chat.id,
+        chat=chat,
+        message_id=message_id,
+        text=text,
+        sender_chat=sender_chat,
+        from_user=None,
+        entities=[],
+        caption_entities=[],
+    )
+    return SimpleNamespace(update_id=3002, message=message, effective_user=None)
+
+
 def _bot_stub(**overrides):
     base = {
         "send_message": AsyncMock(),
@@ -182,6 +220,44 @@ async def test_on_message_includes_reply_context_for_text_reply(telegram_channel
     kwargs = telegram_channel._handle_message.await_args.kwargs
     assert kwargs["content"] == "[Reply to: 上一条消息内容]\n现在继续"
     assert kwargs["metadata"]["reply_to_message_id"] == 111
+
+
+@pytest.mark.asyncio
+async def test_on_message_accepts_group_sender_chat_without_effective_user(telegram_channel: TelegramChannel) -> None:
+    update = _group_sender_chat_update("@dic_supperpower_bot 继续")
+    telegram_channel._handle_message = AsyncMock()
+    telegram_channel._app = SimpleNamespace(bot=SimpleNamespace(username="dic_supperpower_bot", id=8573580959))
+    telegram_channel.config.group_policy = "allowlist"
+    telegram_channel.config.group_require_mention = True
+    telegram_channel.config.group_allow_from = ["-1003819834760"]
+
+    await telegram_channel._on_message(update, None)
+
+    telegram_channel._handle_message.assert_awaited_once()
+    kwargs = telegram_channel._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "-1003819834760|dicloak ai运营团队"
+    assert kwargs["chat_id"] == "-1003819834760"
+    assert kwargs["content"] == "继续"
+    assert kwargs["metadata"]["sender_chat_title"] == "dicloak ai运营团队"
+    assert kwargs["metadata"]["sender_chat_type"] == "supergroup"
+
+
+@pytest.mark.asyncio
+async def test_forward_command_accepts_group_sender_chat_without_effective_user(telegram_channel: TelegramChannel) -> None:
+    update = _group_sender_chat_command_update("/model@dic_supperpower_bot gpt-5.4")
+    telegram_channel._handle_message = AsyncMock()
+    telegram_channel._app = SimpleNamespace(bot=SimpleNamespace(username="dic_supperpower_bot", id=8573580959))
+    telegram_channel.config.group_policy = "allowlist"
+    telegram_channel.config.group_require_mention = True
+    telegram_channel.config.group_allow_from = ["-1003819834760"]
+
+    await telegram_channel._forward_command(update, None)
+
+    telegram_channel._handle_message.assert_awaited_once()
+    kwargs = telegram_channel._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "-1003819834760|dicloak ai运营团队"
+    assert kwargs["chat_id"] == "-1003819834760"
+    assert kwargs["content"] == "/model@dic_supperpower_bot gpt-5.4"
 
 
 @pytest.mark.asyncio
