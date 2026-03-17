@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from lemonclaw.governance.kill_switch import load_kill_switch_state, save_kill_switch_state
+from lemonclaw.governance.kill_switch import load_kill_switch_state, patch_kill_switch_state, save_kill_switch_state
 from lemonclaw.governance import GovernanceRuntime
 
 
@@ -36,3 +36,12 @@ def test_global_kill_switch_blocks_execution(tmp_path: Path):
 
     assert decision.allowed is False
     assert "kill switch" in decision.reason
+
+
+def test_patch_kill_switch_state_updates_epoch(tmp_path: Path):
+    kill_path = tmp_path / "governance.json"
+    updated = patch_kill_switch_state(kill_path, {"global": True, "capabilities": {"exec.system": True}})
+
+    assert updated["global"] is True
+    assert updated["capabilities"]["exec.system"] is True
+    assert updated["epoch"] == 1

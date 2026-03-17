@@ -36,6 +36,31 @@ def save_kill_switch_state(path: Path, state: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def patch_kill_switch_state(path: Path, patch: dict[str, Any]) -> dict[str, Any]:
+    state = load_kill_switch_state(path)
+    changed = False
+    for key in ("global",):
+        if key in patch:
+            next_value = bool(patch.get(key))
+            if state.get(key) != next_value:
+                state[key] = next_value
+                changed = True
+    for key in ("categories", "capabilities", "agents", "tenants"):
+        if key not in patch:
+            continue
+        raw = patch.get(key) or {}
+        if not isinstance(raw, dict):
+            continue
+        next_map = {str(name): bool(value) for name, value in raw.items()}
+        if state.get(key) != next_map:
+            state[key] = next_map
+            changed = True
+    if changed:
+        state["epoch"] = int(state.get("epoch", 0)) + 1
+        save_kill_switch_state(path, state)
+    return state
+
+
 def is_kill_switched(
     state: dict[str, Any],
     *,

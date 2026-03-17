@@ -75,6 +75,10 @@ class CronTool(Tool):
             },
             "required": ["action"]
         }
+
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del context
+        return "cron.read" if str(params.get("action") or "") == "list" else "cron.write"
     
     async def execute(
         self,

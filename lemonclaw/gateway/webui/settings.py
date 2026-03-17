@@ -140,6 +140,8 @@ _VISIBLE_SENSITIVE_PATHS = {
 def _should_mask(path: tuple[str, ...], key: str, value: Any) -> bool:
     if not isinstance(value, str) or not value:
         return False
+    if len(path) >= 3 and path[0] == "governance" and path[1] == "secret_profiles" and "values" in path:
+        return True
     full_path = ".".join((*path, key))
     if any(full_path == prefix or full_path.startswith(prefix + ".") for prefix in _MASKED_VALUE_PREFIXES):
         return True
@@ -451,6 +453,10 @@ def get_settings_routes(
             )
         return response
 
+    def _get_governance_runtime():
+        governance = getattr(agent_loop, "governance", None) if agent_loop is not None else None
+        return governance
+
     # ── GET /api/settings ─────────────────────────────────────────────
 
     async def get_settings(request: Request) -> Response:
@@ -520,6 +526,81 @@ def get_settings_routes(
         if effective_model:
             result["effective_model"] = effective_model
 
+        return _maybe_refresh(request, _json(result))
+
+    # ── GET /api/governance* — runtime governance views ───────────────
+
+    async def get_governance(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        governance = _get_governance_runtime()
+        if governance is None:
+            return _json({"error": "Governance runtime not available"}, 503)
+        payload = {
+            "overview": governance.get_governance_overview(),
+            "secret_profiles": governance.list_secret_profiles_view(),
+            "sandbox_profiles": governance.list_sandbox_profiles_view(),
+            "kill_switch": governance.get_kill_switch_view(),
+            "recent_audit": governance.list_audit_view(limit=10),
+        }
+        return _maybe_refresh(request, _json(payload))
+
+    async def get_governance_capabilities(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        governance = _get_governance_runtime()
+        if governance is None:
+            return _json({"error": "Governance runtime not available"}, 503)
+        return _maybe_refresh(request, _json({"capabilities": governance.list_capabilities_view()}))
+
+    async def get_governance_audit(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        governance = _get_governance_runtime()
+        if governance is None:
+            return _json({"error": "Governance runtime not available"}, 503)
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "50")), 200))
+        except Exception:
+            limit = 50
+        return _maybe_refresh(request, _json({"records": governance.list_audit_view(limit=limit)}))
+
+    async def get_governance_kill_switch(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        governance = _get_governance_runtime()
+        if governance is None:
+            return _json({"error": "Governance runtime not available"}, 503)
+        return _maybe_refresh(request, _json({"kill_switch": governance.get_kill_switch_view()}))
+
+    async def patch_governance_kill_switch(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        governance = _get_governance_runtime()
+        if governance is None:
+            return _json({"error": "Governance runtime not available"}, 503)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        if not isinstance(body, dict):
+            return _json({"error": "Expected object patch"}, 400)
+        allowed_keys = {"global", "categories", "capabilities"}
+        rejected = sorted(set(body) - allowed_keys)
+        if rejected:
+            return _json({"error": f"Forbidden keys: {', '.join(rejected)}"}, 403)
+        if "categories" in body and not isinstance(body.get("categories"), dict):
+            return _json({"error": "categories must be an object map"}, 400)
+        if "capabilities" in body and not isinstance(body.get("capabilities"), dict):
+            return _json({"error": "capabilities must be an object map"}, 400)
+        if "global" in body and not isinstance(body.get("global"), bool):
+            return _json({"error": "global must be boolean"}, 400)
+        result = governance.patch_kill_switch(body)
         return _maybe_refresh(request, _json(result))
 
     # ── PATCH /api/settings ───────────────────────────────────────────
@@ -1043,6 +1124,11 @@ def get_settings_routes(
         Route("/api/settings/channels/whatsapp/pairing", start_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/whatsapp/disconnect", disconnect_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
+        Route("/api/governance", get_governance, methods=["GET"]),
+        Route("/api/governance/capabilities", get_governance_capabilities, methods=["GET"]),
+        Route("/api/governance/audit", get_governance_audit, methods=["GET"]),
+        Route("/api/governance/kill-switch", get_governance_kill_switch, methods=["GET"]),
+        Route("/api/governance/kill-switch", patch_governance_kill_switch, methods=["POST"]),
         Route("/api/settings", patch_settings, methods=["PATCH"]),
         Route("/api/settings/apply", apply_settings, methods=["POST"]),
         Route("/api/runtime-policy/reload", reload_runtime_policy, methods=["POST"]),

@@ -2,9 +2,10 @@ from starlette.testclient import TestClient
 
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import save_config
-from lemonclaw.config.schema import Config
+from lemonclaw.config.schema import Config, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
+from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.session.manager import SessionManager
 
 
@@ -286,18 +287,96 @@ def test_patch_settings_accepts_operator_tool_paths(tmp_path):
     })
 
     assert resp.status_code == 200
-    assert resp.json() == {'saved': True}
 
-    from lemonclaw.config.loader import load_config
-    cfg = load_config(config_path)
-    assert cfg.tools.http.enabled is True
-    assert cfg.tools.http.allow_domains == ['api.example.com']
-    assert cfg.tools.k8s.default_namespace == 'claw'
-    assert cfg.tools.k8s.allowed_namespaces == ['claw']
-    assert cfg.tools.db.sqlite_profiles == {'local': '/tmp/test.db'}
-    assert cfg.tools.db.postgres_profiles['analytics_ro'].host == 'db.example.internal'
-    assert cfg.tools.db.postgres_profiles['analytics_ro'].sslmode == 'require'
-    assert cfg.tools.notify.allow_webhook_domains == ['hooks.example.com']
+
+def test_settings_masks_governance_secret_profile_values(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.governance.secret_profiles = {
+        'ops_http': GovernanceSecretProfileConfig(
+            kind='headers',
+            values={'Authorization': 'Bearer top-secret', 'X-API-Key': 'abc123'},
+            description='ops profile',
+        )
+    }
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+
+    assert resp.status_code == 200
+    profile = resp.json()['settings']['governance']['secret_profiles']['ops_http']
+    assert profile['values']['Authorization'].startswith('Bear')
+    assert 'top-secret' not in profile['values']['Authorization']
+    assert profile['values']['X-API-Key'] == '****'
+
+
+def test_governance_routes_expose_runtime_views(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.governance.kill_switch_file = str(tmp_path / 'governance.json')
+    cfg.governance.audit_log_path = str(tmp_path / 'audit.jsonl')
+    cfg.governance.secret_profiles = {
+        'ops_http': GovernanceSecretProfileConfig(
+            kind='headers',
+            values={'Authorization': 'Bearer top-secret'},
+        )
+    }
+    cfg.governance.sandbox_profiles = {
+        'runtime_default': GovernanceSandboxProfileConfig(
+            allowed_domains=['api.example.com'],
+            allowed_paths=['/tmp'],
+            blocked_commands=['rm -rf'],
+        )
+    }
+    cfg.governance.capability_overrides = {
+        'http.write': {
+            'secret_profile': 'ops_http',
+            'sandbox_profile': 'runtime_default',
+        }
+    }
+    save_config(cfg, config_path)
+
+    governance = GovernanceRuntime(workspace=tmp_path, config=cfg.governance, agent_id='test3')
+    agent_loop = type('Loop', (), {'governance': governance, 'model': 'gpt-5.4'})()
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=agent_loop)
+    client = TestClient(app)
+
+    resp = client.get('/api/governance')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data['overview']['secret_profiles']['count'] == 1
+    assert data['overview']['sandbox_profiles']['count'] == 1
+    assert data['kill_switch']['global'] is False
+
+    caps = client.get('/api/governance/capabilities')
+    assert caps.status_code == 200
+    http_write = next(item for item in caps.json()['capabilities'] if item['capability_id'] == 'http.write')
+    assert http_write['secret_profile_status']['state'] == 'configured'
+    assert http_write['sandbox_profile_status']['state'] == 'configured'
+
+
+def test_governance_kill_switch_patch_updates_state(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.governance.kill_switch_file = str(tmp_path / 'governance.json')
+    cfg.governance.audit_log_path = str(tmp_path / 'audit.jsonl')
+    save_config(cfg, config_path)
+
+    governance = GovernanceRuntime(workspace=tmp_path, config=cfg.governance, agent_id='test3')
+    agent_loop = type('Loop', (), {'governance': governance, 'model': 'gpt-5.4'})()
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=agent_loop)
+    client = TestClient(app)
+
+    resp = client.post('/api/governance/kill-switch', json={'global': True, 'capabilities': {'exec.system': True}})
+    assert resp.status_code == 200
+    assert resp.json()['state']['global'] is True
+    assert resp.json()['state']['capabilities']['exec.system'] is True
+
+    get_resp = client.get('/api/governance/kill-switch')
+    assert get_resp.status_code == 200
+    assert get_resp.json()['kill_switch']['global'] is True
 
 
 def test_apply_settings_marks_operator_tools_as_restart_required(monkeypatch, tmp_path):

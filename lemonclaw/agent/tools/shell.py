@@ -72,6 +72,24 @@ class ExecTool(Tool):
             "required": ["command"],
         }
 
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del context
+        command = str(params.get("command") or "").strip().lower()
+        if not command:
+            return "exec.write"
+        if re.search(r"\b(curl|wget|httpie|nc|ncat|telnet|ssh|scp|rsync)\b", command):
+            return "exec.network"
+        if re.search(r"\b(npm|pnpm|yarn|bun|pip|pip3|poetry|uv\s+pip|apt|apt-get|yum|dnf|apk|brew)\b.*\b(install|add|remove|uninstall|update|upgrade)\b", command):
+            return "exec.package"
+        if re.search(r"\b(systemctl|service|launchctl|kubectl|helm|docker|podman|shutdown|reboot|poweroff|iptables|ufw|chmod|chown|mount|umount)\b", command):
+            return "exec.system"
+        if (
+            re.search(r"(^|\s)(pwd|ls|cat|grep|rg|find|head|tail|sed|awk|wc|which|env|printenv|git\s+(status|log|diff|show)|python(\d+(\.\d+)*)?\s+-v|node\s+-v|date|whoami|ps)\b", command)
+            and not re.search(r"(\>\>?|\btee\b|\btouch\b|\bmkdir\b|\bmv\b|\bcp\b|\brm\b|\bgit\s+(commit|push|apply)\b)", command)
+        ):
+            return "exec.read"
+        return "exec.write"
+
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         del kwargs
         cwd, cwd_error = self._resolve_cwd(working_dir)

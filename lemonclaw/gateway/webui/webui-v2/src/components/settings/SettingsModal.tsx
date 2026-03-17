@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
 import { HTTPAuthProfilesEditor } from './HTTPAuthProfilesEditor';
+import { GovernanceTab } from './GovernanceTab';
 import { MCPServersEditor } from './MCPServersEditor';
 import { PostgresProfilesEditor } from './PostgresProfilesEditor';
 import { SkillsTab } from './SkillsTab';
@@ -17,7 +18,7 @@ type GroupRuntimeMap = Record<string, { effective_group_policy?: string; effecti
 type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registered?: boolean; running?: boolean; available?: boolean; error?: string }>;
 
 const MOBILE_BREAKPOINT = 768;
-const TABS = ['soul', 'providers', 'agents', 'channels', 'tools', 'skills'];
+const TABS = ['soul', 'providers', 'agents', 'governance', 'channels', 'tools', 'skills'];
 
 const noticeStyle = (tone: NoticeTone) => ({
   marginBottom: '12px',
@@ -221,6 +222,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [channelRuntime, setChannelRuntime] = useState<ChannelRuntimeMap | null>(null);
   const [groupRuntime, setGroupRuntime] = useState<GroupRuntimeMap | null>(null);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusMap | null>(null);
+  const [governanceData, setGovernanceData] = useState<any | null>(null);
+  const [governanceLoading, setGovernanceLoading] = useState(true);
+  const [governanceError, setGovernanceError] = useState<string | null>(null);
+  const [governanceBusy, setGovernanceBusy] = useState(false);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -241,16 +246,36 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const load = async () => {
     try {
-      const res = await apiFetch('/api/settings');
-      const data = await res.json();
+      setGovernanceLoading(true);
+      setGovernanceError(null);
+      const [settingsRes, governanceRes] = await Promise.all([
+        apiFetch('/api/settings'),
+        apiFetch('/api/governance').catch(() => null),
+      ]);
+      const data = await settingsRes.json();
       setDraft(JSON.parse(JSON.stringify(data.settings)));
       setToolStatus(data.tool_status || null);
       setChannelRuntime(data.channel_runtime || null);
       setGroupRuntime(data.group_runtime || null);
       setChannelStatus(data.channel_status || null);
+      if (governanceRes) {
+        if (!governanceRes.ok) {
+          const err = await governanceRes.json().catch(() => ({}));
+          setGovernanceError(err.error || 'Failed to load governance');
+          setGovernanceData(null);
+        } else {
+          setGovernanceData(await governanceRes.json());
+        }
+      } else {
+        setGovernanceError('Failed to load governance');
+        setGovernanceData(null);
+      }
       setChangedPaths(new Set());
     } catch (e) {
       console.error('Failed to load settings', e);
+      setGovernanceError('Failed to load governance');
+    } finally {
+      setGovernanceLoading(false);
     }
   };
 
@@ -295,6 +320,33 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       onClose();
     } catch (e: any) {
       setSaveError(e.message || 'Save failed');
+    }
+  };
+
+  const handleToggleGlobalKillSwitch = async () => {
+    const nextGlobal = !Boolean(governanceData?.kill_switch?.global);
+    const message = nextGlobal
+      ? t('governance_confirm_enable_kill_switch')
+      : t('governance_confirm_disable_kill_switch');
+    if (typeof window !== 'undefined' && !window.confirm(message)) return;
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const res = await apiFetch('/api/governance/kill-switch', {
+        method: 'POST',
+        body: JSON.stringify({ global: nextGlobal }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update kill switch');
+      }
+      const refreshed = await apiFetch('/api/governance');
+      if (!refreshed.ok) throw new Error('Failed to refresh governance state');
+      setGovernanceData(await refreshed.json());
+    } catch (err: any) {
+      setGovernanceError(err?.message || 'Failed to update kill switch');
+    } finally {
+      setGovernanceBusy(false);
     }
   };
 
@@ -453,11 +505,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     : activeTab === 'tools'
       ? activeTabData
       : activeTabData;
-  const dataKeys = activeTab !== 'skills' && contentData
+  const dataKeys = activeTab !== 'skills' && activeTab !== 'governance' && contentData
     ? Object.keys(contentData).filter((key) => isGroup(contentData[key]))
     : [];
   // Prepend tool status card for the tools tab
-  const quickJumpKeys = activeTab === 'tools'
+  const quickJumpKeys = activeTab === 'governance'
+    ? []
+    : activeTab === 'tools'
     ? ['_tool_status', ...dataKeys]
     : dataKeys;
 
@@ -856,10 +910,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
                   {activeTab === 'agents' && renderWorkspaceCard()}
                   {activeTab === 'tools' && renderToolStatusCard()}
-                  {activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
+                  {activeTab === 'governance' ? (
+                    <GovernanceTab
+                      configGovernance={draft?.governance || null}
+                      data={governanceData}
+                      loading={governanceLoading}
+                      busy={governanceBusy}
+                      error={governanceError}
+                      onToggleGlobalKillSwitch={handleToggleGlobalKillSwitch}
+                    />
+                  ) : activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
                 </div>
 
-                {!isMobile && activeTab !== 'skills' && quickJumpKeys.length > 0 && (
+                {!isMobile && activeTab !== 'skills' && activeTab !== 'governance' && quickJumpKeys.length > 0 && (
                   <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
                     {quickJumpKeys.map((key) => {
@@ -900,7 +963,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
           <div style={{ display: 'flex', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
             <button onClick={handleClose} style={{ padding: '10px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_cancel')}</button>
-            <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '10px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_save_apply')}</button>
+            {activeTab !== 'governance' ? (
+              <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '10px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_save_apply')}</button>
+            ) : null}
           </div>
         </div>
       </div>

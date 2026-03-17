@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from lemonclaw.governance.redaction import redact_sensitive_value
 from lemonclaw.ledger.types import OutboxEventRecord, StepRecord, TaskRecord
 
 
@@ -173,14 +174,7 @@ class TaskLedgerSharedMixin:
 
     @staticmethod
     def _sanitize_export_value(value: Any) -> Any:
-        if isinstance(value, list):
-            return [TaskLedgerSharedMixin._sanitize_export_value(item) for item in value]
-        if isinstance(value, dict):
-            return {
-                key: ("[redacted]" if _SENSITIVE_EXPORT_KEY.search(str(key)) else TaskLedgerSharedMixin._sanitize_export_value(nested))
-                for key, nested in value.items()
-            }
-        return value
+        return redact_sensitive_value(value)
 
     def build_operator_queue_item(
         self,

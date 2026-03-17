@@ -58,6 +58,7 @@ class ToolRegistry:
         step = None
         task_id = ""
         capability_id = ""
+        decision = None
         try:
             errors = tool.validate_params(params)
             if errors:
@@ -99,10 +100,33 @@ class ToolRegistry:
                         ended_at=ended_at,
                         params=params,
                         result_status="denied",
+                        warnings=decision.warnings,
                     )
                     if step:
                         self._ledger.finish_step(step, status="failed", error=f"denied: {decision.reason}")
                     return f"Error: Capability '{capability_id}' denied: {decision.reason}" + _TOOL_ERROR_HINT
+                sandbox_allowed, sandbox_reason = self._governance.validate_tool_call(
+                    capability=decision.capability,
+                    params=params,
+                    tool=tool,
+                )
+                if not sandbox_allowed:
+                    ended_at = time.time()
+                    self._governance.record_audit(
+                        capability=decision.capability,
+                        token=capability_token,
+                        task_id=task_id,
+                        mode=mode,
+                        actor_identity=actor_identity,
+                        started_at=started_at,
+                        ended_at=ended_at,
+                        params=params,
+                        result_status="denied",
+                        warnings=[*decision.warnings, "sandbox_denied"],
+                    )
+                    if step:
+                        self._ledger.finish_step(step, status="failed", error=f"denied: {sandbox_reason}")
+                    return f"Error: Capability '{capability_id}' denied: {sandbox_reason}" + _TOOL_ERROR_HINT
 
             result = await tool.execute(**params, **call_context)
             normalized = tool.normalize_result(result)
@@ -114,15 +138,15 @@ class ToolRegistry:
                     error=None if normalized.get("ok") else str(normalized.get("summary", ""))[:500],
                 )
             if self._governance:
-                decision = self._governance.authorize(
+                capability = decision.capability if decision else self._governance.authorize(
                     capability_id=capability_id,
                     tool_name=name,
                     token=capability_token,
                     tenant_id=tenant_id,
                     mode=mode,
-                )
+                ).capability
                 self._governance.record_audit(
-                    capability=decision.capability,
+                    capability=capability,
                     token=capability_token,
                     task_id=task_id,
                     mode=mode,
@@ -131,6 +155,7 @@ class ToolRegistry:
                     ended_at=time.time(),
                     params=params,
                     result_status="ok" if normalized.get("ok") else "error",
+                    warnings=decision.warnings if decision else None,
                 )
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _TOOL_ERROR_HINT

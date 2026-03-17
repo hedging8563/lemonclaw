@@ -89,6 +89,15 @@ class BrowserTool(Tool):
             "required": ["command"],
         }
 
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del context
+        command = str(params.get("command") or "").strip().lower()
+        if not command:
+            return "browser.read"
+        if re.search(r"\b(click|fill|type|press|select|submit|check|uncheck|drag|upload|file-upload|accept-dialog|dismiss-dialog)\b", command):
+            return "browser.interact"
+        return "browser.read"
+
     async def execute(self, command: str, _session_key: str | None = None, **kwargs: Any) -> str:
         del kwargs
         if not self._cli_path:

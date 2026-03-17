@@ -79,6 +79,10 @@ class MessageTool(Tool):
             "required": ["content"]
         }
 
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del params, context
+        return "message.send"
+
     async def execute(
         self,
         content: str,

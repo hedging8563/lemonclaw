@@ -44,6 +44,8 @@ class CapabilityDefinition:
     side_effect_level: str = "none"
     requires_secrets: bool = False
     auth_profile: str = ""
+    secret_profile: str = ""
+    sandbox_profile: str = ""
     identity_mode: IdentityMode = IdentityMode.SERVICE_ACCOUNT
     approval_policy: ApprovalPolicy = ApprovalPolicy.AUTO
     timeout_policy: str = "default"
@@ -98,6 +100,7 @@ class AuthorizationDecision:
     allowed: bool
     capability: CapabilityDefinition
     reason: str = ""
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -117,6 +120,11 @@ class AuditRecord:
     kill_switch_state: dict[str, Any] = field(default_factory=dict)
     tenant_id: str = ""
     artifact_refs: list[str] = field(default_factory=list)
+    secret_profile: str = ""
+    sandbox_profile: str = ""
+    approval_policy: str = ""
+    identity_mode: str = ""
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

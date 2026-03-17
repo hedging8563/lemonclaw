@@ -472,6 +472,32 @@ class GovernanceBudgetConfig(Base):
     default_task_usd: float | None = None
 
 
+class GovernanceSecretProfileConfig(Base):
+    """Named secret profile used by governance policies."""
+
+    kind: Literal["generic", "token", "headers", "credentials"] = "generic"
+    values: dict[str, str] = Field(default_factory=dict)
+    description: str = ""
+
+
+class GovernanceSandboxProfileConfig(Base):
+    """Named runtime sandbox profile (policy-level guardrails, not OS isolation)."""
+
+    allowed_domains: list[str] = Field(default_factory=list)
+    allowed_paths: list[str] = Field(default_factory=list)
+    blocked_commands: list[str] = Field(default_factory=list)
+    max_timeout_seconds: int | None = None
+    allow_headed_browser: bool | None = None
+    require_content_boundaries: bool | None = None
+
+
+class GovernanceIdentityDefaultsConfig(Base):
+    """Default identity labels used by governance views and audit."""
+
+    interactive: Literal["service_account", "instance_identity", "anonymous_readonly"] = "service_account"
+    automation: Literal["service_account", "instance_identity", "anonymous_readonly"] = "service_account"
+
+
 class GovernanceRuntimeConfig(Base):
     """Minimal local governance runtime configuration."""
 
@@ -481,6 +507,9 @@ class GovernanceRuntimeConfig(Base):
     kill_switch_file: str = "~/.lemonclaw/state/governance.json"
     audit_log_path: str = "~/.lemonclaw/state/capability-audit.jsonl"
     budgets: GovernanceBudgetConfig = Field(default_factory=GovernanceBudgetConfig)
+    secret_profiles: dict[str, GovernanceSecretProfileConfig] = Field(default_factory=dict)
+    sandbox_profiles: dict[str, GovernanceSandboxProfileConfig] = Field(default_factory=dict)
+    identity_defaults: GovernanceIdentityDefaultsConfig = Field(default_factory=GovernanceIdentityDefaultsConfig)
     capability_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 

@@ -57,7 +57,11 @@ class SpawnTool(Tool):
             },
             "required": ["task"],
         }
-    
+
+    def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del params, context
+        return "spawn.agent"
+
     async def execute(
         self,
         task: str,
