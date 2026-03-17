@@ -307,10 +307,10 @@ def gateway(
         console.print(f"[yellow]Warning: {sync_report.summary()}[/yellow]")
 
     sync_workspace_templates(config.workspace_path)
-    bus = MessageBus()
+    trigger_runtime = TriggerRuntime(config.workspace_path)
+    bus = MessageBus(trigger_runtime=trigger_runtime)
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    trigger_runtime = TriggerRuntime(config.workspace_path)
 
     # Create usage tracker with budget config
     from lemonclaw.telemetry.usage import UsageTracker

@@ -7,6 +7,7 @@ import pytest
 from lemonclaw.agent.types import AgentInfo, AgentStatus
 from lemonclaw.bus.events import InboundMessage
 from lemonclaw.bus.queue import DEFAULT_AGENT_ID, MessageBus
+from lemonclaw.triggers import TriggerRuntime
 
 
 # ── MessageBus routing ────────────────────────────────────────────────────
@@ -41,6 +42,29 @@ async def test_publish_routes_to_specific_agent():
     # Player queue should have the message
     received = await asyncio.wait_for(bus.consume_inbound("player-1"), timeout=1.0)
     assert received.content == "do task"
+
+
+async def test_internal_queue_publish_attaches_trigger_metadata(tmp_path):
+    trigger_runtime = TriggerRuntime(tmp_path)
+    bus = MessageBus(trigger_runtime=trigger_runtime)
+    bus.register_agent("player-1")
+    msg = InboundMessage(
+        channel="internal",
+        sender_id="conductor",
+        chat_id="player-1",
+        content="do task",
+        target_agent_id="player-1",
+        session_key_override="internal:player-1:t1",
+        metadata={"_request_id": "req-123"},
+    )
+
+    await bus.publish_inbound(msg)
+
+    received = await asyncio.wait_for(bus.consume_inbound("player-1"), timeout=1.0)
+    assert received.metadata["_trigger_source"] == "queue.internal"
+    assert received.metadata["_trigger_kind"] == "queue.dispatch"
+    records = trigger_runtime.list_triggers(limit=10)
+    assert records[0]["metadata"]["target_agent_id"] == "player-1"
 
 
 async def test_unknown_target_falls_back_to_default():

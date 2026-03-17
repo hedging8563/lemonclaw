@@ -2,10 +2,12 @@
 
 import asyncio
 import time
+from typing import Any
 
 from loguru import logger
 
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
+from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
 DEFAULT_AGENT_ID = "default"
 
@@ -26,8 +28,9 @@ class MessageBus:
     original dual-queue bus (everything goes to the "default" agent).
     """
 
-    def __init__(self, maxsize: int = 200):
+    def __init__(self, maxsize: int = 200, trigger_runtime: TriggerRuntime | None = None):
         self._maxsize = maxsize
+        self._trigger_runtime = trigger_runtime
         self._agent_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue(maxsize=maxsize)
         self._pending_responses: dict[str, asyncio.Future[str]] = {}
@@ -57,12 +60,38 @@ class MessageBus:
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Route an inbound message to the target agent's queue."""
+        self._attach_queue_trigger(msg)
         target = msg.target_agent_id or DEFAULT_AGENT_ID
         queue = self._agent_queues.get(target)
         if queue is None:
             logger.warning("Bus: no queue for agent '{}', routing to default", target)
             queue = self._agent_queues[DEFAULT_AGENT_ID]
         await queue.put(msg)
+
+    def _attach_queue_trigger(self, msg: InboundMessage) -> None:
+        if not self._trigger_runtime:
+            return
+        if msg.channel != "internal" or not msg.target_agent_id:
+            return
+        metadata = dict(msg.metadata or {})
+        if metadata.get("_trigger_id"):
+            msg.metadata = metadata
+            return
+        trigger = self._trigger_runtime.record_trigger(
+            source="queue.internal",
+            kind="queue.dispatch" if metadata.get("_request_id") else "queue.message",
+            payload_summary=str(msg.content or "")[:500],
+            session_key=msg.session_key,
+            channel=msg.channel,
+            chat_id=str(msg.chat_id or ""),
+            metadata={
+                "target_agent_id": str(msg.target_agent_id or ""),
+                "sender_id": str(msg.sender_id or ""),
+                "request_id": str(metadata.get("_request_id") or ""),
+            },
+        )
+        metadata.update(build_trigger_metadata(trigger))
+        msg.metadata = metadata
 
     async def consume_inbound(self, agent_id: str = DEFAULT_AGENT_ID) -> InboundMessage:
         """Consume the next inbound message for a specific agent."""
