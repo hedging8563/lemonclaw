@@ -9,6 +9,37 @@ export interface TaskDisplayState {
   detail?: string;
 }
 
+export interface RecoveryHistoryEntry {
+  source?: string;
+  action?: string;
+  reason?: string;
+  details?: Record<string, any>;
+  at_ms?: number;
+}
+
+export interface TaskStepRecord {
+  step_id: string;
+  step_type: string;
+  name: string;
+  status: string;
+  started_at_ms?: number;
+  ended_at_ms?: number | null;
+  input_summary?: string;
+  error?: string | null;
+  replayable?: boolean;
+}
+
+export interface TaskSummary {
+  step_count?: number;
+  status_counts?: Record<string, number>;
+  last_successful_step?: string | null;
+  resume_from_step?: string | null;
+  display_state?: TaskDisplayState;
+  outbox_count?: number;
+  outbox_status_counts?: Record<string, number>;
+  recovery_history?: RecoveryHistoryEntry[];
+}
+
 export interface OutboxEventRecord {
   event_id: string;
   task_id: string;
@@ -42,8 +73,8 @@ export interface TaskRecord {
 
 export interface TaskDetail {
   task: TaskRecord;
-  summary?: Record<string, any>;
-  steps?: Array<Record<string, any>>;
+  summary?: TaskSummary;
+  steps?: TaskStepRecord[];
   outboxEvents?: OutboxEventRecord[];
   candidate?: Record<string, any> | null;
 }

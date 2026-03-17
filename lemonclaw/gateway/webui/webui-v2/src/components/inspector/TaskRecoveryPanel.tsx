@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   loadTaskDetail,
+  type RecoveryHistoryEntry,
   loadTaskPanel,
   recoverySummary,
   recoveryTasks,
@@ -8,6 +9,7 @@ import {
   taskActionBusy,
   taskDetails,
   taskPanelError,
+  type TaskStepRecord,
   triggerManualResume,
   triggerOutboxRetry,
   triggerSafeResume,
@@ -100,6 +102,135 @@ function formatEventTime(value?: number | null): string {
   } catch {
     return '—';
   }
+}
+
+function formatStepStatus(status?: string | null): string {
+  const key = String(status || '').toLowerCase();
+  const translated = t(`task_step_status_${key}` as any);
+  return translated === `task_step_status_${key}` ? (status || 'unknown') : translated;
+}
+
+function formatRecoveryAction(action?: string | null): string {
+  const key = String(action || '').toLowerCase();
+  const translated = t(`task_recovery_action_${key}` as any);
+  return translated === `task_recovery_action_${key}` ? (action || '—') : translated;
+}
+
+function stepTone(status?: string | null): { color: string; background: string; borderColor: string } {
+  switch (String(status || '').toLowerCase()) {
+    case 'completed':
+      return toneStyles('success');
+    case 'failed':
+    case 'abandoned':
+      return toneStyles('error');
+    case 'waiting':
+    case 'waiting_outbox':
+    case 'retrying':
+      return toneStyles('warning');
+    case 'running':
+    case 'pending':
+      return toneStyles('accent');
+    default:
+      return toneStyles('muted');
+  }
+}
+
+function isSettledTask(task: TaskRecord): boolean {
+  return ['completed', 'abandoned'].includes(String(task.status || ''));
+}
+
+function renderStepTimeline(steps: TaskStepRecord[] | undefined) {
+  if (!steps || steps.length === 0) {
+    return (
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+        {t('task_steps_empty')}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {steps.map((step) => {
+        const tone = stepTone(step.status);
+        return (
+          <div key={step.step_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'grid', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{step.name || step.step_id}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                  {step.step_type} · {step.step_id}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '10px', fontFamily: 'var(--font-mono)', ...tone }}>
+                  {formatStepStatus(step.status)}
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                  {step.replayable === false ? t('task_step_non_replayable') : t('task_step_replayable')}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_step_started_at')}</div>
+              <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(step.started_at_ms)}</div>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_step_ended_at')}</div>
+              <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(step.ended_at_ms)}</div>
+            </div>
+            {step.input_summary && (
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_step_input')}</div>
+                <pre style={{ margin: 0, maxHeight: '120px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {step.input_summary}
+                </pre>
+              </div>
+            )}
+            {step.error && (
+              <div style={{ fontSize: '11px', color: 'var(--error)', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', padding: '8px 10px', lineHeight: '1.55', wordBreak: 'break-word' }}>
+                {step.error}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderRecoveryHistory(history: RecoveryHistoryEntry[] | undefined) {
+  if (!history || history.length === 0) {
+    return (
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+        {t('task_recovery_history_empty')}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {history.slice().reverse().map((entry, idx) => (
+        <div key={`${entry.action || 'history'}-${entry.at_ms || idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)', padding: '8px 10px', display: 'grid', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                {formatRecoveryAction(entry.action)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {(entry.source || '—')} · {formatEventTime(entry.at_ms)}
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
+            {entry.reason || '—'}
+          </div>
+          {entry.details && Object.keys(entry.details).length > 0 && (
+            <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {JSON.stringify(entry.details, null, 2)}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function formatResumeRoute(task: TaskRecord): string {
@@ -368,6 +499,18 @@ function taskCard(
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              {t('task_steps_title')}
+            </div>
+            {renderStepTimeline(detail.steps)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              {t('task_recovery_history_title')}
+            </div>
+            {renderRecoveryHistory(detail.summary?.recovery_history)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
               {t('task_outbox_title')}
             </div>
             {!detail.outboxEvents || detail.outboxEvents.length === 0 ? (
@@ -443,6 +586,8 @@ function taskCard(
                         <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.target || '—'}</div>
                         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_attempts')}</div>
                         <div style={{ color: 'var(--text-primary)' }}>{event.attempts ?? 0}</div>
+                        <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_step_id')}</div>
+                        <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>{event.step_id || '—'}</div>
                         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_updated_at')}</div>
                         <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.updated_at_ms)}</div>
                         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_error')}</div>
@@ -469,7 +614,11 @@ function taskCard(
 export function TaskRecoveryPanel() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
+  const [showSettledTasks, setShowSettledTasks] = useState(false);
   const timerRef = useRef<any>(null);
+
+  const actionableTasks = sessionTasks.value.filter((task) => !isSettledTask(task));
+  const settledTasks = sessionTasks.value.filter((task) => isSettledTask(task));
 
   useEffect(() => {
     loadTaskPanel(activeSessionKey.value);
@@ -514,8 +663,14 @@ export function TaskRecoveryPanel() {
         <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-secondary)' }}>
           {t('tasks_panel_session_count')}: {sessionTasks.value.length}
         </div>
+        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(10, 186, 181, 0.24)', background: 'rgba(10, 186, 181, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)' }}>
+          {t('tasks_panel_actionable_count')}: {actionableTasks.length}
+        </div>
         <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(255, 107, 53, 0.28)', background: 'rgba(255, 107, 53, 0.1)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent)' }}>
           {t('tasks_panel_manual_review_count')}: {recoverySummary.value?.manual_review_required || 0}
+        </div>
+        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(76, 175, 80, 0.24)', background: 'rgba(76, 175, 80, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--success)' }}>
+          {t('tasks_panel_settled_count')}: {settledTasks.length}
         </div>
       </div>
 
@@ -525,7 +680,42 @@ export function TaskRecoveryPanel() {
             <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks_panel_empty')}</div>
           </div>
         ) : (
-          sessionTasks.value.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))
+          <>
+            {actionableTasks.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
+                  {t('tasks_panel_actionable')}
+                </div>
+                {actionableTasks.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
+              </div>
+            )}
+
+            {settledTasks.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
+                    {t('tasks_panel_settled')}
+                  </div>
+                  <button
+                    onClick={() => setShowSettledTasks(!showSettledTasks)}
+                    style={{
+                      padding: '5px 8px',
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      borderRadius: '6px',
+                      color: 'var(--text-secondary)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {showSettledTasks ? t('tasks_panel_hide_settled') : t('tasks_panel_show_settled')}
+                  </button>
+                </div>
+                {showSettledTasks && settledTasks.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
+              </div>
+            )}
+          </>
         )}
 
         {recoveryTasks.value.length > 0 && (
@@ -533,23 +723,7 @@ export function TaskRecoveryPanel() {
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginTop: '4px' }}>
               {t('tasks_panel_manual_review')}
             </div>
-            {recoveryTasks.value.slice(0, 4).map((task) => {
-              const state = task.display_state;
-              const tone = toneStyles(state?.tone || 'warning');
-              return (
-                <div key={`recovery-${task.task_id}`} style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid', background: tone.background, borderColor: tone.borderColor }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '2px', wordBreak: 'break-word' }}>{task.goal || task.task_id}</div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{task.session_key}</div>
-                    </div>
-                    <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: tone.color }}>
-                      {formatDisplayState(state)}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {recoveryTasks.value.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
           </div>
         )}
       </div>
