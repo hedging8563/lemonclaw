@@ -107,7 +107,7 @@ class NotifyTool(Tool):
             "properties": {
                 "target_type": {
                     "type": "string",
-                    "enum": ["channel", "webhook"],
+                    "enum": ["channel", "webhook", "email"],
                     "description": "Notification target type.",
                 },
                 "content": {
@@ -127,6 +127,10 @@ class NotifyTool(Tool):
                     "type": "string",
                     "description": "Webhook URL when target_type=webhook.",
                 },
+                "email": {
+                    "type": "string",
+                    "description": "Recipient email address when target_type=email.",
+                },
                 "title": {
                     "type": "string",
                     "description": "Optional title for structured notifications.",
@@ -139,6 +143,8 @@ class NotifyTool(Tool):
         target_type = str(params.get("target_type", "channel"))
         if target_type == "webhook":
             return "notify.webhook.send"
+        if target_type == "email":
+            return "notify.email.send"
         return "notify.channel.send"
 
     async def execute(
@@ -148,6 +154,7 @@ class NotifyTool(Tool):
         channel: str | None = None,
         chat_id: str | None = None,
         webhook_url: str | None = None,
+        email: str | None = None,
         title: str | None = None,
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
@@ -235,5 +242,35 @@ class NotifyTool(Tool):
                 "summary": f"Webhook notification -> {resp_status}",
                 "raw": {"target_type": "webhook", "webhook_url": webhook_url, "status_code": resp_status},
             }
+
+        if target_type == "email":
+            to_email = str(email or "").strip()
+            callback = _outbound_sink or self._send_callback
+            if not to_email:
+                return {"ok": False, "summary": "Missing email target", "raw": {}}
+            if _outbox_enabled and _task_id and _task_ledger and _step_id:
+                event = _task_ledger.enqueue_outbox(
+                    task_id=_task_id,
+                    step_id=_step_id,
+                    effect_type="email_send",
+                    target=to_email,
+                    payload={"to": to_email, "subject": title or "", "body": content},
+                )
+                return {
+                    "ok": True,
+                    "summary": f"Email queued -> {to_email}",
+                    "step_status": "waiting_outbox",
+                    "raw": {
+                        "target_type": "email",
+                        "email": to_email,
+                        "event_id": event["event_id"],
+                        "queued": True,
+                    },
+                }
+            if not callback:
+                return {"ok": False, "summary": "Notification channel callback not configured", "raw": {"email": to_email}}
+            msg = OutboundMessage(channel="email", chat_id=to_email, content=content, metadata={"subject": title or ""})
+            await callback(msg)
+            return {"ok": True, "summary": f"Email notification sent to {to_email}", "raw": {"target_type": "email", "email": to_email}}
 
         return {"ok": False, "summary": f"Unsupported target_type '{target_type}'", "raw": {"target_type": target_type}}

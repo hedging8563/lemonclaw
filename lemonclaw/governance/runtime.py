@@ -82,6 +82,13 @@ _CAPABILITY_SPECS: dict[str, dict[str, Any]] = {
         "identity_mode": IdentityMode.SERVICE_ACCOUNT,
         "network_scope": "egress",
     },
+    "notify.email.send": {
+        "tool_name": "notify",
+        "category": "messaging",
+        "risk_level": RiskLevel.EXTERNAL_WRITE,
+        "side_effect_level": "external_write",
+        "identity_mode": IdentityMode.SERVICE_ACCOUNT,
+    },
     "git.read": {
         "tool_name": "git",
         "category": "repository",

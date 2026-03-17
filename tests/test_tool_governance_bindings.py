@@ -1,6 +1,7 @@
 from lemonclaw.agent.tools.browser import BrowserTool
 from lemonclaw.agent.tools.cron import CronTool
 from lemonclaw.agent.tools.message import MessageTool
+from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.shell import ExecTool
 from lemonclaw.agent.tools.spawn import SpawnTool
 
@@ -42,9 +43,11 @@ def test_browser_resolves_governance_capabilities():
 def test_cron_message_and_spawn_resolve_governance_capabilities():
     cron = CronTool(_DummyCronService())
     message = MessageTool()
+    notify = NotifyTool()
     spawn = SpawnTool(_DummySpawnManager())
 
     assert cron.resolve_capability({"action": "list"}) == "cron.read"
     assert cron.resolve_capability({"action": "add"}) == "cron.write"
     assert message.resolve_capability({"content": "hello"}) == "message.send"
+    assert notify.resolve_capability({"target_type": "email"}) == "notify.email.send"
     assert spawn.resolve_capability({"task": "Summarize logs"}) == "spawn.agent"

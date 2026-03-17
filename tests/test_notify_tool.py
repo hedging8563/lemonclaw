@@ -35,6 +35,24 @@ def test_notify_resolves_capability():
     tool = NotifyTool()
     assert tool.resolve_capability({"target_type": "channel"}) == "notify.channel.send"
     assert tool.resolve_capability({"target_type": "webhook"}) == "notify.webhook.send"
+    assert tool.resolve_capability({"target_type": "email"}) == "notify.email.send"
+
+
+@pytest.mark.asyncio
+async def test_notify_email_uses_email_channel_callback():
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = NotifyTool(send_callback=_send)
+    result = await tool.execute(target_type="email", content="hello", email="user@example.com", title="Subject")
+
+    assert result["ok"] is True
+    assert len(sent) == 1
+    assert sent[0].channel == "email"
+    assert sent[0].chat_id == "user@example.com"
+    assert sent[0].metadata["subject"] == "Subject"
 
 
 @pytest.mark.asyncio
@@ -123,6 +141,40 @@ async def test_notify_webhook_enqueues_outbox_when_enabled(tmp_path, monkeypatch
     assert len(events) == 1
     assert events[0]["effect_type"] == "webhook_json"
     assert events[0]["target"] == "https://hooks.example.com/hook"
+
+
+@pytest.mark.asyncio
+async def test_notify_email_enqueues_outbox_when_enabled(tmp_path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+
+    tool = NotifyTool()
+    result = await tool.execute(
+        target_type="email",
+        content="hello",
+        email="user@example.com",
+        title="Subject",
+        _task_id="task_1",
+        _task_ledger=ledger,
+        _step_id="step_notify_1",
+        _outbox_enabled=True,
+    )
+
+    assert result["ok"] is True
+    assert result["raw"]["queued"] is True
+    assert result["step_status"] == "waiting_outbox"
+    events = ledger.list_outbox_events()
+    assert len(events) == 1
+    assert events[0]["effect_type"] == "email_send"
+    assert events[0]["target"] == "user@example.com"
+    assert events[0]["payload"]["subject"] == "Subject"
 
 
 @pytest.mark.asyncio
