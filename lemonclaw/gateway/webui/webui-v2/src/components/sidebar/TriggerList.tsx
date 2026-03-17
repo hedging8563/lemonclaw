@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { activeSessionKey } from '../../stores/sessions';
+import { activeOperatorTaskId } from '../../stores/tasks';
 import { t } from '../../stores/i18n';
-import { mobileMenuOpen, sidebarTab } from '../../stores/ui';
+import { mobileMenuOpen, showInspector, sidebarTab } from '../../stores/ui';
 import { loadTriggers, triggerPanelError, triggerSummary, triggers } from '../../stores/triggers';
 
 function formatTriggerTime(value?: number): string {
@@ -63,6 +64,10 @@ export function TriggerList() {
             key={item.trigger_id}
             onClick={() => {
               if (item.session_key) activeSessionKey.value = item.session_key;
+              if (item.task_id) {
+                activeOperatorTaskId.value = item.task_id;
+                showInspector.value = true;
+              }
               sidebarTab.value = 'sessions';
               mobileMenuOpen.value = false;
             }}

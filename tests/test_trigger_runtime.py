@@ -10,6 +10,7 @@ from lemonclaw.channels.wecom import WeComChannel, WeComCrypto, verify_signature
 from lemonclaw.config.schema import WeComConfig
 from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
+from lemonclaw.ledger.runtime import TaskLedger
 from lemonclaw.session.manager import SessionManager
 from lemonclaw.triggers import build_trigger_metadata
 from lemonclaw.triggers import TriggerRuntime
@@ -115,6 +116,45 @@ def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
     detail_resp = client.get(f"/api/triggers/{trigger['trigger_id']}")
     assert detail_resp.status_code == 200
     assert detail_resp.json()["trigger"]["kind"] == "heartbeat.run"
+
+
+def test_trigger_bundle_includes_linked_task_bundle(tmp_path: Path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    ledger = TaskLedger(tmp_path)
+    trigger = trigger_runtime.record_trigger(
+        source="cron",
+        kind="agent_turn",
+        payload_summary="bundle me",
+        session_key="cron:job-1",
+        channel="cron",
+        chat_id="direct",
+    )
+    trigger_runtime.link_task(trigger["trigger_id"], task_id="task_bundle", session_key="cron:job-1")
+    ledger.ensure_task(
+        task_id="task_bundle",
+        session_key="cron:job-1",
+        agent_id="default",
+        mode="chat",
+        channel="cron",
+        goal="bundle me",
+        metadata={"trigger": {"trigger_id": trigger["trigger_id"], "source": trigger["source"], "kind": trigger["kind"]}},
+    )
+
+    app = create_app(
+        auth_token=None,
+        agent_loop=SimpleNamespace(workspace=tmp_path, ledger=ledger, trigger_runtime=trigger_runtime),
+        session_manager=SessionManager(tmp_path),
+        trigger_runtime=trigger_runtime,
+        webui_enabled=True,
+    )
+    client = TestClient(app)
+
+    resp = client.get(f"/api/triggers/{trigger['trigger_id']}/bundle")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["trigger"]["trigger_id"] == trigger["trigger_id"]
+    assert data["task_bundle"]["task"]["task_id"] == "task_bundle"
+    assert data["task_bundle"]["trigger"]["trigger_id"] == trigger["trigger_id"]
 
 
 @pytest.mark.asyncio

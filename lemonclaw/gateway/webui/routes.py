@@ -931,6 +931,32 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def get_trigger_bundle(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if trigger_runtime is None:
+            return _json({"error": "trigger runtime not available"}, 503)
+
+        trigger_id = request.path_params.get("trigger_id", "")
+        if not trigger_id:
+            return _json({"error": "trigger_id is required"}, 400)
+        if not trigger_runtime.is_valid_trigger_id(trigger_id):
+            return _json({"error": "invalid trigger_id"}, 400)
+        record = trigger_runtime.read_trigger(trigger_id)
+        if not record:
+            return _json({"error": "trigger not found"}, 404)
+
+        ledger = getattr(agent_loop, "ledger", None)
+        task_bundle = None
+        task_id = str(record.get("task_id") or "")
+        if ledger is not None and task_id and ledger.is_valid_task_id(task_id):
+            task_bundle = _build_task_bundle(task_id)
+
+        resp = _json({"trigger": record, "task_bundle": task_bundle})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def update_memory_core(request: Request) -> Response:
         """9.2: Update core.md."""
         ok, err = _require_auth(request)
@@ -1803,6 +1829,7 @@ def get_webui_routes(
         Route("/api/chat/stream", chat_stream, methods=["POST"]),
         Route("/api/triggers", list_triggers, methods=["GET"]),
         Route("/api/triggers/{trigger_id}", get_trigger, methods=["GET"]),
+        Route("/api/triggers/{trigger_id}/bundle", get_trigger_bundle, methods=["GET"]),
         Route("/api/memory", get_memory, methods=["GET"]),
         Route("/api/memory/core", update_memory_core, methods=["PATCH"]),
         Route("/api/memory/entities/{name:path}", update_entity, methods=["PATCH"]),
