@@ -1,12 +1,26 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { activeSessionKey } from '../../stores/sessions';
 import { activeOperatorTaskId, loadOperatorQueue, operatorQueueTasks, recoverySummary } from '../../stores/tasks';
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector } from '../../stores/ui';
 
 export function OperatorQueueList() {
+  const timerRef = useRef<any>(null);
+
   useEffect(() => {
     loadOperatorQueue();
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadOperatorQueue();
+      }
+    }, 15000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   return (
