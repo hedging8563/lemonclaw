@@ -183,11 +183,12 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CallbackQueryHandler(self._on_model_callback, pattern=r"^model:"))
         self._app.add_handler(CallbackQueryHandler(self._on_noop_callback, pattern=r"^noop$"))
 
+        inbound_message_filter = (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) & ~filters.COMMAND
+
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
-                & ~filters.COMMAND,
+                inbound_message_filter,
                 self._on_message
             )
         )
@@ -210,7 +211,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message", "callback_query"],
+            allowed_updates=["message", "edited_message", "channel_post", "edited_channel_post", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
 
@@ -619,6 +620,50 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
+    def _extract_update_message(update: Update):
+        return (
+            getattr(update, "message", None)
+            or getattr(update, "edited_message", None)
+            or getattr(update, "channel_post", None)
+            or getattr(update, "edited_channel_post", None)
+        )
+
+    @staticmethod
+    def _update_kind(update: Update) -> str:
+        if getattr(update, "message", None) is not None:
+            return "message"
+        if getattr(update, "edited_message", None) is not None:
+            return "edited_message"
+        if getattr(update, "channel_post", None) is not None:
+            return "channel_post"
+        if getattr(update, "edited_channel_post", None) is not None:
+            return "edited_channel_post"
+        return "unknown"
+
+    def _log_group_ingress(self, update: Update, message) -> None:
+        chat = getattr(message, "chat", None)
+        if chat is None or getattr(chat, "type", "private") == "private":
+            return
+        entities = []
+        for attr in ("entities", "caption_entities"):
+            for entity in getattr(message, attr, None) or []:
+                entity_type = str(getattr(entity, "type", "") or "")
+                if entity_type:
+                    entities.append(entity_type)
+        logger.info(
+            "Telegram group ingress update_id={} kind={} chat_id={} chat_type={} effective_user={} from_user={} sender_chat={} entities={} text={!r}",
+            getattr(update, "update_id", None),
+            self._update_kind(update),
+            getattr(chat, "id", None),
+            getattr(chat, "type", None),
+            bool(getattr(update, "effective_user", None)),
+            bool(getattr(message, "from_user", None)),
+            bool(getattr(message, "sender_chat", None)),
+            entities,
+            ((getattr(message, "text", None) or getattr(message, "caption", None) or "")[:120]),
+        )
+
+    @staticmethod
     def _sender_id(sender) -> str:
         """Build sender_id for user or sender_chat style Telegram actors."""
         sid = str(getattr(sender, "id", "") or "")
@@ -633,7 +678,7 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _resolve_sender(update: Update):
         """Resolve the best available sender identity for a Telegram update."""
-        message = getattr(update, "message", None)
+        message = TelegramChannel._extract_update_message(update)
         if message is None:
             return getattr(update, "effective_user", None)
         return (
@@ -660,11 +705,11 @@ class TelegramChannel(BaseChannel):
 
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
-        if not update.message:
+        message = self._extract_update_message(update)
+        if not message:
             return
         if not self._dedup_update(update):
             return
-        message = update.message
         sender = self._resolve_sender(update)
         if sender is None:
             logger.debug("Telegram command dropped due to missing sender identity")
@@ -843,7 +888,7 @@ class TelegramChannel(BaseChannel):
             was_mentioned=mentioned,
         )
         if not allowed:
-            logger.debug(
+            logger.info(
                 "Telegram group gate blocked chat_id={} policy={} allowlist_hit={} require_mention={} mentioned={} text={!r}",
                 chat_id,
                 policy,
@@ -865,15 +910,21 @@ class TelegramChannel(BaseChannel):
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
-        if not update.message:
+        message = self._extract_update_message(update)
+        if not message:
             return
         if not self._dedup_update(update):
             return
 
-        message = update.message
+        self._log_group_ingress(update, message)
         sender = self._resolve_sender(update)
         if sender is None:
-            logger.debug("Telegram message dropped due to missing sender identity for chat_id={}", getattr(message, "chat_id", ""))
+            logger.info(
+                "Telegram message dropped due to missing sender identity update_id={} kind={} chat_id={}",
+                getattr(update, "update_id", None),
+                self._update_kind(update),
+                getattr(message, "chat_id", ""),
+            )
             return
         chat_id = message.chat_id
         sender_id = self._sender_id(sender)
