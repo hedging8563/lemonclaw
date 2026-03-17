@@ -45,6 +45,13 @@ class KnowledgeStore:
         with self._lock:
             return list(self._read_manifest_unlocked()["documents"])
 
+    def read_document(self, doc_id: str) -> dict[str, Any] | None:
+        if not self.is_valid_doc_id(doc_id):
+            raise ValueError("invalid doc_id")
+        with self._lock:
+            data = self._read_manifest_unlocked()
+            return next((dict(item) for item in data["documents"] if item.get("doc_id") == doc_id), None)
+
     def summarize(self) -> dict[str, Any]:
         docs = self.list_documents()
         by_type: dict[str, int] = {}
@@ -104,6 +111,60 @@ class KnowledgeStore:
             self._write_manifest_unlocked(data)
             self._delete_chunks_unlocked(doc_id)
             return True
+
+    def update_document(
+        self,
+        doc_id: str,
+        *,
+        title: str | None = None,
+        note: str | None = None,
+        source: str | None = None,
+        source_type: str | None = None,
+        content: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.is_valid_doc_id(doc_id):
+            raise ValueError("invalid doc_id")
+        with self._lock:
+            data = self._read_manifest_unlocked()
+            target = next((item for item in data["documents"] if item.get("doc_id") == doc_id), None)
+            if not target:
+                raise KeyError("document not found")
+
+            needs_reingest = False
+            if title is not None:
+                target["title"] = str(title).strip()[:200]
+            if note is not None:
+                target["note"] = str(note or "")[:2000]
+            if source is not None:
+                next_source = str(source or "").strip()
+                if not next_source:
+                    raise ValueError("source is required")
+                if next_source != str(target.get("source") or ""):
+                    target["source"] = next_source[:2000]
+                    needs_reingest = True
+            if source_type is not None:
+                next_type = str(source_type or "").strip().lower()
+                if next_type not in _ALLOWED_TYPES:
+                    raise ValueError("invalid source_type")
+                if next_type != str(target.get("source_type") or ""):
+                    target["source_type"] = next_type
+                    needs_reingest = True
+            if content is not None:
+                next_content = str(content or "")[:20000]
+                if next_content != str(target.get("content") or ""):
+                    target["content"] = next_content
+                    needs_reingest = True
+
+            if needs_reingest:
+                target["status"] = "registered"
+                target["chunk_count"] = 0
+                target["last_error"] = ""
+                target.pop("ingested_at_ms", None)
+                self._delete_chunks_unlocked(doc_id)
+
+            target["updated_at_ms"] = _now_ms()
+            self._write_manifest_unlocked(data)
+            return dict(target)
 
     def ingest_document(self, doc_id: str) -> dict[str, Any]:
         if not self.is_valid_doc_id(doc_id):
@@ -173,6 +234,14 @@ class KnowledgeStore:
                 "snippet": text[:280],
             })
         return results
+
+    def list_chunks(self, doc_id: str) -> list[dict[str, Any]]:
+        if not self.is_valid_doc_id(doc_id):
+            raise ValueError("invalid doc_id")
+        with self._lock:
+            chunks = [dict(item) for item in self._read_chunks_unlocked() if item.get("doc_id") == doc_id]
+        chunks.sort(key=lambda item: str(item.get("chunk_id") or ""))
+        return chunks
 
     @staticmethod
     def format_for_context(results: list[dict[str, Any]]) -> str:

@@ -1053,6 +1053,24 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def get_knowledge_document(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        doc_id = str(request.path_params.get("doc_id", "") or "")
+        if not doc_id:
+            return _json({"error": "doc_id is required"}, 400)
+        try:
+            doc = _knowledge.read_document(doc_id)
+            chunks = _knowledge.list_chunks(doc_id)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        if not doc:
+            return _json({"error": "document not found"}, 404)
+        resp = _json({"document": doc, "chunks": chunks})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def create_knowledge_document(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1071,6 +1089,34 @@ def get_webui_routes(
             )
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
+        resp = _json({"document": doc})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def update_knowledge_document(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        doc_id = str(request.path_params.get("doc_id", "") or "")
+        if not doc_id:
+            return _json({"error": "doc_id is required"}, 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        try:
+            doc = _knowledge.update_document(
+                doc_id,
+                title=body.get("title"),
+                note=body.get("note"),
+                source=body.get("source"),
+                source_type=body.get("source_type"),
+                content=body.get("content"),
+            )
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        except KeyError:
+            return _json({"error": "document not found"}, 404)
         resp = _json({"document": doc})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -1973,6 +2019,8 @@ def get_webui_routes(
         Route("/api/knowledge", get_knowledge, methods=["GET"]),
         Route("/api/knowledge/search", search_knowledge, methods=["GET"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
+        Route("/api/knowledge/documents/{doc_id}", get_knowledge_document, methods=["GET"]),
+        Route("/api/knowledge/documents/{doc_id}", update_knowledge_document, methods=["PATCH"]),
         Route("/api/knowledge/documents/{doc_id}/ingest", ingest_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", delete_knowledge_document, methods=["DELETE"]),
         Route("/api/soul", get_soul, methods=["GET"]),

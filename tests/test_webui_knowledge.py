@@ -85,3 +85,46 @@ def test_knowledge_manual_ingest_and_search(tmp_path: Path) -> None:
     results = search_resp.json()["results"]
     assert len(results) >= 1
     assert results[0]["doc_id"] == doc_id
+
+    detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["document"]["doc_id"] == doc_id
+    assert len(detail["chunks"]) >= 1
+
+
+def test_knowledge_document_patch_resets_ingest_state(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Initial Notes",
+            "source": "manual://initial",
+            "source_type": "manual",
+            "content": "Original content for retrieval.",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    assert ingest_resp.json()["document"]["status"] == "ingested"
+
+    patch_resp = client.patch(
+        f"/api/knowledge/documents/{doc_id}",
+        json={
+            "title": "Updated Notes",
+            "content": "Updated content with a different retrieval keyword.",
+        },
+    )
+    assert patch_resp.status_code == 200
+    patched = patch_resp.json()["document"]
+    assert patched["title"] == "Updated Notes"
+    assert patched["status"] == "registered"
+    assert patched["chunk_count"] == 0
+
+    detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["chunks"] == []

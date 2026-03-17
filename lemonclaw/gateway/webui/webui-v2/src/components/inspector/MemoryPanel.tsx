@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, searchKnowledge } from '../../stores/knowledge';
+import { activeKnowledgeChunks, activeKnowledgeDocument, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -56,6 +56,12 @@ export function MemoryPanel() {
   const [knowledgeNote, setKnowledgeNote] = useState('');
   const [knowledgeContent, setKnowledgeContent] = useState('');
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
+  const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
+  const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
+  const [editKnowledgeType, setEditKnowledgeType] = useState('url');
+  const [editKnowledgeNote, setEditKnowledgeNote] = useState('');
+  const [editKnowledgeContent, setEditKnowledgeContent] = useState('');
 
   useEffect(() => {
     loadMemory();
@@ -158,6 +164,30 @@ export function MemoryPanel() {
       await loadKnowledge();
     } catch (e: any) {
       setSaveError(e.message || t('knowledge_delete_failed'));
+    }
+  };
+
+  const handleEditKnowledge = async (docId: string) => {
+    setSaveError(null);
+    try {
+      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: editKnowledgeTitle,
+          source: editKnowledgeSource,
+          source_type: editKnowledgeType,
+          note: editKnowledgeNote,
+          content: editKnowledgeContent,
+        }),
+      });
+      setEditingKnowledgeId(null);
+      await loadKnowledge();
+      await loadKnowledgeDocument(docId);
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_create_failed'));
     }
   };
 
@@ -265,11 +295,19 @@ export function MemoryPanel() {
                 {knowledgeDocuments.value.map((doc) => (
                   <div key={doc.doc_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => void loadKnowledgeDocument(doc.doc_id)}>
                         <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                        <button onClick={() => {
+                          setEditingKnowledgeId(doc.doc_id);
+                          setEditKnowledgeTitle(doc.title || '');
+                          setEditKnowledgeSource(doc.source || '');
+                          setEditKnowledgeType(doc.source_type || 'url');
+                          setEditKnowledgeNote(doc.note || '');
+                          setEditKnowledgeContent((doc as any).content || '');
+                        }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
                         <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
                         <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
                       </div>
@@ -283,11 +321,59 @@ export function MemoryPanel() {
                     </div>
                     {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
                     {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
+                    {editingKnowledgeId === doc.doc_id && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                        <input value={editKnowledgeTitle} onInput={(e) => setEditKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+                        <select value={editKnowledgeType} onInput={(e) => setEditKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
+                          <option value="url">url</option>
+                          <option value="file">file</option>
+                          <option value="manual">manual</option>
+                        </select>
+                        <input value={editKnowledgeSource} onInput={(e) => setEditKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+                        <textarea value={editKnowledgeNote} onInput={(e) => setEditKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+                        {editKnowledgeType === 'manual' && (
+                          <textarea value={editKnowledgeContent} onInput={(e) => setEditKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                          <button onClick={() => setEditingKnowledgeId(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
+                          <button onClick={() => void handleEditKnowledge(doc.doc_id)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_update')}</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
+            )}
+            {activeKnowledgeDocument.value && (
+              <div style={{ marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_detail')}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{activeKnowledgeDocument.value.title || activeKnowledgeDocument.value.source}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeKnowledgeDocument.value.source}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                  <span style={pillStyle()}>{activeKnowledgeDocument.value.source_type || '—'}</span>
+                  <span style={pillStyle()}>{activeKnowledgeDocument.value.status || 'registered'}</span>
+                  <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeKnowledgeDocument.value.chunk_count || 0}`}</span>
+                </div>
+                {activeKnowledgeDocument.value.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeKnowledgeDocument.value.note}</div>}
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_chunks')}</div>
+                {activeKnowledgeChunks.value.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {activeKnowledgeChunks.value.map((chunk) => (
+                      <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
+                          <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+                )}
+              </div>
             )}
             <div style={{ marginTop: '10px' }}>
               <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_search_results')}</div>
