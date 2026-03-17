@@ -1346,11 +1346,39 @@ def get_webui_routes(
                 "```json",
                 json.dumps(export_view.get("candidate") or {}, ensure_ascii=False, indent=2),
                 "```",
+                "",
+                "## Outbox Postmortem",
+                "",
+                "```json",
+                json.dumps((export_view.get("postmortem") or {}).get("outbox") or {}, ensure_ascii=False, indent=2),
+                "```",
             ])
             resp = PlainTextResponse("\n".join(lines), media_type="text/markdown; charset=utf-8")
             _maybe_refresh_cookie(request, resp)
             return resp
         return _json({"error": "unsupported format"}, 400)
+
+    async def get_task_postmortem(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return _json({"error": "task_id is required"}, 400)
+        if not ledger.is_valid_task_id(task_id):
+            return _json({"error": "invalid task_id"}, 400)
+
+        postmortem = ledger.build_task_postmortem_view(task_id)
+        if not postmortem:
+            return _json({"error": "task not found"}, 404)
+        resp = _json(postmortem)
+        _maybe_refresh_cookie(request, resp)
+        return resp
 
     # ── GET /api/watchdog — watchdog runtime snapshot ───────────────────
 
@@ -1388,7 +1416,7 @@ def get_webui_routes(
         if task_id and not ledger.is_valid_task_id(task_id):
             return _json({"error": "invalid task_id"}, 400)
 
-        events = ledger.list_outbox_events(limit=limit, status=status, task_id=task_id)
+        events = [ledger.enrich_outbox_event_for_observer(event) for event in ledger.list_outbox_events(limit=limit, status=status, task_id=task_id)]
         resp = _json({"events": events})
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -1419,7 +1447,26 @@ def get_webui_routes(
             keep_terminal=keep_terminal,
             min_terminal_age_ms=min_terminal_age_ms,
         )
-        resp = _json({"result": result, "events": ledger.list_outbox_events(limit=200)})
+        resp = _json({"result": result, "events": [ledger.enrich_outbox_event_for_observer(event) for event in ledger.list_outbox_events(limit=200)]})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def expire_outbox(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        source = str(body.get("source") or "webui_expire")
+        expired = ledger.expire_due_outbox_events(source=source)
+        resp = _json({"events": [ledger.enrich_outbox_event_for_observer(event) for event in expired]})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1444,7 +1491,7 @@ def get_webui_routes(
         if not event:
             return _json({"error": "event not found"}, 404)
 
-        resp = _json({"event": event})
+        resp = _json({"event": ledger.enrich_outbox_event_for_observer(event)})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1478,7 +1525,36 @@ def get_webui_routes(
 
         task_id = str(updated.get("task_id") or "")
         task = ledger.read_task(task_id) if task_id and ledger.is_valid_task_id(task_id) else None
-        resp = _json({"event": updated, "task": task})
+        resp = _json({"event": ledger.enrich_outbox_event_for_observer(updated), "task": task})
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def abandon_outbox_event(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        ledger = getattr(agent_loop, "ledger", None)
+        if ledger is None:
+            return _json({"error": "Task ledger not available"}, 503)
+
+        event_id = request.path_params.get("event_id", "")
+        if not event_id:
+            return _json({"error": "event_id is required"}, 400)
+        if not ledger.is_valid_outbox_id(event_id):
+            return _json({"error": "invalid event_id"}, 400)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        reason = str(body.get("reason") or "operator abandoned outbox event")
+        updated = ledger.abandon_outbox_event(event_id, source="webui_manual_abandon", reason=reason)
+        if not updated:
+            return _json({"error": "event not found"}, 404)
+        task_id = str(updated.get("task_id") or "")
+        task = ledger.read_task(task_id) if task_id and ledger.is_valid_task_id(task_id) else None
+        resp = _json({"event": ledger.enrich_outbox_event_for_observer(updated), "task": task})
         _maybe_refresh_cookie(request, resp)
         return resp
 
@@ -1515,6 +1591,7 @@ def get_webui_routes(
         Route("/api/tasks", list_tasks, methods=["GET"]),
         Route("/api/tasks/{task_id}", get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}/export", export_task, methods=["GET"]),
+        Route("/api/tasks/{task_id}/postmortem", get_task_postmortem, methods=["GET"]),
         Route("/api/tasks/{task_id}/recheck", recheck_task, methods=["POST"]),
         Route("/api/tasks/{task_id}/resume-candidate", get_resume_candidate, methods=["GET"]),
         Route("/api/tasks/{task_id}/resume", resume_task, methods=["POST"]),
@@ -1524,7 +1601,9 @@ def get_webui_routes(
         Route("/api/watchdog", get_watchdog, methods=["GET"]),
         Route("/api/outbox", list_outbox, methods=["GET"]),
         Route("/api/outbox/compact", compact_outbox, methods=["POST"]),
+        Route("/api/outbox/expire", expire_outbox, methods=["POST"]),
         Route("/api/outbox/{event_id}", get_outbox_event, methods=["GET"]),
         Route("/api/outbox/{event_id}/retry", retry_outbox_event, methods=["POST"]),
+        Route("/api/outbox/{event_id}/abandon", abandon_outbox_event, methods=["POST"]),
         Route("/api/info", get_info, methods=["GET"]),
     ]

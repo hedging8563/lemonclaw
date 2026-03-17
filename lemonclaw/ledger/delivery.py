@@ -63,7 +63,7 @@ async def deliver_outbox_event(
     notify_config: "NotifyToolConfig",
     http_config: "HTTPRequestToolConfig | None" = None,
     email_config: "EmailConfig | None" = None,
-) -> None:
+) -> dict[str, Any]:
     """Deliver one outbox event.
 
     Raises:
@@ -89,7 +89,13 @@ async def deliver_outbox_event(
             media=list(payload.get("media") or []),
             metadata=dict(payload.get("metadata") or {}),
         ))
-        return
+        return {
+            "effect_type": effect_type,
+            "delivered_via": "message_bus",
+            "channel": channel,
+            "chat_id": chat_id,
+            "media_count": len(list(payload.get("media") or [])),
+        }
 
     if effect_type == "webhook_json":
         try:
@@ -108,7 +114,12 @@ async def deliver_outbox_event(
             raise RuntimeError(f"webhook delivery -> {resp_status}")
         if resp_status >= 400:
             raise PermanentOutboxError(f"webhook delivery -> {resp_status}")
-        return
+        return {
+            "effect_type": effect_type,
+            "delivered_via": "webhook",
+            "status_code": resp_status,
+            "target": target,
+        }
 
     if effect_type == "http_json":
         method = str(payload.get("method") or "POST").upper()
@@ -143,7 +154,15 @@ async def deliver_outbox_event(
             raise RuntimeError(f"http delivery -> {result.status_code}")
         if result.status_code is not None and result.status_code >= 400:
             raise PermanentOutboxError(f"http delivery -> {result.status_code}")
-        return
+        return {
+            "effect_type": effect_type,
+            "delivered_via": "http",
+            "status_code": result.status_code,
+            "method": method,
+            "target": target,
+            "final_url": result.final_url,
+            "body": result.body,
+        }
 
     if effect_type == "email_send":
         if not email_config:
@@ -177,7 +196,13 @@ async def deliver_outbox_event(
             if type(exc).__name__ == "SMTPAuthenticationError":
                 raise PermanentOutboxError(f"email auth failed: {err_str}")
             raise RuntimeError(f"email delivery failed: {err_str}") from exc
-        return
+        return {
+            "effect_type": effect_type,
+            "delivered_via": "smtp",
+            "to": to,
+            "subject": subject,
+            "smtp_host": email_config.smtp_host,
+        }
 
     raise PermanentOutboxError(f"unsupported outbox effect_type: {effect_type}")
 

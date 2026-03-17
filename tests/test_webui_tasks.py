@@ -564,6 +564,69 @@ def test_task_export_api_redacts_sensitive_payload_and_supports_markdown(tmp_pat
     md_resp = client.get("/api/tasks/task_export/export", params={"format": "md"})
     assert md_resp.status_code == 200
     assert "## Recovery History" in md_resp.text
+    assert "## Outbox Postmortem" in md_resp.text
+
+
+def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_pm",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="postmortem me",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_pm", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="boom")
+    ledger.enqueue_outbox(
+        task_id="task_pm",
+        step_id=step.step_id,
+        effect_type="webhook_json",
+        target="https://example.com/hook",
+        payload={"content": "hello"},
+        status="failed",
+        error="boom",
+        metadata={"delivery_result": {"status_code": 500}},
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks/task_pm/postmortem")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["outbox"]["lifecycle"]["status_counts"]["failed"] == 1
+    assert data["outbox"]["events"][0]["effect"]["category"] == "webhook"
+
+
+def test_outbox_abandon_api_marks_event_and_task_abandoned(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_ab",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="abandon me",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_ab", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox")
+    event = ledger.enqueue_outbox(
+        task_id="task_ab",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="retrying",
+    )
+
+    client = TestClient(app)
+    resp = client.post(f"/api/outbox/{event['event_id']}/abandon", json={"reason": "operator stop"})
+    assert resp.status_code == 200
+    assert resp.json()["event"]["status"] == "abandoned"
+    assert resp.json()["task"]["status"] == "abandoned"
 
 
 def test_watchdog_api_returns_runtime_snapshot(tmp_path):

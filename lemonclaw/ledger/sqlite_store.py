@@ -17,7 +17,14 @@ from lemonclaw.ledger.runtime import (
     _now_ms,
     TaskLedgerSharedMixin,
 )
-from lemonclaw.ledger.types import OutboxEventRecord, StepRecord, TaskRecord
+from lemonclaw.ledger.types import (
+    OutboxEventRecord,
+    StepRecord,
+    TaskRecord,
+    OUTBOX_TERMINAL_STATUSES,
+    describe_outbox_effect_type,
+    is_supported_outbox_effect_type,
+)
 
 
 class SQLiteTaskLedger(TaskLedgerSharedMixin):
@@ -90,6 +97,8 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
                     created_at_ms INTEGER NOT NULL,
                     updated_at_ms INTEGER NOT NULL,
                     next_attempt_at_ms INTEGER,
+                    expires_at_ms INTEGER,
+                    terminal_at_ms INTEGER,
                     error TEXT,
                     metadata_json TEXT NOT NULL
                 );
@@ -104,6 +113,14 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
             }
             if "payload_json" not in columns:
                 self._conn.execute("ALTER TABLE tasks ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}'")
+            outbox_columns = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(outbox_events)").fetchall()
+            }
+            if "expires_at_ms" not in outbox_columns:
+                self._conn.execute("ALTER TABLE outbox_events ADD COLUMN expires_at_ms INTEGER")
+            if "terminal_at_ms" not in outbox_columns:
+                self._conn.execute("ALTER TABLE outbox_events ADD COLUMN terminal_at_ms INTEGER")
 
     @staticmethod
     def _dump_json(value: dict[str, Any] | list[Any]) -> str:
@@ -188,6 +205,8 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
             "created_at_ms": int(row["created_at_ms"]),
             "updated_at_ms": int(row["updated_at_ms"]),
             "next_attempt_at_ms": int(row["next_attempt_at_ms"]) if row["next_attempt_at_ms"] is not None else None,
+            "expires_at_ms": int(row["expires_at_ms"]) if "expires_at_ms" in row.keys() and row["expires_at_ms"] is not None else None,
+            "terminal_at_ms": int(row["terminal_at_ms"]) if "terminal_at_ms" in row.keys() and row["terminal_at_ms"] is not None else None,
             "error": row["error"],
             "metadata": cls._loads_json(row["metadata_json"]),
         }
@@ -418,12 +437,18 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
         status: str = "pending",
         attempts: int = 0,
         next_attempt_at_ms: int | None = None,
+        expires_at_ms: int | None = None,
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._require_valid_task_id(task_id)
         self._require_valid_step_id(step_id)
+        if not is_supported_outbox_effect_type(effect_type):
+            raise ValueError("unsupported effect_type")
         now = _now_ms()
+        event_metadata = dict(metadata or {})
+        event_metadata.setdefault("effect", describe_outbox_effect_type(effect_type))
+        event_metadata.setdefault("delivery_history", [])
         event = OutboxEventRecord(
             event_id=f"ob_{uuid.uuid4().hex[:12]}",
             task_id=task_id,
@@ -436,8 +461,9 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
             created_at_ms=now,
             updated_at_ms=now,
             next_attempt_at_ms=next_attempt_at_ms,
+            expires_at_ms=expires_at_ms,
             error=error,
-            metadata=metadata or {},
+            metadata=event_metadata,
         ).to_dict()
         with self._outbox_lock:
             self._insert_outbox_event(event)
@@ -470,7 +496,7 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
 
             now = now_ms if now_ms is not None else _now_ms()
             cutoff = now - max(0, int(min_terminal_age_ms))
-            terminal_statuses = {"sent", "failed", "compensated"}
+            terminal_statuses = set(OUTBOX_TERMINAL_STATUSES)
             non_terminal = [event for event in events if str(event.get("status") or "") not in terminal_statuses]
             terminal = [event for event in events if str(event.get("status") or "") in terminal_statuses]
             terminal.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
@@ -572,6 +598,8 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
             int(event["created_at_ms"]),
             int(event["updated_at_ms"]),
             int(event["next_attempt_at_ms"]) if event.get("next_attempt_at_ms") is not None else None,
+            int(event["expires_at_ms"]) if event.get("expires_at_ms") is not None else None,
+            int(event["terminal_at_ms"]) if event.get("terminal_at_ms") is not None else None,
             event.get("error"),
             self._dump_json(dict(event.get("metadata") or {})),
         )
@@ -583,8 +611,8 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
                         INSERT INTO outbox_events (
                             event_id, task_id, step_id, effect_type, target, payload_json,
                             status, attempts, created_at_ms, updated_at_ms, next_attempt_at_ms,
-                            error, metadata_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            expires_at_ms, terminal_at_ms, error, metadata_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         params,
                     )
@@ -594,8 +622,8 @@ class SQLiteTaskLedger(TaskLedgerSharedMixin):
                     INSERT INTO outbox_events (
                         event_id, task_id, step_id, effect_type, target, payload_json,
                         status, attempts, created_at_ms, updated_at_ms, next_attempt_at_ms,
-                        error, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        expires_at_ms, terminal_at_ms, error, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     params,
                 )

@@ -260,8 +260,9 @@ def test_task_ledger_claims_due_outbox_events_and_reschedules_retry(tmp_path: Pa
         max_attempts=1,
     )
     assert terminal is not None
-    assert terminal["status"] == "failed"
+    assert terminal["status"] == "expired"
     assert terminal["next_attempt_at_ms"] is None
+    assert terminal["terminal_at_ms"] is not None
 
     not_due = ledger.claim_due_outbox_events(limit=10, now_ms=1_000)
     assert [event["event_id"] for event in not_due] == []
@@ -292,6 +293,73 @@ def test_task_ledger_can_mark_outbox_failed_without_retry(tmp_path: Path):
     assert failed["status"] == "failed"
     assert failed["next_attempt_at_ms"] is None
     assert failed["metadata"]["terminal"] is True
+    assert failed["terminal_at_ms"] is not None
+
+
+def test_task_ledger_can_abandon_outbox_event_and_task(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="abandon demo",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="retrying",
+    )
+
+    abandoned = ledger.abandon_outbox_event(event["event_id"], source="test", reason="operator abandoned")
+
+    assert abandoned is not None
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["terminal_at_ms"] is not None
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "abandoned"
+    steps = ledger.materialize_steps("task_1")
+    assert steps[0]["status"] == "abandoned"
+
+
+def test_task_ledger_expires_due_outbox_events(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="expire demo",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="retrying",
+        expires_at_ms=10,
+    )
+
+    expired = ledger.expire_due_outbox_events(now_ms=20, source="test")
+
+    assert [item["event_id"] for item in expired] == [event["event_id"]]
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "expired"
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "failed"
 
 
 def test_task_ledger_request_outbox_retry_clears_manual_review(tmp_path: Path):

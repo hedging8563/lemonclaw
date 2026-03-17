@@ -79,6 +79,7 @@ class OutboxDispatcher:
         idle_sleep_s = self._poll_interval_s
         while self._running:
             try:
+                await self._expire_due_events()
                 delivered = await self.dispatch_once()
                 await self._maybe_compact()
                 if delivered == 0:
@@ -111,6 +112,17 @@ class OutboxDispatcher:
         except Exception:
             logger.exception("outbox: compaction failed")
 
+    async def _expire_due_events(self) -> None:
+        try:
+            expired = await asyncio.to_thread(
+                self._ledger.expire_due_outbox_events,
+                source=self._claim_owner,
+            )
+            if expired:
+                logger.warning("outbox: expired {} event(s) before dispatch", len(expired))
+        except Exception:
+            logger.exception("outbox: expiry sweep failed")
+
     async def dispatch_once(self) -> int:
         claimed = await asyncio.to_thread(
             self._ledger.claim_due_outbox_events,
@@ -122,12 +134,13 @@ class OutboxDispatcher:
             event_id = str(event.get("event_id") or "")
             task_id = str(event.get("task_id") or "")
             try:
-                await self._on_deliver(event)
+                result = await self._on_deliver(event)
             except PermanentOutboxError as exc:
                 updated = await asyncio.to_thread(
                     self._ledger.mark_outbox_failed,
                     event_id,
                     error=str(exc),
+                    source=self._claim_owner,
                 )
                 logger.warning("outbox: permanent delivery failure for {}: {}", event_id, exc)
                 if updated and task_id and event.get("step_id"):
@@ -147,6 +160,7 @@ class OutboxDispatcher:
                     error=str(exc),
                     retry_at_ms=self._ledger.now_ms() + self._retry_delay_ms,
                     max_attempts=self._max_attempts,
+                    source=self._claim_owner,
                 )
                 status = str((updated or {}).get("status") or "")
                 logger.warning("outbox: delivery failed for {} (status={}): {}", event_id, status or "missing", exc)
@@ -155,13 +169,18 @@ class OutboxDispatcher:
                         self._ledger.update_step_state,
                         task_id,
                         str(event.get("step_id")),
-                        status="failed" if status == "failed" else "waiting_outbox",
+                        status="failed" if status in {"failed", "expired"} else "waiting_outbox",
                         error=str(exc),
                     )
-                if updated and status == "failed" and task_id:
+                if updated and status in {"failed", "expired"} and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
             else:
-                updated = await asyncio.to_thread(self._ledger.mark_outbox_sent, event_id)
+                updated = await asyncio.to_thread(
+                    self._ledger.mark_outbox_sent,
+                    event_id,
+                    result=result,
+                    source=self._claim_owner,
+                )
                 if updated:
                     delivered += 1
                     logger.info("outbox: delivered {}", event_id)

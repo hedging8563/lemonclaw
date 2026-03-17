@@ -75,7 +75,7 @@ async def test_outbox_dispatcher_retries_then_marks_task_failed_when_attempts_ex
     assert count == 0
     failed = ledger.read_outbox_event(event["event_id"])
     assert failed is not None
-    assert failed["status"] == "failed"
+    assert failed["status"] == "expired"
     task = ledger.read_task("task_1")
     assert task is not None
     assert task["status"] == "failed"

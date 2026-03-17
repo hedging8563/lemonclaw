@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from lemonclaw.ledger.types import CompletionGateResult
+from lemonclaw.ledger.types import (
+    CompletionGateResult,
+    OUTBOX_ABANDONED_STATUSES,
+    OUTBOX_ACTIVE_STATUSES,
+    OUTBOX_FAILURE_STATUSES,
+)
 
 if TYPE_CHECKING:
     from lemonclaw.ledger.runtime import TaskLedger
@@ -15,8 +20,10 @@ if TYPE_CHECKING:
 _OPEN_STEP_STATUSES = {"pending", "running", "waiting", "retrying"}
 _OUTBOX_WAITING_STEP_STATUSES = {"waiting_outbox"}
 _FAILED_STEP_STATUSES = {"failed"}
-_OPEN_OUTBOX_STATUSES = {"pending", "claimed", "retrying"}
+_OPEN_OUTBOX_STATUSES = set(OUTBOX_ACTIVE_STATUSES)
 _FAILED_OUTBOX_STATUSES = {"failed"}
+_EXPIRED_OUTBOX_STATUSES = {"expired"}
+_ABANDONED_OUTBOX_STATUSES = set(OUTBOX_ABANDONED_STATUSES)
 
 
 def evaluate_completion(
@@ -37,6 +44,30 @@ def evaluate_completion(
             next_stage="error",
             checked_at_ms=checked_at_ms,
             open_steps=failed_steps[:20],
+        )
+
+    abandoned_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _ABANDONED_OUTBOX_STATUSES]
+    if abandoned_outbox:
+        return CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"abandoned outbox events remain: {', '.join(abandoned_outbox[:5])}",
+            next_status="abandoned",
+            next_stage="abandoned",
+            checked_at_ms=checked_at_ms,
+            open_outbox=abandoned_outbox[:20],
+        )
+
+    expired_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _EXPIRED_OUTBOX_STATUSES]
+    if expired_outbox:
+        return CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"expired outbox events remain: {', '.join(expired_outbox[:5])}",
+            next_status="failed",
+            next_stage="error",
+            checked_at_ms=checked_at_ms,
+            open_outbox=expired_outbox[:20],
         )
 
     failed_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _FAILED_OUTBOX_STATUSES]

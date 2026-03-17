@@ -11,7 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from lemonclaw.governance.redaction import redact_sensitive_value
-from lemonclaw.ledger.types import OutboxEventRecord, StepRecord, TaskRecord
+from lemonclaw.ledger.types import (
+    OutboxEventRecord,
+    StepRecord,
+    TaskRecord,
+    OUTBOX_ABANDONED_STATUSES,
+    OUTBOX_ACTIVE_STATUSES,
+    OUTBOX_EFFECT_SPECS,
+    OUTBOX_FAILURE_STATUSES,
+    OUTBOX_SUCCESS_STATUSES,
+    OUTBOX_TERMINAL_STATUSES,
+    describe_outbox_effect_type,
+    is_supported_outbox_effect_type,
+)
 
 
 def _now_ms() -> int:
@@ -176,6 +188,100 @@ class TaskLedgerSharedMixin:
     def _sanitize_export_value(value: Any) -> Any:
         return redact_sensitive_value(value)
 
+    @staticmethod
+    def _append_outbox_history(
+        metadata: dict[str, Any],
+        *,
+        action: str,
+        status: str,
+        at_ms: int | None = None,
+        result: dict[str, Any] | None = None,
+        error: str = "",
+        source: str = "",
+    ) -> dict[str, Any]:
+        history = list(metadata.get("delivery_history") or [])
+        entry = {
+            "action": str(action or ""),
+            "status": str(status or ""),
+            "at_ms": int(at_ms or _now_ms()),
+            "source": str(source or ""),
+        }
+        if result:
+            entry["result"] = redact_sensitive_value(result)
+        if error:
+            entry["error"] = str(error)[:500]
+        history.append(entry)
+        metadata["delivery_history"] = history[-10:]
+        return metadata
+
+    @staticmethod
+    def summarize_outbox_lifecycle(events: list[dict[str, Any]]) -> dict[str, Any]:
+        effect_type_counts: dict[str, int] = {}
+        status_counts: dict[str, int] = {}
+        active_count = 0
+        terminal_count = 0
+        for event in events:
+            effect_type = str(event.get("effect_type") or "unknown")
+            status = str(event.get("status") or "unknown")
+            effect_type_counts[effect_type] = effect_type_counts.get(effect_type, 0) + 1
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status in OUTBOX_ACTIVE_STATUSES:
+                active_count += 1
+            if status in OUTBOX_TERMINAL_STATUSES:
+                terminal_count += 1
+        return {
+            "effect_type_counts": effect_type_counts,
+            "status_counts": status_counts,
+            "active_count": active_count,
+            "terminal_count": terminal_count,
+        }
+
+    @classmethod
+    def enrich_outbox_event_for_observer(cls, event: dict[str, Any]) -> dict[str, Any]:
+        item = dict(event or {})
+        metadata = dict(item.get("metadata") or {})
+        sanitized_metadata = redact_sensitive_value(metadata)
+        item["effect"] = describe_outbox_effect_type(str(item.get("effect_type") or ""))
+        item["payload"] = redact_sensitive_value(dict(item.get("payload") or {}))
+        item["metadata"] = sanitized_metadata
+        item["lifecycle"] = {
+            "active": str(item.get("status") or "") in OUTBOX_ACTIVE_STATUSES,
+            "terminal": str(item.get("status") or "") in OUTBOX_TERMINAL_STATUSES,
+            "terminal_kind": (
+                "success"
+                if str(item.get("status") or "") in OUTBOX_SUCCESS_STATUSES
+                else "failure"
+                if str(item.get("status") or "") in OUTBOX_FAILURE_STATUSES
+                else "abandoned"
+                if str(item.get("status") or "") in OUTBOX_ABANDONED_STATUSES
+                else "active"
+            ),
+            "next_attempt_at_ms": item.get("next_attempt_at_ms"),
+            "expires_at_ms": item.get("expires_at_ms"),
+            "terminal_at_ms": item.get("terminal_at_ms"),
+            "last_delivery_result": redact_sensitive_value(metadata.get("delivery_result") or metadata.get("last_delivery_result") or {}),
+            "delivery_history": redact_sensitive_value(list(metadata.get("delivery_history") or [])),
+        }
+        return item
+
+    def build_task_postmortem_view(self, task_id: str) -> dict[str, Any] | None:
+        task_view = self.read_task_view(task_id)
+        if not task_view:
+            return None
+        outbox_events = [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)]
+        summary = dict(task_view.get("summary") or {})
+        postmortem = {
+            "task": task_view.get("task"),
+            "summary": summary,
+            "candidate": self.build_resume_candidate(task_id),
+            "outbox": {
+                "events": outbox_events,
+                "lifecycle": self.summarize_outbox_lifecycle(outbox_events),
+            },
+            "checked_at_ms": _now_ms(),
+        }
+        return self._sanitize_export_value(postmortem)
+
     def build_operator_queue_item(
         self,
         task: dict[str, Any],
@@ -232,8 +338,9 @@ class TaskLedgerSharedMixin:
             "task": task_view.get("task"),
             "summary": task_view.get("summary"),
             "steps": task_view.get("steps") or [],
-            "outbox_events": self.materialize_outbox_events_for_task(task_id),
+            "outbox_events": [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)],
             "candidate": self.build_resume_candidate(task_id),
+            "postmortem": self.build_task_postmortem_view(task_id),
             "exported_at_ms": _now_ms(),
         }
         return self._sanitize_export_value(export)
@@ -464,10 +571,7 @@ class TaskLedgerSharedMixin:
             status_counts[status] = status_counts.get(status, 0) + 1
 
         outbox = self.materialize_outbox_events_for_task(task_id)
-        outbox_status_counts: dict[str, int] = {}
-        for event in outbox:
-            status = str(event.get("status") or "unknown")
-            outbox_status_counts[status] = outbox_status_counts.get(status, 0) + 1
+        outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
 
         return {
             "task": self.enrich_task_for_observer(task),
@@ -480,7 +584,10 @@ class TaskLedgerSharedMixin:
                 "current_stage": task.get("current_stage"),
                 "display_state": display_state,
                 "outbox_count": len(outbox),
-                "outbox_status_counts": outbox_status_counts,
+                "outbox_status_counts": outbox_lifecycle["status_counts"],
+                "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
+                "outbox_terminal_count": outbox_lifecycle["terminal_count"],
+                "outbox_active_count": outbox_lifecycle["active_count"],
                 "completion_gate": task.get("completion_gate"),
                 "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
@@ -553,14 +660,19 @@ class TaskLedgerSharedMixin:
         resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
         resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
         failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
-        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in {"pending", "retrying", "claimed"}]
+        expired_outbox = [event for event in outbox_events if str(event.get("status") or "") == "expired"]
+        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
         replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and step.get("replayable", True)]
         non_replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and not step.get("replayable", True)]
 
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
-        if failed_outbox:
+        if expired_outbox:
+            recommended_action = "retry_outbox"
+            safe_to_execute = True
+            reason = f"{len(expired_outbox)} expired outbox event(s) can be retried manually"
+        elif failed_outbox:
             recommended_action = "retry_outbox"
             safe_to_execute = True
             reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
@@ -599,6 +711,7 @@ class TaskLedgerSharedMixin:
             "resume_from_step": resume_from_step or None,
             "resume_step": dict(resume_step or {}) if resume_step else None,
             "failed_outbox_count": len(failed_outbox),
+            "expired_outbox_count": len(expired_outbox),
             "open_outbox_count": len(open_outbox),
             "replayable_failed_count": len(replayable_failed),
             "non_replayable_failed_count": len(non_replayable_failed),
@@ -730,20 +843,35 @@ class TaskLedgerSharedMixin:
         event_id: str,
         *,
         result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Mark a claimed outbox event as delivered."""
         self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
             return None
+        now = _now_ms()
         metadata = dict(current.get("metadata") or {})
-        metadata["sent_at_ms"] = _now_ms()
+        metadata["sent_at_ms"] = now
         if result is not None:
             metadata["delivery_result"] = result
+            metadata["last_delivery_result"] = result
+        metadata["terminal"] = True
+        metadata["terminal_reason"] = "delivered"
+        metadata["terminal_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="delivered",
+            status="sent",
+            at_ms=now,
+            result=result,
+            source=source,
+        )
         return self.update_outbox_event(
             event_id,
             status="sent",
             next_attempt_at_ms=None,
+            terminal_at_ms=now,
             error=None,
             metadata=metadata,
         )
@@ -755,6 +883,8 @@ class TaskLedgerSharedMixin:
         error: str,
         retry_at_ms: int,
         max_attempts: int | None = None,
+        result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Reschedule an outbox event or mark it terminally failed.
 
@@ -767,16 +897,33 @@ class TaskLedgerSharedMixin:
         if not current:
             return None
 
+        now = _now_ms()
         attempts = int(current.get("attempts") or 0)
         terminal = bool(max_attempts and max_attempts > 0 and attempts >= max_attempts)
         metadata = dict(current.get("metadata") or {})
-        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_error_at_ms"] = now
         metadata["last_claimed_by"] = metadata.get("claimed_by")
+        if result is not None:
+            metadata["last_delivery_result"] = result
+        if terminal:
+            metadata["terminal"] = True
+            metadata["terminal_reason"] = "retry budget exhausted"
+            metadata["terminal_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="expired" if terminal else "retry_scheduled",
+            status="expired" if terminal else "retrying",
+            at_ms=now,
+            result=result,
+            error=error,
+            source=source,
+        )
 
         return self.update_outbox_event(
             event_id,
-            status="failed" if terminal else "retrying",
+            status="expired" if terminal else "retrying",
             next_attempt_at_ms=None if terminal else int(retry_at_ms),
+            terminal_at_ms=now if terminal else None,
             error=error[:500],
             metadata=metadata,
         )
@@ -786,6 +933,8 @@ class TaskLedgerSharedMixin:
         event_id: str,
         *,
         error: str,
+        result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Mark an outbox event as terminally failed without retry."""
         self._require_valid_outbox_id(event_id)
@@ -793,15 +942,30 @@ class TaskLedgerSharedMixin:
         if not current:
             return None
 
+        now = _now_ms()
         metadata = dict(current.get("metadata") or {})
-        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_error_at_ms"] = now
         metadata["last_claimed_by"] = metadata.get("claimed_by")
         metadata["terminal"] = True
+        metadata["terminal_reason"] = error[:500]
+        metadata["terminal_source"] = source
+        if result is not None:
+            metadata["last_delivery_result"] = result
+        self._append_outbox_history(
+            metadata,
+            action="failed",
+            status="failed",
+            at_ms=now,
+            result=result,
+            error=error,
+            source=source,
+        )
 
         return self.update_outbox_event(
             event_id,
             status="failed",
             next_attempt_at_ms=None,
+            terminal_at_ms=now,
             error=error[:500],
             metadata=metadata,
         )
@@ -820,7 +984,7 @@ class TaskLedgerSharedMixin:
             return None
 
         status = str(current.get("status") or "")
-        if status == "sent":
+        if status in {"sent", "abandoned", "compensated"}:
             raise ValueError("cannot retry a sent outbox event")
 
         now = _now_ms()
@@ -833,13 +997,24 @@ class TaskLedgerSharedMixin:
         ):
             return current
         metadata.pop("terminal", None)
+        metadata.pop("terminal_reason", None)
+        metadata.pop("terminal_source", None)
         metadata["manual_retry_requested_at_ms"] = now
         metadata["manual_retry_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="manual_retry_requested",
+            status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
+            at_ms=now,
+            source=source,
+        )
 
         updated = self.update_outbox_event(
             event_id,
             status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
             next_attempt_at_ms=now + max(0, int(delay_ms)),
+            expires_at_ms=None if int(current.get("expires_at_ms") or 0) <= now else current.get("expires_at_ms"),
+            terminal_at_ms=None,
             error=None,
             metadata=metadata,
         )
@@ -879,6 +1054,97 @@ class TaskLedgerSharedMixin:
                     error=None,
                 )
         return updated
+
+    def abandon_outbox_event(
+        self,
+        event_id: str,
+        *,
+        source: str,
+        reason: str,
+    ) -> dict[str, Any] | None:
+        self._require_valid_outbox_id(event_id)
+        current = self.read_outbox_event(event_id)
+        if not current:
+            return None
+
+        now = _now_ms()
+        metadata = dict(current.get("metadata") or {})
+        metadata["terminal"] = True
+        metadata["terminal_reason"] = reason[:500]
+        metadata["terminal_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="abandoned",
+            status="abandoned",
+            at_ms=now,
+            error=reason,
+            source=source,
+        )
+        updated = self.update_outbox_event(
+            event_id,
+            status="abandoned",
+            next_attempt_at_ms=None,
+            terminal_at_ms=now,
+            error=reason[:500],
+            metadata=metadata,
+        )
+        task_id = str(current.get("task_id") or "")
+        step_id = str(current.get("step_id") or "")
+        if task_id and self.is_valid_task_id(task_id):
+            if step_id and self.is_valid_step_id(step_id):
+                self.update_step_state(task_id, step_id, status="abandoned", error=reason[:500])
+            from lemonclaw.ledger.completion_gate import finalize_task
+
+            finalize_task(self, task_id)
+        return updated
+
+    def expire_due_outbox_events(
+        self,
+        *,
+        now_ms: int | None = None,
+        source: str = "retention",
+    ) -> list[dict[str, Any]]:
+        now = int(now_ms if now_ms is not None else _now_ms())
+        expired: list[dict[str, Any]] = []
+        for event in self.materialize_outbox_events():
+            status = str(event.get("status") or "")
+            expires_at_ms = int(event.get("expires_at_ms") or 0)
+            if status not in OUTBOX_ACTIVE_STATUSES or expires_at_ms <= 0 or expires_at_ms > now:
+                continue
+            event_id = str(event.get("event_id") or "")
+            if not event_id:
+                continue
+            metadata = dict(event.get("metadata") or {})
+            metadata["terminal"] = True
+            metadata["terminal_reason"] = "expired"
+            metadata["terminal_source"] = source
+            self._append_outbox_history(
+                metadata,
+                action="expired",
+                status="expired",
+                at_ms=now,
+                error="expired by retention policy",
+                source=source,
+            )
+            updated = self.update_outbox_event(
+                event_id,
+                status="expired",
+                next_attempt_at_ms=None,
+                terminal_at_ms=now,
+                error="expired by retention policy",
+                metadata=metadata,
+            )
+            if updated:
+                expired.append(updated)
+                task_id = str(event.get("task_id") or "")
+                step_id = str(event.get("step_id") or "")
+                if task_id and self.is_valid_task_id(task_id):
+                    if step_id and self.is_valid_step_id(step_id):
+                        self.update_step_state(task_id, step_id, status="failed", error="outbox expired")
+                    from lemonclaw.ledger.completion_gate import finalize_task
+
+                    finalize_task(self, task_id)
+        return expired
 
     def prepare_replay_failed_steps(
         self,
@@ -1551,10 +1817,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             status_counts[key] = status_counts.get(key, 0) + 1
 
         outbox = self.materialize_outbox_events_for_task(task_id)
-        outbox_status_counts: dict[str, int] = {}
-        for event in outbox:
-            status = str(event.get("status") or "unknown")
-            outbox_status_counts[status] = outbox_status_counts.get(status, 0) + 1
+        outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
 
         return {
             "task": self.enrich_task_for_observer(task),
@@ -1571,7 +1834,10 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
                 "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
                 "outbox_count": len(outbox),
-                "outbox_status_counts": outbox_status_counts,
+                "outbox_status_counts": outbox_lifecycle["status_counts"],
+                "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
+                "outbox_terminal_count": outbox_lifecycle["terminal_count"],
+                "outbox_active_count": outbox_lifecycle["active_count"],
                 "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
             },
         }
@@ -1640,7 +1906,8 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
         resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
         failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
-        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in {"pending", "retrying", "claimed"}]
+        expired_outbox = [event for event in outbox_events if str(event.get("status") or "") == "expired"]
+        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
 
         # Classify steps by replayability
         failed_steps = [s for s in steps if str(s.get("status") or "") == "failed"]
@@ -1650,7 +1917,11 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
-        if failed_outbox:
+        if expired_outbox:
+            recommended_action = "retry_outbox"
+            safe_to_execute = True
+            reason = f"{len(expired_outbox)} expired outbox event(s) can be retried manually"
+        elif failed_outbox:
             recommended_action = "retry_outbox"
             safe_to_execute = True
             reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
@@ -1693,6 +1964,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             "resume_from_step": resume_from_step or None,
             "resume_step": dict(resume_step or {}) if resume_step else None,
             "failed_outbox_count": len(failed_outbox),
+            "expired_outbox_count": len(expired_outbox),
             "open_outbox_count": len(open_outbox),
             "replayable_failed_count": len(replayable_failed),
             "non_replayable_failed_count": len(non_replayable_failed),
@@ -1764,6 +2036,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         status: str = "pending",
         attempts: int = 0,
         next_attempt_at_ms: int | None = None,
+        expires_at_ms: int | None = None,
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1771,8 +2044,13 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         # but delivery itself is still asynchronous and non-transactional.
         self._require_valid_task_id(task_id)
         self._require_valid_step_id(step_id)
+        if not is_supported_outbox_effect_type(effect_type):
+            raise ValueError("unsupported effect_type")
         with self._outbox_lock:
             now = _now_ms()
+            event_metadata = dict(metadata or {})
+            event_metadata.setdefault("effect", describe_outbox_effect_type(effect_type))
+            event_metadata.setdefault("delivery_history", [])
             event = OutboxEventRecord(
                 event_id=f"ob_{uuid.uuid4().hex[:12]}",
                 task_id=task_id,
@@ -1785,8 +2063,9 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 created_at_ms=now,
                 updated_at_ms=now,
                 next_attempt_at_ms=next_attempt_at_ms,
+                expires_at_ms=expires_at_ms,
                 error=error,
-                metadata=metadata or {},
+                metadata=event_metadata,
             )
             self._append_jsonl(self._outbox_path(), event.to_dict())
             return event.to_dict()
@@ -1823,7 +2102,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
 
             now = now_ms if now_ms is not None else _now_ms()
             cutoff = now - max(0, int(min_terminal_age_ms))
-            terminal_statuses = {"sent", "failed", "compensated"}
+            terminal_statuses = set(OUTBOX_TERMINAL_STATUSES)
             non_terminal = [event for event in events if str(event.get("status") or "") not in terminal_statuses]
             terminal = [event for event in events if str(event.get("status") or "") in terminal_statuses]
             terminal.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
@@ -1926,20 +2205,35 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         event_id: str,
         *,
         result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Mark a claimed outbox event as delivered."""
         self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
             return None
+        now = _now_ms()
         metadata = dict(current.get("metadata") or {})
-        metadata["sent_at_ms"] = _now_ms()
+        metadata["sent_at_ms"] = now
         if result is not None:
             metadata["delivery_result"] = result
+            metadata["last_delivery_result"] = result
+        metadata["terminal"] = True
+        metadata["terminal_reason"] = "delivered"
+        metadata["terminal_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="delivered",
+            status="sent",
+            at_ms=now,
+            result=result,
+            source=source,
+        )
         return self.update_outbox_event(
             event_id,
             status="sent",
             next_attempt_at_ms=None,
+            terminal_at_ms=now,
             error=None,
             metadata=metadata,
         )
@@ -1951,6 +2245,8 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         error: str,
         retry_at_ms: int,
         max_attempts: int | None = None,
+        result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Reschedule an outbox event or mark it terminally failed.
 
@@ -1963,16 +2259,33 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         if not current:
             return None
 
+        now = _now_ms()
         attempts = int(current.get("attempts") or 0)
         terminal = bool(max_attempts and max_attempts > 0 and attempts >= max_attempts)
         metadata = dict(current.get("metadata") or {})
-        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_error_at_ms"] = now
         metadata["last_claimed_by"] = metadata.get("claimed_by")
+        if result is not None:
+            metadata["last_delivery_result"] = result
+        if terminal:
+            metadata["terminal"] = True
+            metadata["terminal_reason"] = "retry budget exhausted"
+            metadata["terminal_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="expired" if terminal else "retry_scheduled",
+            status="expired" if terminal else "retrying",
+            at_ms=now,
+            result=result,
+            error=error,
+            source=source,
+        )
 
         return self.update_outbox_event(
             event_id,
-            status="failed" if terminal else "retrying",
+            status="expired" if terminal else "retrying",
             next_attempt_at_ms=None if terminal else int(retry_at_ms),
+            terminal_at_ms=now if terminal else None,
             error=error[:500],
             metadata=metadata,
         )
@@ -1982,6 +2295,8 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         event_id: str,
         *,
         error: str,
+        result: dict[str, Any] | None = None,
+        source: str = "dispatcher",
     ) -> dict[str, Any] | None:
         """Mark an outbox event as terminally failed without retry."""
         self._require_valid_outbox_id(event_id)
@@ -1989,15 +2304,30 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         if not current:
             return None
 
+        now = _now_ms()
         metadata = dict(current.get("metadata") or {})
-        metadata["last_error_at_ms"] = _now_ms()
+        metadata["last_error_at_ms"] = now
         metadata["last_claimed_by"] = metadata.get("claimed_by")
         metadata["terminal"] = True
+        metadata["terminal_reason"] = error[:500]
+        metadata["terminal_source"] = source
+        if result is not None:
+            metadata["last_delivery_result"] = result
+        self._append_outbox_history(
+            metadata,
+            action="failed",
+            status="failed",
+            at_ms=now,
+            result=result,
+            error=error,
+            source=source,
+        )
 
         return self.update_outbox_event(
             event_id,
             status="failed",
             next_attempt_at_ms=None,
+            terminal_at_ms=now,
             error=error[:500],
             metadata=metadata,
         )
@@ -2016,7 +2346,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             return None
 
         status = str(current.get("status") or "")
-        if status == "sent":
+        if status in {"sent", "abandoned", "compensated"}:
             raise ValueError("cannot retry a sent outbox event")
 
         now = _now_ms()
@@ -2029,13 +2359,24 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         ):
             return current
         metadata.pop("terminal", None)
+        metadata.pop("terminal_reason", None)
+        metadata.pop("terminal_source", None)
         metadata["manual_retry_requested_at_ms"] = now
         metadata["manual_retry_source"] = source
+        self._append_outbox_history(
+            metadata,
+            action="manual_retry_requested",
+            status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
+            at_ms=now,
+            source=source,
+        )
 
         updated = self.update_outbox_event(
             event_id,
             status="retrying" if int(current.get("attempts") or 0) > 0 else "pending",
             next_attempt_at_ms=now + max(0, int(delay_ms)),
+            expires_at_ms=None if int(current.get("expires_at_ms") or 0) <= now else current.get("expires_at_ms"),
+            terminal_at_ms=None,
             error=None,
             metadata=metadata,
         )
@@ -2339,6 +2680,7 @@ class TaskLedger:
         "materialize_outbox_events",
         "materialize_outbox_events_for_task",
         "read_outbox_events",
+        "enrich_outbox_event_for_observer",
         "compact_outbox",
         "list_outbox_events",
         "claim_due_outbox_events",
@@ -2346,6 +2688,9 @@ class TaskLedger:
         "mark_outbox_retry",
         "mark_outbox_failed",
         "request_outbox_retry",
+        "abandon_outbox_event",
+        "expire_due_outbox_events",
+        "build_task_postmortem_view",
         "prepare_replay_failed_steps",
         "rollback_prepared_replay_resume",
         "read_outbox_event",

@@ -44,6 +44,9 @@ export interface TaskSummary {
   display_state?: TaskDisplayState;
   outbox_count?: number;
   outbox_status_counts?: Record<string, number>;
+  outbox_effect_type_counts?: Record<string, number>;
+  outbox_active_count?: number;
+  outbox_terminal_count?: number;
   recovery_history?: RecoveryHistoryEntry[];
 }
 
@@ -52,13 +55,31 @@ export interface OutboxEventRecord {
   task_id: string;
   step_id: string;
   effect_type: string;
+  effect?: {
+    effect_type?: string;
+    category?: string;
+    target_kind?: string;
+    description?: string;
+  };
   target: string;
   status: string;
   attempts?: number;
   next_attempt_at_ms?: number | null;
+  expires_at_ms?: number | null;
+  terminal_at_ms?: number | null;
   error?: string | null;
   payload?: Record<string, any>;
   metadata?: Record<string, any>;
+  lifecycle?: {
+    active?: boolean;
+    terminal?: boolean;
+    terminal_kind?: string;
+    next_attempt_at_ms?: number | null;
+    expires_at_ms?: number | null;
+    terminal_at_ms?: number | null;
+    last_delivery_result?: Record<string, any>;
+    delivery_history?: Array<Record<string, any>>;
+  };
   updated_at_ms?: number;
 }
 
@@ -237,6 +258,23 @@ export async function triggerOutboxRetry(taskId: string, eventId: string) {
   } catch (err: any) {
     console.error('Failed to retry outbox event', err);
     taskPanelError.value = err?.message || 'Failed to retry outbox event';
+  } finally {
+    setTaskBusy(taskId, null);
+  }
+}
+
+export async function triggerOutboxAbandon(taskId: string, eventId: string, reason: string) {
+  setTaskBusy(taskId, `outbox:${eventId}`);
+  taskPanelError.value = null;
+  try {
+    await apiFetch(`/api/outbox/${encodeURIComponent(eventId)}/abandon`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    await Promise.all([loadTaskPanel(), loadTaskDetail(taskId)]);
+  } catch (err: any) {
+    console.error('Failed to abandon outbox event', err);
+    taskPanelError.value = err?.message || 'Failed to abandon outbox event';
   } finally {
     setTaskBusy(taskId, null);
   }

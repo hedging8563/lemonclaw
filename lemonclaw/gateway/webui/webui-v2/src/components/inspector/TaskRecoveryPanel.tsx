@@ -13,6 +13,7 @@ import {
   taskDetails,
   taskPanelError,
   type TaskStepRecord,
+  triggerOutboxAbandon,
   triggerManualResume,
   triggerOutboxRetry,
   triggerSafeResume,
@@ -440,7 +441,7 @@ function renderTaskDetailBody(
           </button>
         </div>
       )}
-      {(detail.summary?.status_counts || detail.summary?.outbox_status_counts) && (
+      {(detail.summary?.status_counts || detail.summary?.outbox_status_counts || detail.summary?.outbox_effect_type_counts) && (
         <div style={{ display: 'grid', gap: '8px' }}>
           {detail.summary?.status_counts && (
             <div style={{ display: 'grid', gap: '6px' }}>
@@ -456,6 +457,17 @@ function renderTaskDetailBody(
                 {t('task_outbox_status_summary')}
               </div>
               {renderCountChips(detail.summary.outbox_status_counts, (key) => key)}
+            </div>
+          )}
+          {detail.summary?.outbox_effect_type_counts && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {t('task_outbox_effect_summary')}
+              </div>
+              {renderCountChips(detail.summary.outbox_effect_type_counts, (key) => key)}
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                {t('task_outbox_active_count')}: {detail.summary?.outbox_active_count ?? 0} · {t('task_outbox_terminal_count')}: {detail.summary?.outbox_terminal_count ?? 0}
+              </div>
             </div>
           )}
         </div>
@@ -548,10 +560,21 @@ function renderTaskDetailBody(
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
         ) : detail.outboxEvents.map((event) => {
           const isOutboxOpen = expandedOutboxId === event.event_id;
-          const eventTone = toneStyles(event.status === 'failed' ? 'error' : event.status === 'sent' ? 'success' : event.status === 'retrying' ? 'warning' : 'accent');
+          const eventTone = toneStyles(
+            event.status === 'failed' || event.status === 'expired'
+              ? 'error'
+              : event.status === 'sent'
+                ? 'success'
+                : event.status === 'retrying'
+                  ? 'warning'
+                  : event.status === 'abandoned'
+                    ? 'muted'
+                    : 'accent'
+          );
           const outboxBusy = busy === `outbox:${event.event_id}`;
           const focus = makeOutboxFocus(event);
           const isLinked = (!!event.event_id && linkedFocus?.outboxEventIds.includes(event.event_id)) || (!!event.step_id && linkedFocus?.stepIds.includes(event.step_id));
+          const canAbandon = ['pending', 'claimed', 'retrying', 'failed', 'expired'].includes(event.status || '');
           return (
             <div
               key={event.event_id}
@@ -587,7 +610,7 @@ function renderTaskDetailBody(
                 >
                   {isOutboxOpen ? t('task_outbox_hide') : t('task_outbox_show')}
                 </button>
-                {event.status === 'failed' && (
+                {['failed', 'expired'].includes(event.status || '') && (
                   <button
                     onClick={() => triggerOutboxRetry(task.task_id, event.event_id)}
                     disabled={outboxBusy}
@@ -604,6 +627,28 @@ function renderTaskDetailBody(
                     }}
                   >
                     {outboxBusy ? t('task_action_running') : t('task_outbox_retry')}
+                  </button>
+                )}
+                {canAbandon && (
+                  <button
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && !window.confirm(t('task_outbox_abandon_confirm'))) return;
+                      void triggerOutboxAbandon(task.task_id, event.event_id, t('task_outbox_abandon_reason'));
+                    }}
+                    disabled={outboxBusy}
+                    style={{
+                      padding: '5px 8px',
+                      background: 'transparent',
+                      border: '1px solid rgba(255, 184, 77, 0.28)',
+                      borderRadius: '6px',
+                      color: 'var(--warning, #ffb84d)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      cursor: outboxBusy ? 'wait' : 'pointer',
+                      opacity: outboxBusy ? 0.7 : 1,
+                    }}
+                  >
+                    {outboxBusy ? t('task_action_running') : t('task_outbox_abandon')}
                   </button>
                 )}
               </div>
@@ -642,6 +687,10 @@ function renderTaskDetailBody(
                     </button>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_effect')}</div>
+                    <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                      {event.effect?.category || '—'} · {event.effect?.target_kind || '—'}
+                    </div>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_target')}</div>
                     <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.target || '—'}</div>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_attempts')}</div>
@@ -650,8 +699,31 @@ function renderTaskDetailBody(
                     <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>{event.step_id || '—'}</div>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_updated_at')}</div>
                     <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.updated_at_ms)}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_next_attempt')}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.next_attempt_at_ms)}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_expires_at')}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.expires_at_ms || event.lifecycle?.expires_at_ms)}</div>
+                    <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_terminal_at')}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(event.terminal_at_ms || event.lifecycle?.terminal_at_ms)}</div>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_outbox_error')}</div>
                     <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.error || '—'}</div>
+                  </div>
+                  {event.effect?.description ? (
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
+                      {event.effect.description}
+                    </div>
+                  ) : null}
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_last_result')}</div>
+                    <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(event.lifecycle?.last_delivery_result || {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_history')}</div>
+                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(event.lifecycle?.delivery_history || [], null, 2)}
+                    </pre>
                   </div>
                   <div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
