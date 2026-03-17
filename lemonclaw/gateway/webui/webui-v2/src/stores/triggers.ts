@@ -21,11 +21,16 @@ export interface TriggerRecord {
 export const triggerSummary = signal<Record<string, any> | null>(null);
 export const triggers = signal<TriggerRecord[]>([]);
 export const triggerPanelError = signal<string | null>(null);
+export const selectedTriggerFamily = signal<string>('');
 
-export async function loadTriggers() {
+export async function loadTriggers(family?: string) {
   triggerPanelError.value = null;
+  const nextFamily = family ?? selectedTriggerFamily.value ?? '';
+  selectedTriggerFamily.value = nextFamily;
   try {
-    const res = await apiFetch('/api/triggers?limit=24');
+    const query = new URLSearchParams({ limit: '24' });
+    if (nextFamily) query.set('family', nextFamily);
+    const res = await apiFetch(`/api/triggers?${query.toString()}`);
     const data = await res.json();
     triggerSummary.value = data.summary || null;
     triggers.value = data.triggers || [];

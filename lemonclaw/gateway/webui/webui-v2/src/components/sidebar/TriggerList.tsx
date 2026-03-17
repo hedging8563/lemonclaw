@@ -3,7 +3,7 @@ import { activeSessionKey } from '../../stores/sessions';
 import { activeOperatorTaskId } from '../../stores/tasks';
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector, sidebarTab } from '../../stores/ui';
-import { loadTriggers, triggerPanelError, triggerSummary, triggers } from '../../stores/triggers';
+import { loadTriggers, selectedTriggerFamily, triggerPanelError, triggerSummary, triggers } from '../../stores/triggers';
 
 function formatTriggerTime(value?: number): string {
   const stamp = Number(value || 0);
@@ -17,6 +17,7 @@ function formatTriggerTime(value?: number): string {
 
 export function TriggerList() {
   const timerRef = useRef<any>(null);
+  const families = Object.keys(triggerSummary.value?.by_family || {}).sort();
 
   useEffect(() => {
     loadTriggers();
@@ -44,8 +45,34 @@ export function TriggerList() {
           {t('trigger_source_count')}: {Object.keys(triggerSummary.value?.by_source || {}).length}
         </div>
         <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(124, 58, 237, 0.2)', background: 'rgba(124, 58, 237, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent)' }}>
-          family: {Object.keys(triggerSummary.value?.by_family || {}).length}
+          {t('trigger_family_count')}: {families.length}
         </div>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', padding: '0 4px' }}>
+        {[{ key: '', label: t('trigger_family_all') }, ...families.map((family) => ({ key: family, label: family }))].map((item) => {
+          const active = selectedTriggerFamily.value === item.key;
+          return (
+            <button
+              key={item.key || 'all'}
+              onClick={() => void loadTriggers(item.key)}
+              style={{
+                appearance: 'none',
+                border: '1px solid',
+                borderColor: active ? 'var(--accent)' : 'var(--border)',
+                background: active ? 'rgba(124, 58, 237, 0.12)' : 'var(--bg-primary)',
+                color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                borderRadius: '999px',
+                padding: '4px 8px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                cursor: 'pointer',
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
 
       {triggerPanelError.value && (
