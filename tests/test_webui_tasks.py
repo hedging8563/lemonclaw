@@ -456,6 +456,7 @@ def test_recovery_api_lists_tasks_with_recovery_metadata(tmp_path):
     assert data["tasks"][0]["queue"]["source"] == "watchdog_soft_recovery"
     assert data["tasks"][0]["queue"]["manual_review_required"] is False
     assert data["tasks"][0]["queue"]["queued_at_ms"] > 0
+    assert "next_step" not in data["tasks"][0]["queue"]
 
 
 def test_recovery_api_can_filter_manual_review_tasks_without_changing_summary(tmp_path):

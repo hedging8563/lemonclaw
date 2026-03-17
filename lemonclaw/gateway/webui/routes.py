@@ -1266,10 +1266,9 @@ def get_webui_routes(
 
     # ── GET /api/recovery — recovery summary + tasks needing attention ──
 
-    def _build_recovery_queue_item(ledger_obj, task: dict[str, Any]) -> dict[str, Any]:
+    def _build_recovery_queue_item(ledger_obj, task: dict[str, Any], *, candidate: dict[str, Any] | None = None) -> dict[str, Any]:
         enriched = ledger_obj.enrich_task_for_observer(task) or task
         recovery = ((enriched.get("metadata") or {}).get("recovery") or {}) if isinstance(enriched, dict) else {}
-        candidate = ledger_obj.build_resume_candidate(str(enriched.get("task_id") or "")) if isinstance(enriched, dict) else None
         resume_context = dict(enriched.get("resume_context") or {}) if isinstance(enriched, dict) else {}
         queued_at_ms = int(
             recovery.get("requested_at_ms")
@@ -1290,7 +1289,6 @@ def get_webui_routes(
             "failed_outbox_count": int((candidate or {}).get("failed_outbox_count") or 0),
             "last_successful_step": str(enriched.get("last_successful_step") or ""),
             "route": route,
-            "next_step": str((candidate or {}).get("recommended_action") or ""),
         }
         item = dict(enriched)
         item["queue"] = queue
@@ -1321,9 +1319,13 @@ def get_webui_routes(
                 for task in all_tasks
                 if ((task.get("metadata") or {}).get("recovery") or {}).get("manual_review_required")
             ]
+        visible_tasks: list[dict[str, Any]] = []
+        for task in tasks[:max(1, int(limit))]:
+            candidate = ledger.build_resume_candidate(str(task.get("task_id") or ""))
+            visible_tasks.append(_build_recovery_queue_item(ledger, task, candidate=candidate))
         resp = _json({
             "summary": ledger.summarize_recovery_tasks(all_tasks),
-            "tasks": tasks[:max(1, int(limit))],
+            "tasks": visible_tasks,
         })
         _maybe_refresh_cookie(request, resp)
         return resp

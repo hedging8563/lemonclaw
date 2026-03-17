@@ -270,6 +270,24 @@ function renderCountChips(counts: Record<string, number> | undefined, formatter:
   );
 }
 
+const SENSITIVE_COPY_KEY = /(^|[_-])(authorization|token|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)($|[_-])/i;
+
+function sanitizeForCopy(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForCopy(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  return Object.fromEntries(
+    entries.map(([key, nested]) => [
+      key,
+      SENSITIVE_COPY_KEY.test(key) ? '[redacted]' : sanitizeForCopy(nested),
+    ]),
+  );
+}
+
 function getTaskActionState(task: TaskRecord, detail: ReturnType<typeof taskDetails.peek>[string] | undefined) {
   const candidate = detail?.candidate;
   const state = task.display_state;
@@ -889,7 +907,8 @@ export function TaskRecoveryPanel() {
 
   const copyValue = async (label: string, value: unknown) => {
     try {
-      await navigator.clipboard.writeText(typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2));
+      const sanitized = typeof value === 'string' ? value : sanitizeForCopy(value ?? {});
+      await navigator.clipboard.writeText(typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized, null, 2));
       setCopiedLabel(label);
       window.setTimeout(() => {
         setCopiedLabel((current) => (current === label ? null : current));
