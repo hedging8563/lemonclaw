@@ -28,6 +28,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from lemonclaw.channels.manager import ChannelManager
     from lemonclaw.ledger.runtime import TaskLedger
+    from lemonclaw.triggers.runtime import TriggerRuntime
 
 
 # ============================================================================
@@ -94,6 +95,7 @@ class WatchdogService:
         channel_manager: "ChannelManager" | None = None,
         task_ledger: "TaskLedger" | None = None,
         task_stuck_threshold_s: int = TASK_STUCK_THRESHOLD,
+        trigger_runtime: "TriggerRuntime | None" = None,
     ) -> None:
         self._port = port
         self._interval = check_interval
@@ -102,6 +104,7 @@ class WatchdogService:
         self._channel_manager = channel_manager
         self._task_ledger = task_ledger
         self._task_stuck_threshold_s = task_stuck_threshold_s
+        self._trigger_runtime = trigger_runtime
         self._state = WatchdogState()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -409,6 +412,17 @@ class WatchdogService:
         self._state.total_soft_recoveries += 1
         names = ", ".join(c.name for c in checks)
         logger.warning(f"watchdog: soft recovery triggered ({names})")
+        trigger = None
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="watchdog",
+                kind="watchdog.soft_recovery",
+                payload_summary=names[:500],
+                session_key="watchdog",
+                channel="system",
+                chat_id="watchdog",
+                metadata={"checks": [c.name for c in checks]},
+            )
 
         # Clear stuck sessions if that's the issue
         for c in checks:
@@ -441,6 +455,12 @@ class WatchdogService:
                         logger.warning("watchdog: restarted channel {} -> {}", name, result)
                     except Exception as e:
                         logger.error("watchdog: failed to restart channel {}: {}", name, e)
+        if trigger and self._trigger_runtime:
+            self._trigger_runtime.finish_trigger(
+                trigger["trigger_id"],
+                status="completed",
+                result_summary=f"soft recovery completed: {names}"[:500],
+            )
 
     async def _hard_recovery(self, checks: list[HealthCheck]) -> None:
         """Hard recovery: exit process (K8s/launchd/systemd will restart).
@@ -460,6 +480,17 @@ class WatchdogService:
         self._state.last_hard_restart_time = now
         names = ", ".join(c.name for c in checks)
         logger.critical(f"watchdog: HARD RESTART — {self._state.consecutive_failures} consecutive failures ({names})")
+        trigger = None
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="watchdog",
+                kind="watchdog.hard_recovery",
+                payload_summary=names[:500],
+                session_key="watchdog",
+                channel="system",
+                chat_id="watchdog",
+                metadata={"checks": [c.name for c in checks]},
+            )
 
         if self._task_ledger:
             try:
@@ -472,6 +503,13 @@ class WatchdogService:
                     logger.warning("watchdog: marked {} task(s) before hard recovery", len(marked))
             except Exception as e:
                 logger.error(f"watchdog: failed to mark tasks before hard recovery: {e}")
+
+        if trigger and self._trigger_runtime:
+            self._trigger_runtime.finish_trigger(
+                trigger["trigger_id"],
+                status="completed",
+                result_summary=f"hard recovery triggered: {names}"[:500],
+            )
 
         # Flush all cached sessions to disk before killing the process
         if self._session_manager is not None:

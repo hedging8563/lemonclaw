@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.triggers import TriggerRuntime
 from lemonclaw.watchdog.service import HealthCheck, WatchdogService
 
 
@@ -133,3 +134,16 @@ async def test_watchdog_hard_recovery_marks_active_tasks_before_exit(tmp_path: P
     assert task["status"] == "failed"
     assert task["current_stage"] == "hard_recovery"
     assert task["metadata"]["recovery"]["source"] == "watchdog_hard_recovery"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_records_trigger_runtime_entries(tmp_path: Path):
+    ledger = TaskLedger(tmp_path, backend="json")
+    trigger_runtime = TriggerRuntime(tmp_path)
+    watchdog = WatchdogService(task_ledger=ledger, task_stuck_threshold_s=1, trigger_runtime=trigger_runtime)
+
+    await watchdog._soft_recovery([HealthCheck("task_stuck", False, "1 stale task(s): task_1")])
+
+    records = trigger_runtime.list_triggers(limit=10)
+    assert records[0]["source"] == "watchdog"
+    assert records[0]["kind"] == "watchdog.soft_recovery"
