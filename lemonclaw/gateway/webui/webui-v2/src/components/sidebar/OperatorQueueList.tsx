@@ -1,0 +1,78 @@
+import { useEffect } from 'preact/hooks';
+import { activeSessionKey } from '../../stores/sessions';
+import { activeOperatorTaskId, loadOperatorQueue, operatorQueueTasks, recoverySummary } from '../../stores/tasks';
+import { t } from '../../stores/i18n';
+import { mobileMenuOpen, showInspector } from '../../stores/ui';
+
+export function OperatorQueueList() {
+  useEffect(() => {
+    loadOperatorQueue();
+  }, []);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', padding: '0 4px' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-secondary)' }}>
+          {t('tasks_panel_manual_review_count')}: {recoverySummary.value?.manual_review_required || 0}
+        </div>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(255, 107, 53, 0.28)', background: 'rgba(255, 107, 53, 0.1)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent)' }}>
+          {t('operator_queue_count')}: {operatorQueueTasks.value.length}
+        </div>
+      </div>
+
+      {operatorQueueTasks.value.length === 0 && (
+        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+          {t('operator_queue_empty')}
+        </div>
+      )}
+
+      {operatorQueueTasks.value.map((task) => {
+        const active = activeOperatorTaskId.value === task.task_id;
+        const queue = task.queue || {};
+        return (
+          <div
+            key={task.task_id}
+            onClick={() => {
+              activeOperatorTaskId.value = task.task_id;
+              activeSessionKey.value = task.session_key;
+              showInspector.value = true;
+              mobileMenuOpen.value = false;
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              padding: '10px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              gap: '8px',
+              marginBottom: '6px',
+              background: active ? 'var(--bg-tertiary)' : 'transparent',
+              border: '1px solid',
+              borderColor: active ? 'var(--accent)' : 'transparent',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+            onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
+                  {queue.recommended_action || task.current_stage}
+                </span>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-mono)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                  {task.goal || task.task_id}
+                </span>
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
+                {queue.route || task.session_key}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
+                {queue.reason || '—'}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
+  activeOperatorTaskId,
   loadTaskDetail,
+  loadOperatorQueue,
   type RecoveryHistoryEntry,
   loadTaskPanel,
+  operatorQueueTasks,
   recoverySummary,
   recoveryTasks,
   sessionTasks,
@@ -866,16 +869,19 @@ function recoveryQueueCard(
 }
 
 export function TaskRecoveryPanel() {
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
   const [showSettledTasks, setShowSettledTasks] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const timerRef = useRef<any>(null);
+  const expandedTaskId = activeOperatorTaskId.value;
+  const setExpandedTaskId = (taskId: string | null) => {
+    activeOperatorTaskId.value = taskId;
+  };
 
   const actionableTasks = sessionTasks.value.filter((task) => !isSettledTask(task));
   const settledTasks = sessionTasks.value.filter((task) => isSettledTask(task));
   const recoveryQueueTasks = recoveryTasks.value.filter((task) => !sessionTasks.value.some((sessionTask) => sessionTask.task_id === task.task_id));
-  const selectedTask = [...recoveryTasks.value, ...sessionTasks.value].find((task) => task.task_id === expandedTaskId) || null;
+  const selectedTask = [...operatorQueueTasks.value, ...recoveryTasks.value, ...sessionTasks.value].find((task) => task.task_id === expandedTaskId) || null;
   const selectedDetail = expandedTaskId ? taskDetails.value[expandedTaskId] : null;
   const selectedBusy = expandedTaskId ? taskActionBusy.value[expandedTaskId] : undefined;
   const selectedState = selectedTask?.display_state;
@@ -884,6 +890,10 @@ export function TaskRecoveryPanel() {
   useEffect(() => {
     loadTaskPanel(activeSessionKey.value);
   }, [activeSessionKey.value]);
+
+  useEffect(() => {
+    loadOperatorQueue();
+  }, []);
 
   useEffect(() => {
     const startPolling = () => {

@@ -94,9 +94,11 @@ export interface TaskDetail {
 export const sessionTasks = signal<TaskRecord[]>([]);
 export const recoverySummary = signal<Record<string, number> | null>(null);
 export const recoveryTasks = signal<TaskRecord[]>([]);
+export const operatorQueueTasks = signal<TaskRecord[]>([]);
 export const taskDetails = signal<Record<string, TaskDetail>>({});
 export const taskPanelError = signal<string | null>(null);
 export const taskActionBusy = signal<Record<string, string>>({});
+export const activeOperatorTaskId = signal<string | null>(null);
 
 function setTaskBusy(taskId: string, action: string | null) {
   const next = { ...taskActionBusy.peek() };
@@ -131,6 +133,18 @@ export async function loadTaskPanel(sessionKey = activeSessionKey.value) {
   } catch (err: any) {
     console.error('Failed to load task panel', err);
     taskPanelError.value = err?.message || 'Failed to load task state';
+  }
+}
+
+export async function loadOperatorQueue() {
+  taskPanelError.value = null;
+  try {
+    const res = await apiFetch('/api/operator-queue?limit=24');
+    const data = await res.json();
+    operatorQueueTasks.value = data.tasks || [];
+  } catch (err: any) {
+    console.error('Failed to load operator queue', err);
+    taskPanelError.value = err?.message || 'Failed to load operator queue';
   }
 }
 

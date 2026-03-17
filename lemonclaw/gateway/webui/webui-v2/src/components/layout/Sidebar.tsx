@@ -2,6 +2,7 @@ import { t, toggleLang, lang } from '../../stores/i18n';
 import { activeSessionKey } from '../../stores/sessions';
 import { mobileMenuOpen, sidebarTab, showSettings } from '../../stores/ui';
 import { ActivityList } from '../sidebar/ActivityList';
+import { OperatorQueueList } from '../sidebar/OperatorQueueList';
 import { SessionList } from '../sidebar/SessionList';
 
 export function Sidebar() {
@@ -33,10 +34,13 @@ export function Sidebar() {
         <button onClick={() => sidebarTab.value = 'activity'} style={{ flex: 1, padding: '10px 0', background: 'transparent', border: 'none', borderBottom: sidebarTab.value === 'activity' ? '2px solid var(--teal)' : '2px solid transparent', color: sidebarTab.value === 'activity' ? 'var(--teal)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}>
           {t('activity')}
         </button>
+        <button onClick={() => sidebarTab.value = 'operatorQueue'} style={{ flex: 1, padding: '10px 0', background: 'transparent', border: 'none', borderBottom: sidebarTab.value === 'operatorQueue' ? '2px solid var(--accent)' : '2px solid transparent', color: sidebarTab.value === 'operatorQueue' ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}>
+          {t('operator_queue')}
+        </button>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        {sidebarTab.value === 'sessions' ? <SessionList /> : <ActivityList />}
+        {sidebarTab.value === 'sessions' ? <SessionList /> : sidebarTab.value === 'activity' ? <ActivityList /> : <OperatorQueueList />}
       </div>
 
       <div style={{ padding: '16px', borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
