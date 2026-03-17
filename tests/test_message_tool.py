@@ -2,6 +2,7 @@ import pytest
 
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY
+from lemonclaw.ledger.runtime import TaskLedger
 
 
 @pytest.mark.asyncio
@@ -88,3 +89,47 @@ def test_message_tool_start_turn_returns_isolated_state() -> None:
     first["messages"].append("x")
 
     assert second == {"sent": False, "messages": []}
+
+
+@pytest.mark.asyncio
+async def test_message_tool_enqueues_outbox_when_enabled(tmp_path) -> None:
+    tool = MessageTool()
+    turn_state = tool.start_turn()
+    tool.set_context(
+        "telegram",
+        "12345",
+        "321",
+        {
+            "source_channel": "telegram",
+            "source_chat_id": "12345",
+            "session_key": "telegram:12345",
+            "route": {"reply_to_message_id": 321},
+        },
+    )
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:12345",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="notify",
+    )
+
+    result = await tool.execute(
+        content="hello",
+        _message_turn_state=turn_state,
+        _task_id="task_1",
+        _task_ledger=ledger,
+        _step_id="step_msg_1",
+        _outbox_enabled=True,
+    )
+
+    assert result["ok"] is True
+    assert result["raw"]["queued"] is True
+    assert result["step_status"] == "waiting_outbox"
+    events = ledger.list_outbox_events()
+    assert len(events) == 1
+    assert events[0]["effect_type"] == "outbound_message"
+    assert events[0]["payload"]["channel"] == "telegram"
+    assert turn_state["sent"] is True

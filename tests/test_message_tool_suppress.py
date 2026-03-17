@@ -48,6 +48,49 @@ class TestMessageToolSuppressLogic:
         assert result is None  # suppressed
 
     @pytest.mark.asyncio
+    async def test_suppress_when_message_tool_queues_same_target_outbox(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        loop.outbox_enabled = True
+        tool_call = ToolCallRequest(
+            id="call1", name="message",
+            arguments={"content": "Hello", "channel": "feishu", "chat_id": "chat123"},
+        )
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        sent: list[OutboundMessage] = []
+        mt = loop.tools.get("message")
+        if isinstance(mt, MessageTool):
+            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+
+        loop.ledger.ensure_task(
+            task_id="task_msg_1",
+            session_key="feishu:chat123",
+            agent_id=loop.agent_id,
+            mode="chat",
+            channel="feishu",
+            goal="Send",
+        )
+        msg = InboundMessage(
+            channel="feishu",
+            sender_id="user1",
+            chat_id="chat123",
+            content="Send",
+            metadata={"_task_id": "task_msg_1"},
+        )
+        result = await loop._process_message(msg)
+
+        assert len(sent) == 0
+        assert result is None
+        events = loop.ledger.list_outbox_events()
+        assert len(events) == 1
+        assert events[0]["effect_type"] == "outbound_message"
+
+    @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(

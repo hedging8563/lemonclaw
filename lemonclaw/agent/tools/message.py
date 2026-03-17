@@ -96,6 +96,10 @@ class MessageTool(Tool):
         _default_delivery_context: dict[str, Any] | None = None,
         _message_turn_state: dict[str, Any] | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
+        _task_id: str | None = None,
+        _task_ledger: Any | None = None,
+        _step_id: str | None = None,
+        _outbox_enabled: bool = False,
         **kwargs: Any
     ) -> str:
         effective_default_channel = _default_channel or self._default_channel
@@ -111,8 +115,6 @@ class MessageTool(Tool):
             return "Error: No target channel/chat specified"
 
         callback = _outbound_sink or self._send_callback
-        if not callback:
-            return "Error: Message sending not configured"
 
         metadata: dict[str, Any] = {}
         same_target = channel == effective_default_channel and chat_id == effective_default_chat_id
@@ -130,6 +132,39 @@ class MessageTool(Tool):
         )
 
         try:
+            if _outbox_enabled and _task_ledger and _task_id and _step_id:
+                event = _task_ledger.enqueue_outbox(
+                    task_id=str(_task_id),
+                    step_id=str(_step_id),
+                    effect_type="outbound_message",
+                    target=f"{channel}:{chat_id}",
+                    payload={
+                        "channel": channel,
+                        "chat_id": chat_id,
+                        "content": content,
+                        "media": media or [],
+                        "metadata": metadata,
+                    },
+                )
+                if same_target and isinstance(_message_turn_state, dict):
+                    _message_turn_state["sent"] = True
+                    _message_turn_state.setdefault("messages", []).append(msg)
+                media_info = f" with {len(media)} attachments" if media else ""
+                return {
+                    "ok": True,
+                    "summary": f"Message queued to {channel}:{chat_id}{media_info}",
+                    "raw": {
+                        "queued": True,
+                        "event_id": event["event_id"],
+                        "channel": channel,
+                        "chat_id": chat_id,
+                    },
+                    "step_status": "waiting_outbox",
+                }
+
+            if not callback:
+                return "Error: Message sending not configured"
+
             await callback(msg)
             if same_target and isinstance(_message_turn_state, dict):
                 _message_turn_state["sent"] = True
