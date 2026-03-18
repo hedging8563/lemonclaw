@@ -2,7 +2,6 @@ import { useEffect, useState } from 'preact/hooks';
 import { showInspector } from '../../stores/ui';
 import { ConductorPanel } from '../inspector/ConductorPanel';
 import { MemoryPanel } from '../inspector/MemoryPanel';
-import { StarOffice } from '../inspector/StarOffice';
 import { TaskRecoveryPanel } from '../inspector/TaskRecoveryPanel';
 import { YesterdayMemo } from '../inspector/YesterdayMemo';
 
@@ -27,22 +26,11 @@ export function Inspector() {
           </div>
         </div>
         <div style={{ flex: 1, padding: isMobile ? '12px' : '16px', overflowY: 'auto' }}>
-          <div class="inspector-grid">
-            <div class="inspector-span-full">
-              <YesterdayMemo />
-            </div>
-            <div class="inspector-span-full">
-              <TaskRecoveryPanel />
-            </div>
-            <div class="inspector-col">
-              <ConductorPanel />
-            </div>
-            <div class="inspector-col">
-              <MemoryPanel />
-            </div>
-            <div class="inspector-span-full">
-              <StarOffice />
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <YesterdayMemo />
+            <TaskRecoveryPanel />
+            <ConductorPanel />
+            <MemoryPanel />
           </div>
         </div>
       </aside>

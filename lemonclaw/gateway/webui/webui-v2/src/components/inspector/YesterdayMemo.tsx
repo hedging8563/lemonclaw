@@ -1,17 +1,44 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
+import { loadMemory, memory } from '../../stores/memory';
 
-const COLLAPSED_MAX_HEIGHT = 320;
+const COLLAPSED_MAX_HEIGHT = 220;
+const HISTORY_COLLAPSED_MAX_HEIGHT = 180;
+
+const shellStyle = {
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  borderRadius: '8px',
+  padding: '12px',
+} as const;
+
+function pillStyle(active = false) {
+  return {
+    padding: '4px 8px',
+    borderRadius: '999px',
+    border: '1px solid',
+    borderColor: active ? 'var(--accent)' : 'var(--border)',
+    background: active ? 'rgba(255, 107, 53, 0.08)' : 'var(--bg-primary)',
+    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+    cursor: 'pointer',
+  } as const;
+}
 
 export function YesterdayMemo() {
   const [memo, setMemo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
+  const [historyOverflows, setHistoryOverflows] = useState(false);
 
   useEffect(() => {
+    void loadMemory();
     apiFetch('/api/memo/yesterday')
       .then((res) => res.json())
       .then((data) => {
@@ -21,112 +48,136 @@ export function YesterdayMemo() {
       .catch(() => setLoading(false));
   }, []);
 
-  const hasContent = Boolean(memo && (memo.yesterday?.length || memo.today?.length));
+  const hasMemoContent = Boolean(memo && (memo.yesterday?.length || memo.today?.length));
+  const historyEntries = memory.value?.history || [];
 
-  // Measure actual content height to decide if toggle is needed
   useEffect(() => {
-    if (!contentRef.current || !hasContent) return;
-    const el = contentRef.current;
-    setOverflows(el.scrollHeight > COLLAPSED_MAX_HEIGHT);
-  }, [hasContent, memo]);
+    if (!contentRef.current || !hasMemoContent) return;
+    setOverflows(contentRef.current.scrollHeight > COLLAPSED_MAX_HEIGHT);
+  }, [hasMemoContent, memo]);
+
+  useEffect(() => {
+    if (!historyRef.current || historyEntries.length === 0) return;
+    setHistoryOverflows(historyRef.current.scrollHeight > HISTORY_COLLAPSED_MAX_HEIGHT);
+  }, [historyEntries.join('|')]);
 
   if (loading) return null;
 
-  const showToggle = overflows;
-
   return (
-    <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '12px', marginBottom: '16px' }}>
-      {/* Header */}
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>// MEMO</span>
-        <span>{memo.date}</span>
-      </div>
-
-      {/* Content */}
-      {!hasContent ? (
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          {t('memo_empty')}
+    <div style={shellStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+            // MEMO
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+            <span style={pillStyle(Boolean(memo?.today?.length))}>{`${t('memo_today')}: ${memo?.today?.length || 0}`}</span>
+            <span style={pillStyle(Boolean(memo?.yesterday?.length))}>{`${t('memo_yesterday')}: ${memo?.yesterday?.length || 0}`}</span>
+            <span style={pillStyle(Boolean(historyEntries.length))}>{`${t('memory_history')}: ${historyEntries.length}`}</span>
+          </div>
         </div>
-      ) : (
-        <div
-          ref={contentRef}
-          style={{
-            maxHeight: expanded ? 'none' : `${COLLAPSED_MAX_HEIGHT}px`,
-            overflow: 'hidden',
-            position: 'relative',
-          }}
-        >
-          {memo.yesterday && memo.yesterday.length > 0 && (
-            <div style={{ marginBottom: memo.today?.length ? '12px' : '0' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_yesterday')}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-                {memo.yesterday.map((item: string, i: number) => (
-                  <div key={i} style={{ marginBottom: i < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>{item}</div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {memo.today && memo.today.length > 0 && (
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 'bold' }}>{t('memo_today')}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-                {memo.today.map((item: string, i: number) => (
-                  <div key={i} style={{ marginBottom: i < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>{item}</div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Fade overlay + bottom toggle */}
-      {hasContent && showToggle && (
-        <div style={{ position: 'relative' }}>
-          {!expanded && (
-            <div style={{
-              position: 'absolute',
-              bottom: '100%',
-              left: 0,
-              right: 0,
-              height: '48px',
-              background: 'linear-gradient(to bottom, transparent, var(--bg-secondary))',
-              pointerEvents: 'none',
-            }} />
-          )}
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              width: '100%',
-              marginTop: '8px',
-              padding: '4px 0',
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              borderRadius: '4px',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              transition: 'color 0.15s, border-color 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
-            }}
-          >
-            <span style={{ fontSize: '8px' }}>{expanded ? '▲' : '▼'}</span>
-            <span>{expanded ? t('memo_collapse') : t('memo_expand')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>{memo?.date || '—'}</span>
+          <button onClick={() => setExpanded((value) => !value)} style={pillStyle(expanded)}>
+            {expanded ? t('memo_collapse') : t('memo_expand')}
           </button>
         </div>
-      )}
+      </div>
+
+      <div
+        ref={contentRef}
+        style={{
+          maxHeight: expanded ? 'none' : `${COLLAPSED_MAX_HEIGHT}px`,
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        {!hasMemoContent ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('memo_empty')}</div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px' }}>
+            {memo?.today?.length ? (
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 'bold' }}>{t('memo_today')}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                  {memo.today.map((item: string, index: number) => (
+                    <div key={`today-${index}`} style={{ marginBottom: index < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {memo?.yesterday?.length ? (
+              <details open>
+                <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  {t('memo_yesterday')}
+                </summary>
+                <div style={{ marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                  {memo.yesterday.map((item: string, index: number) => (
+                    <div key={`yesterday-${index}`} style={{ marginBottom: index < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
+
+            <details open={historyEntries.length > 0}>
+              <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {`${t('memory_history')} · ${historyEntries.length}`}
+              </summary>
+              <div style={{ marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+                {historyEntries.length === 0 ? (
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
+                ) : (
+                  <>
+                    <div
+                      ref={historyRef}
+                      style={{
+                        maxHeight: historyExpanded ? 'none' : `${HISTORY_COLLAPSED_MAX_HEIGHT}px`,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        {historyEntries.map((entry, index) => (
+                          <div key={`memo-history-${index}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                            {entry}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {historyOverflows ? (
+                      <button onClick={() => setHistoryExpanded((value) => !value)} style={{ ...pillStyle(historyExpanded), marginTop: '10px' }}>
+                        {historyExpanded ? t('memo_collapse') : t('memo_expand')}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+
+      {hasMemoContent && overflows ? (
+        <div style={{ position: 'relative' }}>
+          {!expanded ? (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                right: 0,
+                height: '48px',
+                background: 'linear-gradient(to bottom, transparent, var(--bg-secondary))',
+                pointerEvents: 'none',
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

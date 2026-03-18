@@ -53,6 +53,14 @@ const sectionTitleStyle = {
   color: 'var(--purple)',
 } as const;
 
+function sectionShellStyle(maxHeight?: number) {
+  return {
+    display: 'grid',
+    gap: '8px',
+    ...(maxHeight ? { maxHeight: `${maxHeight}px`, overflowY: 'auto', paddingRight: '4px' } : {}),
+  } as const;
+}
+
 function pillStyle(active = false) {
   return {
     padding: '4px 8px',
@@ -104,7 +112,26 @@ function downloadJson(filename: string, payload: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function renderAccordionSection(
+  title: string,
+  count: number | null,
+  children: any,
+  defaultOpen = false,
+  maxHeight = 260,
+) {
+  return (
+    <details open={defaultOpen} style={panelStyle}>
+      <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', listStyle: 'none' }}>
+        <span style={sectionTitleStyle}>{title}</span>
+        {typeof count === 'number' ? <span style={pillStyle(count > 0)}>{count}</span> : null}
+      </summary>
+      <div style={{ marginTop: '10px', ...sectionShellStyle(maxHeight) }}>{children}</div>
+    </details>
+  );
+}
+
 export function MemoryPanel() {
+  const [panelExpanded, setPanelExpanded] = useState(true);
   const [editingEntity, setEditingEntity] = useState<string | null>(null);
   const [editBody, setEditBody] = useState('');
   const [editingCore, setEditingCore] = useState(false);
@@ -175,11 +202,6 @@ export function MemoryPanel() {
         if (!query) return true;
         return [item.trigger, item.lesson, item.action].join(' ').toLowerCase().includes(query);
       }),
-    [snapshot, query],
-  );
-
-  const filteredHistory = useMemo(
-    () => (snapshot?.history || []).filter((entry: string) => !query || entry.toLowerCase().includes(query)),
     [snapshot, query],
   );
 
@@ -582,7 +604,8 @@ export function MemoryPanel() {
   );
 
   const renderSourcesTab = () => (
-    <div style={panelStyle}>
+    <div style={{ display: 'grid', gap: '10px' }}>
+      <div style={panelStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <div style={sectionTitleStyle}>{t('knowledge_sources')}</div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -621,50 +644,21 @@ export function MemoryPanel() {
       </div>
 
       {creatingKnowledge ? <div style={{ marginBottom: '10px' }}>{renderKnowledgeForm('create')}</div> : null}
+      </div>
 
       {knowledgeDocuments.value.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {knowledgeView === 'all' ? (
-            <>
-              {groupedKnowledgeDocs.pinned.length > 0 ? (
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {t('knowledge_group_pinned')}
-                  </div>
-                  {groupedKnowledgeDocs.pinned.map(renderKnowledgeCard)}
-                </div>
-              ) : null}
-              {groupedKnowledgeDocs.due.length > 0 ? (
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {t('knowledge_group_due')}
-                  </div>
-                  {groupedKnowledgeDocs.due.map(renderKnowledgeCard)}
-                </div>
-              ) : null}
-              {groupedKnowledgeDocs.used.length > 0 ? (
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {t('knowledge_group_used')}
-                  </div>
-                  {groupedKnowledgeDocs.used.map(renderKnowledgeCard)}
-                </div>
-              ) : null}
-              {groupedKnowledgeDocs.other.length > 0 ? (
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {t('knowledge_group_other')}
-                  </div>
-                  {groupedKnowledgeDocs.other.map(renderKnowledgeCard)}
-                </div>
-              ) : null}
-            </>
-          ) : (
-            visibleKnowledgeDocs.map(renderKnowledgeCard)
-          )}
-        </div>
+        knowledgeView === 'all' ? (
+          <>
+            {groupedKnowledgeDocs.pinned.length > 0 ? renderAccordionSection(t('knowledge_group_pinned'), groupedKnowledgeDocs.pinned.length, groupedKnowledgeDocs.pinned.map(renderKnowledgeCard), true, 260) : null}
+            {groupedKnowledgeDocs.due.length > 0 ? renderAccordionSection(t('knowledge_group_due'), groupedKnowledgeDocs.due.length, groupedKnowledgeDocs.due.map(renderKnowledgeCard), true, 260) : null}
+            {groupedKnowledgeDocs.used.length > 0 ? renderAccordionSection(t('knowledge_group_used'), groupedKnowledgeDocs.used.length, groupedKnowledgeDocs.used.map(renderKnowledgeCard), false, 260) : null}
+            {groupedKnowledgeDocs.other.length > 0 ? renderAccordionSection(t('knowledge_group_other'), groupedKnowledgeDocs.other.length, groupedKnowledgeDocs.other.map(renderKnowledgeCard), false, 300) : null}
+          </>
+        ) : (
+          renderAccordionSection(t('knowledge_sources'), visibleKnowledgeDocs.length, visibleKnowledgeDocs.map(renderKnowledgeCard), true, 360)
+        )
       ) : (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
+        <div style={{ ...panelStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
       )}
     </div>
   );
@@ -707,7 +701,7 @@ export function MemoryPanel() {
       </div>
 
       {knowledgeResults.value.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={sectionShellStyle(420)}>
           {knowledgeResults.value.map((item, idx) => {
             const linkedDoc = item.doc_id ? knowledgeDocumentMap.get(item.doc_id) : null;
             return (
@@ -816,49 +810,43 @@ export function MemoryPanel() {
             {editingKnowledgeId === activeDoc.doc_id ? renderKnowledgeForm('edit', activeDoc.doc_id) : null}
           </div>
 
-          <div>
-            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_chunks')}</div>
-            {activeChunks.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activeChunks.map((chunk) => (
-                  <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
-                        {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
-                      </div>
-                      <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
+          {renderAccordionSection(
+            t('knowledge_chunks'),
+            activeChunks.length,
+            activeChunks.length > 0 ? activeChunks.map((chunk) => (
+              <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
+                    {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
                   </div>
-                ))}
+                  <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
               </div>
-            ) : (
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-            )}
-          </div>
+            )) : <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
+            activeChunks.length <= 3,
+            260,
+          )}
 
-          <div>
-            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_facts')}</div>
-            {activeFacts.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activeFacts.map((fact) => (
-                  <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
-                        {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
-                      </div>
-                      <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
+          {renderAccordionSection(
+            t('knowledge_facts'),
+            activeFacts.length,
+            activeFacts.length > 0 ? activeFacts.map((fact) => (
+              <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
+                    {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
                   </div>
-                ))}
+                  <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
               </div>
-            ) : (
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-            )}
-          </div>
+            )) : <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
+            activeFacts.length <= 3,
+            240,
+          )}
         </div>
       ) : (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_detail_empty')}</div>
@@ -895,7 +883,6 @@ export function MemoryPanel() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
           <div style={pillStyle()}>{t('memory_count_entities')}: {snapshot.entities?.length || 0}</div>
           <div style={pillStyle()}>{t('memory_count_rules')}: {snapshot.rules?.length || 0}</div>
-          <div style={pillStyle()}>{t('memory_count_history')}: {snapshot.history?.length || 0}</div>
           <div style={pillStyle()}>{t('memory_count_indexed')}: {snapshot.search_index?.last_indexed_docs || 0}</div>
         </div>
 
@@ -924,184 +911,133 @@ export function MemoryPanel() {
           </div>
         ) : null}
 
-        <div style={panelStyle}>
-          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_search_index')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span>{' '}
-              <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
-                {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
-              </span>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span>{' '}
-              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span>{' '}
-              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span>{' '}
-              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span>
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span>{' '}
-              <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span>
-            </div>
-            {snapshot.search_index?.last_error ? (
-              <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index.last_error}
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {renderAccordionSection(
+            t('memory_search_index'),
+            snapshot.search_index?.last_indexed_docs || 0,
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span>{' '}
+                <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
+                  {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
+                </span>
               </div>
-            ) : null}
-          </div>
-        </div>
-
-        {snapshot.core ? (
-          <div style={panelStyle}>
-            <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', ...sectionTitleStyle }}>
-              {t('memory_core')}
-              {!editingCore ? (
-                <button
-                  onClick={() => {
-                    setEditingCore(true);
-                    setCoreDraft(snapshot.core || '');
-                  }}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
-                >
-                  {t('memory_edit')}
-                </button>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span>{' '}
+                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span>{' '}
+                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span>{' '}
+                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span>{' '}
+                <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span>
+              </div>
+              {snapshot.search_index?.last_error ? (
+                <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index.last_error}
+                </div>
               ) : null}
-            </div>
-            {editingCore ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <textarea value={coreDraft} onInput={(event) => setCoreDraft((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
-                    {t('memory_cancel')}
-                  </button>
-                  <button onClick={() => void handleSaveCore()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
-                    {t('memory_save')}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}
-                onDblClick={() => {
-                  setEditingCore(true);
-                  setCoreDraft(snapshot.core || '');
-                }}
-              >
-                {snapshot.core}
-              </div>
-            )}
-          </div>
-        ) : null}
+            </div>,
+            false,
+            220,
+          )}
 
-        {snapshot.today ? (
-          <div style={panelStyle}>
+          {snapshot.core ? (
+            <div style={panelStyle}>
+              <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', ...sectionTitleStyle }}>
+                {t('memory_core')}
+                {!editingCore ? (
+                  <button
+                    onClick={() => {
+                      setEditingCore(true);
+                      setCoreDraft(snapshot.core || '');
+                    }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
+                  >
+                    {t('memory_edit')}
+                  </button>
+                ) : null}
+              </div>
+              {editingCore ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <textarea value={coreDraft} onInput={(event) => setCoreDraft((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
+                      {t('memory_cancel')}
+                    </button>
+                    <button onClick={() => void handleSaveCore()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
+                      {t('memory_save')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }}>
+                  {snapshot.core}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <div style={{ ...panelStyle, fontSize: '11px', color: snapshot.today ? 'var(--text-primary)' : 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
             <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_today')}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>{snapshot.today}</div>
+            {snapshot.today || t('memory_empty_today')}
           </div>
-        ) : (
-          <div style={{ ...panelStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_today')}</div>
-        )}
 
-        <div style={panelStyle}>
-          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_entities')}</div>
-          {filteredEntities.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredEntities.map((entity: MemoryEntityRecord) => (
-                <div key={entity.name} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-                  <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{entity.name}</span>
-                    {editingEntity !== entity.name ? (
-                      <button
-                        onClick={() => {
-                          setEditingEntity(entity.name);
-                          setEditBody(entity.body || '');
-                        }}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
-                      >
-                        {t('memory_edit')}
-                      </button>
-                    ) : null}
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    {entity.type ? <span style={pillStyle()}>{entity.type}</span> : null}
-                    {typeof entity.access_count === 'number' ? <span style={pillStyle()}>{`access:${entity.access_count}`}</span> : null}
-                    {(entity.keywords || []).slice(0, 6).map((item) => (
-                      <span key={item} style={pillStyle()}>
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                  {editingEntity === entity.name ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <textarea value={editBody} onInput={(event) => setEditBody((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                        <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
-                          {t('memory_cancel')}
-                        </button>
-                        <button onClick={() => void handleSaveEntity(entity.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
-                          {t('memory_save')}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}
-                      onDblClick={() => {
-                        setEditingEntity(entity.name);
-                        setEditBody(entity.body || '');
-                      }}
-                    >
-                      {entity.body}
-                    </div>
-                  )}
+          {renderAccordionSection(
+            t('memory_entities'),
+            filteredEntities.length,
+            filteredEntities.length > 0 ? filteredEntities.map((entity: MemoryEntityRecord) => (
+              <div key={entity.name} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{entity.name}</span>
+                  {editingEntity !== entity.name ? (
+                    <button onClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
+                      {t('memory_edit')}
+                    </button>
+                  ) : null}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
-          )}
-        </div>
-
-        <div style={panelStyle}>
-          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_rules')}</div>
-          {filteredRules.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredRules.map((rule, idx) => (
-                <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                  {entity.type ? <span style={pillStyle()}>{entity.type}</span> : null}
+                  {typeof entity.access_count === 'number' ? <span style={pillStyle()}>{`access:${entity.access_count}`}</span> : null}
+                  {(entity.keywords || []).slice(0, 6).map((item) => <span key={item} style={pillStyle()}>{item}</span>)}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>
-          )}
-        </div>
-
-        <div style={panelStyle}>
-          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_history')}</div>
-          {filteredHistory.length > 0 ? (
-            <details open>
-              <summary style={{ cursor: 'pointer', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                {`${filteredHistory.length} ${t('memory_history_entries')}`}
-              </summary>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {filteredHistory.slice(0, 12).map((entry, idx) => (
-                  <div key={`history-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
-                    {entry}
+                {editingEntity === entity.name ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <textarea value={editBody} onInput={(event) => setEditBody((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
+                      <button onClick={() => void handleSaveEntity(entity.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_save')}</button>
+                    </div>
                   </div>
-                ))}
+                ) : (
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }}>
+                    {entity.body}
+                  </div>
+                )}
               </div>
-            </details>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
+            )) : <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>,
+            filteredEntities.length <= 2,
+            260,
+          )}
+
+          {renderAccordionSection(
+            t('memory_rules'),
+            filteredRules.length,
+            filteredRules.length > 0 ? filteredRules.map((rule, idx) => (
+              <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
+              </div>
+            )) : <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>,
+            filteredRules.length <= 2,
+            220,
           )}
         </div>
 
@@ -1127,47 +1063,45 @@ export function MemoryPanel() {
   };
 
   return (
-    <div>
-      <div
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '10px',
-          color: 'var(--purple)',
-          textTransform: 'uppercase',
-          letterSpacing: '1.5px',
-          marginBottom: '8px',
-        }}
-      >
-        // {t('memory_title')}
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-        {([
-          ['sources', t('memory_tab_sources')],
-          ['search', t('memory_tab_search')],
-          ['detail', t('memory_tab_detail')],
-          ['memory', t('memory_tab_memory')],
-        ] as Array<[MemoryPanelTab, string]>).map(([key, label]) => (
-          <button key={key} onClick={() => { activeMemoryPanelTab.value = key; }} style={pillStyle(activeTab === key)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {saveError || memoryError.value || knowledgeError.value ? (
-        <div
-          style={{
-            fontSize: '11px',
-            color: 'var(--error)',
-            fontFamily: 'var(--font-mono)',
-            marginBottom: '8px',
-            padding: '6px 8px',
-            background: 'rgba(255,68,68,0.1)',
-            borderRadius: '4px',
-          }}
-        >
-          {saveError || memoryError.value || knowledgeError.value}
+    <div style={{ ...panelStyle, padding: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
+            // {t('memory_title')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <span style={pillStyle(activeTab === 'sources')}>{`${t('knowledge_count_sources')}: ${knowledgeSummary.value?.total || 0}`}</span>
+            <span style={pillStyle(activeTab === 'memory')}>{`${t('memory_count_entities')}: ${snapshot?.entities?.length || 0}`}</span>
+            <span style={pillStyle(activeTab === 'detail')}>{`${t('knowledge_chunk_count')}: ${activeDoc?.chunk_count || 0}`}</span>
+          </div>
         </div>
+        <button onClick={() => setPanelExpanded((value) => !value)} style={pillStyle(panelExpanded)}>
+          {panelExpanded ? t('memo_collapse') : t('memo_expand')}
+        </button>
+      </div>
+
+      {panelExpanded ? (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            {([
+              ['sources', t('memory_tab_sources')],
+              ['search', t('memory_tab_search')],
+              ['detail', t('memory_tab_detail')],
+              ['memory', t('memory_tab_memory')],
+            ] as Array<[MemoryPanelTab, string]>).map(([key, label]) => (
+              <button key={key} onClick={() => { activeMemoryPanelTab.value = key; }} style={pillStyle(activeTab === key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {saveError || memoryError.value || knowledgeError.value ? (
+            <div style={{ fontSize: '11px', color: 'var(--error)', fontFamily: 'var(--font-mono)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>
+              {saveError || memoryError.value || knowledgeError.value}
+            </div>
+          ) : null}
+          {renderActiveTab()}
+        </>
       ) : null}
-      {renderActiveTab()}
     </div>
   );
 }
