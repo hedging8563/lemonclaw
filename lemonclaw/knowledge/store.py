@@ -360,19 +360,18 @@ class KnowledgeStore:
         ranked: list[tuple[int, dict[str, Any]]] = []
         for chunk in chunks:
             text = str(chunk.get("text") or "")
-            hay = text.lower()
-            score = 0
-            if query.lower() in hay:
-                score += 50
-            title = str(documents.get(str(chunk.get("doc_id") or ""), {}).get("title") or "").lower()
-            if query.lower() in title:
-                score += 25
-            for token in tokens:
-                score += hay.count(token)
-                score += title.count(token) * 2
+            doc = documents.get(str(chunk.get("doc_id") or ""), {})
+            score = self._score_search_candidate(
+                query=query,
+                tokens=tokens,
+                body=text,
+                title=str(doc.get("title") or ""),
+                source=str(doc.get("source") or ""),
+                result_type="chunk",
+                updated_at_ms=int(doc.get("updated_at_ms") or 0),
+            )
             if score <= 0:
                 continue
-            doc = documents.get(str(chunk.get("doc_id") or ""), {})
             if source_type and str(doc.get("source_type") or "") != source_type:
                 continue
             if result_type and result_type != "chunk":
@@ -380,19 +379,18 @@ class KnowledgeStore:
             ranked.append((score, {**chunk, "result_type": "chunk"}))
         for fact in facts:
             claim = str(fact.get("claim") or "")
-            hay = claim.lower()
-            score = 0
-            if query.lower() in hay:
-                score += 80
-            title = str(documents.get(str(fact.get("doc_id") or ""), {}).get("title") or "").lower()
-            if query.lower() in title:
-                score += 20
-            for token in tokens:
-                score += hay.count(token) * 2
-                score += title.count(token)
+            doc = documents.get(str(fact.get("doc_id") or ""), {})
+            score = self._score_search_candidate(
+                query=query,
+                tokens=tokens,
+                body=claim,
+                title=str(doc.get("title") or ""),
+                source=str(doc.get("source") or ""),
+                result_type="fact",
+                updated_at_ms=int(doc.get("updated_at_ms") or 0),
+            )
             if score <= 0:
                 continue
-            doc = documents.get(str(fact.get("doc_id") or ""), {})
             if source_type and str(doc.get("source_type") or "") != source_type:
                 continue
             if result_type and result_type != "fact":
@@ -407,7 +405,14 @@ class KnowledgeStore:
             reverse=True,
         )
         results: list[dict[str, Any]] = []
-        for score, chunk in ranked[:max(1, int(limit))]:
+        seen_per_doc: dict[str, int] = {}
+        for score, chunk in ranked:
+            doc_id = str(chunk.get("doc_id") or "")
+            if doc_id:
+                seen = seen_per_doc.get(doc_id, 0)
+                if seen >= 2:
+                    continue
+                seen_per_doc[doc_id] = seen + 1
             doc = documents.get(str(chunk.get("doc_id") or ""), {})
             result_type = str(chunk.get("result_type") or "chunk")
             text = str(chunk.get("text") or chunk.get("claim") or "")
@@ -422,7 +427,64 @@ class KnowledgeStore:
                 "score": score,
                 "snippet": text[:280],
             })
+            if len(results) >= max(1, int(limit)):
+                break
         return results
+
+    @staticmethod
+    def _score_search_candidate(
+        *,
+        query: str,
+        tokens: list[str],
+        body: str,
+        title: str,
+        source: str,
+        result_type: str,
+        updated_at_ms: int,
+    ) -> int:
+        query_lower = query.lower()
+        body_lower = body.lower()
+        title_lower = title.lower()
+        source_lower = source.lower()
+        score = 0
+
+        if query_lower in body_lower:
+            score += 55 if result_type == "chunk" else 80
+        if query_lower == title_lower and query_lower:
+            score += 260
+        if query_lower in title_lower:
+            score += 120
+        if query_lower in source_lower:
+            score += 15
+
+        if tokens and all(token in title_lower for token in tokens):
+            score += 50
+        if tokens and all(token in body_lower for token in tokens):
+            score += 20
+
+        for token in tokens:
+            body_hits = min(body_lower.count(token), 3)
+            title_hits = min(title_lower.count(token), 2)
+            source_hits = min(source_lower.count(token), 1)
+            score += body_hits * (2 if result_type == "fact" else 1)
+            score += title_hits * 3
+            score += source_hits
+
+        # Prefer concise facts/chunks once relevance is established.
+        body_len = max(len(body.strip()), 1)
+        if body_len <= 240:
+            score += 6
+        elif body_len <= 800:
+            score += 3
+
+        # Light recency boost without overwhelming lexical relevance.
+        if updated_at_ms > 0:
+            age_ms = max(_now_ms() - updated_at_ms, 0)
+            if age_ms <= 24 * 60 * 60 * 1000:
+                score += 4
+            elif age_ms <= 7 * 24 * 60 * 60 * 1000:
+                score += 2
+        return score
 
     def list_chunks(self, doc_id: str) -> list[dict[str, Any]]:
         if not self.is_valid_doc_id(doc_id):

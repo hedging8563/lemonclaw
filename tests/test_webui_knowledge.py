@@ -357,6 +357,39 @@ def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:
     assert all(item["source_type"] == "manual" for item in source_results)
 
 
+def test_knowledge_search_reranks_title_hits_and_limits_doc_dominance(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    repeated = ("retry queue jobs after rollout " * 80).strip()
+    dominant = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Ops Notes",
+            "source": "manual://ops-notes",
+            "source_type": "manual",
+            "content": f"{repeated}\n\n{repeated}\n\n{repeated}",
+        },
+    ).json()["document"]
+    titled = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Retry Queue Jobs After Rollout",
+            "source": "manual://runbook",
+            "source_type": "manual",
+            "content": "Escalate only after checking the queue retry path.",
+        },
+    ).json()["document"]
+
+    client.post("/api/knowledge/reingest")
+
+    search_resp = client.get("/api/knowledge/search?q=retry queue jobs after rollout&limit=3")
+    assert search_resp.status_code == 200
+    results = search_resp.json()["results"]
+    assert len(results) == 3
+    assert results[0]["doc_id"] == titled["doc_id"]
+    assert len({item["doc_id"] for item in results}) >= 2
+    assert sum(1 for item in results if item["doc_id"] == dominant["doc_id"]) <= 2
+
+
 def test_knowledge_refresh_due_only_updates_due_documents(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
 
