@@ -166,6 +166,26 @@ def test_feishu_tokens_are_initialized_before_first_get(tmp_path):
     assert resp.status_code == 200
 
 
+def test_settings_exposes_managed_lemondata_provider_bases(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    monkeypatch.setenv('API_KEY', 'sk-platform')
+    monkeypatch.setenv('API_BASE_URL', 'https://staging.example.com')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+
+    assert resp.status_code == 200
+    providers = resp.json()['settings']['providers']
+    assert providers['lemondata']['api_key'] == '(auto-configured by platform)'
+    assert providers['lemondata']['api_base'] == 'https://staging.example.com/v1'
+    assert providers['lemondata_response']['api_base'] == 'https://staging.example.com/v1'
+    assert providers['lemondata_claude']['api_base'] == 'https://staging.example.com'
+    assert providers['lemondata_minimax']['api_base'] == 'https://staging.example.com'
+    assert providers['lemondata_gemini']['api_base'] == 'https://staging.example.com'
+
 
 def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, tmp_path):
     import json

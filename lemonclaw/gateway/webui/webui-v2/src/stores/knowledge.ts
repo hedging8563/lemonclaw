@@ -33,6 +33,7 @@ export interface KnowledgeSummary {
 }
 
 export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting';
+export type MemoryPanelTab = 'sources' | 'search' | 'detail' | 'memory';
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
 export const knowledgeDocuments = signal<KnowledgeDocumentRecord[]>([]);
@@ -43,6 +44,7 @@ export const activeKnowledgeChunks = signal<Array<Record<string, any>>>([]);
 export const activeKnowledgeFacts = signal<Array<Record<string, any>>>([]);
 export const selectedKnowledgeSourceType = signal<string>('');
 export const selectedKnowledgeResultType = signal<string>('');
+export const activeMemoryPanelTab = signal<MemoryPanelTab>('sources');
 
 export function isKnowledgeUsed(doc: KnowledgeDocumentRecord): boolean {
   return Number(doc.retrieval_count || 0) > 0 || Number(doc.last_hit_at_ms || 0) > 0;
@@ -124,7 +126,13 @@ export async function loadKnowledge() {
     knowledgeDocuments.value = data.documents || [];
     if (activeKnowledgeDocument.value) {
       const match = (data.documents || []).find((item: KnowledgeDocumentRecord) => item.doc_id === activeKnowledgeDocument.value?.doc_id);
-      if (match) activeKnowledgeDocument.value = match;
+      if (match) {
+        activeKnowledgeDocument.value = match;
+      } else {
+        activeKnowledgeDocument.value = null;
+        activeKnowledgeChunks.value = [];
+        activeKnowledgeFacts.value = [];
+      }
     }
   } catch (err: any) {
     console.error('Failed to load knowledge documents', err);

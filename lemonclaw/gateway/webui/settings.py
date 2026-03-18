@@ -496,16 +496,25 @@ def get_settings_routes(
         data.pop("lemondata", None)
         data.pop("gateway", None)
 
-        # For env-injected LemonData providers: if config.json has no api_key
-        # but env var API_KEY is set, show a placeholder so users know keys are active.
+        # For platform-managed LemonData providers, surface the effective provider
+        # wiring in the UI even when config.json keeps those fields empty.
         import os as _os
-        if _os.environ.get("API_KEY"):
+        platform_api_key = (_os.environ.get("API_KEY") or config.lemondata.api_key or "").strip()
+        platform_api_base = (_os.environ.get("API_BASE_URL") or config.lemondata.api_base_url or "").strip()
+        if platform_api_key:
+            base_root = platform_api_base or "https://api.lemondata.cc"
+            base_v1 = base_root if base_root.endswith("/v1") else f"{base_root}/v1"
+            base_no_v1 = base_root.removesuffix("/v1")
             env_providers = ("lemondata", "lemondata_response", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
             providers = data.get("providers", {})
             for pname in env_providers:
                 prov = providers.get(pname, {})
-                if isinstance(prov, dict) and not prov.get("api_key"):
+                if not isinstance(prov, dict):
+                    continue
+                if not prov.get("api_key"):
                     prov["api_key"] = "(auto-configured by platform)"
+                if not prov.get("api_base"):
+                    prov["api_base"] = base_v1 if pname in {"lemondata", "lemondata_response"} else base_no_v1
 
         # Include the effective (runtime) model so frontend can show both
         effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None

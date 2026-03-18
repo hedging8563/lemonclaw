@@ -22,8 +22,27 @@ import {
   type TaskRecord,
 } from '../../stores/tasks';
 import { activeSessionKey } from '../../stores/sessions';
-import { loadKnowledgeDocument } from '../../stores/knowledge';
+import { activeMemoryPanelTab, loadKnowledgeDocument } from '../../stores/knowledge';
 import { t } from '../../stores/i18n';
+
+function pillStyle(active = false) {
+  return {
+    padding: '4px 8px',
+    borderRadius: '999px',
+    border: '1px solid',
+    borderColor: active ? 'var(--accent)' : 'var(--border)',
+    background: active ? 'rgba(124, 58, 237, 0.1)' : 'var(--bg-primary)',
+    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+  } as const;
+}
+
+function openKnowledgeDetail(docId?: string | null) {
+  if (!docId) return;
+  activeMemoryPanelTab.value = 'detail';
+  void loadKnowledgeDocument(docId);
+}
 
 function toneStyles(tone: string): { color: string; background: string; borderColor: string } {
   switch (tone) {
@@ -515,7 +534,7 @@ function renderTaskDetailBody(
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_card_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {retrieval.card_hits.map((item, idx) => (
+                {retrieval.card_hits.map((item: NonNullable<typeof retrieval.card_hits>[number], idx: number) => (
                   <div key={`${item.name || 'card'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -534,7 +553,7 @@ function renderTaskDetailBody(
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_rule_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {retrieval.rule_hits.map((item, idx) => (
+                {retrieval.rule_hits.map((item: NonNullable<typeof retrieval.rule_hits>[number], idx: number) => (
                   <div key={`${item.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.trigger || '—'}</div>
                     {item.lesson ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.lesson}</div> : null}
@@ -555,10 +574,10 @@ function renderTaskDetailBody(
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_knowledge_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {retrieval.knowledge_hits.map((item, idx) => (
+                {retrieval.knowledge_hits.map((item: NonNullable<typeof retrieval.knowledge_hits>[number], idx: number) => (
                   <div
                     key={`${item.source || 'knowledge'}-${idx}`}
-                    onClick={() => item.doc_id ? void loadKnowledgeDocument(item.doc_id) : undefined}
+                    onClick={() => openKnowledgeDetail(item.doc_id)}
                     style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)', cursor: item.doc_id ? 'pointer' : 'default' }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
@@ -571,7 +590,7 @@ function renderTaskDetailBody(
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              void loadKnowledgeDocument(item.doc_id!);
+                              openKnowledgeDetail(item.doc_id);
                             }}
                             style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
                           >

@@ -1,8 +1,57 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, filterKnowledgeDocuments, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, partitionKnowledgeDocuments, searchKnowledge, selectedKnowledgeResultType, selectedKnowledgeSourceType, type KnowledgeDocumentRecord, type KnowledgeView } from '../../stores/knowledge';
-import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
+import {
+  activeMemoryPanelTab,
+  activeKnowledgeChunks,
+  activeKnowledgeDocument,
+  activeKnowledgeFacts,
+  filterKnowledgeDocuments,
+  knowledgeDocuments,
+  knowledgeError,
+  knowledgeResults,
+  knowledgeSummary,
+  loadKnowledge,
+  loadKnowledgeDocument,
+  partitionKnowledgeDocuments,
+  searchKnowledge,
+  selectedKnowledgeResultType,
+  selectedKnowledgeSourceType,
+  type KnowledgeDocumentRecord,
+  type MemoryPanelTab,
+  type KnowledgeView,
+} from '../../stores/knowledge';
+import { loadMemory, memory, memoryError, type MemoryEntityRecord, type MemoryRuleRecord } from '../../stores/memory';
+
+const panelStyle = {
+  background: 'var(--bg-primary)',
+  border: '1px solid var(--border)',
+  borderRadius: '6px',
+  padding: '10px',
+} as const;
+
+const inputStyle = {
+  width: '100%',
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  color: 'var(--text-primary)',
+  borderRadius: '6px',
+  padding: '8px 10px',
+  fontSize: '12px',
+  outline: 'none',
+} as const;
+
+const textareaStyle = {
+  ...inputStyle,
+  minHeight: '96px',
+  resize: 'vertical',
+} as const;
+
+const sectionTitleStyle = {
+  fontSize: '12px',
+  fontFamily: 'var(--font-mono)',
+  color: 'var(--purple)',
+} as const;
 
 function pillStyle(active = false) {
   return {
@@ -14,14 +63,32 @@ function pillStyle(active = false) {
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-mono)',
     fontSize: '10px',
+    cursor: 'pointer',
   } as const;
 }
 
-function formatTime(value?: number) {
+function actionButtonStyle(color = 'var(--text-secondary)') {
+  return {
+    background: 'transparent',
+    border: '1px solid var(--border)',
+    color,
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '10px',
+    padding: '4px 8px',
+  } as const;
+}
+
+function formatTime(value?: number | null) {
   const stamp = Number(value || 0);
   if (!stamp) return '—';
   try {
-    return new Date(stamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return new Date(stamp).toLocaleString([], {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   } catch {
     return '—';
   }
@@ -38,7 +105,6 @@ function downloadJson(filename: string, payload: unknown) {
 }
 
 export function MemoryPanel() {
-  const [activeTab, setActiveTab] = useState<'sources' | 'search' | 'detail' | 'memory'>('sources');
   const [editingEntity, setEditingEntity] = useState<string | null>(null);
   const [editBody, setEditBody] = useState('');
   const [editingCore, setEditingCore] = useState(false);
@@ -68,8 +134,8 @@ export function MemoryPanel() {
   const [editKnowledgeRefreshHours, setEditKnowledgeRefreshHours] = useState('0');
 
   useEffect(() => {
-    loadMemory();
-    loadKnowledge();
+    void loadMemory();
+    void loadKnowledge();
   }, []);
 
   useEffect(() => {
@@ -84,31 +150,104 @@ export function MemoryPanel() {
     return () => window.clearInterval(timer);
   }, [knowledgeDocuments.value.map((doc) => `${doc.doc_id}:${doc.status || ''}`).join('|'), activeKnowledgeDocument.value?.doc_id]);
 
+  const snapshot = memory.value;
+  const activeTab = activeMemoryPanelTab.value;
+  const activeDoc = activeKnowledgeDocument.value;
+  const activeChunks = activeKnowledgeChunks.value;
+  const activeFacts = activeKnowledgeFacts.value;
+  const query = filter.trim().toLowerCase();
+
+  const filteredEntities = useMemo(
+    () =>
+      (snapshot?.entities || []).filter((item: MemoryEntityRecord) => {
+        if (!query) return true;
+        return [item.name, item.type, ...(item.keywords || []), item.body]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      }),
+    [snapshot, query],
+  );
+
+  const filteredRules = useMemo(
+    () =>
+      (snapshot?.rules || []).filter((item: MemoryRuleRecord) => {
+        if (!query) return true;
+        return [item.trigger, item.lesson, item.action].join(' ').toLowerCase().includes(query);
+      }),
+    [snapshot, query],
+  );
+
+  const filteredHistory = useMemo(
+    () => (snapshot?.history || []).filter((entry: string) => !query || entry.toLowerCase().includes(query)),
+    [snapshot, query],
+  );
+
+  const visibleKnowledgeDocs = useMemo(
+    () => filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView),
+    [knowledgeView, knowledgeDocuments.value],
+  );
+
+  const groupedKnowledgeDocs = useMemo(
+    () => partitionKnowledgeDocuments(knowledgeDocuments.value),
+    [knowledgeDocuments.value],
+  );
+
+  const knowledgeDocumentMap = useMemo(
+    () => new Map(knowledgeDocuments.value.map((doc) => [doc.doc_id, doc])),
+    [knowledgeDocuments.value],
+  );
+
+  const openKnowledgeDetail = (docId: string) => {
+    void loadKnowledgeDocument(docId);
+    activeMemoryPanelTab.value = 'detail';
+  };
+
+  const resetKnowledgeCreateForm = () => {
+    setCreatingKnowledge(false);
+    setKnowledgeTitle('');
+    setKnowledgeSource('');
+    setKnowledgeType('url');
+    setKnowledgeNote('');
+    setKnowledgeContent('');
+    setKnowledgeRefreshHours('0');
+  };
+
+  const resetKnowledgeEditForm = () => {
+    setEditingKnowledgeId(null);
+    setEditKnowledgeTitle('');
+    setEditKnowledgeSource('');
+    setEditKnowledgeType('url');
+    setEditKnowledgeNote('');
+    setEditKnowledgeContent('');
+    setEditKnowledgeRefreshHours('0');
+  };
+
   const handleSaveEntity = async (name: string) => {
     setSaveError(null);
     try {
       await apiFetch(`/api/memory/entities/${encodeURIComponent(name)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ body: editBody })
+        body: JSON.stringify({ body: editBody }),
       });
       setEditingEntity(null);
       await loadMemory();
-    } catch (e: any) {
-      setSaveError(e.message || t('memory_save_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('memory_save_failed'));
     }
   };
 
   const handleSaveCore = async () => {
     setSaveError(null);
     try {
-      await apiFetch(`/api/memory/core`, {
+      await apiFetch('/api/memory/core', {
         method: 'PATCH',
-        body: JSON.stringify({ content: coreDraft })
+        body: JSON.stringify({ content: coreDraft }),
       });
       setEditingCore(false);
       await loadMemory();
-    } catch (e: any) {
-      setSaveError(e.message || t('memory_save_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('memory_save_failed'));
     }
   };
 
@@ -122,7 +261,7 @@ export function MemoryPanel() {
           type: newType,
           keywords: newKeywords,
           body: newBody,
-        })
+        }),
       });
       setCreating(false);
       setNewName('');
@@ -130,8 +269,8 @@ export function MemoryPanel() {
       setNewKeywords('');
       setNewBody('');
       await loadMemory();
-    } catch (e: any) {
-      setSaveError(e.message || t('memory_create_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('memory_create_failed'));
     }
   };
 
@@ -149,16 +288,10 @@ export function MemoryPanel() {
           refresh_interval_hours: Number(knowledgeRefreshHours || 0),
         }),
       });
-      setCreatingKnowledge(false);
-      setKnowledgeTitle('');
-      setKnowledgeSource('');
-      setKnowledgeType('url');
-      setKnowledgeNote('');
-      setKnowledgeContent('');
-      setKnowledgeRefreshHours('0');
+      resetKnowledgeCreateForm();
       await loadKnowledge();
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_create_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_create_failed'));
     }
   };
 
@@ -171,8 +304,8 @@ export function MemoryPanel() {
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
       }
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_ingest_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
     }
   };
 
@@ -181,8 +314,11 @@ export function MemoryPanel() {
     try {
       await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}`, { method: 'DELETE' });
       await loadKnowledge();
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_delete_failed'));
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_delete_failed'));
     }
   };
 
@@ -194,11 +330,11 @@ export function MemoryPanel() {
         body: JSON.stringify({ pinned }),
       });
       await loadKnowledge();
-      if (activeKnowledgeDocument.value?.doc_id === docId) {
+      if (activeDoc?.doc_id === docId) {
         await loadKnowledgeDocument(docId);
       }
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_create_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_create_failed'));
     }
   };
 
@@ -216,14 +352,14 @@ export function MemoryPanel() {
           refresh_interval_hours: Number(editKnowledgeRefreshHours || 0),
         }),
       });
-      setEditingKnowledgeId(null);
+      resetKnowledgeEditForm();
       await loadKnowledge();
       await loadKnowledgeDocument(docId);
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
       }
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_create_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_create_failed'));
     }
   };
 
@@ -231,8 +367,8 @@ export function MemoryPanel() {
     setSaveError(null);
     try {
       await searchKnowledge(knowledgeQuery);
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_search_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_search_failed'));
     }
   };
 
@@ -244,8 +380,8 @@ export function MemoryPanel() {
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
       }
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_ingest_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
     }
   };
 
@@ -257,70 +393,169 @@ export function MemoryPanel() {
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
       }
-    } catch (e: any) {
-      setSaveError(e.message || t('knowledge_ingest_failed'));
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
     }
   };
 
-  const snapshot = memory.value;
-  const query = filter.trim().toLowerCase();
-  const filteredEntities = useMemo(() => (
-    (snapshot?.entities || []).filter((item: MemoryEntityRecord) => {
-      if (!query) return true;
-      return [
-        item.name,
-        item.type,
-        ...(item.keywords || []),
-        item.body,
-      ].join(' ').toLowerCase().includes(query);
-    })
-  ), [snapshot, query]);
-  const filteredRules = useMemo(() => (
-    (snapshot?.rules || []).filter((item: MemoryRuleRecord) => {
-      if (!query) return true;
-      return [
-        item.trigger,
-        item.lesson,
-        item.action,
-      ].join(' ').toLowerCase().includes(query);
-    })
-  ), [snapshot, query]);
-  const filteredHistory = useMemo(() => (
-    (snapshot?.history || []).filter((entry: string) => !query || entry.toLowerCase().includes(query))
-  ), [snapshot, query]);
-  const visibleKnowledgeDocs = useMemo(
-    () => filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView),
-    [knowledgeView, knowledgeDocuments.value],
-  );
-  const knowledgeDocumentMap = useMemo(
-    () => new Map(knowledgeDocuments.value.map((doc) => [doc.doc_id, doc])),
-    [knowledgeDocuments.value],
-  );
-  const groupedKnowledgeDocs = useMemo(
-    () => partitionKnowledgeDocuments(knowledgeDocuments.value),
-    [knowledgeDocuments.value],
-  );
+  const beginKnowledgeEdit = (doc: KnowledgeDocumentRecord) => {
+    setEditingKnowledgeId(doc.doc_id);
+    setEditKnowledgeTitle(doc.title || '');
+    setEditKnowledgeSource(doc.source || '');
+    setEditKnowledgeType(doc.source_type || 'url');
+    setEditKnowledgeNote(doc.note || '');
+    setEditKnowledgeContent((doc as any).content || '');
+    setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
+  };
+
+  const renderKnowledgeForm = (mode: 'create' | 'edit', docId?: string) => {
+    const isEdit = mode === 'edit';
+    const currentType = isEdit ? editKnowledgeType : knowledgeType;
+    const currentTitle = isEdit ? editKnowledgeTitle : knowledgeTitle;
+    const currentSource = isEdit ? editKnowledgeSource : knowledgeSource;
+    const currentNote = isEdit ? editKnowledgeNote : knowledgeNote;
+    const currentContent = isEdit ? editKnowledgeContent : knowledgeContent;
+    const currentRefreshHours = isEdit ? editKnowledgeRefreshHours : knowledgeRefreshHours;
+
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          marginTop: isEdit ? '8px' : undefined,
+          paddingTop: isEdit ? '8px' : undefined,
+          borderTop: isEdit ? '1px solid var(--border)' : undefined,
+        }}
+      >
+        <input
+          value={currentTitle}
+          onInput={(event) =>
+            isEdit
+              ? setEditKnowledgeTitle((event.target as HTMLInputElement).value)
+              : setKnowledgeTitle((event.target as HTMLInputElement).value)
+          }
+          placeholder={t('knowledge_title')}
+          style={inputStyle}
+        />
+        <select
+          value={currentType}
+          onInput={(event) =>
+            isEdit
+              ? setEditKnowledgeType((event.target as HTMLSelectElement).value)
+              : setKnowledgeType((event.target as HTMLSelectElement).value)
+          }
+          style={inputStyle}
+        >
+          <option value="url">url</option>
+          <option value="file">file</option>
+          <option value="manual">manual</option>
+        </select>
+        <input
+          value={currentSource}
+          onInput={(event) =>
+            isEdit
+              ? setEditKnowledgeSource((event.target as HTMLInputElement).value)
+              : setKnowledgeSource((event.target as HTMLInputElement).value)
+          }
+          placeholder={t('knowledge_source')}
+          style={inputStyle}
+        />
+        <textarea
+          value={currentNote}
+          onInput={(event) =>
+            isEdit
+              ? setEditKnowledgeNote((event.target as HTMLTextAreaElement).value)
+              : setKnowledgeNote((event.target as HTMLTextAreaElement).value)
+          }
+          placeholder={t('knowledge_note')}
+          style={{ ...textareaStyle, minHeight: '72px' }}
+        />
+        <input
+          value={currentRefreshHours}
+          onInput={(event) =>
+            isEdit
+              ? setEditKnowledgeRefreshHours((event.target as HTMLInputElement).value)
+              : setKnowledgeRefreshHours((event.target as HTMLInputElement).value)
+          }
+          placeholder={t('knowledge_refresh_hours')}
+          style={inputStyle}
+        />
+        {currentType === 'manual' ? (
+          <textarea
+            value={currentContent}
+            onInput={(event) =>
+              isEdit
+                ? setEditKnowledgeContent((event.target as HTMLTextAreaElement).value)
+                : setKnowledgeContent((event.target as HTMLTextAreaElement).value)
+            }
+            placeholder={t('knowledge_content')}
+            style={{ ...textareaStyle, minHeight: '120px' }}
+          />
+        ) : null}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button
+            onClick={() => (isEdit ? resetKnowledgeEditForm() : resetKnowledgeCreateForm())}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
+          >
+            {t('memory_cancel')}
+          </button>
+          <button
+            onClick={() => {
+              if (isEdit && docId) {
+                void handleEditKnowledge(docId);
+                return;
+              }
+              void handleCreateKnowledge();
+            }}
+            style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
+          >
+            {isEdit ? t('knowledge_update') : t('knowledge_create')}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const renderKnowledgeCard = (doc: KnowledgeDocumentRecord) => (
     <div key={doc.doc_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
-        <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => { void loadKnowledgeDocument(doc.doc_id); setActiveTab('detail'); }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
+        <div
+          style={{ minWidth: 0, cursor: 'pointer' }}
+          onClick={() => {
+            openKnowledgeDetail(doc.doc_id);
+          }}
+        >
+          <div
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {doc.title || doc.source}
+          </div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
         </div>
-        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-          <button onClick={() => {
-            setEditingKnowledgeId(doc.doc_id);
-            setEditKnowledgeTitle(doc.title || '');
-            setEditKnowledgeSource(doc.source || '');
-            setEditKnowledgeType(doc.source_type || 'url');
-            setEditKnowledgeNote(doc.note || '');
-            setEditKnowledgeContent((doc as any).content || '');
-            setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
-          }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
-          <button onClick={() => void handleToggleKnowledgePinned(doc.doc_id, !doc.pinned)} style={{ background: 'transparent', border: '1px solid var(--border)', color: doc.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{doc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}</button>
-          <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
-          <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button onClick={() => beginKnowledgeEdit(doc)} style={actionButtonStyle()}>
+            {t('knowledge_edit')}
+          </button>
+          <button
+            onClick={() => void handleToggleKnowledgePinned(doc.doc_id, !doc.pinned)}
+            style={actionButtonStyle(doc.pinned ? 'var(--accent)' : 'var(--text-secondary)')}
+          >
+            {doc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
+          </button>
+          <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={actionButtonStyle('var(--teal)')}>
+            {t('knowledge_ingest')}
+          </button>
+          <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={actionButtonStyle('var(--text-muted)')}>
+            {t('knowledge_remove')}
+          </button>
         </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -335,42 +570,34 @@ export function MemoryPanel() {
         {doc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(doc.next_refresh_at_ms)}`}</span> : null}
         {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
       </div>
-      {doc.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${doc.last_hit_query}`}</div> : null}
-      {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
-      {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
-      {editingKnowledgeId === doc.doc_id && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-          <input value={editKnowledgeTitle} onInput={(e) => setEditKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <select value={editKnowledgeType} onInput={(e) => setEditKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
-            <option value="url">url</option>
-            <option value="file">file</option>
-            <option value="manual">manual</option>
-          </select>
-          <input value={editKnowledgeSource} onInput={(e) => setEditKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <textarea value={editKnowledgeNote} onInput={(e) => setEditKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
-          <input value={editKnowledgeRefreshHours} onInput={(e) => setEditKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          {editKnowledgeType === 'manual' && (
-            <textarea value={editKnowledgeContent} onInput={(e) => setEditKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button onClick={() => setEditingKnowledgeId(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-            <button onClick={() => void handleEditKnowledge(doc.doc_id)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_update')}</button>
-          </div>
+      {doc.last_hit_query ? (
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>
+          {`${t('knowledge_last_query')}: ${doc.last_hit_query}`}
         </div>
-      )}
+      ) : null}
+      {doc.note ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div> : null}
+      {doc.last_error ? <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div> : null}
+      {editingKnowledgeId === doc.doc_id ? renderKnowledgeForm('edit', doc.doc_id) : null}
     </div>
   );
 
   const renderSourcesTab = () => (
-    <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('knowledge_sources')}</div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button onClick={() => void handleReingestAll()} style={pillStyle()}>{t('knowledge_reingest_all')}</button>
-          <button onClick={() => void handleRefreshDue()} style={pillStyle()}>{t('knowledge_refresh_due')}</button>
-          <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
+    <div style={panelStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+        <div style={sectionTitleStyle}>{t('knowledge_sources')}</div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button onClick={() => void handleReingestAll()} style={pillStyle()}>
+            {t('knowledge_reingest_all')}
+          </button>
+          <button onClick={() => void handleRefreshDue()} style={pillStyle()}>
+            {t('knowledge_refresh_due')}
+          </button>
+          <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>
+            {t('knowledge_add_source')}
+          </button>
         </div>
       </div>
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
         <span style={pillStyle()}>{t('knowledge_count_types')}: {Object.keys(knowledgeSummary.value?.by_type || {}).length}</span>
@@ -378,7 +605,8 @@ export function MemoryPanel() {
         <span style={pillStyle()}>{t('knowledge_count_pinned')}: {knowledgeSummary.value?.pinned_count || 0}</span>
         <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
         {([
           ['all', t('knowledge_view_all')],
           ['pinned', t('knowledge_view_pinned')],
@@ -386,57 +614,50 @@ export function MemoryPanel() {
           ['due', t('knowledge_view_due')],
           ['ingesting', t('knowledge_view_ingesting')],
         ] as Array<[KnowledgeView, string]>).map(([value, label]) => (
-          <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>{label}</button>
+          <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>
+            {label}
+          </button>
         ))}
       </div>
-      {creatingKnowledge && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-          <input value={knowledgeTitle} onInput={(e) => setKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <select value={knowledgeType} onInput={(e) => setKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
-            <option value="url">url</option>
-            <option value="file">file</option>
-            <option value="manual">manual</option>
-          </select>
-          <input value={knowledgeSource} onInput={(e) => setKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <textarea value={knowledgeNote} onInput={(e) => setKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
-          <input value={knowledgeRefreshHours} onInput={(e) => setKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          {knowledgeType === 'manual' && (
-            <textarea value={knowledgeContent} onInput={(e) => setKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button onClick={() => setCreatingKnowledge(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-            <button onClick={handleCreateKnowledge} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_create')}</button>
-          </div>
-        </div>
-      )}
+
+      {creatingKnowledge ? <div style={{ marginBottom: '10px' }}>{renderKnowledgeForm('create')}</div> : null}
+
       {knowledgeDocuments.value.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {knowledgeView === 'all' ? (
             <>
-              {groupedKnowledgeDocs.pinned.length > 0 && (
+              {groupedKnowledgeDocs.pinned.length > 0 ? (
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_pinned')}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {t('knowledge_group_pinned')}
+                  </div>
                   {groupedKnowledgeDocs.pinned.map(renderKnowledgeCard)}
                 </div>
-              )}
-              {groupedKnowledgeDocs.due.length > 0 && (
+              ) : null}
+              {groupedKnowledgeDocs.due.length > 0 ? (
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_due')}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {t('knowledge_group_due')}
+                  </div>
                   {groupedKnowledgeDocs.due.map(renderKnowledgeCard)}
                 </div>
-              )}
-              {groupedKnowledgeDocs.used.length > 0 && (
+              ) : null}
+              {groupedKnowledgeDocs.used.length > 0 ? (
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_used')}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {t('knowledge_group_used')}
+                  </div>
                   {groupedKnowledgeDocs.used.map(renderKnowledgeCard)}
                 </div>
-              )}
-              {groupedKnowledgeDocs.other.length > 0 && (
+              ) : null}
+              {groupedKnowledgeDocs.other.length > 0 ? (
                 <div style={{ display: 'grid', gap: '8px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_other')}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {t('knowledge_group_other')}
+                  </div>
                   {groupedKnowledgeDocs.other.map(renderKnowledgeCard)}
                 </div>
-              )}
+              ) : null}
             </>
           ) : (
             visibleKnowledgeDocs.map(renderKnowledgeCard)
@@ -449,70 +670,90 @@ export function MemoryPanel() {
   );
 
   const renderSearchTab = () => (
-    <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-      <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_search_results')}</div>
+    <div style={panelStyle}>
+      <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_search_results')}</div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-        <input value={knowledgeQuery} onInput={(e) => setKnowledgeQuery((e.target as HTMLInputElement).value)} placeholder={t('knowledge_search_placeholder')} style={{ flex: 1, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-        <button onClick={() => void handleSearchKnowledge()} style={pillStyle()}>{t('knowledge_search')}</button>
+        <input
+          value={knowledgeQuery}
+          onInput={(event) => setKnowledgeQuery((event.target as HTMLInputElement).value)}
+          placeholder={t('knowledge_search_placeholder')}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <button onClick={() => void handleSearchKnowledge()} style={pillStyle()}>
+          {t('knowledge_search')}
+        </button>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-        <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_source')}</span>
+        <span style={{ ...pillStyle(), color: 'var(--text-muted)', cursor: 'default' }}>{t('knowledge_filter_source')}</span>
         {['', 'url', 'file', 'manual'].map((value) => (
-          <button key={`src-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { source_type: value })} style={pillStyle(selectedKnowledgeSourceType.value === value)}>{value || 'all'}</button>
+          <button
+            key={`src-${value || 'all'}`}
+            onClick={() => void searchKnowledge(knowledgeQuery, { source_type: value })}
+            style={pillStyle(selectedKnowledgeSourceType.value === value)}
+          >
+            {value || 'all'}
+          </button>
         ))}
-        <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_result')}</span>
+        <span style={{ ...pillStyle(), color: 'var(--text-muted)', cursor: 'default' }}>{t('knowledge_filter_result')}</span>
         {['', 'chunk', 'fact'].map((value) => (
-          <button key={`res-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { result_type: value })} style={pillStyle(selectedKnowledgeResultType.value === value)}>{value || 'all'}</button>
+          <button
+            key={`res-${value || 'all'}`}
+            onClick={() => void searchKnowledge(knowledgeQuery, { result_type: value })}
+            style={pillStyle(selectedKnowledgeResultType.value === value)}
+          >
+            {value || 'all'}
+          </button>
         ))}
       </div>
+
       {knowledgeResults.value.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {knowledgeResults.value.map((item, idx) => (
-            <div
-              key={`${item.doc_id || 'result'}-${idx}`}
-              onClick={() => {
-                if (item.doc_id) {
-                  void loadKnowledgeDocument(item.doc_id);
-                  setActiveTab('detail');
-                }
-              }}
-              style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', cursor: item.doc_id ? 'pointer' : 'default' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.title || item.doc_id || '—'}</div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  {item.doc_id ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void loadKnowledgeDocument(item.doc_id);
-                        setActiveTab('detail');
-                      }}
-                      style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
-                    >
-                      {t('open')}
-                    </button>
-                  ) : null}
-                  {item.doc_id && knowledgeDocumentMap.get(item.doc_id) ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const doc = knowledgeDocumentMap.get(item.doc_id);
-                        if (doc) void handleToggleKnowledgePinned(item.doc_id, !doc.pinned);
-                      }}
-                      style={{ background: 'transparent', border: '1px solid var(--border)', color: knowledgeDocumentMap.get(item.doc_id)?.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
-                    >
-                      {knowledgeDocumentMap.get(item.doc_id)?.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
-                    </button>
-                  ) : null}
-                  {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
-                  <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
+          {knowledgeResults.value.map((item, idx) => {
+            const linkedDoc = item.doc_id ? knowledgeDocumentMap.get(item.doc_id) : null;
+            return (
+              <div
+                key={`${item.doc_id || 'result'}-${idx}`}
+                onClick={() => {
+                  if (item.doc_id) openKnowledgeDetail(item.doc_id);
+                }}
+                style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', cursor: item.doc_id ? 'pointer' : 'default' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {item.title || item.doc_id || '—'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {item.doc_id ? (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openKnowledgeDetail(item.doc_id);
+                        }}
+                        style={actionButtonStyle()}
+                      >
+                        {t('open')}
+                      </button>
+                    ) : null}
+                    {item.doc_id && linkedDoc ? (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleToggleKnowledgePinned(item.doc_id, !linkedDoc.pinned);
+                        }}
+                        style={actionButtonStyle(linkedDoc.pinned ? 'var(--accent)' : 'var(--text-secondary)')}
+                      >
+                        {linkedDoc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
+                      </button>
+                    ) : null}
+                    {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
+                    <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
+                  </div>
                 </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
@@ -521,68 +762,103 @@ export function MemoryPanel() {
   );
 
   const renderDetailTab = () => (
-    <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-      {activeKnowledgeDocument.value ? (
-        <div>
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_detail')}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{activeKnowledgeDocument.value.title || activeKnowledgeDocument.value.source}</div>
-          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeKnowledgeDocument.value.source}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-            <span style={pillStyle()}>{activeKnowledgeDocument.value.source_type || '—'}</span>
-            <span style={pillStyle()}>{activeKnowledgeDocument.value.status || 'registered'}</span>
-            {activeKnowledgeDocument.value.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
-            <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeKnowledgeDocument.value.chunk_count || 0}`}</span>
-            <span style={pillStyle()}>{`facts:${activeKnowledgeDocument.value.fact_count || 0}`}</span>
-            <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${activeKnowledgeDocument.value.retrieval_count || 0}`}</span>
-          </div>
-          {activeKnowledgeDocument.value.last_hit_at_ms ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>{`${t('knowledge_last_hit')}: ${formatTime(activeKnowledgeDocument.value.last_hit_at_ms)}`}</div> : null}
-          {activeKnowledgeDocument.value.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${activeKnowledgeDocument.value.last_hit_query}`}</div> : null}
-          {activeKnowledgeDocument.value.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeKnowledgeDocument.value.note}</div>}
-          {activeKnowledgeDocument.value.metadata && Object.keys(activeKnowledgeDocument.value.metadata).length > 0 && (
+    <div style={panelStyle}>
+      {activeDoc ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div>
+            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_detail')}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+              {activeDoc.title || activeDoc.source}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeDoc.source}</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              <button
+                onClick={() => void handleToggleKnowledgePinned(activeDoc.doc_id, !activeDoc.pinned)}
+                style={pillStyle(Boolean(activeDoc.pinned))}
+              >
+                {activeDoc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
+              </button>
+              <button onClick={() => void handleIngestKnowledge(activeDoc.doc_id)} style={pillStyle()}>
+                {t('knowledge_ingest')}
+              </button>
+              <button onClick={() => beginKnowledgeEdit(activeDoc)} style={pillStyle(editingKnowledgeId === activeDoc.doc_id)}>
+                {t('knowledge_edit')}
+              </button>
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-              {Object.entries(activeKnowledgeDocument.value.metadata).map(([key, value]) => (
-                <span key={key} style={pillStyle()}>{`${key}:${String(value)}`}</span>
-              ))}
+              <span style={pillStyle()}>{activeDoc.source_type || '—'}</span>
+              <span style={pillStyle()}>{activeDoc.status || 'registered'}</span>
+              <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeDoc.chunk_count || 0}`}</span>
+              <span style={pillStyle()}>{`facts:${activeDoc.fact_count || 0}`}</span>
+              <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${activeDoc.retrieval_count || 0}`}</span>
+              {activeDoc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(activeDoc.next_refresh_at_ms)}`}</span> : null}
             </div>
-          )}
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_chunks')}</div>
-          {activeKnowledgeChunks.value.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {activeKnowledgeChunks.value.map((chunk) => (
-                <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
-                      {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
+            {activeDoc.last_hit_at_ms ? (
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                {`${t('knowledge_last_hit')}: ${formatTime(activeDoc.last_hit_at_ms)}`}
+              </div>
+            ) : null}
+            {activeDoc.last_hit_query ? (
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>
+                {`${t('knowledge_last_query')}: ${activeDoc.last_hit_query}`}
+              </div>
+            ) : null}
+            {activeDoc.note ? (
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeDoc.note}</div>
+            ) : null}
+            {activeDoc.metadata && Object.keys(activeDoc.metadata).length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                {Object.entries(activeDoc.metadata).map(([key, value]) => (
+                  <span key={key} style={pillStyle()}>{`${key}:${String(value)}`}</span>
+                ))}
+              </div>
+            ) : null}
+            {editingKnowledgeId === activeDoc.doc_id ? renderKnowledgeForm('edit', activeDoc.doc_id) : null}
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_chunks')}</div>
+            {activeChunks.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {activeChunks.map((chunk) => (
+                  <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
+                        {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
+                      </div>
+                      <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
                     </div>
-                    <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-          )}
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginTop: '10px', marginBottom: '8px' }}>{t('knowledge_facts')}</div>
-          {activeKnowledgeFacts.value.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {activeKnowledgeFacts.value.map((fact) => (
-                <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
-                      {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+            )}
+          </div>
+
+          <div>
+            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_facts')}</div>
+            {activeFacts.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {activeFacts.map((fact) => (
+                  <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
+                        {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
+                      </div>
+                      <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
                     </div>
-                    <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-          )}
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+            )}
+          </div>
         </div>
       ) : (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_detail_empty')}</div>
@@ -590,161 +866,278 @@ export function MemoryPanel() {
     </div>
   );
 
-  const renderMemoryTab = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-        <button onClick={() => void loadMemory()} style={pillStyle()}>{t('memory_refresh')}</button>
-        <button onClick={() => void navigator.clipboard.writeText(JSON.stringify(snapshot || {}, null, 2))} style={pillStyle()}>{t('memory_copy')}</button>
-        <button onClick={() => downloadJson('memory-snapshot.json', snapshot || {})} style={pillStyle()}>{t('memory_export_json')}</button>
-        <button onClick={() => setCreating((value) => !value)} style={pillStyle(creating)}>{t('memory_new_card')}</button>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-        <div style={pillStyle()}>{t('memory_count_entities')}: {snapshot?.entities?.length || 0}</div>
-        <div style={pillStyle()}>{t('memory_count_rules')}: {snapshot?.rules?.length || 0}</div>
-        <div style={pillStyle()}>{t('memory_count_history')}: {snapshot?.history?.length || 0}</div>
-        <div style={pillStyle()}>{t('memory_count_indexed')}: {snapshot?.search_index?.last_indexed_docs || 0}</div>
-      </div>
-      <input
-        value={filter}
-        onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
-        placeholder={t('memory_filter_placeholder')}
-        style={{ width: '100%', marginBottom: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}
-      />
-      {creating && (
-        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('memory_new_card')}</div>
-          <input value={newName} onInput={(e) => setNewName((e.target as HTMLInputElement).value)} placeholder={t('memory_name')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <input value={newType} onInput={(e) => setNewType((e.target as HTMLInputElement).value)} placeholder={t('memory_type')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <input value={newKeywords} onInput={(e) => setNewKeywords((e.target as HTMLInputElement).value)} placeholder={t('memory_keywords')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-          <textarea value={newBody} onInput={(e) => setNewBody((e.target as HTMLTextAreaElement).value)} placeholder={t('memory_body')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '100px', resize: 'vertical', outline: 'none' }} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button onClick={() => setCreating(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-            <button onClick={handleCreateEntity} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_create')}</button>
-          </div>
+  const renderMemoryTab = () => {
+    if (!snapshot) {
+      return (
+        <div style={panelStyle}>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_loading')}</div>
         </div>
-      )}
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_search_index')}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
-          <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span> <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>{snapshot.search_index?.available ? t('common_yes') : t('common_no')}</span></div>
-          <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span></div>
-          <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span></div>
-          <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span></div>
-          <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span> <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span></div>
-          {snapshot.search_index?.last_error && (
-            <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index?.last_error}
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '2px' }}>
+          <button onClick={() => void loadMemory()} style={pillStyle()}>
+            {t('memory_refresh')}
+          </button>
+          <button onClick={() => void navigator.clipboard.writeText(JSON.stringify(snapshot || {}, null, 2))} style={pillStyle()}>
+            {t('memory_copy')}
+          </button>
+          <button onClick={() => downloadJson('memory-snapshot.json', snapshot || {})} style={pillStyle()}>
+            {t('memory_export_json')}
+          </button>
+          <button onClick={() => setCreating((value) => !value)} style={pillStyle(creating)}>
+            {t('memory_new_card')}
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          <div style={pillStyle()}>{t('memory_count_entities')}: {snapshot.entities?.length || 0}</div>
+          <div style={pillStyle()}>{t('memory_count_rules')}: {snapshot.rules?.length || 0}</div>
+          <div style={pillStyle()}>{t('memory_count_history')}: {snapshot.history?.length || 0}</div>
+          <div style={pillStyle()}>{t('memory_count_indexed')}: {snapshot.search_index?.last_indexed_docs || 0}</div>
+        </div>
+
+        <input
+          value={filter}
+          onInput={(event) => setFilter((event.target as HTMLInputElement).value)}
+          placeholder={t('memory_filter_placeholder')}
+          style={inputStyle}
+        />
+
+        {creating ? (
+          <div style={{ ...panelStyle, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={sectionTitleStyle}>{t('memory_new_card')}</div>
+            <input value={newName} onInput={(event) => setNewName((event.target as HTMLInputElement).value)} placeholder={t('memory_name')} style={inputStyle} />
+            <input value={newType} onInput={(event) => setNewType((event.target as HTMLInputElement).value)} placeholder={t('memory_type')} style={inputStyle} />
+            <input value={newKeywords} onInput={(event) => setNewKeywords((event.target as HTMLInputElement).value)} placeholder={t('memory_keywords')} style={inputStyle} />
+            <textarea value={newBody} onInput={(event) => setNewBody((event.target as HTMLTextAreaElement).value)} placeholder={t('memory_body')} style={{ ...textareaStyle, minHeight: '100px' }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button onClick={() => setCreating(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
+                {t('memory_cancel')}
+              </button>
+              <button onClick={() => void handleCreateEntity()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
+                {t('memory_create')}
+              </button>
             </div>
-          )}
-        </div>
-      </div>
-      {snapshot.core && (
-        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-            {t('memory_core')}
-            {!editingCore && <button onClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_edit')}</button>}
           </div>
-          {editingCore ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <textarea value={coreDraft} onInput={e => setCoreDraft((e.target as HTMLTextAreaElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '6px', fontSize: '11px', fontFamily: 'var(--font-ui)', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                <button onClick={handleSaveCore} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_save')}</button>
+        ) : null}
+
+        <div style={panelStyle}>
+          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_search_index')}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span>{' '}
+              <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
+                {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
+              </span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span>{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span>{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span>{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span>{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span>
+            </div>
+            {snapshot.search_index?.last_error ? (
+              <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
+                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index.last_error}
               </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }}>
-              {snapshot.core}
-            </div>
-          )}
+            ) : null}
+          </div>
         </div>
-      )}
-      {snapshot.today ? (
-        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-          <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_today')}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>{snapshot.today}</div>
-        </div>
-      ) : (
-        <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_today')}</div>
-      )}
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_entities')}</div>
-        {filteredEntities.map((e: MemoryEntityRecord) => (
-          <div key={e.name} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-              <span>{e.name}</span>
-              {editingEntity !== e.name && <button onClick={() => { setEditingEntity(e.name); setEditBody(e.body || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_edit')}</button>}
+
+        {snapshot.core ? (
+          <div style={panelStyle}>
+            <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', ...sectionTitleStyle }}>
+              {t('memory_core')}
+              {!editingCore ? (
+                <button
+                  onClick={() => {
+                    setEditingCore(true);
+                    setCoreDraft(snapshot.core || '');
+                  }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
+                >
+                  {t('memory_edit')}
+                </button>
+              ) : null}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-              {e.type && <span style={pillStyle()}>{e.type}</span>}
-              {typeof e.access_count === 'number' && <span style={pillStyle()}>{`access:${e.access_count}`}</span>}
-              {(e.keywords || []).slice(0, 6).map((item) => <span key={item} style={pillStyle()}>{item}</span>)}
-            </div>
-            {editingEntity === e.name ? (
+            {editingCore ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <textarea value={editBody} onInput={evt => setEditBody((evt.target as HTMLTextAreaElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '6px', fontSize: '11px', fontFamily: 'var(--font-ui)', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
+                <textarea value={coreDraft} onInput={(event) => setCoreDraft((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                  <button onClick={() => handleSaveEntity(e.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_save')}</button>
+                  <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
+                    {t('memory_cancel')}
+                  </button>
+                  <button onClick={() => void handleSaveCore()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
+                    {t('memory_save')}
+                  </button>
                 </div>
               </div>
             ) : (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingEntity(e.name); setEditBody(e.body || ''); }}>
-                {e.body}
+              <div
+                style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}
+                onDblClick={() => {
+                  setEditingCore(true);
+                  setCoreDraft(snapshot.core || '');
+                }}
+              >
+                {snapshot.core}
               </div>
             )}
           </div>
-        ))}
-        {(!filteredEntities || filteredEntities.length === 0) && (
-          <div style={{ padding: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
-          </div>
-        )}
-      </div>
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_rules')}</div>
-        {filteredRules.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {filteredRules.map((rule, idx) => (
-              <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
-              </div>
-            ))}
+        ) : null}
+
+        {snapshot.today ? (
+          <div style={panelStyle}>
+            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_today')}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>{snapshot.today}</div>
           </div>
         ) : (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>
+          <div style={{ ...panelStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_today')}</div>
         )}
-      </div>
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_history')}</div>
-        {filteredHistory.length > 0 ? (
-          <details open>
-            <summary style={{ cursor: 'pointer', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{`${filteredHistory.length} ${t('memory_history_entries')}`}</summary>
+
+        <div style={panelStyle}>
+          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_entities')}</div>
+          {filteredEntities.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredHistory.slice(0, 12).map((entry, idx) => (
-                <div key={`history-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
-                  {entry}
+              {filteredEntities.map((entity: MemoryEntityRecord) => (
+                <div key={entity.name} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+                  <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{entity.name}</span>
+                    {editingEntity !== entity.name ? (
+                      <button
+                        onClick={() => {
+                          setEditingEntity(entity.name);
+                          setEditBody(entity.body || '');
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}
+                      >
+                        {t('memory_edit')}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {entity.type ? <span style={pillStyle()}>{entity.type}</span> : null}
+                    {typeof entity.access_count === 'number' ? <span style={pillStyle()}>{`access:${entity.access_count}`}</span> : null}
+                    {(entity.keywords || []).slice(0, 6).map((item) => (
+                      <span key={item} style={pillStyle()}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                  {editingEntity === entity.name ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <textarea value={editBody} onInput={(event) => setEditBody((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                        <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>
+                          {t('memory_cancel')}
+                        </button>
+                        <button onClick={() => void handleSaveEntity(entity.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>
+                          {t('memory_save')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}
+                      onDblClick={() => {
+                        setEditingEntity(entity.name);
+                        setEditBody(entity.body || '');
+                      }}
+                    >
+                      {entity.body}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-          </details>
-        ) : (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
-        )}
-      </div>
-      {(!snapshot.entities || snapshot.entities.length === 0) && !snapshot.core && !snapshot.today && (!snapshot.rules || snapshot.rules.length === 0) && (
-        <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
+          ) : (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
+          )}
         </div>
-      )}
-    </div>
-  );
+
+        <div style={panelStyle}>
+          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_rules')}</div>
+          {filteredRules.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredRules.map((rule, idx) => (
+                <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>
+          )}
+        </div>
+
+        <div style={panelStyle}>
+          <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_history')}</div>
+          {filteredHistory.length > 0 ? (
+            <details open>
+              <summary style={{ cursor: 'pointer', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                {`${filteredHistory.length} ${t('memory_history_entries')}`}
+              </summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {filteredHistory.slice(0, 12).map((entry, idx) => (
+                  <div key={`history-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
+                    {entry}
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
+          )}
+        </div>
+
+        {!snapshot.entities?.length && !snapshot.core && !snapshot.today && !snapshot.rules?.length ? (
+          <div style={{ ...panelStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderActiveTab = () => {
+    switch (activeTab) {
+      case 'sources':
+        return renderSourcesTab();
+      case 'search':
+        return renderSearchTab();
+      case 'detail':
+        return renderDetailTab();
+      case 'memory':
+      default:
+        return renderMemoryTab();
+    }
+  };
 
   return (
     <div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: '10px',
+          color: 'var(--purple)',
+          textTransform: 'uppercase',
+          letterSpacing: '1.5px',
+          marginBottom: '8px',
+        }}
+      >
         // {t('memory_title')}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
@@ -753,417 +1146,28 @@ export function MemoryPanel() {
           ['search', t('memory_tab_search')],
           ['detail', t('memory_tab_detail')],
           ['memory', t('memory_tab_memory')],
-        ] as const).map(([key, label]) => (
-          <button key={key} onClick={() => setActiveTab(key)} style={pillStyle(activeTab === key)}>{label}</button>
+        ] as Array<[MemoryPanelTab, string]>).map(([key, label]) => (
+          <button key={key} onClick={() => { activeMemoryPanelTab.value = key; }} style={pillStyle(activeTab === key)}>
+            {label}
+          </button>
         ))}
       </div>
-      {(saveError || memoryError.value || knowledgeError.value) && <div style={{ fontSize: '11px', color: 'var(--error)', fontFamily: 'var(--font-mono)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>{saveError || memoryError.value || knowledgeError.value}</div>}
-      
-      {!snapshot ? (
-        <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_loading')}</div>
+      {saveError || memoryError.value || knowledgeError.value ? (
+        <div
+          style={{
+            fontSize: '11px',
+            color: 'var(--error)',
+            fontFamily: 'var(--font-mono)',
+            marginBottom: '8px',
+            padding: '6px 8px',
+            background: 'rgba(255,68,68,0.1)',
+            borderRadius: '4px',
+          }}
+        >
+          {saveError || memoryError.value || knowledgeError.value}
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {(activeTab === 'sources' || activeTab === 'search' || activeTab === 'detail') && (
-            <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>
-                  {activeTab === 'sources' ? t('knowledge_sources') : activeTab === 'search' ? t('knowledge_search_results') : t('knowledge_detail')}
-                </div>
-                {activeTab === 'sources' && (
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button onClick={() => void handleReingestAll()} style={pillStyle()}>{t('knowledge_reingest_all')}</button>
-                    <button onClick={() => void handleRefreshDue()} style={pillStyle()}>{t('knowledge_refresh_due')}</button>
-                    <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
-                  </div>
-                )}
-              </div>
-              {activeTab === 'sources' && (
-                <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
-                    <span style={pillStyle()}>{t('knowledge_count_types')}: {Object.keys(knowledgeSummary.value?.by_type || {}).length}</span>
-                    <span style={pillStyle()}>{t('knowledge_count_due')}: {knowledgeSummary.value?.due_count || 0}</span>
-                    <span style={pillStyle()}>{t('knowledge_count_pinned')}: {knowledgeSummary.value?.pinned_count || 0}</span>
-                    <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    {([
-                      ['all', t('knowledge_view_all')],
-                      ['pinned', t('knowledge_view_pinned')],
-                      ['used', t('knowledge_view_used')],
-                      ['due', t('knowledge_view_due')],
-                      ['ingesting', t('knowledge_view_ingesting')],
-                    ] as Array<[KnowledgeView, string]>).map(([value, label]) => (
-                      <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>{label}</button>
-                    ))}
-                  </div>
-                </>
-              )}
-              {activeTab === 'sources' && creatingKnowledge && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-                <input value={knowledgeTitle} onInput={(e) => setKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                <select value={knowledgeType} onInput={(e) => setKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
-                  <option value="url">url</option>
-                  <option value="file">file</option>
-                  <option value="manual">manual</option>
-                </select>
-                <input value={knowledgeSource} onInput={(e) => setKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                <textarea value={knowledgeNote} onInput={(e) => setKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
-                <input value={knowledgeRefreshHours} onInput={(e) => setKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                {knowledgeType === 'manual' && (
-                  <textarea value={knowledgeContent} onInput={(e) => setKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-                )}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button onClick={() => setCreatingKnowledge(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                  <button onClick={handleCreateKnowledge} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_create')}</button>
-                </div>
-              </div>
-              {activeTab === 'search' && (
-                <>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                    <input value={knowledgeQuery} onInput={(e) => setKnowledgeQuery((e.target as HTMLInputElement).value)} placeholder={t('knowledge_search_placeholder')} style={{ flex: 1, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                    <button onClick={() => void handleSearchKnowledge()} style={pillStyle()}>{t('knowledge_search')}</button>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_source')}</span>
-                    {['', 'url', 'file', 'manual'].map((value) => (
-                      <button key={`src-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { source_type: value })} style={pillStyle(selectedKnowledgeSourceType.value === value)}>{value || 'all'}</button>
-                    ))}
-                    <span style={{ ...pillStyle(), color: 'var(--text-muted)' }}>{t('knowledge_filter_result')}</span>
-                    {['', 'chunk', 'fact'].map((value) => (
-                      <button key={`res-${value || 'all'}`} onClick={() => void searchKnowledge(knowledgeQuery, { result_type: value })} style={pillStyle(selectedKnowledgeResultType.value === value)}>{value || 'all'}</button>
-                    ))}
-                  </div>
-                  {knowledgeResults.value.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {knowledgeResults.value.map((item, idx) => (
-                        <div
-                          key={`${item.doc_id || 'result'}-${idx}`}
-                          onClick={() => {
-                            if (item.doc_id) {
-                              void loadKnowledgeDocument(item.doc_id);
-                              setActiveTab('detail');
-                            }
-                          }}
-                          style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', cursor: item.doc_id ? 'pointer' : 'default' }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                            <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.title || item.doc_id || '—'}</div>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                              {item.doc_id ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void loadKnowledgeDocument(item.doc_id);
-                                    setActiveTab('detail');
-                                  }}
-                                  style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
-                                >
-                                  {t('open')}
-                                </button>
-                              ) : null}
-                              {item.doc_id && knowledgeDocumentMap.get(item.doc_id) ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const doc = knowledgeDocumentMap.get(item.doc_id);
-                                    if (doc) void handleToggleKnowledgePinned(item.doc_id, !doc.pinned);
-                                  }}
-                                  style={{ background: 'transparent', border: '1px solid var(--border)', color: knowledgeDocumentMap.get(item.doc_id)?.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
-                                >
-                                  {knowledgeDocumentMap.get(item.doc_id)?.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
-                                </button>
-                              ) : null}
-                              {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
-                              <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
-                            </div>
-                          </div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-                  )}
-                </>
-              )}
-              {activeTab === 'sources' && (knowledgeDocuments.value.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {knowledgeView === 'all' ? (
-                  <>
-                    {groupedKnowledgeDocs.pinned.length > 0 && (
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_pinned')}</div>
-                        {groupedKnowledgeDocs.pinned.map(renderKnowledgeCard)}
-                      </div>
-                    )}
-                    {groupedKnowledgeDocs.due.length > 0 && (
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_due')}</div>
-                        {groupedKnowledgeDocs.due.map(renderKnowledgeCard)}
-                      </div>
-                    )}
-                    {groupedKnowledgeDocs.used.length > 0 && (
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_used')}</div>
-                        {groupedKnowledgeDocs.used.map(renderKnowledgeCard)}
-                      </div>
-                    )}
-                    {groupedKnowledgeDocs.other.length > 0 && (
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_other')}</div>
-                        {groupedKnowledgeDocs.other.map(renderKnowledgeCard)}
-                      </div>
-                    )}
-                  </>
-                  ) : (
-                    visibleKnowledgeDocs.map(renderKnowledgeCard)
-                  )}
-                </div>
-              ) : (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
-              ))}
-              {activeTab === 'detail' && (activeKnowledgeDocument.value ? (
-                <div>
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_detail')}</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{activeKnowledgeDocument.value.title || activeKnowledgeDocument.value.source}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeKnowledgeDocument.value.source}</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                  <span style={pillStyle()}>{activeKnowledgeDocument.value.source_type || '—'}</span>
-                  <span style={pillStyle()}>{activeKnowledgeDocument.value.status || 'registered'}</span>
-                  {activeKnowledgeDocument.value.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
-                  <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeKnowledgeDocument.value.chunk_count || 0}`}</span>
-                  <span style={pillStyle()}>{`facts:${activeKnowledgeDocument.value.fact_count || 0}`}</span>
-                  <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${activeKnowledgeDocument.value.retrieval_count || 0}`}</span>
-                </div>
-                {activeKnowledgeDocument.value.last_hit_at_ms ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>{`${t('knowledge_last_hit')}: ${formatTime(activeKnowledgeDocument.value.last_hit_at_ms)}`}</div> : null}
-                {activeKnowledgeDocument.value.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${activeKnowledgeDocument.value.last_hit_query}`}</div> : null}
-                {activeKnowledgeDocument.value.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeKnowledgeDocument.value.note}</div>}
-                {activeKnowledgeDocument.value.metadata && Object.keys(activeKnowledgeDocument.value.metadata).length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    {Object.entries(activeKnowledgeDocument.value.metadata).map(([key, value]) => (
-                      <span key={key} style={pillStyle()}>{`${key}:${String(value)}`}</span>
-                    ))}
-                  </div>
-                )}
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('knowledge_chunks')}</div>
-                {activeKnowledgeChunks.value.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {activeKnowledgeChunks.value.map((chunk) => (
-                      <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                            <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
-                            {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
-                          </div>
-                          <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-                )}
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginTop: '10px', marginBottom: '8px' }}>{t('knowledge_facts')}</div>
-                {activeKnowledgeFacts.value.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {activeKnowledgeFacts.value.map((fact) => (
-                      <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                            <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
-                            {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
-                          </div>
-                          <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
-                )}
-                </div>
-              ) : (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_detail_empty')}</div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === 'memory' && (
-            <>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-                <button onClick={() => void loadMemory()} style={pillStyle()}>{t('memory_refresh')}</button>
-                <button onClick={() => void navigator.clipboard.writeText(JSON.stringify(snapshot || {}, null, 2))} style={pillStyle()}>{t('memory_copy')}</button>
-                <button onClick={() => downloadJson('memory-snapshot.json', snapshot || {})} style={pillStyle()}>{t('memory_export_json')}</button>
-                <button onClick={() => setCreating((value) => !value)} style={pillStyle(creating)}>{t('memory_new_card')}</button>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-                <div style={pillStyle()}>{t('memory_count_entities')}: {snapshot?.entities?.length || 0}</div>
-                <div style={pillStyle()}>{t('memory_count_rules')}: {snapshot?.rules?.length || 0}</div>
-                <div style={pillStyle()}>{t('memory_count_history')}: {snapshot?.history?.length || 0}</div>
-                <div style={pillStyle()}>{t('memory_count_indexed')}: {snapshot?.search_index?.last_indexed_docs || 0}</div>
-              </div>
-              <input
-                value={filter}
-                onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
-                placeholder={t('memory_filter_placeholder')}
-                style={{ width: '100%', marginBottom: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}
-              />
-
-              {creating && (
-                <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('memory_new_card')}</div>
-                  <input value={newName} onInput={(e) => setNewName((e.target as HTMLInputElement).value)} placeholder={t('memory_name')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                  <input value={newType} onInput={(e) => setNewType((e.target as HTMLInputElement).value)} placeholder={t('memory_type')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                  <input value={newKeywords} onInput={(e) => setNewKeywords((e.target as HTMLInputElement).value)} placeholder={t('memory_keywords')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                  <textarea value={newBody} onInput={(e) => setNewBody((e.target as HTMLTextAreaElement).value)} placeholder={t('memory_body')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '100px', resize: 'vertical', outline: 'none' }} />
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button onClick={() => setCreating(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                    <button onClick={handleCreateEntity} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_create')}</button>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_search_index')}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
-                  <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span> <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>{snapshot.search_index?.available ? t('common_yes') : t('common_no')}</span></div>
-                  <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span></div>
-                  <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span></div>
-                  <div><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span> <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span></div>
-                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span> <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span></div>
-                  {snapshot.search_index?.last_error && (
-                    <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index?.last_error}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-          
-          {/* Core Memory */}
-          {snapshot.core && (
-            <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                {t('memory_core')}
-                {!editingCore && <button onClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_edit')}</button>}
-              </div>
-              {editingCore ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <textarea value={coreDraft} onInput={e => setCoreDraft((e.target as HTMLTextAreaElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '6px', fontSize: '11px', fontFamily: 'var(--font-ui)', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                    <button onClick={handleSaveCore} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_save')}</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }}>
-                  {snapshot.core}
-                </div>
-              )}
-            </div>
-          )}
-
-          {snapshot.today ? (
-            <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_today')}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>{snapshot.today}</div>
-            </div>
-          ) : (
-            <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_today')}</div>
-          )}
-
-          {snapshot.long_term && (
-            <details style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('memory_legacy_long_term')}</summary>
-              <div style={{ fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', marginTop: '8px' }}>{snapshot.long_term}</div>
-            </details>
-          )}
-
-          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_entities')}</div>
-            {filteredEntities.map((e: MemoryEntityRecord) => (
-            <div key={e.name} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                <span>{e.name}</span>
-                {editingEntity !== e.name && <button onClick={() => { setEditingEntity(e.name); setEditBody(e.body || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_edit')}</button>}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                {e.type && <span style={pillStyle()}>{e.type}</span>}
-                {typeof e.access_count === 'number' && <span style={pillStyle()}>{`access:${e.access_count}`}</span>}
-                {(e.keywords || []).slice(0, 6).map((item) => <span key={item} style={pillStyle()}>{item}</span>)}
-              </div>
-              
-              {editingEntity === e.name ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <textarea value={editBody} onInput={evt => setEditBody((evt.target as HTMLTextAreaElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '6px', fontSize: '11px', fontFamily: 'var(--font-ui)', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                    <button onClick={() => handleSaveEntity(e.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('memory_save')}</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingEntity(e.name); setEditBody(e.body || ''); }}>
-                  {e.body}
-                </div>
-              )}
-            </div>
-            ))}
-            {(!filteredEntities || filteredEntities.length === 0) && (
-              <div style={{ padding: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
-              </div>
-            )}
-          </div>
-
-          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_rules')}</div>
-            {filteredRules.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {filteredRules.map((rule, idx) => (
-                  <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>
-            )}
-          </div>
-
-          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)', marginBottom: '8px' }}>{t('memory_history')}</div>
-            {filteredHistory.length > 0 ? (
-              <details open>
-                <summary style={{ cursor: 'pointer', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{`${filteredHistory.length} ${t('memory_history_entries')}`}</summary>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {filteredHistory.slice(0, 12).map((entry, idx) => (
-                    <div key={`history-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
-                      {entry}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : (
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
-            )}
-          </div>
-
-          {(!snapshot.entities || snapshot.entities.length === 0) && !snapshot.core && !snapshot.today && (!snapshot.rules || snapshot.rules.length === 0) && (
-            <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
-            </div>
-          )}
-        </div>
-      )}
+      ) : null}
+      {renderActiveTab()}
     </div>
   );
 }
