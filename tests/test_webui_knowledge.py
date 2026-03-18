@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -156,6 +157,59 @@ def test_knowledge_file_ingest_extracts_html_title_and_metadata(tmp_path: Path) 
     document = ingest_resp.json()["document"]
     assert document["title"] == "Deploy Guide"
     assert document["metadata"]["extractor"] == "html-file"
+    assert document["chunk_count"] >= 1
+
+
+def test_knowledge_pdf_ingest_falls_back_to_pdfplumber(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path)
+    pdf_path = tmp_path / "runbook.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+    class _EmptyPage:
+        def extract_text(self) -> str:
+            return ""
+
+    class _FakeReader:
+        def __init__(self, _path: str):
+            self.pages = [_EmptyPage()]
+            self.metadata = {}
+
+    class _PlumberPage:
+        def extract_text(self) -> str:
+            return "Queue Recovery Runbook\nRetry the outbox before manual escalation."
+
+    class _PlumberDoc:
+        metadata = {}
+
+        def __init__(self, _path: str):
+            self.pages = [_PlumberPage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_FakeReader))
+    monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda path: _PlumberDoc(path)))
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "",
+            "source": str(pdf_path),
+            "source_type": "file",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    document = ingest_resp.json()["document"]
+    assert document["title"] == "Queue Recovery Runbook"
+    assert document["metadata"]["extractor"] == "pdf-pdfplumber"
+    assert document["metadata"]["page_count"] == 1
     assert document["chunk_count"] >= 1
 
 

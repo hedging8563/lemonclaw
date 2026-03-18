@@ -46,6 +46,14 @@ def _pypdf_available() -> bool:
         return False
 
 
+def _pdfplumber_available() -> bool:
+    try:
+        import pdfplumber  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 class KnowledgeStore:
     """Persistent registry for knowledge sources under workspace/knowledge/."""
 
@@ -496,8 +504,27 @@ class KnowledgeStore:
 
     @staticmethod
     def _extract_pdf_text(path: Path) -> tuple[str, dict[str, Any]]:
-        if not _pypdf_available():
-            raise RuntimeError("pypdf is required for pdf ingestion")
+        errors: list[str] = []
+        if _pypdf_available():
+            try:
+                text, meta = KnowledgeStore._extract_pdf_text_with_pypdf(path)
+                if text:
+                    return text, meta
+            except Exception as exc:
+                errors.append(f"pypdf:{exc}")
+        if _pdfplumber_available():
+            try:
+                text, meta = KnowledgeStore._extract_pdf_text_with_pdfplumber(path)
+                if text:
+                    return text, meta
+            except Exception as exc:
+                errors.append(f"pdfplumber:{exc}")
+        if errors:
+            raise RuntimeError("; ".join(errors)[:500])
+        raise RuntimeError("pypdf or pdfplumber is required for pdf ingestion")
+
+    @staticmethod
+    def _extract_pdf_text_with_pypdf(path: Path) -> tuple[str, dict[str, Any]]:
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
@@ -508,14 +535,44 @@ class KnowledgeStore:
         if not text:
             raise ValueError("pdf content is empty")
         metadata = reader.metadata or {}
+        title = str(metadata.get("/Title") or "").strip()
         return text, {
-            "extractor": "pdf",
+            "extractor": "pdf-pypdf",
             "path": str(path),
             "suffix": ".pdf",
             "page_count": len(reader.pages),
-            "title": str(metadata.get("/Title") or "").strip(),
+            "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
             "content_bytes": path.stat().st_size,
         }
+
+    @staticmethod
+    def _extract_pdf_text_with_pdfplumber(path: Path) -> tuple[str, dict[str, Any]]:
+        import pdfplumber
+
+        with pdfplumber.open(str(path)) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+            metadata = dict(getattr(pdf, "metadata", {}) or {})
+            page_count = len(pdf.pages)
+        text = "\n\n".join(part.strip() for part in pages if part.strip())
+        if not text:
+            raise ValueError("pdf content is empty")
+        title = str(metadata.get("Title") or metadata.get("/Title") or "").strip()
+        return text, {
+            "extractor": "pdf-pdfplumber",
+            "path": str(path),
+            "suffix": ".pdf",
+            "page_count": page_count,
+            "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
+            "content_bytes": path.stat().st_size,
+        }
+
+    @staticmethod
+    def _infer_title_from_text(text: str, *, fallback: str = "") -> str:
+        for line in text.splitlines():
+            candidate = _WHITESPACE_RE.sub(" ", line).strip()
+            if len(candidate) >= 4:
+                return candidate[:200]
+        return fallback[:200]
 
     def _chunk_text(self, text: str, *, title: str = "", size: int = 1200) -> list[dict[str, Any]]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
