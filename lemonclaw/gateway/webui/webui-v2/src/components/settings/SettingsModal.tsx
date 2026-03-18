@@ -11,6 +11,7 @@ import { SoulEditor } from './SoulEditor';
 import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 
 type NoticeTone = 'info' | 'warning';
+type SettingsMode = 'basic' | 'advanced' | 'expert';
 type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
@@ -20,6 +21,47 @@ type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registere
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'governance', 'channels', 'tools', 'skills'];
 const LEMONDATA_PROVIDER_KEYS = ['lemondata', 'lemondata_response', 'lemondata_claude', 'lemondata_minimax', 'lemondata_gemini'] as const;
+const ADVANCED_FIELD_NAMES = new Set([
+  'api_base',
+  'proxy',
+  'env',
+  'headers',
+  'bridge_url',
+  'bridge_token',
+  'gateway_url',
+  'homeserver',
+  'device_id',
+  'intents',
+  'e2ee_enabled',
+  'allow_room_mentions',
+  'reply_to_message',
+  'reply_in_thread',
+  'react_emoji',
+  'encoding_aes_key',
+  'encrypt_key',
+  'verification_token',
+  'kubeconfig',
+  'context',
+  'path_append',
+  'command',
+  'args',
+]);
+const ADVANCED_GROUPS = new Set(['mcp_servers']);
+const EXPERT_FIELD_NAMES = new Set([
+  'env',
+  'headers',
+  'proxy',
+  'command',
+  'args',
+  'gateway_url',
+  'homeserver',
+  'device_id',
+  'intents',
+  'encoding_aes_key',
+  'encrypt_key',
+  'verification_token',
+]);
+const EXPERT_GROUPS = new Set(['mcp_servers']);
 
 const noticeStyle = (tone: NoticeTone) => ({
   marginBottom: '12px',
@@ -159,6 +201,25 @@ function renderRuntimeList(items: string[] | undefined): string {
   return items.join(', ');
 }
 
+function isAdvancedField(fullPath: string, fieldKey: string): boolean {
+  if (ADVANCED_FIELD_NAMES.has(fieldKey)) return true;
+  if (fullPath.startsWith('providers.') && (fieldKey === 'api_base' || fieldKey === 'extra_headers')) return true;
+  if (fullPath.startsWith('tools.mcp_servers')) return true;
+  return false;
+}
+
+function isExpertField(fullPath: string, fieldKey: string): boolean {
+  if (EXPERT_FIELD_NAMES.has(fieldKey)) return true;
+  if (fullPath.startsWith('tools.mcp_servers')) return true;
+  return false;
+}
+
+function shouldRenderField(mode: SettingsMode, fullPath: string, fieldKey: string): boolean {
+  if (mode === 'expert') return true;
+  if (mode === 'advanced') return !isExpertField(fullPath, fieldKey);
+  return !isAdvancedField(fullPath, fieldKey) && !isExpertField(fullPath, fieldKey);
+}
+
 // Enum fields rendered as <select> dropdowns instead of text inputs.
 // Key: field name (last segment of path). Value: options array.
 // Empty string option = "inherit / not set".
@@ -229,6 +290,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [governanceBusy, setGovernanceBusy] = useState(false);
   const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('soul');
+  const [settingsMode, setSettingsMode] = useState<SettingsMode>('basic');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -515,11 +577,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const dataKeys = activeTab !== 'skills' && activeTab !== 'governance' && contentData
     ? (() => {
         const keys = Object.keys(contentData).filter((key) => isGroup(contentData[key]));
-        if (activeTab !== 'providers') return keys;
-        const hasLemonData = LEMONDATA_PROVIDER_KEYS.some((key) => keys.includes(key));
+        const visibleKeys = settingsMode === 'expert'
+          ? keys
+          : settingsMode === 'advanced'
+            ? keys.filter((key) => !EXPERT_GROUPS.has(key))
+            : keys.filter((key) => !ADVANCED_GROUPS.has(key) && !EXPERT_GROUPS.has(key));
+        if (activeTab !== 'providers') return visibleKeys;
+        const hasLemonData = LEMONDATA_PROVIDER_KEYS.some((key) => visibleKeys.includes(key));
         return hasLemonData
-          ? ['lemondata_gateway', ...keys.filter((key) => !LEMONDATA_PROVIDER_KEYS.includes(key as any))]
-          : keys;
+          ? ['lemondata_gateway', ...visibleKeys.filter((key) => !LEMONDATA_PROVIDER_KEYS.includes(key as any))]
+          : visibleKeys;
       })()
     : [];
   // Prepend tool status card for the tools tab
@@ -723,6 +790,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     return Object.entries(data).map(([k, v]) => {
       const currentPath = [...path, k];
       const fullPath = currentPath.join('.');
+
+      if (!shouldRenderField(settingsMode, fullPath, k)) {
+        return null;
+      }
 
       if (k === 'mcp_servers' && isGroup(v)) {
         return (
@@ -953,6 +1024,40 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {(t as any)(`tab_${activeTab}`)}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: isMobile ? '20px' : '32px' }}>{settingsDesc}</div>
+                  {activeTab !== 'soul' && activeTab !== 'governance' && activeTab !== 'skills' && (
+                    <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'inline-flex', gap: '6px', padding: '4px', borderRadius: '999px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                          {([
+                            ['basic', t('settings_mode_basic')],
+                            ['advanced', t('settings_mode_advanced')],
+                            ['expert', t('settings_mode_expert')],
+                          ] as Array<[SettingsMode, string]>).map(([mode, label]) => (
+                            <button
+                              key={mode}
+                              onClick={() => setSettingsMode(mode)}
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: '999px',
+                                border: '1px solid',
+                                borderColor: settingsMode === mode ? 'var(--accent)' : 'transparent',
+                                background: settingsMode === mode ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
+                                color: settingsMode === mode ? 'var(--accent)' : 'var(--text-secondary)',
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: '10px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                        {t('settings_mode_help')}
+                      </div>
+                    </div>
+                  )}
 
                   {activeTab === 'agents' && renderWorkspaceCard()}
                   {activeTab === 'tools' && renderToolStatusCard()}

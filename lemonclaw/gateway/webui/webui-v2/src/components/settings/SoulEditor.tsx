@@ -45,6 +45,9 @@ export function SoulEditor() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+            {t('tab_soul')}
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>
             SOUL.md
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>

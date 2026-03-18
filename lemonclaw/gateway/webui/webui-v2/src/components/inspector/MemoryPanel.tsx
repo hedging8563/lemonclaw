@@ -915,31 +915,38 @@ export function MemoryPanel() {
           {renderAccordionSection(
             t('memory_search_index'),
             snapshot.search_index?.last_indexed_docs || 0,
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', fontSize: '11px' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_available')}:</span>{' '}
-                <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
-                  {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
-                </span>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_db')}:</span>{' '}
-                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_op')}:</span>{' '}
-                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_operation || '—'}</span>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_indexed')}:</span>{' '}
-                <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_updated')}:</span>{' '}
-                <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span>
-              </div>
+            <div style={{ display: 'grid', gap: '8px', fontSize: '11px' }}>
+              {([
+                [
+                  t('memory_search_available'),
+                  <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
+                    {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
+                  </span>,
+                ],
+                [
+                  t('memory_search_db'),
+                  <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.db_exists ? t('memory_search_ready') : t('memory_search_empty')}</span>,
+                ],
+                [
+                  t('memory_search_last_op'),
+                  <span style={{ color: 'var(--text-primary)', wordBreak: 'break-word', textAlign: 'right' }}>{snapshot.search_index?.last_operation || '—'}</span>,
+                ],
+                [
+                  t('memory_search_indexed'),
+                  <span style={{ color: 'var(--text-primary)' }}>{snapshot.search_index?.last_indexed_docs || 0}</span>,
+                ],
+                [
+                  t('memory_search_last_updated'),
+                  <span style={{ color: 'var(--text-primary)' }}>{formatTime(snapshot.search_index?.last_updated_ms)}</span>,
+                ],
+              ] as Array<[string, any]>).map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{label}</span>
+                  <span style={{ minWidth: 0 }}>{value}</span>
+                </div>
+              ))}
               {snapshot.search_index?.last_error ? (
-                <div style={{ gridColumn: '1 / -1', color: 'var(--error)' }}>
+                <div style={{ color: 'var(--error)', lineHeight: 1.5, wordBreak: 'break-word' }}>
                   <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index.last_error}
                 </div>
               ) : null}

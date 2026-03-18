@@ -5,6 +5,52 @@ import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector, sidebarTab } from '../../stores/ui';
 import { loadTriggers, selectedTriggerFamily, triggerPanelError, triggerSummary, triggers } from '../../stores/triggers';
 
+function humanizeCode(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  return raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatTriggerFamily(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'runtime';
+  const mapped: Record<string, string> = {
+    runtime: 'runtime',
+    channel: 'channel',
+    cron: 'scheduled',
+    webhook: 'webhook',
+    manual: 'manual',
+  };
+  return humanizeCode(mapped[raw] || raw);
+}
+
+function formatTriggerSource(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'trigger';
+  const mapped: Record<string, string> = {
+    cron: 'scheduled run',
+    webhook: 'webhook',
+    runtime: 'runtime',
+    chat: 'chat',
+    channel: 'channel',
+  };
+  return humanizeCode(mapped[raw] || raw);
+}
+
+function formatTriggerStatus(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'unknown';
+  const mapped: Record<string, string> = {
+    received: 'received',
+    dispatching: 'sending',
+    dispatched: 'sent',
+    ok: 'done',
+    error: 'failed',
+    skipped: 'skipped',
+  };
+  return humanizeCode(mapped[raw] || raw);
+}
+
 function formatTriggerTime(value?: number): string {
   const stamp = Number(value || 0);
   if (!stamp) return '—';
@@ -50,7 +96,7 @@ export function TriggerList() {
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', padding: '0 4px' }}>
-        {[{ key: '', label: t('trigger_family_all') }, ...families.map((family) => ({ key: family, label: family }))].map((item) => {
+        {[{ key: '', label: t('trigger_family_all') }, ...families.map((family) => ({ key: family, label: formatTriggerFamily(family) }))].map((item) => {
           const active = selectedTriggerFamily.value === item.key;
           return (
             <button
@@ -118,10 +164,10 @@ export function TriggerList() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid rgba(124, 58, 237, 0.18)', borderRadius: '3px', color: 'var(--accent)', background: 'rgba(124, 58, 237, 0.08)' }}>
-                  {item.family || 'runtime'}
+                  {formatTriggerFamily(item.family)}
                 </span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
-                  {item.source || 'trigger'}
+                  {formatTriggerSource(item.source)}
                 </span>
                 <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-mono)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                   {item.kind || item.trigger_id}
@@ -131,7 +177,7 @@ export function TriggerList() {
                 {item.payload_summary || item.session_key || '—'}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
-                <span>{item.status || 'unknown'}</span>
+                <span>{`${t('label_status')}: ${formatTriggerStatus(item.status)}`}</span>
                 <span>{formatTriggerTime(item.updated_at_ms)}</span>
               </div>
             </div>

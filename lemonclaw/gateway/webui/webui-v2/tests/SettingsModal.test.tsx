@@ -33,7 +33,7 @@ describe('operator settings editors', () => {
       />
     );
     expect(html).toContain('support_api');
-    expect(html).toContain('HTTP Auth Profiles');
+    expect(html).toContain('Saved Request Headers');
     expect(html).toMatchSnapshot();
   });
 
@@ -46,7 +46,7 @@ describe('operator settings editors', () => {
       />
     );
     expect(html).toContain('local_cache');
-    expect(html).toContain('SQLite Profiles');
+    expect(html).toContain('SQLite Connections');
     expect(html).toMatchSnapshot();
   });
 
@@ -59,7 +59,7 @@ describe('operator settings editors', () => {
       />
     );
     expect(html).toContain('analytics_ro');
-    expect(html).toContain('PostgreSQL Profiles');
+    expect(html).toContain('PostgreSQL Connections');
     expect(html).toMatchSnapshot();
   });
 
@@ -96,9 +96,9 @@ describe('operator settings editors', () => {
         onToggleGlobalKillSwitch={() => undefined}
       />
     );
-    expect(html).toContain('Governance Status');
-    expect(html).toContain('Kill Switch');
-    expect(html).toContain('exec.system');
+    expect(html).toContain('Safety status');
+    expect(html).toContain('Emergency Stop');
+    expect(html).toContain('exec system');
     expect(html).toMatchSnapshot();
   });
 });

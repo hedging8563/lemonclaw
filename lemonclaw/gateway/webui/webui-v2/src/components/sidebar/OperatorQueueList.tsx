@@ -4,6 +4,35 @@ import { activeOperatorTaskId, loadOperatorQueue, operatorQueueTasks, recoverySu
 import { t } from '../../stores/i18n';
 import { mobileMenuOpen, showInspector } from '../../stores/ui';
 
+function humanizeCode(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  return raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatQueueAction(action?: string | null, fallbackStage?: string | null) {
+  const key = String(action || fallbackStage || '').trim();
+  if (!key) return '—';
+  const actionLabel = t(`task_action_${key}` as any);
+  if (actionLabel !== `task_action_${key}`) return actionLabel;
+  const stateLabel = t(`task_state_${key}` as any);
+  if (stateLabel !== `task_state_${key}`) return stateLabel;
+  return humanizeCode(key);
+}
+
+function formatQueueSource(source?: string | null) {
+  const raw = String(source || '').trim();
+  if (!raw) return '—';
+  const mapped: Record<string, string> = {
+    operator_queue: 'operator queue',
+    manual: 'manual action',
+    trigger: 'automation',
+    cron: 'scheduled run',
+    session: 'chat',
+  };
+  return humanizeCode(mapped[raw] || raw);
+}
+
 export function OperatorQueueList() {
   const timerRef = useRef<any>(null);
 
@@ -71,17 +100,17 @@ export function OperatorQueueList() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
-                  {queue.recommended_action || task.current_stage}
+                  {formatQueueAction(queue.recommended_action, task.current_stage)}
                 </span>
                 <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-mono)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                   {task.goal || task.task_id}
                 </span>
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
-                {queue.route || task.session_key}
+                {`${t('label_source')}: ${formatQueueSource(queue.source)}`}
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
-                {queue.reason || '—'}
+                {`${t('label_reason')}: ${queue.reason || '—'}`}
               </div>
             </div>
           </div>

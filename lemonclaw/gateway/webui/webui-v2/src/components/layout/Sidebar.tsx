@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'preact/hooks';
 import { t, toggleLang, lang } from '../../stores/i18n';
 import { activeSessionKey } from '../../stores/sessions';
 import { mobileMenuOpen, sidebarTab, showSettings } from '../../stores/ui';
@@ -7,6 +8,19 @@ import { SessionList } from '../sidebar/SessionList';
 import { TriggerList } from '../sidebar/TriggerList';
 
 export function Sidebar() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < 768);
+      }
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
   const handleNewChat = () => {
     sidebarTab.value = 'sessions';
     const newKey = `webui:${Math.random().toString(36).substring(2, 9)}`;
@@ -28,7 +42,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : undefined, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <button onClick={() => sidebarTab.value = 'sessions'} style={{ flex: 1, padding: '10px 0', background: 'transparent', border: 'none', borderBottom: sidebarTab.value === 'sessions' ? '2px solid var(--accent)' : '2px solid transparent', color: sidebarTab.value === 'sessions' ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}>
           {t('sessions')}
         </button>

@@ -9,11 +9,24 @@ export function SessionItem({ session }: { session: Session }) {
   const isActive = activeSessionKey.value === session.key;
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(session.title);
+  const [hovered, setHovered] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isEditing) inputRef.current?.focus();
   }, [isEditing]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < 768);
+      }
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   const handleRename = async () => {
     if (!title.trim() || title === session.title) {
@@ -32,10 +45,30 @@ export function SessionItem({ session }: { session: Session }) {
     setIsEditing(false);
   };
 
+  const formatRelativeTime = (value: string) => {
+    const stamp = new Date(value).getTime();
+    if (!stamp) return '—';
+    const diff = Date.now() - stamp;
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    if (diff < minute) return t('time_just_now');
+    if (diff < hour) return t('time_minutes_ago').replace('{n}', String(Math.max(1, Math.round(diff / minute))));
+    if (diff < 24 * hour) return t('time_hours_ago').replace('{n}', String(Math.max(1, Math.round(diff / hour))));
+    return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div 
       onClick={() => { if(!isEditing) { activeSessionKey.value = session.key; mobileMenuOpen.value = false; } }}
       onDblClick={() => setIsEditing(true)}
+      onMouseEnter={(e) => {
+        setHovered(true);
+        if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)';
+      }}
+      onMouseLeave={(e) => {
+        setHovered(false);
+        if (!isActive) e.currentTarget.style.background = 'transparent';
+      }}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -49,8 +82,6 @@ export function SessionItem({ session }: { session: Session }) {
         borderColor: isActive ? 'var(--border)' : 'transparent',
         transition: 'all 0.15s'
       }}
-      onMouseEnter={(e) => { if(!isActive) e.currentTarget.style.background = 'var(--bg-hover)' }}
-      onMouseLeave={(e) => { if(!isActive) e.currentTarget.style.background = 'transparent' }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         {isEditing ? (
@@ -64,24 +95,35 @@ export function SessionItem({ session }: { session: Session }) {
           />
         ) : (
           <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', lineHeight: '1.3', fontFamily: 'var(--font-mono)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-            {session.title || t('new_chat_fallback')}
+            {session.title || t('unnamed_chat')}
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
           <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px' }}>●</span>
-          {new Date(session.updated_at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
-          <span>· {session.message_count} msg</span>
+          {formatRelativeTime(session.updated_at)}
+          <span>· {session.message_count} {t('session_messages')}</span>
         </div>
       </div>
-      <button 
-        onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
-        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', fontFamily: 'var(--font-mono)' }}
-        title={t('delete_session')}
-        onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error)'}
-        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-      >
-        ×
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', opacity: hovered || isActive || isEditing || isMobile ? 1 : 0.18, transition: 'opacity 0.15s', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {!isEditing && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setTitle(session.title || ''); setIsEditing(true); }}
+            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: '2px 6px' }}
+            title={t('rename_session')}
+          >
+            {t('rename_session')}
+          </button>
+        )}
+        <button 
+          onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
+          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: '2px 6px' }}
+          title={t('delete_session')}
+          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error)'}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+        >
+          {t('delete_session')}
+        </button>
+      </div>
     </div>
   );
 }

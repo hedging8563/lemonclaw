@@ -169,6 +169,7 @@ export function MessageList() {
   if (isLoadingHistory.value) {
     return (
       <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{t('loading_chat_history')}</div>
         <div class="skeleton-msg user"></div>
         <div class="skeleton-msg assistant"></div>
         <div class="skeleton-msg assistant long"></div>
@@ -177,15 +178,47 @@ export function MessageList() {
   }
 
   if (messages.value.length === 0) {
+    const suggestions = [
+      t('chat_empty_suggestion_1'),
+      t('chat_empty_suggestion_2'),
+      t('chat_empty_suggestion_3'),
+    ];
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: '8px' }}>
-        <div style={{ fontSize: '48px', opacity: 0.3 }}>💬</div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-primary)' }}>
-          <span style={{ color: 'var(--accent)', marginRight: '8px' }}>&gt;</span>
-          {t('start_conversation')}
-        </div>
-        <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', opacity: 0.7, marginTop: '8px' }}>
-          {t('session_debug_label')}: {activeSessionKey.value}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '20px 16px' : '32px' }}>
+        <div style={{ width: '100%', maxWidth: '640px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px', padding: isMobile ? '20px' : '28px', boxShadow: '0 18px 40px rgba(0,0,0,0.18)' }}>
+          <div style={{ fontSize: isMobile ? '34px' : '42px', marginBottom: '10px' }}>💬</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '17px' : '20px', color: 'var(--text-primary)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('chat_empty_title')}
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
+            {t('chat_empty_desc')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {suggestions.map((item) => (
+              <button
+                key={item}
+                onClick={() => {
+                  inputText.value = item;
+                  requestAnimationFrame(() => {
+                    const textarea = document.querySelector('textarea');
+                    if (textarea instanceof HTMLTextAreaElement) textarea.focus();
+                  });
+                }}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '999px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );

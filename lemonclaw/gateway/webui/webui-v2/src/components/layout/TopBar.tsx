@@ -99,7 +99,7 @@ export function TopBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const title = currentSession?.title || activeSessionKey.value.replace('webui:', '');
+  const title = currentSession?.title?.trim() || t('unnamed_chat');
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-primary)', zIndex: 20 }}>
@@ -122,7 +122,7 @@ export function TopBar() {
                 style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
                 onClick={() => { if (isWebUI) { setTitleDraft(currentSession?.title || ''); setIsEditingTitle(true); } }}
                 onDblClick={() => isWebUI && setSpOpen(!spOpen)}
-                title={t('click_edit_sp')}
+                title={t('rename_session')}
               >
                 {title}
               </span>
@@ -133,7 +133,7 @@ export function TopBar() {
               onClick={() => setSpOpen(!spOpen)}
               style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '3px', cursor: 'pointer', background: 'transparent', flexShrink: 0 }}
             >
-              SP
+              {t('session_prompt_button')}
             </button>
           )}
         </div>
@@ -153,7 +153,7 @@ export function TopBar() {
           )}
 
           <div ref={exportRef} style={{ position: 'relative' }}>
-            <button onClick={() => setShowExport(!showExport)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>📦 <span class="topbar-text-label">{t('export')} ▼</span></button>
+            <button onClick={() => setShowExport(!showExport)} title={t('export_chat')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>📦 <span class="topbar-text-label">{t('export_chat')} ▼</span></button>
             {showExport && (
               <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '2px', width: '120px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
                 <button onClick={() => doExport('md')} style={{ padding: '6px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer', borderRadius: '2px' }} onMouseEnter={(e) => e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={(e) => e.currentTarget.style.background='transparent'}>{t('export_md')}</button>
@@ -162,10 +162,10 @@ export function TopBar() {
             )}
           </div>
 
-          <button onClick={logout} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)', cursor: 'pointer' }}>🚪 <span class="topbar-text-label">{t('logout')}</span></button>
+          <button onClick={logout} title={t('logout')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)', cursor: 'pointer' }}>🚪 <span class="topbar-text-label">{t('logout')}</span></button>
 
           <button onClick={() => showInspector.value = !showInspector.value} style={{ background: showInspector.value ? 'var(--bg-tertiary)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)', cursor: 'pointer', marginLeft: isMobile ? '0' : '8px', transition: 'all 0.2s' }} title={t('toggle_inspector')}>
-            👁️
+            👁️ <span class="topbar-text-label">{t('open_side_panel')}</span>
           </button>
         </div>
       </div>

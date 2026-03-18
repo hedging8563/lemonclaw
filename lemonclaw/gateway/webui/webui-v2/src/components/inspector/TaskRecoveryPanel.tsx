@@ -38,6 +38,12 @@ function pillStyle(active = false) {
   } as const;
 }
 
+function humanizeCode(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  return raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function openKnowledgeDetail(docId?: string | null) {
   if (!docId) return;
   activeMemoryPanelTab.value = 'detail';
@@ -86,6 +92,27 @@ function suggestedActionLabel(candidate: Record<string, any> | null | undefined)
   if (!key) return t('task_action_run_safe_resume');
   const translated = t(`task_action_${key}` as any);
   return translated === `task_action_${key}` ? t('task_action_run_safe_resume') : translated;
+}
+
+function formatTaskStage(value?: string | null): string {
+  const key = String(value || '').trim();
+  if (!key) return '—';
+  const translated = t(`task_state_${key}` as any);
+  if (translated !== `task_state_${key}`) return translated;
+  return humanizeCode(key);
+}
+
+function formatWorkflowSource(value?: string | null): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '—';
+  const mapped: Record<string, string> = {
+    operator_queue: 'operator queue',
+    manual: 'manual action',
+    trigger: 'automation',
+    cron: 'scheduled run',
+    session: 'chat',
+  };
+  return humanizeCode(mapped[raw] || raw);
 }
 
 function formatCandidateReason(candidate: Record<string, any> | null | undefined): string {
@@ -210,6 +237,15 @@ function linkedCardStyle(active: boolean) {
     background: 'rgba(10, 186, 181, 0.06)',
   };
 }
+
+const summaryCardStyle = {
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  borderRadius: '8px',
+  padding: '10px',
+  display: 'grid',
+  gap: '6px',
+} as const;
 
 function renderStepTimeline(
   steps: TaskStepRecord[] | undefined,
@@ -451,11 +487,33 @@ function renderTaskDetailBody(
   const retrieval = detail.summary?.retrieval || task.retrieval || task.metadata?.retrieval || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
+  const summaryAction = showSuggestedAction && candidate ? suggestedActionLabel(candidate) : t('task_action_noop');
+  const summaryReason = showSuggestedAction && candidate ? formatCandidateReason(candidate) : formatDisplayDetail(detail.summary?.display_state || state);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', ...(withTopDivider ? { borderTop: '1px dashed var(--border)', paddingTop: '10px' } : {}) }}>
-      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
-        {formatDisplayDetail(detail.summary?.display_state || state)}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+        <div style={summaryCardStyle}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('governance_status')}
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{formatDisplayState(state)}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>{formatDisplayDetail(detail.summary?.display_state || state)}</div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_suggested_action')}
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{summaryAction}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>{summaryReason}</div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_workflow_route')}
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>{workflowNextStep(task)}</div>
+        </div>
       </div>
       {linkedFocus && (
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -477,7 +535,11 @@ function renderTaskDetailBody(
         </div>
       )}
       {(detail.summary?.status_counts || detail.summary?.outbox_status_counts || detail.summary?.outbox_effect_type_counts) && (
-        <div style={{ display: 'grid', gap: '8px' }}>
+        <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_steps_title')}
+          </summary>
+          <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
           {detail.summary?.status_counts && (
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -505,10 +567,15 @@ function renderTaskDetailBody(
               </div>
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
       {retrieval && (
-        <div style={{ display: 'grid', gap: '6px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+        <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_retrieval_summary')}
+          </summary>
+          <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_retrieval_summary')}
           </div>
@@ -606,16 +673,8 @@ function renderTaskDetailBody(
               </div>
             </div>
           )}
-        </div>
-      )}
-      {showSuggestedAction && candidate && (
-        <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.55' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-            {t('task_suggested_action')}
           </div>
-          <div>{suggestedActionLabel(candidate)}</div>
-          <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>{formatCandidateReason(candidate)}</div>
-        </div>
+        </details>
       )}
       {(showRetryDispatchCta || showManualResumeCta) && (
         <div style={{
@@ -633,14 +692,11 @@ function renderTaskDetailBody(
         </div>
       )}
       {showWorkflow && (
-        <div style={{
-          display: 'grid',
-          gap: '8px',
-          padding: '10px',
-          borderRadius: '6px',
-          border: '1px solid var(--border)',
-          background: 'var(--bg-secondary)',
-        }}>
+        <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_workflow_title')}
+          </summary>
+          <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_workflow_title')}
           </div>
@@ -654,7 +710,8 @@ function renderTaskDetailBody(
             <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_route')}</div>
             <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
           </div>
-        </div>
+          </div>
+        </details>
       )}
       {showResumeStats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
@@ -676,22 +733,27 @@ function renderTaskDetailBody(
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+      <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_steps_title')}
+        </summary>
+        <div style={{ marginTop: '10px' }}>
+          {renderStepTimeline(detail.steps, linkedFocus, setLinkedFocus)}
         </div>
-        {renderStepTimeline(detail.steps, linkedFocus, setLinkedFocus)}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+      </details>
+      <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_recovery_history_title')}
+        </summary>
+        <div style={{ marginTop: '10px' }}>
+          {renderRecoveryHistory(detail.summary?.recovery_history, linkedFocus, setLinkedFocus, setExpandedOutboxId)}
         </div>
-        {renderRecoveryHistory(detail.summary?.recovery_history, linkedFocus, setLinkedFocus, setExpandedOutboxId)}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+      </details>
+      <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_outbox_title')}
-        </div>
+        </summary>
+        <div style={{ marginTop: '10px' }}>
         {!detail.outboxEvents || detail.outboxEvents.length === 0 ? (
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
         ) : detail.outboxEvents.map((event) => {
@@ -878,7 +940,8 @@ function renderTaskDetailBody(
             </div>
           );
         })}
-      </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -919,9 +982,9 @@ function taskCard(
               {state?.key === 'resume_running' && <span class="pulse-dot" style={{ background: tone.color }} />}
               {formatDisplayState(state)}
             </span>
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {task.mode} · {task.current_stage}
-            </span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {formatTaskStage(task.current_stage)}
+              </span>
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -1072,7 +1135,7 @@ function recoveryQueueCard(
               {formatDisplayState(state)}
             </span>
             <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {queue.recommended_action || task.current_stage}
+              {formatTaskStage(queue.recommended_action || task.current_stage)}
             </span>
           </div>
         </div>
@@ -1088,7 +1151,7 @@ function recoveryQueueCard(
 
       <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_queued_by')}</div>
-        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{queue.source || '—'}</div>
+        <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{formatWorkflowSource(queue.source)}</div>
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_route')}</div>
         <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{queue.route || formatResumeRoute(task)}</div>
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_workflow_next_step')}</div>

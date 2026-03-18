@@ -7,11 +7,24 @@ import { appendThinkingBlock, normalizeMessage, resolveLastToolBlock, startToolB
 import type { UIMessage } from '../models/messages';
 
 export type ChatMessage = UIMessage;
+export type AttachmentStatus = 'uploading' | 'ready' | 'failed';
+export type AttachmentKind = 'image' | 'video' | 'audio' | 'document';
+
+export interface AttachmentItem {
+  id: string;
+  path?: string;
+  filename: string;
+  url?: string;
+  status: AttachmentStatus;
+  kind: AttachmentKind;
+  error?: string;
+  file?: File;
+}
 
 export const messages = signal<ChatMessage[]>([]);
 export const isStreaming = signal(false);
 export const streamError = signal<string | null>(null);
-export const attachments = signal<{ path: string, filename: string, url?: string }[]>([]);
+export const attachments = signal<AttachmentItem[]>([]);
 export const inputText = signal('');
 export const isLoadingHistory = signal(false);
 export const hasMoreHistory = signal(false);
@@ -133,22 +146,85 @@ export function abortStream() {
   }
 }
 
+function attachmentId() {
+  return `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function guessAttachmentKind(file: File): AttachmentKind {
+  const type = String(file.type || '').toLowerCase();
+  const name = file.name.toLowerCase();
+  if (type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) return 'image';
+  if (type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/.test(name)) return 'video';
+  if (type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac)$/.test(name)) return 'audio';
+  return 'document';
+}
+
+function updateAttachment(id: string, updater: (current: AttachmentItem) => AttachmentItem) {
+  attachments.value = attachments.value.map((item) => item.id === id ? updater(item) : item);
+}
+
+async function uploadAttachmentData(id: string, dataUrl: string) {
+  updateAttachment(id, (item) => ({ ...item, status: 'uploading', error: undefined, url: dataUrl }));
+  const item = attachments.value.find((entry) => entry.id === id);
+  if (!item) return;
+  try {
+    const res = await apiFetch('/api/chat/upload', {
+      method: 'POST',
+      body: JSON.stringify({ data: dataUrl, filename: item.filename }),
+    });
+    const data = await res.json();
+    updateAttachment(id, (current) => ({ ...current, path: data.path, status: 'ready', error: undefined, url: dataUrl }));
+  } catch (err: any) {
+    console.error('Upload failed', err);
+    updateAttachment(id, (current) => ({ ...current, status: 'failed', error: err?.message || 'Upload failed', url: dataUrl }));
+  }
+}
+
 export async function uploadFile(file: File) {
+  const id = attachmentId();
+  attachments.value = [...attachments.value, {
+    id,
+    filename: file.name,
+    kind: guessAttachmentKind(file),
+    status: 'uploading',
+    file,
+  }];
   const reader = new FileReader();
-  reader.onload = async (e) => {
-    const base64 = e.target?.result as string;
-    try {
-      const res = await apiFetch('/api/chat/upload', {
-        method: 'POST',
-        body: JSON.stringify({ data: base64, filename: file.name })
-      });
-      const data = await res.json();
-      attachments.value = [...attachments.value, { path: data.path, filename: file.name, url: base64 }];
-    } catch (err) {
-      console.error('Upload failed', err);
+  reader.onload = async (event) => {
+    const base64 = event.target?.result as string;
+    if (!base64) {
+      updateAttachment(id, (current) => ({ ...current, status: 'failed', error: 'Upload failed' }));
+      return;
     }
+    await uploadAttachmentData(id, base64);
+  };
+  reader.onerror = () => {
+    updateAttachment(id, (current) => ({ ...current, status: 'failed', error: 'Upload failed' }));
   };
   reader.readAsDataURL(file);
+}
+
+export async function retryUploadAttachment(id: string) {
+  const item = attachments.value.find((entry) => entry.id === id);
+  if (!item) return;
+  if (item.url) {
+    await uploadAttachmentData(id, item.url);
+    return;
+  }
+  if (!item.file) return;
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    const base64 = event.target?.result as string;
+    if (!base64) {
+      updateAttachment(id, (current) => ({ ...current, status: 'failed', error: 'Upload failed' }));
+      return;
+    }
+    await uploadAttachmentData(id, base64);
+  };
+  reader.onerror = () => {
+    updateAttachment(id, (current) => ({ ...current, status: 'failed', error: 'Upload failed' }));
+  };
+  reader.readAsDataURL(item.file);
 }
 
 export async function loadHistory() {
@@ -208,7 +284,7 @@ export async function loadMoreHistory() {
 export async function sendMessage(content: string) {
   if (isStreaming.value) return;
 
-  const mediaPaths = attachments.value.map(a => a.path);
+  const mediaPaths = attachments.value.filter((item) => item.status === 'ready' && item.path).map((item) => item.path!) ;
   attachments.value = [];
 
   const userMsg: ChatMessage = normalizeMessage({ role: 'user', content, media: mediaPaths });

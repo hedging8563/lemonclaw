@@ -118,9 +118,43 @@ function fmtMoney(value: number | null | undefined): string {
   return `$${value}`;
 }
 
-function fmtList(items: string[] | undefined, emptyKey: string): string {
+function humanizeCode(value: string | number | null | undefined): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '—';
+  return raw.replace(/[_./:-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function fmtList(items: string[] | undefined, emptyKey: string, formatter: (item: string) => string = (item) => item): string {
   if (!items || items.length === 0) return (t as any)(emptyKey);
-  return items.join(', ');
+  return items.map((item) => formatter(item)).join(', ');
+}
+
+function formatIdentityMode(value?: string | null): string {
+  const key = String(value || '').trim();
+  if (!key) return '—';
+  const map: Record<string, string> = {
+    service_account: 'service account',
+    instance_identity: 'instance identity',
+    anonymous_readonly: 'read only',
+    delegated_user: 'delegated user',
+  };
+  return humanizeCode(map[key] || key);
+}
+
+function formatAuditStatus(value?: string | null): string {
+  const key = String(value || '').trim();
+  if (!key) return 'unknown';
+  const map: Record<string, string> = {
+    ok: 'allowed',
+    denied: 'blocked',
+    warning: 'warning',
+    error: 'error',
+  };
+  return humanizeCode(map[key] || key);
+}
+
+function formatProfileName(profile: GovernanceProfile): string {
+  return profile.description || humanizeCode(profile.name);
 }
 
 export function GovernanceTab({
@@ -171,7 +205,7 @@ export function GovernanceTab({
             </span>
           </div>
           <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-            <div>{t('governance_autonomy_cap')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{overview.default_autonomy_cap || '—'}</span></div>
+            <div>{t('governance_autonomy_cap')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{humanizeCode(overview.default_autonomy_cap || '—')}</span></div>
             <div>{t('governance_token_ttl')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{overview.token_ttl_seconds ?? '—'}s</span></div>
           </div>
         </div>
@@ -251,16 +285,16 @@ export function GovernanceTab({
             <div>{t('governance_unbound_sandbox_count')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{capabilitySummary.unbound_sandbox_count ?? 0}</span></div>
           </div>
           <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-            <div>{t('governance_unbound_secret_capabilities')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(capabilitySummary.unbound_secret_capabilities, 'governance_none')}</span></div>
-            <div>{t('governance_unbound_sandbox_capabilities')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(capabilitySummary.unbound_sandbox_capabilities, 'governance_none')}</span></div>
+            <div>{t('governance_unbound_secret_capabilities')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(capabilitySummary.unbound_secret_capabilities, 'governance_none', humanizeCode)}</span></div>
+            <div>{t('governance_unbound_sandbox_capabilities')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(capabilitySummary.unbound_sandbox_capabilities, 'governance_none', humanizeCode)}</span></div>
           </div>
         </div>
 
         <div style={cardStyle}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent)', marginBottom: '10px' }}>{t('governance_identity_defaults')}</div>
           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-            <div>{t('governance_interactive_identity')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{identityDefaults.interactive || '—'}</span></div>
-            <div>{t('governance_automation_identity')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{identityDefaults.automation || '—'}</span></div>
+            <div>{t('governance_interactive_identity')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{formatIdentityMode(identityDefaults.interactive)}</span></div>
+            <div>{t('governance_automation_identity')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{formatIdentityMode(identityDefaults.automation)}</span></div>
             <div>{t('governance_capability_overrides')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{Object.keys(configGovernance?.capability_overrides || {}).length}</span></div>
           </div>
         </div>
@@ -274,10 +308,11 @@ export function GovernanceTab({
           ) : secretProfiles.map((profile) => (
             <div key={profile.name} style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{profile.name}</div>
-                <span style={pill(profile.configured ? 'teal' : 'amber')}>{profile.kind || 'generic'}</span>
+                <div style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{formatProfileName(profile)}</div>
+                <span style={pill(profile.configured ? 'teal' : 'amber')}>{profile.configured ? t('governance_profile_ready') : t('governance_profile_needs_setup')}</span>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                <div>{t('governance_profile_kind')}: {humanizeCode(profile.kind || 'generic')}</div>
                 <div>{t('governance_profile_fields')}: {profile.field_count ?? profile.fields?.length ?? 0}</div>
                 <div>{t('governance_bound_capabilities')}: {profile.bound_capabilities?.length || 0}</div>
                 {profile.description ? <div>{profile.description}</div> : null}
@@ -292,12 +327,15 @@ export function GovernanceTab({
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('governance_no_sandbox_profiles')}</div>
           ) : sandboxProfiles.map((profile) => (
             <div key={profile.name} style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: '4px', overflowWrap: 'anywhere' }}>{profile.name}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                <div style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{formatProfileName(profile)}</div>
+                <span style={pill(profile.configured ? 'teal' : 'amber')}>{profile.configured ? t('governance_profile_ready') : t('governance_profile_needs_setup')}</span>
+              </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                 <div>{t('governance_bound_capabilities')}: {profile.bound_capabilities?.length || 0}</div>
                 <div>{t('governance_allowed_domains')}: {fmtList(profile.allowed_domains, 'governance_none')}</div>
                 <div>{t('governance_allowed_paths')}: {fmtList(profile.allowed_paths, 'governance_none')}</div>
-                <div>{t('governance_blocked_commands')}: {fmtList(profile.blocked_commands, 'governance_none')}</div>
+                <div>{t('governance_blocked_commands')}: {fmtList(profile.blocked_commands, 'governance_none', humanizeCode)}</div>
               </div>
             </div>
           ))}
@@ -311,16 +349,16 @@ export function GovernanceTab({
         ) : audit.map((record, index) => (
           <div key={`${record.task_id || 'task'}-${record.capability_id || 'cap'}-${index}`} style={{ padding: '10px 0', borderTop: index === 0 ? 'none' : '1px solid var(--border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{record.capability_id || '—'}</div>
+              <div style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{humanizeCode(record.capability_id || '—')}</div>
               <span style={pill(record.result_status === 'denied' ? 'red' : record.result_status === 'ok' ? 'teal' : 'amber')}>
-                {record.result_status || 'unknown'}
+                {formatAuditStatus(record.result_status)}
               </span>
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-              <div>{t('governance_audit_actor')}: <span style={{ color: 'var(--text-primary)' }}>{record.actor_identity || '—'}</span></div>
+              <div>{t('governance_audit_actor')}: <span style={{ color: 'var(--text-primary)' }}>{humanizeCode(record.actor_identity || '—')}</span></div>
               <div>{t('governance_audit_tool')}: <span style={{ color: 'var(--text-primary)' }}>{record.tool_name || '—'}</span></div>
-              <div>{t('governance_audit_profiles')}: <span style={{ color: 'var(--text-primary)' }}>{record.secret_profile || '—'} / {record.sandbox_profile || '—'}</span></div>
-              <div>{t('governance_audit_warnings')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(record.warnings, 'governance_none')}</span></div>
+              <div>{t('governance_audit_profiles')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList([record.secret_profile || '—', record.sandbox_profile || '—'], 'governance_none', humanizeCode)}</span></div>
+              <div>{t('governance_audit_warnings')}: <span style={{ color: 'var(--text-primary)' }}>{fmtList(record.warnings, 'governance_none', humanizeCode)}</span></div>
             </div>
           </div>
         ))}
