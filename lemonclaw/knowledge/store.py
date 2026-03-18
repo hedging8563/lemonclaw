@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+import zipfile
+from xml.etree import ElementTree as ET
 
 from lemonclaw.utils.pdf_extract import extract_pdf_content
 
@@ -29,6 +31,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?\.])\s+")
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
 def _now_ms() -> int:
@@ -550,6 +553,14 @@ class KnowledgeStore:
                     "metadata": meta,
                     "pages": list(content.get("pages") or []),
                 }
+            if suffix == ".docx":
+                content = self._extract_docx_content(path)
+                meta = dict(content.get("metadata") or {})
+                return {
+                    "text": str(content.get("text") or ""),
+                    "title": str(meta.get("title") or path.stem),
+                    "metadata": meta,
+                }
             raw_bytes = path.read_bytes()
             content = raw_bytes.decode("utf-8", errors="ignore")
             if suffix in {".html", ".htm"}:
@@ -717,6 +728,31 @@ class KnowledgeStore:
             return output
         merged = "\n\n".join(str(page or "").strip() for page in pages if str(page or "").strip())
         return self._chunk_text(merged, title=title, size=size)
+
+    def _extract_docx_content(self, path: Path) -> dict[str, Any]:
+        raw_bytes = path.read_bytes()
+        with zipfile.ZipFile(path) as zf:
+            root = ET.fromstring(zf.read("word/document.xml"))
+        paragraphs: list[str] = []
+        for para in root.findall(".//w:p", _DOCX_NS):
+            text = "".join(node.text or "" for node in para.findall(".//w:t", _DOCX_NS)).strip()
+            if text:
+                paragraphs.append(text)
+        if not paragraphs:
+            raise ValueError("docx content is empty")
+        text = "\n\n".join(paragraphs)
+        return {
+            "text": text,
+            "metadata": {
+                "extractor": "docx-file",
+                "path": str(path),
+                "suffix": ".docx",
+                "paragraph_count": len(paragraphs),
+                "title": paragraphs[0][:200],
+                "content_bytes": len(raw_bytes),
+                "content_hash": _sha1_hexdigest(raw_bytes),
+            },
+        }
 
     def _extract_facts(self, text: str, *, title: str = "", limit: int = 12) -> list[dict[str, Any]]:
         normalized = _WHITESPACE_RE.sub(" ", text).strip()

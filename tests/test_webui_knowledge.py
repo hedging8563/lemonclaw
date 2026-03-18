@@ -1,4 +1,5 @@
 import sys
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -7,8 +8,6 @@ from starlette.testclient import TestClient
 
 from lemonclaw.gateway.server import create_app
 from lemonclaw.session.manager import SessionManager
-
-
 def _make_client(tmp_path: Path) -> TestClient:
     app = create_app(
         auth_token=None,
@@ -17,6 +16,35 @@ def _make_client(tmp_path: Path) -> TestClient:
         webui_enabled=True,
     )
     return TestClient(app)
+
+
+def _write_minimal_docx(path: Path) -> None:
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr(
+            '[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '</Types>',
+        )
+        zf.writestr(
+            '_rels/.rels',
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+            '</Relationships>',
+        )
+        zf.writestr(
+            'word/document.xml',
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body>'
+            '<w:p><w:r><w:t>Hello DOCX</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Second paragraph.</w:t></w:r></w:p>'
+            '</w:body></w:document>',
+        )
 
 
 def test_knowledge_document_roundtrip(tmp_path: Path) -> None:
@@ -160,6 +188,36 @@ def test_knowledge_file_ingest_extracts_html_title_and_metadata(tmp_path: Path) 
     assert document["metadata"]["extractor"] == "html-file"
     assert document["metadata"]["content_hash"]
     assert document["chunk_count"] >= 1
+
+
+def test_knowledge_file_ingest_extracts_docx_text_and_metadata(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    docx_path = tmp_path / "runbook.docx"
+    _write_minimal_docx(docx_path)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "",
+            "source": str(docx_path),
+            "source_type": "file",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    document = ingest_resp.json()["document"]
+    assert document["title"] == "Hello DOCX"
+    assert document["metadata"]["extractor"] == "docx-file"
+    assert document["metadata"]["paragraph_count"] == 2
+    assert document["metadata"]["content_hash"]
+    assert document["chunk_count"] >= 1
+
+    search_resp = client.get("/api/knowledge/search?q=second paragraph")
+    assert search_resp.status_code == 200
+    assert search_resp.json()["results"][0]["doc_id"] == doc_id
 
 
 def test_knowledge_pdf_ingest_falls_back_to_pdfplumber(tmp_path: Path, monkeypatch) -> None:
