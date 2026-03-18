@@ -510,6 +510,38 @@ function renderTaskDetailBody(
               {renderStringChips(retrieval.hit_sources)}
             </div>
           )}
+          {retrieval.card_hits && retrieval.card_hits.length > 0 && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_card_hits')}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {retrieval.card_hits.map((item, idx) => (
+                  <div key={`${item.name || 'card'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.name || '—'}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
+                      </div>
+                      {item.type ? <span style={pillStyle()}>{item.type}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {retrieval.rule_hits && retrieval.rule_hits.length > 0 && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_rule_hits')}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {retrieval.rule_hits.map((item, idx) => (
+                  <div key={`${item.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.trigger || '—'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{item.action || '—'}</div>
+                    {item.source ? <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', wordBreak: 'break-all' }}>{item.source}</div> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {renderStringChips(retrieval.knowledge_sources) && (
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_knowledge_sources')}</div>

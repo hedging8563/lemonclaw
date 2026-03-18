@@ -43,6 +43,16 @@ export interface RetrievalMeta {
   fallbacks?: string[];
   card_count?: number;
   rule_count?: number;
+  card_hits?: Array<{
+    name?: string;
+    type?: string;
+    source?: string;
+  }>;
+  rule_hits?: Array<{
+    trigger?: string;
+    action?: string;
+    source?: string;
+  }>;
   knowledge_count?: number;
   knowledge_sources?: string[];
   knowledge_hits?: Array<{

@@ -309,6 +309,22 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "fallbacks": list(trace.get("fallbacks") or []),
             "card_count": len(cards),
             "rule_count": len(rules),
+            "card_hits": [
+                {
+                    "name": str(card.name or ""),
+                    "type": str(card.meta.get("type", "") or ""),
+                    "source": str((trace.get("card_sources") or {}).get(card.name) or ""),
+                }
+                for card in cards
+            ],
+            "rule_hits": [
+                {
+                    "trigger": str(rule.get("trigger") or ""),
+                    "action": str(rule.get("action") or ""),
+                    "source": str((trace.get("rule_sources") or {}).get(rule.get("trigger", "")) or ""),
+                }
+                for rule in rules
+            ],
             "knowledge_count": len(knowledge_hits),
             "knowledge_sources": [str(item.get("source") or "") for item in knowledge_hits],
             "knowledge_hits": [
