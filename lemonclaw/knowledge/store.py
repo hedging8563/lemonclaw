@@ -31,6 +31,13 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _next_refresh_at_ms(interval_hours: int, *, now_ms: int | None = None) -> int | None:
+    if interval_hours <= 0:
+        return None
+    base = now_ms if now_ms is not None else _now_ms()
+    return base + int(interval_hours * 60 * 60 * 1000)
+
+
 def _pypdf_available() -> bool:
     try:
         import pypdf  # noqa: F401
@@ -68,13 +75,17 @@ class KnowledgeStore:
         docs = self.list_documents()
         by_type: dict[str, int] = {}
         by_status: dict[str, int] = {}
+        due_count = 0
         for doc in docs:
             by_type[doc["source_type"]] = by_type.get(doc["source_type"], 0) + 1
             by_status[doc["status"]] = by_status.get(doc["status"], 0) + 1
+            if self._is_due_document(doc):
+                due_count += 1
         return {
             "total": len(docs),
             "by_type": by_type,
             "by_status": by_status,
+            "due_count": due_count,
         }
 
     def create_document(
@@ -85,6 +96,7 @@ class KnowledgeStore:
         title: str = "",
         note: str = "",
         content: str = "",
+        refresh_interval_hours: int = 0,
     ) -> dict[str, Any]:
         source_type = str(source_type or "").strip().lower()
         if source_type not in _ALLOWED_TYPES:
@@ -92,6 +104,7 @@ class KnowledgeStore:
         source = str(source or "").strip()
         if not source:
             raise ValueError("source is required")
+        refresh_interval_hours = max(0, int(refresh_interval_hours or 0))
         now = _now_ms()
         record = {
             "doc_id": f"kd_{uuid.uuid4().hex[:12]}",
@@ -104,6 +117,8 @@ class KnowledgeStore:
             "chunk_count": 0,
             "fact_count": 0,
             "metadata": {},
+            "refresh_interval_hours": refresh_interval_hours,
+            "next_refresh_at_ms": None,
             "created_at_ms": now,
             "updated_at_ms": now,
         }
@@ -136,6 +151,7 @@ class KnowledgeStore:
         source: str | None = None,
         source_type: str | None = None,
         content: str | None = None,
+        refresh_interval_hours: int | None = None,
     ) -> dict[str, Any]:
         if not self.is_valid_doc_id(doc_id):
             raise ValueError("invalid doc_id")
@@ -169,6 +185,12 @@ class KnowledgeStore:
                 if next_content != str(target.get("content") or ""):
                     target["content"] = next_content
                     needs_reingest = True
+            if refresh_interval_hours is not None:
+                interval = max(0, int(refresh_interval_hours or 0))
+                if interval != int(target.get("refresh_interval_hours") or 0):
+                    target["refresh_interval_hours"] = interval
+                    if target.get("status") == "ingested":
+                        target["next_refresh_at_ms"] = _next_refresh_at_ms(interval)
 
             if needs_reingest:
                 target["status"] = "registered"
@@ -177,6 +199,7 @@ class KnowledgeStore:
                 target["last_error"] = ""
                 target["metadata"] = {}
                 target.pop("ingested_at_ms", None)
+                target["next_refresh_at_ms"] = None
                 self._delete_chunks_unlocked(doc_id)
                 self._delete_facts_unlocked(doc_id)
 
@@ -208,6 +231,7 @@ class KnowledgeStore:
                 target["last_error"] = ""
                 target["metadata"] = detected_meta
                 target["ingested_at_ms"] = _now_ms()
+                target["next_refresh_at_ms"] = _next_refresh_at_ms(int(target.get("refresh_interval_hours") or 0), now_ms=target["ingested_at_ms"])
             except Exception as exc:
                 target["status"] = "error"
                 target["chunk_count"] = 0
@@ -226,6 +250,27 @@ class KnowledgeStore:
 
     def reingest_all(self) -> dict[str, Any]:
         docs = self.list_documents()
+        updated = 0
+        failed = 0
+        errors: list[dict[str, str]] = []
+        for doc in docs:
+            try:
+                self.ingest_document(str(doc.get("doc_id") or ""))
+                updated += 1
+            except Exception as exc:
+                failed += 1
+                errors.append({
+                    "doc_id": str(doc.get("doc_id") or ""),
+                    "error": str(exc)[:200],
+                })
+        return {
+            "updated": updated,
+            "failed": failed,
+            "errors": errors,
+        }
+
+    def refresh_due(self, *, limit: int = 20) -> dict[str, Any]:
+        docs = [doc for doc in self.list_documents() if self._is_due_document(doc)][:max(1, int(limit))]
         updated = 0
         failed = 0
         errors: list[dict[str, str]] = []
@@ -346,6 +391,14 @@ class KnowledgeStore:
             facts = [dict(item) for item in self._read_facts_unlocked() if item.get("doc_id") == doc_id]
         facts.sort(key=lambda item: str(item.get("fact_id") or ""))
         return facts
+
+    @staticmethod
+    def _is_due_document(document: dict[str, Any], *, now_ms: int | None = None) -> bool:
+        next_refresh = int(document.get("next_refresh_at_ms") or 0)
+        interval = int(document.get("refresh_interval_hours") or 0)
+        if interval <= 0 or next_refresh <= 0:
+            return False
+        return next_refresh <= (now_ms if now_ms is not None else _now_ms())
 
     @staticmethod
     def format_for_context(results: list[dict[str, Any]]) -> str:

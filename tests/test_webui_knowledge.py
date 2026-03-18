@@ -198,3 +198,52 @@ def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:
     source_results = source_resp.json()["results"]
     assert len(source_results) >= 1
     assert all(item["source_type"] == "manual" for item in source_results)
+
+
+def test_knowledge_refresh_due_only_updates_due_documents(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    due_doc = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Due Doc",
+            "source": "manual://due",
+            "source_type": "manual",
+            "content": "Retry jobs after deploy.",
+            "refresh_interval_hours": 1,
+        },
+    ).json()["document"]
+    not_due_doc = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Fresh Doc",
+            "source": "manual://fresh",
+            "source_type": "manual",
+            "content": "Fresh content.",
+            "refresh_interval_hours": 24,
+        },
+    ).json()["document"]
+
+    client.post(f"/api/knowledge/documents/{due_doc['doc_id']}/ingest")
+    client.post(f"/api/knowledge/documents/{not_due_doc['doc_id']}/ingest")
+
+    # Force one doc into due state.
+    patch_resp = client.patch(
+        f"/api/knowledge/documents/{due_doc['doc_id']}",
+        json={"refresh_interval_hours": 1},
+    )
+    assert patch_resp.status_code == 200
+
+    from lemonclaw.knowledge import KnowledgeStore
+
+    store = KnowledgeStore(tmp_path)
+    stored = store.read_document(due_doc["doc_id"])
+    stored["next_refresh_at_ms"] = 1
+    manifest = {"version": 1, "documents": [stored] + [item for item in store.list_documents() if item["doc_id"] != due_doc["doc_id"]]}
+    store._write_manifest_unlocked(manifest)  # type: ignore[attr-defined]
+
+    refresh_resp = client.post("/api/knowledge/refresh-due")
+    assert refresh_resp.status_code == 200
+    body = refresh_resp.json()
+    assert body["updated"] == 1
+    assert body["failed"] == 0

@@ -1062,6 +1062,15 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def refresh_due_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        result = await asyncio.to_thread(_knowledge.refresh_due)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def get_knowledge_document(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -1096,6 +1105,7 @@ def get_webui_routes(
                 title=str(body.get("title", "") or ""),
                 note=str(body.get("note", "") or ""),
                 content=str(body.get("content", "") or ""),
+                refresh_interval_hours=int(body.get("refresh_interval_hours", 0) or 0),
             )
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
@@ -1122,6 +1132,7 @@ def get_webui_routes(
                 source=body.get("source"),
                 source_type=body.get("source_type"),
                 content=body.get("content"),
+                refresh_interval_hours=body.get("refresh_interval_hours"),
             )
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
@@ -2037,6 +2048,7 @@ def get_webui_routes(
         Route("/api/knowledge", get_knowledge, methods=["GET"]),
         Route("/api/knowledge/search", search_knowledge, methods=["GET"]),
         Route("/api/knowledge/reingest", reingest_knowledge, methods=["POST"]),
+        Route("/api/knowledge/refresh-due", refresh_due_knowledge, methods=["POST"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", get_knowledge_document, methods=["GET"]),
         Route("/api/knowledge/documents/{doc_id}", update_knowledge_document, methods=["PATCH"]),

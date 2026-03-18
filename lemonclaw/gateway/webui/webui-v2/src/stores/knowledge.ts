@@ -15,12 +15,15 @@ export interface KnowledgeDocumentRecord {
   fact_count?: number;
   last_error?: string;
   metadata?: Record<string, any>;
+  refresh_interval_hours?: number;
+  next_refresh_at_ms?: number | null;
 }
 
 export interface KnowledgeSummary {
   total?: number;
   by_type?: Record<string, number>;
   by_status?: Record<string, number>;
+  due_count?: number;
 }
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);

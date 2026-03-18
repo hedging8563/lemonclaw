@@ -55,6 +55,7 @@ export function MemoryPanel() {
   const [knowledgeType, setKnowledgeType] = useState('url');
   const [knowledgeNote, setKnowledgeNote] = useState('');
   const [knowledgeContent, setKnowledgeContent] = useState('');
+  const [knowledgeRefreshHours, setKnowledgeRefreshHours] = useState('0');
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
@@ -62,6 +63,7 @@ export function MemoryPanel() {
   const [editKnowledgeType, setEditKnowledgeType] = useState('url');
   const [editKnowledgeNote, setEditKnowledgeNote] = useState('');
   const [editKnowledgeContent, setEditKnowledgeContent] = useState('');
+  const [editKnowledgeRefreshHours, setEditKnowledgeRefreshHours] = useState('0');
 
   useEffect(() => {
     loadMemory();
@@ -130,6 +132,7 @@ export function MemoryPanel() {
           source_type: knowledgeType,
           note: knowledgeNote,
           content: knowledgeContent,
+          refresh_interval_hours: Number(knowledgeRefreshHours || 0),
         }),
       });
       setCreatingKnowledge(false);
@@ -138,6 +141,7 @@ export function MemoryPanel() {
       setKnowledgeType('url');
       setKnowledgeNote('');
       setKnowledgeContent('');
+      setKnowledgeRefreshHours('0');
       await loadKnowledge();
     } catch (e: any) {
       setSaveError(e.message || t('knowledge_create_failed'));
@@ -178,6 +182,7 @@ export function MemoryPanel() {
           source_type: editKnowledgeType,
           note: editKnowledgeNote,
           content: editKnowledgeContent,
+          refresh_interval_hours: Number(editKnowledgeRefreshHours || 0),
         }),
       });
       setEditingKnowledgeId(null);
@@ -204,6 +209,19 @@ export function MemoryPanel() {
     setSaveError(null);
     try {
       await apiFetch('/api/knowledge/reingest', { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_ingest_failed'));
+    }
+  };
+
+  const handleRefreshDue = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/refresh-due', { method: 'POST' });
       await loadKnowledge();
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
@@ -276,12 +294,14 @@ export function MemoryPanel() {
               <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--purple)' }}>{t('knowledge_sources')}</div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button onClick={() => void handleReingestAll()} style={pillStyle()}>{t('knowledge_reingest_all')}</button>
+                <button onClick={() => void handleRefreshDue()} style={pillStyle()}>{t('knowledge_refresh_due')}</button>
                 <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>{t('knowledge_add_source')}</button>
               </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
               <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
               <span style={pillStyle()}>{t('knowledge_count_types')}: {Object.keys(knowledgeSummary.value?.by_type || {}).length}</span>
+              <span style={pillStyle()}>{t('knowledge_count_due')}: {knowledgeSummary.value?.due_count || 0}</span>
             </div>
             {creatingKnowledge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
@@ -293,6 +313,7 @@ export function MemoryPanel() {
                 </select>
                 <input value={knowledgeSource} onInput={(e) => setKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
                 <textarea value={knowledgeNote} onInput={(e) => setKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+                <input value={knowledgeRefreshHours} onInput={(e) => setKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
                 {knowledgeType === 'manual' && (
                   <textarea value={knowledgeContent} onInput={(e) => setKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
                 )}
@@ -333,6 +354,7 @@ export function MemoryPanel() {
                           setEditKnowledgeType(doc.source_type || 'url');
                           setEditKnowledgeNote(doc.note || '');
                           setEditKnowledgeContent((doc as any).content || '');
+                          setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
                         }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
                         <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
                         <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
@@ -342,8 +364,10 @@ export function MemoryPanel() {
                       <span style={pillStyle()}>{doc.source_type}</span>
                       <span style={pillStyle()}>{doc.status || 'registered'}</span>
                       <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${doc.chunk_count || 0}`}</span>
+                      <span style={pillStyle()}>{`${t('knowledge_refresh_hours')}:${doc.refresh_interval_hours || 0}`}</span>
                       <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
                       {doc.ingested_at_ms ? <span style={pillStyle()}>{`${t('knowledge_ingested_at')}:${formatTime(doc.ingested_at_ms)}`}</span> : null}
+                      {doc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(doc.next_refresh_at_ms)}`}</span> : null}
                     </div>
                     {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
                     {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
@@ -357,6 +381,7 @@ export function MemoryPanel() {
                         </select>
                         <input value={editKnowledgeSource} onInput={(e) => setEditKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
                         <textarea value={editKnowledgeNote} onInput={(e) => setEditKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+                        <input value={editKnowledgeRefreshHours} onInput={(e) => setEditKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
                         {editKnowledgeType === 'manual' && (
                           <textarea value={editKnowledgeContent} onInput={(e) => setEditKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
                         )}
