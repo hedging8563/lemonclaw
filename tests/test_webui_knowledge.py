@@ -157,6 +157,7 @@ def test_knowledge_file_ingest_extracts_html_title_and_metadata(tmp_path: Path) 
     document = ingest_resp.json()["document"]
     assert document["title"] == "Deploy Guide"
     assert document["metadata"]["extractor"] == "html-file"
+    assert document["metadata"]["content_hash"]
     assert document["chunk_count"] >= 1
 
 
@@ -209,8 +210,44 @@ def test_knowledge_pdf_ingest_falls_back_to_pdfplumber(tmp_path: Path, monkeypat
     document = ingest_resp.json()["document"]
     assert document["title"] == "Queue Recovery Runbook"
     assert document["metadata"]["extractor"] == "pdf-pdfplumber"
+    assert document["metadata"]["content_hash"]
     assert document["metadata"]["page_count"] == 1
     assert document["chunk_count"] >= 1
+
+
+def test_knowledge_reingest_same_content_marks_document_unchanged(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Stable Notes",
+            "source": "manual://stable",
+            "source_type": "manual",
+            "content": "Trigger history explains recovery spikes after rollout.",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    first_ingest = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert first_ingest.status_code == 200
+    first_doc = first_ingest.json()["document"]
+
+    detail_before = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_before.status_code == 200
+    first_chunk_updated_at = detail_before.json()["chunks"][0]["updated_at_ms"]
+
+    second_ingest = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert second_ingest.status_code == 200
+    second_doc = second_ingest.json()["document"]
+    assert second_doc["metadata"]["refresh_state"] == "unchanged"
+    assert second_doc["metadata"]["content_hash"] == first_doc["metadata"]["content_hash"]
+    assert second_doc["checked_at_ms"] >= first_doc["checked_at_ms"]
+
+    detail_after = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_after.status_code == 200
+    assert detail_after.json()["chunks"][0]["updated_at_ms"] == first_chunk_updated_at
 
 
 def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:

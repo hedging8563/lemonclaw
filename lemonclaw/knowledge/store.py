@@ -38,6 +38,10 @@ def _next_refresh_at_ms(interval_hours: int, *, now_ms: int | None = None) -> in
     return base + int(interval_hours * 60 * 60 * 1000)
 
 
+def _sha1_hexdigest(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()[:12]
+
+
 def _pypdf_available() -> bool:
     try:
         import pypdf  # noqa: F401
@@ -229,16 +233,35 @@ class KnowledgeStore:
                 text = str(raw.get("text") or "")
                 detected_title = str(raw.get("title") or "")
                 detected_meta = dict(raw.get("metadata") or {})
+                now = _now_ms()
+                existing_meta = dict(target.get("metadata") or {})
                 if not str(target.get("title") or "").strip() or str(target.get("title") or "") == str(target.get("source") or ""):
                     target["title"] = (detected_title or str(target.get("title") or "")).strip()[:200]
+                existing_hash = str(existing_meta.get("content_hash") or "")
+                next_hash = str(detected_meta.get("content_hash") or "")
+                if (
+                    target.get("status") == "ingested"
+                    and int(target.get("chunk_count") or 0) > 0
+                    and existing_hash
+                    and next_hash
+                    and existing_hash == next_hash
+                ):
+                    target["last_error"] = ""
+                    target["checked_at_ms"] = now
+                    target["metadata"] = {**existing_meta, **detected_meta, "refresh_state": "unchanged"}
+                    target["next_refresh_at_ms"] = _next_refresh_at_ms(int(target.get("refresh_interval_hours") or 0), now_ms=now)
+                    target["updated_at_ms"] = now
+                    self._write_manifest_unlocked(data)
+                    return dict(target)
                 chunks = self._chunk_text(text, title=str(target.get("title") or ""))
                 facts = self._extract_facts(text, title=str(target.get("title") or ""))
                 target["status"] = "ingested"
                 target["chunk_count"] = len(chunks)
                 target["fact_count"] = len(facts)
                 target["last_error"] = ""
-                target["metadata"] = detected_meta
-                target["ingested_at_ms"] = _now_ms()
+                target["metadata"] = {**detected_meta, "refresh_state": "updated"}
+                target["ingested_at_ms"] = now
+                target["checked_at_ms"] = now
                 target["next_refresh_at_ms"] = _next_refresh_at_ms(int(target.get("refresh_interval_hours") or 0), now_ms=target["ingested_at_ms"])
             except Exception as exc:
                 target["status"] = "error"
@@ -445,7 +468,8 @@ class KnowledgeStore:
             if suffix == ".pdf":
                 text, meta = self._extract_pdf_text(path)
                 return {"text": text, "title": meta.get("title") or path.stem, "metadata": meta}
-            content = path.read_text(encoding="utf-8", errors="ignore")
+            raw_bytes = path.read_bytes()
+            content = raw_bytes.decode("utf-8", errors="ignore")
             if suffix in {".html", ".htm"}:
                 title = self._extract_html_title(content) or path.stem
                 return {
@@ -455,7 +479,8 @@ class KnowledgeStore:
                         "extractor": "html-file",
                         "path": str(path),
                         "suffix": suffix,
-                        "content_bytes": len(content.encode("utf-8")),
+                        "content_bytes": len(raw_bytes),
+                        "content_hash": _sha1_hexdigest(raw_bytes),
                     },
                 }
             return {
@@ -465,14 +490,18 @@ class KnowledgeStore:
                     "extractor": "text-file",
                     "path": str(path),
                     "suffix": suffix or "(none)",
-                    "content_bytes": len(content.encode("utf-8")),
+                    "content_bytes": len(raw_bytes),
+                    "content_hash": _sha1_hexdigest(raw_bytes),
                 },
             }
         if source_type == "url":
             source = str(document.get("source") or "")
             req = Request(source, headers={"User-Agent": "LemonClawKnowledge/1.0"})
             with urlopen(req, timeout=10) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
+                raw_bytes = response.read()
+                raw = raw_bytes.decode("utf-8", errors="ignore")
+                etag = str(response.headers.get("ETag") or "").strip()
+                last_modified = str(response.headers.get("Last-Modified") or "").strip()
             title = self._extract_html_title(raw) or str(document.get("title") or source)
             text = self._html_to_text(raw)
             if not text:
@@ -483,7 +512,10 @@ class KnowledgeStore:
                 "metadata": {
                     "extractor": "url-html",
                     "source_url": source,
-                    "content_bytes": len(raw.encode("utf-8")),
+                    "content_bytes": len(raw_bytes),
+                    "content_hash": _sha1_hexdigest(raw_bytes),
+                    "etag": etag,
+                    "last_modified": last_modified,
                 },
             }
         raise ValueError("invalid source_type")
@@ -528,6 +560,7 @@ class KnowledgeStore:
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
+        raw_bytes = path.read_bytes()
         pages: list[str] = []
         for page in reader.pages:
             pages.append(page.extract_text() or "")
@@ -543,12 +576,14 @@ class KnowledgeStore:
             "page_count": len(reader.pages),
             "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
             "content_bytes": path.stat().st_size,
+            "content_hash": _sha1_hexdigest(raw_bytes),
         }
 
     @staticmethod
     def _extract_pdf_text_with_pdfplumber(path: Path) -> tuple[str, dict[str, Any]]:
         import pdfplumber
 
+        raw_bytes = path.read_bytes()
         with pdfplumber.open(str(path)) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
             metadata = dict(getattr(pdf, "metadata", {}) or {})
@@ -564,6 +599,7 @@ class KnowledgeStore:
             "page_count": page_count,
             "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
             "content_bytes": path.stat().st_size,
+            "content_hash": _sha1_hexdigest(raw_bytes),
         }
 
     @staticmethod
