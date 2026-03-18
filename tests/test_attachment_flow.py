@@ -267,6 +267,51 @@ def test_read_attachment_supports_pdf_and_docx(tmp_path: Path, monkeypatch) -> N
     assert 'Hello PDF' in pdf_output
 
 
+def test_read_attachment_pdf_preview_falls_back_to_pdfplumber(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from lemonclaw.utils.attachments import inspect_attachment
+
+    workspace = _make_workspace(tmp_path)
+    pdf = workspace / 'fallback.pdf'
+    pdf.write_bytes(b'%PDF-1.4 fake')
+
+    class _EmptyPage:
+        def extract_text(self) -> str:
+            return ''
+
+    class _FakeReader:
+        def __init__(self, _path: str):
+            self.pages = [_EmptyPage()]
+            self.metadata = {}
+
+    class _PlumberPage:
+        def extract_text(self) -> str:
+            return 'Fallback PDF text'
+
+    class _PlumberDoc:
+        metadata = {}
+
+        def __init__(self, _path: str):
+            self.pages = [_PlumberPage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setitem(sys.modules, 'pypdf', SimpleNamespace(PdfReader=_FakeReader))
+    monkeypatch.setitem(sys.modules, 'pdfplumber', SimpleNamespace(open=lambda path: _PlumberDoc(path)))
+
+    pdf_output = inspect_attachment(str(pdf))
+
+    assert 'PDF preview:' in pdf_output
+    assert '[Page 1]' in pdf_output
+    assert 'Fallback PDF text' in pdf_output
+
+
 
 def test_archive_session_rewrites_attachment_paths(tmp_path: Path) -> None:
     from lemonclaw.gateway.webui.message_schema import serialize_ui_message
@@ -320,4 +365,3 @@ def test_analyze_image_falls_back_within_vision_chain(tmp_path: Path) -> None:
 
     assert output == 'fallback result'
     assert [call['model'] for call in provider.calls][:2] == ['gemini-3.1-pro-preview', 'claude-sonnet-4-6']
-

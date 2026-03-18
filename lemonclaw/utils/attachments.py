@@ -12,6 +12,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from lemonclaw.utils.helpers import ensure_dir, safe_filename
+from lemonclaw.utils.pdf_extract import preview_pdf
 
 
 def _human_size(size: int | None) -> str:
@@ -319,32 +320,11 @@ def _docx_preview(path: Path, *, max_paragraphs: int, max_chars: int) -> str:
     return preview
 
 
-def _load_pypdf_reader():
-    try:
-        from pypdf import PdfReader
-        return PdfReader
-    except Exception:
-        return None
-
-
 def _pdf_preview(path: Path, *, max_pages: int, max_chars: int) -> str:
-    pdf_reader_cls = _load_pypdf_reader()
-    if pdf_reader_cls is None:
-        return "PDF preview unavailable because pypdf is not installed."
-    reader = pdf_reader_cls(str(path))
-    parts: list[str] = []
-    for index, page in enumerate(reader.pages[:max_pages], 1):
-        try:
-            raw = page.extract_text() or ""
-        except Exception:
-            raw = ""
-        normalized = "\n".join(line.strip() for line in raw.splitlines() if line.strip()) or "(no extractable text on this page)"
-        parts.append(f"[Page {index}]\n{normalized}")
-        if len("\n\n".join(parts)) >= max_chars:
-            break
-    if len(reader.pages) > max_pages:
-        parts.append(f"... and {len(reader.pages) - max_pages} more pages")
-    return "\n\n".join(parts)[:max_chars]
+    try:
+        return preview_pdf(path, max_pages=max_pages, max_chars=max_chars)
+    except Exception as exc:
+        return f"PDF preview unavailable: {exc}"
 
 
 def inspect_attachment(path: str, *, max_chars: int = 12000, max_rows: int = 20, max_entries: int = 100) -> str:

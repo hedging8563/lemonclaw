@@ -20,6 +20,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from lemonclaw.utils.pdf_extract import extract_pdf_content
+
 _SAFE_DOC_ID = re.compile(r"^kd_[A-Za-z0-9_-]{1,64}$")
 _ALLOWED_TYPES = {"url", "file", "manual"}
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -41,22 +43,6 @@ def _next_refresh_at_ms(interval_hours: int, *, now_ms: int | None = None) -> in
 
 def _sha1_hexdigest(data: bytes) -> str:
     return hashlib.sha1(data).hexdigest()[:12]
-
-
-def _pypdf_available() -> bool:
-    try:
-        import pypdf  # noqa: F401
-        return True
-    except Exception:
-        return False
-
-
-def _pdfplumber_available() -> bool:
-    try:
-        import pdfplumber  # noqa: F401
-        return True
-    except Exception:
-        return False
 
 
 class _RemoteNotModified(RuntimeError):
@@ -635,79 +621,8 @@ class KnowledgeStore:
 
     @staticmethod
     def _extract_pdf_text(path: Path) -> tuple[str, dict[str, Any]]:
-        errors: list[str] = []
-        if _pypdf_available():
-            try:
-                text, meta = KnowledgeStore._extract_pdf_text_with_pypdf(path)
-                if text:
-                    return text, meta
-            except Exception as exc:
-                errors.append(f"pypdf:{exc}")
-        if _pdfplumber_available():
-            try:
-                text, meta = KnowledgeStore._extract_pdf_text_with_pdfplumber(path)
-                if text:
-                    return text, meta
-            except Exception as exc:
-                errors.append(f"pdfplumber:{exc}")
-        if errors:
-            raise RuntimeError("; ".join(errors)[:500])
-        raise RuntimeError("pypdf or pdfplumber is required for pdf ingestion")
-
-    @staticmethod
-    def _extract_pdf_text_with_pypdf(path: Path) -> tuple[str, dict[str, Any]]:
-        from pypdf import PdfReader
-
-        reader = PdfReader(str(path))
-        raw_bytes = path.read_bytes()
-        pages: list[str] = []
-        for page in reader.pages:
-            pages.append(page.extract_text() or "")
-        text = "\n\n".join(part.strip() for part in pages if part.strip())
-        if not text:
-            raise ValueError("pdf content is empty")
-        metadata = reader.metadata or {}
-        title = str(metadata.get("/Title") or "").strip()
-        return text, {
-            "extractor": "pdf-pypdf",
-            "path": str(path),
-            "suffix": ".pdf",
-            "page_count": len(reader.pages),
-            "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
-            "content_bytes": path.stat().st_size,
-            "content_hash": _sha1_hexdigest(raw_bytes),
-        }
-
-    @staticmethod
-    def _extract_pdf_text_with_pdfplumber(path: Path) -> tuple[str, dict[str, Any]]:
-        import pdfplumber
-
-        raw_bytes = path.read_bytes()
-        with pdfplumber.open(str(path)) as pdf:
-            pages = [page.extract_text() or "" for page in pdf.pages]
-            metadata = dict(getattr(pdf, "metadata", {}) or {})
-            page_count = len(pdf.pages)
-        text = "\n\n".join(part.strip() for part in pages if part.strip())
-        if not text:
-            raise ValueError("pdf content is empty")
-        title = str(metadata.get("Title") or metadata.get("/Title") or "").strip()
-        return text, {
-            "extractor": "pdf-pdfplumber",
-            "path": str(path),
-            "suffix": ".pdf",
-            "page_count": page_count,
-            "title": title or KnowledgeStore._infer_title_from_text(text, fallback=path.stem),
-            "content_bytes": path.stat().st_size,
-            "content_hash": _sha1_hexdigest(raw_bytes),
-        }
-
-    @staticmethod
-    def _infer_title_from_text(text: str, *, fallback: str = "") -> str:
-        for line in text.splitlines():
-            candidate = _WHITESPACE_RE.sub(" ", line).strip()
-            if len(candidate) >= 4:
-                return candidate[:200]
-        return fallback[:200]
+        content = extract_pdf_content(path)
+        return str(content.get("text") or ""), dict(content.get("metadata") or {})
 
     def _chunk_text(self, text: str, *, title: str = "", size: int = 1200) -> list[dict[str, Any]]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
