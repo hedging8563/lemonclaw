@@ -58,6 +58,7 @@ export interface RetrievalMeta {
   knowledge_count?: number;
   knowledge_sources?: string[];
   knowledge_hits?: Array<{
+    doc_id?: string;
     title?: string;
     source?: string;
     result_type?: string;

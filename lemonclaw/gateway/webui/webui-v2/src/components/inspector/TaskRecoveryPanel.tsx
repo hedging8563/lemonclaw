@@ -22,6 +22,7 @@ import {
   type TaskRecord,
 } from '../../stores/tasks';
 import { activeSessionKey } from '../../stores/sessions';
+import { loadKnowledgeDocument } from '../../stores/knowledge';
 import { t } from '../../stores/i18n';
 
 function toneStyles(tone: string): { color: string; background: string; borderColor: string } {
@@ -555,13 +556,28 @@ function renderTaskDetailBody(
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_knowledge_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {retrieval.knowledge_hits.map((item, idx) => (
-                  <div key={`${item.source || 'knowledge'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                  <div
+                    key={`${item.source || 'knowledge'}-${idx}`}
+                    onClick={() => item.doc_id ? void loadKnowledgeDocument(item.doc_id) : undefined}
+                    style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)', cursor: item.doc_id ? 'pointer' : 'default' }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.title || '—'}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {item.doc_id ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void loadKnowledgeDocument(item.doc_id!);
+                            }}
+                            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
+                          >
+                            {t('open')}
+                          </button>
+                        ) : null}
                         {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
                         {item.result_type ? <span style={pillStyle()}>{item.result_type}</span> : null}
                       </div>

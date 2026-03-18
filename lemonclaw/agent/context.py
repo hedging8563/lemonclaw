@@ -335,6 +335,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "knowledge_sources": [str(item.get("source") or "") for item in knowledge_hits],
             "knowledge_hits": [
                 {
+                    "doc_id": str(item.get("doc_id") or ""),
                     "title": str(item.get("title") or item.get("doc_id") or ""),
                     "source": str(item.get("source") or ""),
                     "result_type": str(item.get("result_type") or ""),
