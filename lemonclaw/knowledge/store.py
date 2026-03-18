@@ -256,7 +256,8 @@ class KnowledgeStore:
                     target["updated_at_ms"] = now
                     self._write_manifest_unlocked(data)
                     return dict(target)
-                chunks = self._chunk_text(text, title=str(target.get("title") or ""))
+                pages = list(raw.get("pages") or [])
+                chunks = self._chunk_pdf_pages(pages, title=str(target.get("title") or "")) if pages else self._chunk_text(text, title=str(target.get("title") or ""))
                 facts = self._extract_facts(text, title=str(target.get("title") or ""))
                 target["status"] = "ingested"
                 target["chunk_count"] = len(chunks)
@@ -402,6 +403,10 @@ class KnowledgeStore:
             doc = documents.get(str(chunk.get("doc_id") or ""), {})
             result_type = str(chunk.get("result_type") or "chunk")
             text = str(chunk.get("text") or chunk.get("claim") or "")
+            page_label = str(chunk.get("page_label") or "").strip()
+            doc_meta = dict(doc.get("metadata") or {})
+            if not page_label and str(doc_meta.get("extractor") or "").startswith("pdf-") and int(doc_meta.get("page_count") or 0) == 1:
+                page_label = "p.1"
             results.append({
                 "doc_id": chunk.get("doc_id"),
                 "chunk_id": chunk.get("chunk_id"),
@@ -412,6 +417,9 @@ class KnowledgeStore:
                 "source_type": doc.get("source_type") or "",
                 "score": score,
                 "snippet": text[:280],
+                "page_start": chunk.get("page_start"),
+                "page_end": chunk.get("page_end"),
+                "page_label": page_label,
             })
             if len(results) >= max(1, int(limit)):
                 break
@@ -506,7 +514,9 @@ class KnowledgeStore:
             source = str(item.get("source") or "—")
             snippet = str(item.get("snippet") or "").strip()
             result_type = str(item.get("result_type") or "chunk")
-            parts.append(f"\n### {title}\n- Source: {source}\n- Type: {result_type}\n- Snippet: {snippet}")
+            page_label = str(item.get("page_label") or "").strip()
+            page_line = f"\n- Page: {page_label}" if page_label else ""
+            parts.append(f"\n### {title}\n- Source: {source}\n- Type: {result_type}{page_line}\n- Snippet: {snippet}")
         return "\n".join(parts)
 
     def _load_document_content(self, document: dict[str, Any]) -> dict[str, Any]:
@@ -531,8 +541,14 @@ class KnowledgeStore:
                 raise FileNotFoundError("file not found")
             suffix = path.suffix.lower()
             if suffix == ".pdf":
-                text, meta = self._extract_pdf_text(path)
-                return {"text": text, "title": meta.get("title") or path.stem, "metadata": meta}
+                content = extract_pdf_content(path)
+                meta = dict(content.get("metadata") or {})
+                return {
+                    "text": str(content.get("text") or ""),
+                    "title": str(meta.get("title") or path.stem),
+                    "metadata": meta,
+                    "pages": list(content.get("pages") or []),
+                }
             raw_bytes = path.read_bytes()
             content = raw_bytes.decode("utf-8", errors="ignore")
             if suffix in {".html", ".htm"}:
@@ -648,6 +664,26 @@ class KnowledgeStore:
             })
         return output
 
+    def _chunk_pdf_pages(self, pages: list[str], *, title: str = "", size: int = 1200) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for page_index, raw_page in enumerate(pages, 1):
+            page_text = str(raw_page or "").strip()
+            if not page_text:
+                continue
+            page_chunks = self._chunk_text(page_text, title=title, size=size)
+            for idx, chunk in enumerate(page_chunks):
+                output.append({
+                    **chunk,
+                    "chunk_id": f"page_{page_index:03d}_chunk_{idx}",
+                    "page_start": page_index,
+                    "page_end": page_index,
+                    "page_label": f"p.{page_index}",
+                })
+        if output:
+            return output
+        merged = "\n\n".join(str(page or "").strip() for page in pages if str(page or "").strip())
+        return self._chunk_text(merged, title=title, size=size)
+
     def _extract_facts(self, text: str, *, title: str = "", limit: int = 12) -> list[dict[str, Any]]:
         normalized = _WHITESPACE_RE.sub(" ", text).strip()
         if not normalized:
@@ -693,6 +729,9 @@ class KnowledgeStore:
                 "chunk_id": item["chunk_id"],
                 "title": item.get("title") or "",
                 "text": item.get("text") or "",
+                "page_start": item.get("page_start"),
+                "page_end": item.get("page_end"),
+                "page_label": item.get("page_label") or "",
                 "updated_at_ms": now,
             })
         self._write_chunks_unlocked({"version": 1, "chunks": data})

@@ -215,6 +215,16 @@ def test_knowledge_pdf_ingest_falls_back_to_pdfplumber(tmp_path: Path, monkeypat
     assert document["metadata"]["page_count"] == 1
     assert document["chunk_count"] >= 1
 
+    detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_resp.status_code == 200
+    chunks = detail_resp.json()["chunks"]
+    assert chunks[0]["page_start"] == 1
+    assert chunks[0]["page_label"] == "p.1"
+
+    search_resp = client.get("/api/knowledge/search?q=manual escalation")
+    assert search_resp.status_code == 200
+    assert search_resp.json()["results"][0]["page_label"] == "p.1"
+
 
 def test_knowledge_reingest_same_content_marks_document_unchanged(tmp_path: Path) -> None:
     client = _make_client(tmp_path)

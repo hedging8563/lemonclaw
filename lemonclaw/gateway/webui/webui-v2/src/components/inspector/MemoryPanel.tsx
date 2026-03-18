@@ -422,7 +422,10 @@ export function MemoryPanel() {
                     {activeKnowledgeChunks.value.map((chunk) => (
                       <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                          <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{chunk.chunk_id}</div>
+                            {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
+                          </div>
                           <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
@@ -458,7 +461,10 @@ export function MemoryPanel() {
                     <div key={`${item.doc_id || 'result'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
                         <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.title || item.doc_id || '—'}</div>
-                        <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
+                          <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
+                        </div>
                       </div>
                       <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
