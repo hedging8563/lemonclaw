@@ -466,6 +466,8 @@ async def test_context_builder_resolve_retrieval_context_includes_knowledge_hits
     assert "outbox first" in memory_ctx
     assert rules_ctx == ""
     assert meta["knowledge_count"] >= 1
+    assert meta["knowledge_hits"][0]["title"] == "Deploy Notes"
+    assert meta["knowledge_hits"][0]["source"] == "manual://deploy-notes"
     assert "knowledge" in meta["hit_sources"]
 
 

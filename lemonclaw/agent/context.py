@@ -311,6 +311,15 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "rule_count": len(rules),
             "knowledge_count": len(knowledge_hits),
             "knowledge_sources": [str(item.get("source") or "") for item in knowledge_hits],
+            "knowledge_hits": [
+                {
+                    "title": str(item.get("title") or item.get("doc_id") or ""),
+                    "source": str(item.get("source") or ""),
+                    "result_type": str(item.get("result_type") or ""),
+                    "page_label": str(item.get("page_label") or ""),
+                }
+                for item in knowledge_hits
+            ],
             "hit_sources": hit_sources,
             "card_sources": dict(trace.get("card_sources") or {}),
             "rule_sources": dict(trace.get("rule_sources") or {}),

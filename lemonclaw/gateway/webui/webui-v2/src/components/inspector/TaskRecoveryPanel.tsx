@@ -516,6 +516,27 @@ function renderTaskDetailBody(
               {renderStringChips(retrieval.knowledge_sources)}
             </div>
           )}
+          {retrieval.knowledge_hits && retrieval.knowledge_hits.length > 0 && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_knowledge_hits')}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {retrieval.knowledge_hits.map((item, idx) => (
+                  <div key={`${item.source || 'knowledge'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.title || '—'}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
+                        {item.result_type ? <span style={pillStyle()}>{item.result_type}</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {showSuggestedAction && candidate && (

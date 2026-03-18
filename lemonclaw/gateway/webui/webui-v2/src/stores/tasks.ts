@@ -45,6 +45,12 @@ export interface RetrievalMeta {
   rule_count?: number;
   knowledge_count?: number;
   knowledge_sources?: string[];
+  knowledge_hits?: Array<{
+    title?: string;
+    source?: string;
+    result_type?: string;
+    page_label?: string;
+  }>;
   hit_sources?: string[];
   card_sources?: Record<string, string>;
   rule_sources?: Record<string, string>;
