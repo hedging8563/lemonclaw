@@ -23,6 +23,11 @@
   --sidebar-w: 240px;
   --inspector-w: 440px;
   --topbar-h: 48px;
+  --touch-target: 44px;
+  --card-radius: 12px;
+  --card-radius-lg: 18px;
+  --shadow-soft: 0 12px 26px rgba(0, 0, 0, 0.14);
+  --shadow-float: 0 20px 44px rgba(0, 0, 0, 0.22);
 }
 
 [data-theme="light"] {
@@ -48,7 +53,7 @@ html, body, #app {
 
 body {
   font-family: var(--font-ui);
-  background: var(--bg-primary);
+  background: radial-gradient(circle at top, rgba(255, 107, 53, 0.06), transparent 30%), var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
   font-size: 14px;
@@ -69,6 +74,7 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 
 .layout-main {
@@ -76,6 +82,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 18%), var(--bg-primary);
 }
 
 .layout-inspector {
@@ -87,6 +94,7 @@ body {
   flex-shrink: 0;
   transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
   overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 .layout-inspector.closed {
   width: 0 !important;
@@ -150,6 +158,8 @@ body {
 .msg-wrapper .msg-actions-bar { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .msg-wrapper:hover .msg-actions-bar { opacity: 1; pointer-events: auto; }
 
+.topbar-root { width: 100%; }
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -202,6 +212,18 @@ body {
   }
   .topbar-mobile-btn { display: block; }
   .sidebar-mobile-close { display: block; }
+  .topbar-root {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .topbar-mobile-btn,
+  .sidebar-mobile-close {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
   
   .msg-wrapper .msg-actions-bar {
     opacity: 1 !important;
@@ -217,6 +239,11 @@ body {
   
   .topbar-session-id { display: none; }
   .topbar-text-label { display: none; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @media (max-width: 640px) {
   .layout-inspector {

@@ -24,10 +24,11 @@ import {
 import { loadMemory, memory, memoryError, type MemoryEntityRecord, type MemoryRuleRecord } from '../../stores/memory';
 
 const panelStyle = {
-  background: 'var(--bg-primary)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-primary) 100%)',
   border: '1px solid var(--border)',
-  borderRadius: '6px',
-  padding: '10px',
+  borderRadius: '12px',
+  padding: '12px',
+  boxShadow: '0 12px 26px rgba(0,0,0,0.14)',
 } as const;
 
 const inputStyle = {
@@ -35,8 +36,8 @@ const inputStyle = {
   background: 'var(--bg-secondary)',
   border: '1px solid var(--border)',
   color: 'var(--text-primary)',
-  borderRadius: '6px',
-  padding: '8px 10px',
+  borderRadius: '10px',
+  padding: '10px 12px',
   fontSize: '12px',
   outline: 'none',
 } as const;
@@ -63,11 +64,11 @@ function sectionShellStyle(maxHeight?: number) {
 
 function pillStyle(active = false) {
   return {
-    padding: '4px 8px',
+    padding: '6px 10px',
     borderRadius: '999px',
     border: '1px solid',
     borderColor: active ? 'var(--accent)' : 'var(--border)',
-    background: active ? 'rgba(124, 58, 237, 0.1)' : 'var(--bg-primary)',
+    background: active ? 'rgba(255, 107, 53, 0.12)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-mono)',
     fontSize: '10px',
@@ -80,10 +81,10 @@ function actionButtonStyle(color = 'var(--text-secondary)') {
     background: 'transparent',
     border: '1px solid var(--border)',
     color,
-    borderRadius: '4px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontSize: '10px',
-    padding: '4px 8px',
+    padding: '6px 10px',
   } as const;
 }
 

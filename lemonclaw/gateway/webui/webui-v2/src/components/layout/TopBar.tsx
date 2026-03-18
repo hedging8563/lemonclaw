@@ -100,13 +100,15 @@ export function TopBar() {
   }, []);
 
   const title = currentSession?.title?.trim() || t('unnamed_chat');
+  const compactActionPadding = isMobile ? '0 10px' : '0 8px';
+  const compactActionHeight = isMobile ? '40px' : '32px';
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-primary)', zIndex: 20 }}>
-      <div style={{ minHeight: 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: isMobile ? '8px' : '12px', padding: isMobile ? '8px 12px' : '0 16px' }}>
+    <div class="topbar-root" style={{ position: isMobile ? 'sticky' : 'relative', top: isMobile ? 0 : undefined, left: 0, right: 0, display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-primary)', zIndex: 20, backdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined, WebkitBackdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined }}>
+      <div style={{ minHeight: isMobile ? '56px' : 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: isMobile ? '8px' : '12px', padding: isMobile ? '8px 10px' : '0 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '12px', minWidth: 0, flex: 1 }}>
-          <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '18px', cursor: 'pointer', paddingRight: isMobile ? '4px' : '8px', flexShrink: 0 }}>☰</button>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '11px' : '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
+          <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text-primary)', fontSize: '18px', cursor: 'pointer', padding: isMobile ? '8px' : '0 8px', marginRight: isMobile ? 0 : '4px', flexShrink: 0, minWidth: isMobile ? '40px' : 'auto', minHeight: isMobile ? '40px' : 'auto', height: isMobile ? compactActionHeight : 'auto', width: isMobile ? '40px' : 'auto', borderRadius: isMobile ? '10px' : '0', touchAction: 'manipulation' }}>☰</button>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
             <span class="topbar-session-id">{t('session_label')}</span>
             {isEditingTitle ? (
               <input
@@ -115,11 +117,11 @@ export function TopBar() {
                 onInput={(e) => setTitleDraft((e.target as HTMLInputElement).value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleTitleSave(); if (e.key === 'Escape') setIsEditingTitle(false); }}
                 onBlur={handleTitleSave}
-                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)', outline: 'none', minWidth: 0, width: isMobile ? '100%' : 'auto' }}
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '6px 8px' : '2px 6px', borderRadius: '4px', fontSize: isMobile ? '13px' : '12px', fontFamily: 'var(--font-mono)', outline: 'none', minWidth: 0, width: isMobile ? '100%' : 'auto', minHeight: isMobile ? '40px' : 'auto' }}
               />
             ) : (
               <span
-                style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                style={{ color: 'var(--text-primary)', cursor: isWebUI ? 'pointer' : 'default', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 onClick={() => { if (isWebUI) { setTitleDraft(currentSession?.title || ''); setIsEditingTitle(true); } }}
                 onDblClick={() => isWebUI && setSpOpen(!spOpen)}
                 title={t('rename_session')}
@@ -131,7 +133,7 @@ export function TopBar() {
           {isWebUI && spDraft && (
             <button
               onClick={() => setSpOpen(!spOpen)}
-              style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '3px', cursor: 'pointer', background: 'transparent', flexShrink: 0 }}
+              style={{ fontSize: '11px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', border: '1px solid var(--accent)', padding: isMobile ? '0 8px' : '0 4px', cursor: 'pointer', background: 'transparent', flexShrink: 0, minHeight: compactActionHeight, borderRadius: '6px', touchAction: 'manipulation' }}
             >
               {t('session_prompt_button')}
             </button>
@@ -153,18 +155,18 @@ export function TopBar() {
           )}
 
           <div ref={exportRef} style={{ position: 'relative' }}>
-            <button onClick={() => setShowExport(!showExport)} title={t('export_chat')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}>📦 <span class="topbar-text-label">{t('export_chat')} ▼</span></button>
+            <button onClick={() => setShowExport(!showExport)} title={t('export_chat')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', minWidth: isMobile ? compactActionHeight : 'auto', minHeight: compactActionHeight, padding: compactActionPadding, fontFamily: 'var(--font-mono)', fontSize: isMobile ? '13px' : '11px', color: 'var(--text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', touchAction: 'manipulation' }}>📦 <span class="topbar-text-label">{t('export_chat')} ▼</span></button>
             {showExport && (
-              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '2px', width: '120px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-                <button onClick={() => doExport('md')} style={{ padding: '6px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer', borderRadius: '2px' }} onMouseEnter={(e) => e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={(e) => e.currentTarget.style.background='transparent'}>{t('export_md')}</button>
-                <button onClick={() => doExport('json')} style={{ padding: '6px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer', borderRadius: '2px' }} onMouseEnter={(e) => e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={(e) => e.currentTarget.style.background='transparent'}>{t('export_json')}</button>
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '6px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '2px', width: isMobile ? 'calc(100vw - 24px)' : '120px', minWidth: isMobile ? '160px' : '120px', maxWidth: isMobile ? '180px' : '120px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
+                <button onClick={() => doExport('md')} style={{ padding: '8px', textAlign: isMobile ? 'center' : 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: isMobile ? '12px' : '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer', borderRadius: '2px', minHeight: '34px' }} onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.background='var(--bg-hover)'; }} onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.background='transparent'; }}>{t('export_md')}</button>
+                <button onClick={() => doExport('json')} style={{ padding: '8px', textAlign: isMobile ? 'center' : 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: isMobile ? '12px' : '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer', borderRadius: '2px', minHeight: '34px' }} onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.background='var(--bg-hover)'; }} onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.background='transparent'; }}>{t('export_json')}</button>
               </div>
             )}
           </div>
 
-          <button onClick={logout} title={t('logout')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)', cursor: 'pointer' }}>🚪 <span class="topbar-text-label">{t('logout')}</span></button>
+          <button onClick={logout} title={t('logout')} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', minWidth: isMobile ? compactActionHeight : 'auto', minHeight: compactActionHeight, padding: compactActionPadding, fontFamily: 'var(--font-mono)', fontSize: isMobile ? '13px' : '11px', color: 'var(--error)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', touchAction: 'manipulation' }}>🚪 <span class="topbar-text-label">{t('logout')}</span></button>
 
-          <button onClick={() => showInspector.value = !showInspector.value} style={{ background: showInspector.value ? 'var(--bg-tertiary)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', padding: isMobile ? '6px 8px' : '4px 8px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)', cursor: 'pointer', marginLeft: isMobile ? '0' : '8px', transition: 'all 0.2s' }} title={t('toggle_inspector')}>
+          <button onClick={() => showInspector.value = !showInspector.value} style={{ background: showInspector.value ? 'var(--bg-tertiary)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', minWidth: isMobile ? compactActionHeight : 'auto', minHeight: compactActionHeight, padding: compactActionPadding, fontFamily: 'var(--font-mono)', fontSize: isMobile ? '13px' : '11px', color: 'var(--text-primary)', cursor: 'pointer', marginLeft: isMobile ? '0' : '8px', transition: 'all 0.2s', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', touchAction: 'manipulation' }} title={t('toggle_inspector')}>
             👁️ <span class="topbar-text-label">{t('open_side_panel')}</span>
           </button>
         </div>

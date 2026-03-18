@@ -57,25 +57,32 @@ export function SessionItem({ session }: { session: Session }) {
     return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  const actionsVisible = isActive || isEditing || isMobile || hovered;
+
   return (
     <div 
       onClick={() => { if(!isEditing) { activeSessionKey.value = session.key; mobileMenuOpen.value = false; } }}
       onDblClick={() => setIsEditing(true)}
       onMouseEnter={(e) => {
-        setHovered(true);
-        if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)';
+        if (!isMobile) {
+          setHovered(true);
+          if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)';
+        }
       }}
       onMouseLeave={(e) => {
-        setHovered(false);
-        if (!isActive) e.currentTarget.style.background = 'transparent';
+        if (!isMobile) {
+          setHovered(false);
+          if (!isActive) e.currentTarget.style.background = 'transparent';
+        }
       }}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
-        padding: '8px 12px',
+        minHeight: isMobile ? '56px' : '48px',
+        padding: isMobile ? '10px 10px' : '8px 12px',
         borderRadius: '6px',
         cursor: 'pointer',
-        gap: '8px',
+        gap: isMobile ? '10px' : '8px',
         marginBottom: '2px',
         background: isActive ? 'var(--bg-tertiary)' : 'transparent',
         border: '1px solid',
@@ -91,24 +98,24 @@ export function SessionItem({ session }: { session: Session }) {
             onInput={e => setTitle((e.target as HTMLInputElement).value)}
             onKeyDown={e => { if(e.key === 'Enter') handleRename(); if(e.key === 'Escape') setIsEditing(false); }}
             onBlur={handleRename}
-            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)', outline: 'none' }}
+            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '14px' : '12px', fontFamily: 'var(--font-mono)', outline: 'none' }}
           />
         ) : (
           <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', lineHeight: '1.3', fontFamily: 'var(--font-mono)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
             {session.title || t('unnamed_chat')}
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: isMobile ? '5px' : '3px', fontFamily: 'var(--font-mono)', fontSize: isMobile ? '11px' : '10px', color: 'var(--text-muted)', flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
           <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px' }}>●</span>
-          {formatRelativeTime(session.updated_at)}
-          <span>· {session.message_count} {t('session_messages')}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{formatRelativeTime(session.updated_at)}</span>
+          <span style={{ whiteSpace: 'nowrap' }}>· {session.message_count} {t('session_messages')}</span>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', opacity: hovered || isActive || isEditing || isMobile ? 1 : 0.18, transition: 'opacity 0.15s', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '4px', opacity: actionsVisible ? 1 : 0.18, transition: 'opacity 0.15s', justifyContent: 'flex-end' }}>
         {!isEditing && (
           <button
             onClick={(e) => { e.stopPropagation(); setTitle(session.title || ''); setIsEditing(true); }}
-            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: '2px 6px' }}
+            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
             title={t('rename_session')}
           >
             {t('rename_session')}
@@ -116,10 +123,10 @@ export function SessionItem({ session }: { session: Session }) {
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
-          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: '2px 6px' }}
+          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
           title={t('delete_session')}
-          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error)'}
-          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+          onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--error)'; }}
+          onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--text-muted)'; }}
         >
           {t('delete_session')}
         </button>

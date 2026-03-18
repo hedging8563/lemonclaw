@@ -108,7 +108,7 @@ function MsgActions({ msg }: { msg: any }) {
   };
 
   return (
-    <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 8px', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }} className="msg-actions-bar">
+    <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '999px', padding: '4px 8px', zIndex: 10, boxShadow: '0 8px 18px rgba(0,0,0,0.24)' }} className="msg-actions-bar">
       <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
       {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
@@ -185,15 +185,18 @@ export function MessageList() {
     ];
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '20px 16px' : '32px' }}>
-        <div style={{ width: '100%', maxWidth: '640px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px', padding: isMobile ? '20px' : '28px', boxShadow: '0 18px 40px rgba(0,0,0,0.18)' }}>
-          <div style={{ fontSize: isMobile ? '34px' : '42px', marginBottom: '10px' }}>💬</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '17px' : '20px', color: 'var(--text-primary)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        <div style={{ width: '100%', maxWidth: '680px', background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, var(--bg-secondary) 18%)', border: '1px solid var(--border)', borderRadius: '20px', padding: isMobile ? '20px' : '28px', boxShadow: '0 22px 50px rgba(0,0,0,0.2)' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '14px' }}>
+            <span>💬</span>
+            <span>LemonClaw</span>
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '18px' : '20px', color: 'var(--text-primary)', marginBottom: '10px', lineHeight: 1.35 }}>
             {t('chat_empty_title')}
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '18px', maxWidth: '560px' }}>
             {t('chat_empty_desc')}
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
             {suggestions.map((item) => (
               <button
                 key={item}
@@ -205,14 +208,18 @@ export function MessageList() {
                   });
                 }}
                 style={{
-                  padding: '8px 12px',
-                  borderRadius: '999px',
+                  padding: '12px 14px',
+                  borderRadius: '14px',
                   border: '1px solid var(--border)',
                   background: 'var(--bg-primary)',
-                  color: 'var(--text-secondary)',
+                  color: 'var(--text-primary)',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '11px',
                   cursor: 'pointer',
+                  textAlign: 'left',
+                  lineHeight: 1.45,
+                  minHeight: isMobile ? '48px' : '68px',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)',
                 }}
               >
                 {item}
@@ -271,11 +278,12 @@ export function MessageList() {
               position: 'relative',
               maxWidth: isMobile ? 'min(100%, calc(100vw - 72px))' : '680px',
               minWidth: 0,
-              padding: isUser ? '10px 14px' : '4px 0',
+              padding: isUser ? '12px 14px' : '6px 0',
               textAlign: 'left',
-              background: isUser ? 'var(--bg-tertiary)' : 'transparent',
+              background: isUser ? 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-tertiary) 100%)' : 'transparent',
               border: isUser ? '1px solid var(--border)' : 'none',
-              borderRadius: isUser ? '8px 8px 0 8px' : '0'
+              borderRadius: isUser ? '16px 16px 6px 16px' : '0',
+              boxShadow: isUser ? '0 10px 22px rgba(0,0,0,0.14)' : 'none',
             }}>
               <MsgActions msg={msg} />
 

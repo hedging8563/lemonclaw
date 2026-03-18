@@ -3,19 +3,20 @@ import { agents, plans, loadConductor } from '../../stores/conductor';
 import { t } from '../../stores/i18n';
 
 const shellStyle = {
-  background: 'var(--bg-secondary)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-secondary) 100%)',
   border: '1px solid var(--border)',
-  borderRadius: '8px',
-  padding: '12px',
+  borderRadius: '12px',
+  padding: '14px',
+  boxShadow: '0 12px 26px rgba(0,0,0,0.14)',
 } as const;
 
 function pillStyle(active = false) {
   return {
-    padding: '4px 8px',
+    padding: '6px 10px',
     borderRadius: '999px',
     border: '1px solid',
     borderColor: active ? 'var(--accent)' : 'var(--border)',
-    background: active ? 'rgba(10, 186, 181, 0.1)' : 'var(--bg-primary)',
+    background: active ? 'rgba(10, 186, 181, 0.12)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-mono)',
     fontSize: '10px',
