@@ -849,6 +849,8 @@ def get_webui_routes(
     from lemonclaw.knowledge import KnowledgeStore
     _memory = MemoryStore(agent_loop.workspace)
     _knowledge = KnowledgeStore(agent_loop.workspace)
+    _knowledge_ingest_tasks: dict[str, asyncio.Task[None]] = {}
+    _knowledge_batch_tasks: dict[str, asyncio.Task[None]] = {}
     _entity_name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
     async def get_memory(request: Request) -> Response:
@@ -1057,6 +1059,23 @@ def get_webui_routes(
         ok, err = _require_auth(request)
         if not ok:
             return err  # type: ignore[return-value]
+        wait = str(request.query_params.get("wait", "1") or "1").strip() not in {"0", "false", "False"}
+        if not wait:
+            docs = _knowledge.list_documents()
+            doc_ids = [str(item.get("doc_id") or "") for item in docs]
+            if doc_ids:
+                _knowledge.mark_documents_ingesting(doc_ids)
+            running = _knowledge_batch_tasks.get("reingest")
+            if running is None or running.done():
+                async def _run_reingest() -> None:
+                    try:
+                        await asyncio.to_thread(_knowledge.reingest_all)
+                    finally:
+                        _knowledge_batch_tasks.pop("reingest", None)
+                _knowledge_batch_tasks["reingest"] = asyncio.create_task(_run_reingest())
+            resp = _json({"queued": True, "count": len(doc_ids)}, 202)
+            _maybe_refresh_cookie(request, resp)
+            return resp
         result = await asyncio.to_thread(_knowledge.reingest_all)
         resp = _json(result)
         _maybe_refresh_cookie(request, resp)
@@ -1066,6 +1085,23 @@ def get_webui_routes(
         ok, err = _require_auth(request)
         if not ok:
             return err  # type: ignore[return-value]
+        wait = str(request.query_params.get("wait", "1") or "1").strip() not in {"0", "false", "False"}
+        if not wait:
+            docs = [doc for doc in _knowledge.list_documents() if _knowledge._is_due_document(doc)]
+            doc_ids = [str(item.get("doc_id") or "") for item in docs]
+            if doc_ids:
+                _knowledge.mark_documents_ingesting(doc_ids)
+            running = _knowledge_batch_tasks.get("refresh_due")
+            if running is None or running.done():
+                async def _run_refresh_due() -> None:
+                    try:
+                        await asyncio.to_thread(_knowledge.refresh_due)
+                    finally:
+                        _knowledge_batch_tasks.pop("refresh_due", None)
+                _knowledge_batch_tasks["refresh_due"] = asyncio.create_task(_run_refresh_due())
+            resp = _json({"queued": True, "count": len(doc_ids)}, 202)
+            _maybe_refresh_cookie(request, resp)
+            return resp
         result = await asyncio.to_thread(_knowledge.refresh_due)
         resp = _json(result)
         _maybe_refresh_cookie(request, resp)
@@ -1149,6 +1185,26 @@ def get_webui_routes(
         doc_id = str(request.path_params.get("doc_id", "") or "")
         if not doc_id:
             return _json({"error": "doc_id is required"}, 400)
+        wait = str(request.query_params.get("wait", "1") or "1").strip() not in {"0", "false", "False"}
+        if not wait:
+            try:
+                doc = _knowledge.read_document(doc_id)
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 400)
+            if not doc:
+                return _json({"error": "document not found"}, 404)
+            _knowledge.mark_documents_ingesting([doc_id])
+            running = _knowledge_ingest_tasks.get(doc_id)
+            if running is None or running.done():
+                async def _run_doc_ingest() -> None:
+                    try:
+                        await asyncio.to_thread(_knowledge.ingest_document, doc_id)
+                    finally:
+                        _knowledge_ingest_tasks.pop(doc_id, None)
+                _knowledge_ingest_tasks[doc_id] = asyncio.create_task(_run_doc_ingest())
+            resp = _json({"document": _knowledge.read_document(doc_id), "queued": True}, 202)
+            _maybe_refresh_cookie(request, resp)
+            return resp
         try:
             doc = await asyncio.to_thread(_knowledge.ingest_document, doc_id)
         except ValueError as exc:

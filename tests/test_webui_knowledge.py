@@ -1,4 +1,5 @@
 import sys
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,20 @@ def _write_minimal_docx(path: Path) -> None:
             '<w:p><w:r><w:t>Second paragraph.</w:t></w:r></w:p>'
             '</w:body></w:document>',
         )
+
+
+def _wait_for_doc_status(client: TestClient, doc_id: str, expected: str, *, timeout_s: float = 2.0) -> dict:
+    deadline = time.time() + timeout_s
+    last = None
+    while time.time() < deadline:
+        resp = client.get(f"/api/knowledge/documents/{doc_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        last = body["document"]
+        if last["status"] == expected:
+            return body
+        time.sleep(0.05)
+    raise AssertionError(f"document {doc_id} did not reach status={expected}; last={last}")
 
 
 def test_knowledge_document_roundtrip(tmp_path: Path) -> None:
@@ -123,6 +138,61 @@ def test_knowledge_manual_ingest_and_search(tmp_path: Path) -> None:
     assert detail["document"]["doc_id"] == doc_id
     assert len(detail["chunks"]) >= 1
     assert len(detail["facts"]) >= 1
+
+
+def test_knowledge_manual_ingest_can_run_async(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Async Notes",
+            "source": "manual://async-notes",
+            "source_type": "manual",
+            "content": "Queue a background ingest for this runbook.",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest?wait=0")
+    assert ingest_resp.status_code == 202
+    assert ingest_resp.json()["queued"] is True
+    assert ingest_resp.json()["document"]["status"] == "ingesting"
+
+    settled = _wait_for_doc_status(client, doc_id, "ingested")
+    assert settled["document"]["chunk_count"] >= 1
+
+
+def test_knowledge_reingest_can_run_async(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+
+    first = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Async Batch One",
+            "source": "manual://batch-one",
+            "source_type": "manual",
+            "content": "First async batch note.",
+        },
+    ).json()["document"]
+    second = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Async Batch Two",
+            "source": "manual://batch-two",
+            "source_type": "manual",
+            "content": "Second async batch note.",
+        },
+    ).json()["document"]
+
+    batch_resp = client.post("/api/knowledge/reingest?wait=0")
+    assert batch_resp.status_code == 202
+    assert batch_resp.json()["queued"] is True
+    assert batch_resp.json()["count"] == 2
+
+    _wait_for_doc_status(client, first["doc_id"], "ingested")
+    _wait_for_doc_status(client, second["doc_id"], "ingested")
 
 
 def test_knowledge_document_patch_resets_ingest_state(tmp_path: Path) -> None:

@@ -80,6 +80,24 @@ class KnowledgeStore:
             data = self._read_manifest_unlocked()
             return next((dict(item) for item in data["documents"] if item.get("doc_id") == doc_id), None)
 
+    def mark_documents_ingesting(self, doc_ids: list[str]) -> list[dict[str, Any]]:
+        wanted = {str(doc_id or "") for doc_id in doc_ids if self.is_valid_doc_id(str(doc_id or ""))}
+        if not wanted:
+            return []
+        now = _now_ms()
+        updated: list[dict[str, Any]] = []
+        with self._lock:
+            data = self._read_manifest_unlocked()
+            for item in data["documents"]:
+                if str(item.get("doc_id") or "") not in wanted:
+                    continue
+                item["status"] = "ingesting"
+                item["last_error"] = ""
+                item["updated_at_ms"] = now
+                updated.append(dict(item))
+            self._write_manifest_unlocked(data)
+        return updated
+
     def summarize(self) -> dict[str, Any]:
         docs = self.list_documents()
         by_type: dict[str, int] = {}

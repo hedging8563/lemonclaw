@@ -70,6 +70,18 @@ export function MemoryPanel() {
     loadKnowledge();
   }, []);
 
+  useEffect(() => {
+    const hasIngesting = knowledgeDocuments.value.some((doc) => doc.status === 'ingesting');
+    if (!hasIngesting) return;
+    const timer = window.setInterval(() => {
+      void loadKnowledge();
+      if (activeKnowledgeDocument.value?.doc_id) {
+        void loadKnowledgeDocument(activeKnowledgeDocument.value.doc_id);
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [knowledgeDocuments.value.map((doc) => `${doc.doc_id}:${doc.status || ''}`).join('|'), activeKnowledgeDocument.value?.doc_id]);
+
   const handleSaveEntity = async (name: string) => {
     setSaveError(null);
     try {
@@ -151,8 +163,9 @@ export function MemoryPanel() {
   const handleIngestKnowledge = async (docId: string) => {
     setSaveError(null);
     try {
-      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}/ingest`, { method: 'POST' });
+      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}/ingest?wait=0`, { method: 'POST' });
       await loadKnowledge();
+      await loadKnowledgeDocument(docId);
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
       }
@@ -208,7 +221,7 @@ export function MemoryPanel() {
   const handleReingestAll = async () => {
     setSaveError(null);
     try {
-      await apiFetch('/api/knowledge/reingest', { method: 'POST' });
+      await apiFetch('/api/knowledge/reingest?wait=0', { method: 'POST' });
       await loadKnowledge();
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
@@ -221,7 +234,7 @@ export function MemoryPanel() {
   const handleRefreshDue = async () => {
     setSaveError(null);
     try {
-      await apiFetch('/api/knowledge/refresh-due', { method: 'POST' });
+      await apiFetch('/api/knowledge/refresh-due?wait=0', { method: 'POST' });
       await loadKnowledge();
       if (knowledgeQuery.trim()) {
         await searchKnowledge(knowledgeQuery);
