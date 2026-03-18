@@ -596,6 +596,51 @@ def test_knowledge_search_reranks_title_hits_and_limits_doc_dominance(tmp_path: 
     assert sum(1 for item in results if item["doc_id"] == dominant["doc_id"]) <= 2
 
 
+def test_knowledge_search_updates_usefulness_and_supports_pinning(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    first = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Pinned Runbook",
+            "source": "manual://pinned",
+            "source_type": "manual",
+            "content": "Shared recovery workflow note.",
+        },
+    ).json()["document"]
+    second = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Unpinned Runbook",
+            "source": "manual://unpinned",
+            "source_type": "manual",
+            "content": "Shared recovery workflow note.",
+        },
+    ).json()["document"]
+
+    client.post("/api/knowledge/reingest")
+    pin_resp = client.patch(f"/api/knowledge/documents/{first['doc_id']}", json={"pinned": True})
+    assert pin_resp.status_code == 200
+    assert pin_resp.json()["document"]["pinned"] is True
+
+    search_resp = client.get("/api/knowledge/search?q=shared recovery workflow note&limit=2")
+    assert search_resp.status_code == 200
+    results = search_resp.json()["results"]
+    assert results[0]["doc_id"] == first["doc_id"]
+
+    detail_resp = client.get(f"/api/knowledge/documents/{first['doc_id']}")
+    assert detail_resp.status_code == 200
+    document = detail_resp.json()["document"]
+    assert document["retrieval_count"] >= 1
+    assert document["last_hit_at_ms"]
+    assert document["last_hit_query"] == "shared recovery workflow note"
+
+    summary_resp = client.get("/api/knowledge")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()["summary"]
+    assert summary["pinned_count"] >= 1
+    assert summary["used_count"] >= 1
+
+
 def test_knowledge_refresh_due_only_updates_due_documents(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
 

@@ -13,6 +13,10 @@ export interface KnowledgeDocumentRecord {
   ingested_at_ms?: number;
   chunk_count?: number;
   fact_count?: number;
+  pinned?: boolean;
+  retrieval_count?: number;
+  last_hit_at_ms?: number | null;
+  last_hit_query?: string;
   last_error?: string;
   metadata?: Record<string, any>;
   refresh_interval_hours?: number;
@@ -24,6 +28,8 @@ export interface KnowledgeSummary {
   by_type?: Record<string, number>;
   by_status?: Record<string, number>;
   due_count?: number;
+  pinned_count?: number;
+  used_count?: number;
 }
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);

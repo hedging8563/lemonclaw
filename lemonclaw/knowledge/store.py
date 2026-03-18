@@ -103,16 +103,24 @@ class KnowledgeStore:
         by_type: dict[str, int] = {}
         by_status: dict[str, int] = {}
         due_count = 0
+        pinned_count = 0
+        used_count = 0
         for doc in docs:
             by_type[doc["source_type"]] = by_type.get(doc["source_type"], 0) + 1
             by_status[doc["status"]] = by_status.get(doc["status"], 0) + 1
             if self._is_due_document(doc):
                 due_count += 1
+            if bool(doc.get("pinned")):
+                pinned_count += 1
+            if int(doc.get("retrieval_count") or 0) > 0:
+                used_count += 1
         return {
             "total": len(docs),
             "by_type": by_type,
             "by_status": by_status,
             "due_count": due_count,
+            "pinned_count": pinned_count,
+            "used_count": used_count,
         }
 
     def create_document(
@@ -143,6 +151,10 @@ class KnowledgeStore:
             "status": "registered",
             "chunk_count": 0,
             "fact_count": 0,
+            "pinned": False,
+            "retrieval_count": 0,
+            "last_hit_at_ms": None,
+            "last_hit_query": "",
             "metadata": {},
             "refresh_interval_hours": refresh_interval_hours,
             "next_refresh_at_ms": None,
@@ -178,6 +190,7 @@ class KnowledgeStore:
         source: str | None = None,
         source_type: str | None = None,
         content: str | None = None,
+        pinned: bool | None = None,
         refresh_interval_hours: int | None = None,
     ) -> dict[str, Any]:
         if not self.is_valid_doc_id(doc_id):
@@ -212,6 +225,8 @@ class KnowledgeStore:
                 if next_content != str(target.get("content") or ""):
                     target["content"] = next_content
                     needs_reingest = True
+            if pinned is not None:
+                target["pinned"] = bool(pinned)
             if refresh_interval_hours is not None:
                 interval = max(0, int(refresh_interval_hours or 0))
                 if interval != int(target.get("refresh_interval_hours") or 0):
@@ -378,6 +393,7 @@ class KnowledgeStore:
                 source=str(doc.get("source") or ""),
                 result_type="chunk",
                 updated_at_ms=int(doc.get("updated_at_ms") or 0),
+                pinned=bool(doc.get("pinned")),
             )
             if score <= 0:
                 continue
@@ -397,6 +413,7 @@ class KnowledgeStore:
                 source=str(doc.get("source") or ""),
                 result_type="fact",
                 updated_at_ms=int(doc.get("updated_at_ms") or 0),
+                pinned=bool(doc.get("pinned")),
             )
             if score <= 0:
                 continue
@@ -445,6 +462,8 @@ class KnowledgeStore:
             })
             if len(results) >= max(1, int(limit)):
                 break
+        if results:
+            self._record_search_hits(query, results)
         return results
 
     @staticmethod
@@ -457,6 +476,7 @@ class KnowledgeStore:
         source: str,
         result_type: str,
         updated_at_ms: int,
+        pinned: bool,
     ) -> int:
         query_lower = query.lower()
         body_lower = body.lower()
@@ -472,6 +492,8 @@ class KnowledgeStore:
             score += 120
         if query_lower in source_lower:
             score += 15
+        if pinned:
+            score += 35
 
         if tokens and all(token in title_lower for token in tokens):
             score += 50
@@ -501,6 +523,28 @@ class KnowledgeStore:
             elif age_ms <= 7 * 24 * 60 * 60 * 1000:
                 score += 2
         return score
+
+    def _record_search_hits(self, query: str, results: list[dict[str, Any]]) -> None:
+        doc_ids = []
+        for item in results:
+            doc_id = str(item.get("doc_id") or "")
+            if doc_id and doc_id not in doc_ids:
+                doc_ids.append(doc_id)
+        if not doc_ids:
+            return
+        now = _now_ms()
+        with self._lock:
+            data = self._read_manifest_unlocked()
+            touched = False
+            for item in data["documents"]:
+                if str(item.get("doc_id") or "") not in doc_ids:
+                    continue
+                item["retrieval_count"] = int(item.get("retrieval_count") or 0) + 1
+                item["last_hit_at_ms"] = now
+                item["last_hit_query"] = str(query or "")[:500]
+                touched = True
+            if touched:
+                self._write_manifest_unlocked(data)
 
     def list_chunks(self, doc_id: str) -> list[dict[str, Any]]:
         if not self.is_valid_doc_id(doc_id):

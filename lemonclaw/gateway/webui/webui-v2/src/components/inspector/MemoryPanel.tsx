@@ -184,6 +184,22 @@ export function MemoryPanel() {
     }
   };
 
+  const handleToggleKnowledgePinned = async (docId: string, pinned: boolean) => {
+    setSaveError(null);
+    try {
+      await apiFetch(`/api/knowledge/documents/${encodeURIComponent(docId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ pinned }),
+      });
+      await loadKnowledge();
+      if (activeKnowledgeDocument.value?.doc_id === docId) {
+        await loadKnowledgeDocument(docId);
+      }
+    } catch (e: any) {
+      setSaveError(e.message || t('knowledge_create_failed'));
+    }
+  };
+
   const handleEditKnowledge = async (docId: string) => {
     setSaveError(null);
     try {
@@ -315,6 +331,8 @@ export function MemoryPanel() {
               <span style={pillStyle()}>{t('knowledge_count_sources')}: {knowledgeSummary.value?.total || 0}</span>
               <span style={pillStyle()}>{t('knowledge_count_types')}: {Object.keys(knowledgeSummary.value?.by_type || {}).length}</span>
               <span style={pillStyle()}>{t('knowledge_count_due')}: {knowledgeSummary.value?.due_count || 0}</span>
+              <span style={pillStyle()}>{t('knowledge_count_pinned')}: {knowledgeSummary.value?.pinned_count || 0}</span>
+              <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
             </div>
             {creatingKnowledge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
@@ -369,6 +387,7 @@ export function MemoryPanel() {
                           setEditKnowledgeContent((doc as any).content || '');
                           setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
                         }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
+                        <button onClick={() => void handleToggleKnowledgePinned(doc.doc_id, !doc.pinned)} style={{ background: 'transparent', border: '1px solid var(--border)', color: doc.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{doc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}</button>
                         <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
                         <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
                       </div>
@@ -376,12 +395,16 @@ export function MemoryPanel() {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       <span style={pillStyle()}>{doc.source_type}</span>
                       <span style={pillStyle()}>{doc.status || 'registered'}</span>
+                      {doc.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
                       <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${doc.chunk_count || 0}`}</span>
+                      <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${doc.retrieval_count || 0}`}</span>
                       <span style={pillStyle()}>{`${t('knowledge_refresh_hours')}:${doc.refresh_interval_hours || 0}`}</span>
                       <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
                       {doc.ingested_at_ms ? <span style={pillStyle()}>{`${t('knowledge_ingested_at')}:${formatTime(doc.ingested_at_ms)}`}</span> : null}
                       {doc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(doc.next_refresh_at_ms)}`}</span> : null}
+                      {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
                     </div>
+                    {doc.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${doc.last_hit_query}`}</div> : null}
                     {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
                     {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
                     {editingKnowledgeId === doc.doc_id && (
@@ -418,9 +441,13 @@ export function MemoryPanel() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                   <span style={pillStyle()}>{activeKnowledgeDocument.value.source_type || '—'}</span>
                   <span style={pillStyle()}>{activeKnowledgeDocument.value.status || 'registered'}</span>
+                  {activeKnowledgeDocument.value.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
                   <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${activeKnowledgeDocument.value.chunk_count || 0}`}</span>
                   <span style={pillStyle()}>{`facts:${activeKnowledgeDocument.value.fact_count || 0}`}</span>
+                  <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${activeKnowledgeDocument.value.retrieval_count || 0}`}</span>
                 </div>
+                {activeKnowledgeDocument.value.last_hit_at_ms ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>{`${t('knowledge_last_hit')}: ${formatTime(activeKnowledgeDocument.value.last_hit_at_ms)}`}</div> : null}
+                {activeKnowledgeDocument.value.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${activeKnowledgeDocument.value.last_hit_query}`}</div> : null}
                 {activeKnowledgeDocument.value.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeKnowledgeDocument.value.note}</div>}
                 {activeKnowledgeDocument.value.metadata && Object.keys(activeKnowledgeDocument.value.metadata).length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
