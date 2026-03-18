@@ -163,6 +163,10 @@ function auxiliaryBlocks(blocks: UIBlock[]): UIBlock[] {
   return blocks.filter((block) => AUX_BLOCK_TYPES.has(block.type));
 }
 
+function shouldSuppressPrimaryContent(raw: any, role: UIMessageRole): boolean {
+  return role === 'assistant' && Array.isArray(raw?.tool_calls) && raw.tool_calls.length > 0;
+}
+
 export function normalizeMessage(raw: any): UIMessage {
   if (Array.isArray(raw?.blocks) && Array.isArray(raw?.media) && raw.media.every((m: any) => typeof m === 'object' && typeof m?.id === 'string')) {
     return raw as UIMessage;
@@ -170,6 +174,7 @@ export function normalizeMessage(raw: any): UIMessage {
   const role: UIMessageRole = raw?.role || 'assistant';
   const content = typeof raw?.content === 'string' ? raw.content : '';
   const rawMedia: string[] = Array.isArray(raw?.media) ? raw.media.filter((v: unknown) => typeof v === 'string') : [];
+  const suppressPrimaryContent = shouldSuppressPrimaryContent(raw, role);
 
   const { media, blocks } = buildContentBlocks(content, rawMedia);
   const out: UIMessage = {
@@ -206,7 +211,9 @@ export function normalizeMessage(raw: any): UIMessage {
     out.blocks.push({ type: 'tool', state: 'done', detail: content });
   }
 
-  out.blocks.push(...blocks);
+  if (!suppressPrimaryContent) {
+    out.blocks.push(...blocks);
+  }
 
   if (raw?.error) {
     out.blocks.push({ type: 'error', text: String(raw.error) });
@@ -238,7 +245,11 @@ export function appendThinkingBlock(message: UIMessage, text: string): UIMessage
 }
 
 export function startToolBlock(message: UIMessage, detail: string): UIMessage {
-  return { ...message, blocks: [...message.blocks, { type: 'tool', state: 'running', detail }] };
+  return {
+    ...message,
+    content: '',
+    blocks: [...auxiliaryBlocks(message.blocks), { type: 'tool', state: 'running', detail }],
+  };
 }
 
 export function resolveLastToolBlock(message: UIMessage, result: string): UIMessage {

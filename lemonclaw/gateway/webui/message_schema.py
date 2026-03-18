@@ -215,6 +215,7 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
         message["blocks"].append({"type": "thinking", "text": thinking})
 
     tool_calls = raw.get("tool_calls")
+    suppress_primary_content = role == "assistant" and isinstance(tool_calls, list) and len(tool_calls) > 0
     meta = raw.get("metadata", {}) if isinstance(raw.get("metadata"), dict) else {}
     notice_text = meta.get("_ui_notice_text")
     notice_kind = meta.get("_ui_notice_kind", "system")
@@ -235,7 +236,8 @@ def serialize_ui_message(raw: dict[str, Any], *, session_key: str | None = None)
     if role == 'tool_call' and content:
         message["blocks"].append({"type": "tool", "state": "done", "detail": content})
 
-    message["blocks"].extend(blocks)
+    if not suppress_primary_content:
+        message["blocks"].extend(blocks)
 
     if raw.get("error"):
         message["error"] = str(raw["error"])
