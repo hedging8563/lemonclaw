@@ -441,7 +441,10 @@ export function MemoryPanel() {
                     {activeKnowledgeFacts.value.map((fact) => (
                       <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                          <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{fact.fact_id}</div>
+                            {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
+                          </div>
                           <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>

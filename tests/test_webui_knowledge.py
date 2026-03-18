@@ -218,8 +218,10 @@ def test_knowledge_pdf_ingest_falls_back_to_pdfplumber(tmp_path: Path, monkeypat
     detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
     assert detail_resp.status_code == 200
     chunks = detail_resp.json()["chunks"]
+    facts = detail_resp.json()["facts"]
     assert chunks[0]["page_start"] == 1
     assert chunks[0]["page_label"] == "p.1"
+    assert facts[0]["page_label"] == "p.1"
 
     search_resp = client.get("/api/knowledge/search?q=manual escalation")
     assert search_resp.status_code == 200
@@ -383,7 +385,9 @@ def test_knowledge_url_pdf_ingest_extracts_page_chunks(tmp_path: Path, monkeypat
     detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
     assert detail_resp.status_code == 200
     chunks = detail_resp.json()["chunks"]
+    facts = detail_resp.json()["facts"]
     assert chunks[0]["page_label"] == "p.1"
+    assert facts[0]["page_label"] == "p.1"
 
     search_resp = client.get("/api/knowledge/search?q=dispatcher stuck outbox")
     assert search_resp.status_code == 200

@@ -259,7 +259,7 @@ class KnowledgeStore:
                     return dict(target)
                 pages = list(raw.get("pages") or [])
                 chunks = self._chunk_pdf_pages(pages, title=str(target.get("title") or "")) if pages else self._chunk_text(text, title=str(target.get("title") or ""))
-                facts = self._extract_facts(text, title=str(target.get("title") or ""))
+                facts = self._extract_pdf_page_facts(pages, title=str(target.get("title") or "")) if pages else self._extract_facts(text, title=str(target.get("title") or ""))
                 target["status"] = "ingested"
                 target["chunk_count"] = len(chunks)
                 target["fact_count"] = len(facts)
@@ -744,6 +744,30 @@ class KnowledgeStore:
                 break
         return output
 
+    def _extract_pdf_page_facts(self, pages: list[str], *, title: str = "", limit: int = 12) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for page_index, raw_page in enumerate(pages, 1):
+            if len(output) >= limit:
+                break
+            page_facts = self._extract_facts(str(raw_page or ""), title=title, limit=limit)
+            for item in page_facts:
+                claim = str(item.get("claim") or "").strip()
+                lowered = claim.lower()
+                if not claim or lowered in seen:
+                    continue
+                seen.add(lowered)
+                output.append({
+                    **item,
+                    "fact_id": f"page_{page_index:03d}_{item.get('fact_id')}",
+                    "page_start": page_index,
+                    "page_end": page_index,
+                    "page_label": f"p.{page_index}",
+                })
+                if len(output) >= limit:
+                    break
+        return output
+
     def _read_chunks_unlocked(self) -> list[dict[str, Any]]:
         if not self._chunks.exists():
             return []
@@ -794,6 +818,9 @@ class KnowledgeStore:
                 "fact_id": item["fact_id"],
                 "title": item.get("title") or "",
                 "claim": item.get("claim") or "",
+                "page_start": item.get("page_start"),
+                "page_end": item.get("page_end"),
+                "page_label": item.get("page_label") or "",
                 "updated_at_ms": now,
             })
         self._write_facts_unlocked({"version": 1, "facts": data})
