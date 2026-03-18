@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 from starlette.testclient import TestClient
 
@@ -248,6 +249,71 @@ def test_knowledge_reingest_same_content_marks_document_unchanged(tmp_path: Path
     detail_after = client.get(f"/api/knowledge/documents/{doc_id}")
     assert detail_after.status_code == 200
     assert detail_after.json()["chunks"][0]["updated_at_ms"] == first_chunk_updated_at
+
+
+def test_knowledge_url_reingest_uses_not_modified_refresh(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path)
+    calls: list[dict[str, str]] = []
+
+    class _Response:
+        def __init__(self, body: bytes, headers: dict[str, str]):
+            self._body = body
+            self.headers = headers
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=10):
+        headers = {str(k).lower(): str(v) for k, v in req.header_items()}
+        calls.append(headers)
+        if len(calls) == 1:
+            return _Response(
+                b"<html><head><title>Ops URL</title></head><body>Retry queue jobs after rollout.</body></html>",
+                {"ETag": "etag-v1", "Last-Modified": "Tue, 18 Mar 2026 12:00:00 GMT"},
+            )
+        raise HTTPError(req.full_url, 304, "Not Modified", hdrs={}, fp=None)
+
+    monkeypatch.setattr("lemonclaw.knowledge.store.urlopen", _fake_urlopen)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Ops URL",
+            "source": "https://docs.example.com/ops",
+            "source_type": "url",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    first_ingest = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert first_ingest.status_code == 200
+    first_doc = first_ingest.json()["document"]
+    assert first_doc["metadata"]["etag"] == "etag-v1"
+
+    detail_before = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_before.status_code == 200
+    first_chunk_updated_at = detail_before.json()["chunks"][0]["updated_at_ms"]
+
+    second_ingest = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert second_ingest.status_code == 200
+    second_doc = second_ingest.json()["document"]
+    assert second_doc["metadata"]["refresh_state"] == "not_modified"
+    assert second_doc["metadata"]["etag"] == "etag-v1"
+
+    detail_after = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_after.status_code == 200
+    assert detail_after.json()["chunks"][0]["updated_at_ms"] == first_chunk_updated_at
+
+    assert len(calls) == 2
+    assert calls[1].get("if-none-match") == "etag-v1"
+    assert calls[1].get("if-modified-since") == "Tue, 18 Mar 2026 12:00:00 GMT"
 
 
 def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:

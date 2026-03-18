@@ -17,6 +17,7 @@ import uuid
 from html import unescape
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 _SAFE_DOC_ID = re.compile(r"^kd_[A-Za-z0-9_-]{1,64}$")
@@ -56,6 +57,12 @@ def _pdfplumber_available() -> bool:
         return True
     except Exception:
         return False
+
+
+class _RemoteNotModified(RuntimeError):
+    def __init__(self, metadata: dict[str, Any]):
+        super().__init__("remote content not modified")
+        self.metadata = metadata
 
 
 class KnowledgeStore:
@@ -228,13 +235,23 @@ class KnowledgeStore:
             if not target:
                 raise KeyError("document not found")
 
+            now = _now_ms()
+            existing_meta = dict(target.get("metadata") or {})
             try:
                 raw = self._load_document_content(target)
+            except _RemoteNotModified as exc:
+                target["status"] = "ingested"
+                target["last_error"] = ""
+                target["checked_at_ms"] = now
+                target["metadata"] = {**existing_meta, **exc.metadata, "refresh_state": "not_modified"}
+                target["next_refresh_at_ms"] = _next_refresh_at_ms(int(target.get("refresh_interval_hours") or 0), now_ms=now)
+                target["updated_at_ms"] = now
+                self._write_manifest_unlocked(data)
+                return dict(target)
+            try:
                 text = str(raw.get("text") or "")
                 detected_title = str(raw.get("title") or "")
                 detected_meta = dict(raw.get("metadata") or {})
-                now = _now_ms()
-                existing_meta = dict(target.get("metadata") or {})
                 if not str(target.get("title") or "").strip() or str(target.get("title") or "") == str(target.get("source") or ""):
                     target["title"] = (detected_title or str(target.get("title") or "")).strip()[:200]
                 existing_hash = str(existing_meta.get("content_hash") or "")
@@ -496,12 +513,32 @@ class KnowledgeStore:
             }
         if source_type == "url":
             source = str(document.get("source") or "")
-            req = Request(source, headers={"User-Agent": "LemonClawKnowledge/1.0"})
-            with urlopen(req, timeout=10) as response:
-                raw_bytes = response.read()
-                raw = raw_bytes.decode("utf-8", errors="ignore")
-                etag = str(response.headers.get("ETag") or "").strip()
-                last_modified = str(response.headers.get("Last-Modified") or "").strip()
+            existing_meta = dict(document.get("metadata") or {})
+            headers = {"User-Agent": "LemonClawKnowledge/1.0"}
+            etag = str(existing_meta.get("etag") or "").strip()
+            last_modified = str(existing_meta.get("last_modified") or "").strip()
+            if etag:
+                headers["If-None-Match"] = etag
+            if last_modified:
+                headers["If-Modified-Since"] = last_modified
+            req = Request(source, headers=headers)
+            try:
+                with urlopen(req, timeout=10) as response:
+                    raw_bytes = response.read()
+                    raw = raw_bytes.decode("utf-8", errors="ignore")
+                    etag = str(response.headers.get("ETag") or etag).strip()
+                    last_modified = str(response.headers.get("Last-Modified") or last_modified).strip()
+            except HTTPError as exc:
+                if exc.code == 304:
+                    raise _RemoteNotModified({
+                        "extractor": str(existing_meta.get("extractor") or "url-html"),
+                        "source_url": source,
+                        "content_bytes": int(existing_meta.get("content_bytes") or 0),
+                        "content_hash": str(existing_meta.get("content_hash") or ""),
+                        "etag": etag,
+                        "last_modified": last_modified,
+                    }) from exc
+                raise
             title = self._extract_html_title(raw) or str(document.get("title") or source)
             text = self._html_to_text(raw)
             if not text:
