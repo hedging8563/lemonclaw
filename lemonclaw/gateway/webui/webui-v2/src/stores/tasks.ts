@@ -36,6 +36,20 @@ export interface TaskStepRecord {
   replayable?: boolean;
 }
 
+export interface RetrievalMeta {
+  strategy?: string;
+  latency_ms?: number;
+  fallback_count?: number;
+  fallbacks?: string[];
+  card_count?: number;
+  rule_count?: number;
+  knowledge_count?: number;
+  knowledge_sources?: string[];
+  hit_sources?: string[];
+  card_sources?: Record<string, string>;
+  rule_sources?: Record<string, string>;
+}
+
 export interface TaskSummary {
   step_count?: number;
   status_counts?: Record<string, number>;
@@ -48,6 +62,7 @@ export interface TaskSummary {
   outbox_active_count?: number;
   outbox_terminal_count?: number;
   recovery_history?: RecoveryHistoryEntry[];
+  retrieval?: RetrievalMeta;
 }
 
 export interface OutboxEventRecord {
@@ -97,6 +112,7 @@ export interface TaskRecord {
   display_state?: TaskDisplayState;
   resume_context?: Record<string, any>;
   metadata?: Record<string, any>;
+  retrieval?: RetrievalMeta;
   queue?: {
     queued_at_ms?: number;
     source?: string;

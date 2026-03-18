@@ -363,6 +363,20 @@ function renderCountChips(counts: Record<string, number> | undefined, formatter:
   );
 }
 
+function renderStringChips(values: string[] | undefined) {
+  const entries = (values || []).filter(Boolean);
+  if (entries.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      {entries.map((value) => (
+        <span key={value} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', maxWidth: '100%', wordBreak: 'break-all' }}>
+          {value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const SENSITIVE_COPY_KEY = /(^|[_-])(authorization|token|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)($|[_-])/i;
 
 function sanitizeForCopy(value: unknown): unknown {
@@ -414,6 +428,7 @@ function renderTaskDetailBody(
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
   const recovery = task.metadata?.recovery || {};
+  const retrieval = detail.summary?.retrieval || task.retrieval || task.metadata?.retrieval || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
 
@@ -468,6 +483,37 @@ function renderTaskDetailBody(
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
                 {t('task_outbox_active_count')}: {detail.summary?.outbox_active_count ?? 0} · {t('task_outbox_terminal_count')}: {detail.summary?.outbox_terminal_count ?? 0}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+      {retrieval && (
+        <div style={{ display: 'grid', gap: '6px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_retrieval_summary')}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '11px', lineHeight: '1.55' }}>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_strategy')}</div>
+            <div style={{ color: 'var(--text-primary)' }}>{String(retrieval.strategy || '—')}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_latency')}</div>
+            <div style={{ color: 'var(--text-primary)' }}>{retrieval.latency_ms != null ? `${retrieval.latency_ms}ms` : '—'}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_fallbacks')}</div>
+            <div style={{ color: 'var(--text-primary)' }}>{retrieval.fallback_count != null ? `${retrieval.fallback_count}` : '—'}</div>
+            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_hits')}</div>
+            <div style={{ color: 'var(--text-primary)' }}>
+              cards:{retrieval.card_count ?? 0} · rules:{retrieval.rule_count ?? 0} · knowledge:{retrieval.knowledge_count ?? 0}
+            </div>
+          </div>
+          {renderStringChips(retrieval.hit_sources) && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_hit_sources')}</div>
+              {renderStringChips(retrieval.hit_sources)}
+            </div>
+          )}
+          {renderStringChips(retrieval.knowledge_sources) && (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('task_retrieval_knowledge_sources')}</div>
+              {renderStringChips(retrieval.knowledge_sources)}
             </div>
           )}
         </div>
