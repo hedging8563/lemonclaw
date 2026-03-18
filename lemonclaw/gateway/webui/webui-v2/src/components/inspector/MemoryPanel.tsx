@@ -291,6 +291,10 @@ export function MemoryPanel() {
     () => filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView),
     [knowledgeView, knowledgeDocuments.value],
   );
+  const knowledgeDocumentMap = useMemo(
+    () => new Map(knowledgeDocuments.value.map((doc) => [doc.doc_id, doc])),
+    [knowledgeDocuments.value],
+  );
   const groupedKnowledgeDocs = useMemo(
     () => partitionKnowledgeDocuments(knowledgeDocuments.value),
     [knowledgeDocuments.value],
@@ -552,10 +556,37 @@ export function MemoryPanel() {
               {knowledgeResults.value.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {knowledgeResults.value.map((item, idx) => (
-                    <div key={`${item.doc_id || 'result'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+                    <div
+                      key={`${item.doc_id || 'result'}-${idx}`}
+                      onClick={() => item.doc_id ? void loadKnowledgeDocument(item.doc_id) : undefined}
+                      style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', cursor: item.doc_id ? 'pointer' : 'default' }}
+                    >
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
                         <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.title || item.doc_id || '—'}</div>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {item.doc_id ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void loadKnowledgeDocument(item.doc_id);
+                              }}
+                              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
+                            >
+                              {t('open')}
+                            </button>
+                          ) : null}
+                          {item.doc_id && knowledgeDocumentMap.get(item.doc_id) ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const doc = knowledgeDocumentMap.get(item.doc_id);
+                                if (doc) void handleToggleKnowledgePinned(item.doc_id, !doc.pinned);
+                              }}
+                              style={{ background: 'transparent', border: '1px solid var(--border)', color: knowledgeDocumentMap.get(item.doc_id)?.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}
+                            >
+                              {knowledgeDocumentMap.get(item.doc_id)?.pinned ? t('knowledge_unpin') : t('knowledge_pin')}
+                            </button>
+                          ) : null}
                           {item.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
                           <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
                         </div>
