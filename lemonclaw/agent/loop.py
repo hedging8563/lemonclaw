@@ -34,6 +34,7 @@ from lemonclaw.agent.tools.grep import GrepTool
 from lemonclaw.agent.tools.git_tool import GitTool
 from lemonclaw.agent.tools.http_request import HTTPRequestTool
 from lemonclaw.agent.tools.k8s import K8sTool
+from lemonclaw.agent.tools.knowledge import KnowledgeSearchTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.task_checkpoint import TaskCheckpointTool
@@ -364,6 +365,7 @@ class AgentLoop:
         self.tools.register(GitTool(working_dir=str(self.workspace)))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        self.tools.register(KnowledgeSearchTool(workspace=str(self.workspace)))
         if hasattr(self, "db_config") and self.db_config and self.db_config.enabled:
             self.tools.register(DBTool(
                 timeout=self.db_config.timeout,
@@ -1229,13 +1231,17 @@ class AgentLoop:
             reply = self._command_reply(msg, t("help", lang), kind="help")
             self._persist_simple_reply(session, msg.content, reply, kind="help")
             return reply
+        if cmd == "/kb" or cmd.startswith("/kb "):
+            reply = self._handle_kb_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="kb_search")
+            return reply
         if cmd == "/model" or cmd.startswith("/model "):
             reply = self._handle_model_command(msg, session, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="model_list")
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/model", "/stop")
+            known = ("/new", "/usage", "/help", "/kb", "/model", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -1446,6 +1452,34 @@ class AgentLoop:
 
         reply_key = "model_switched_new_context" if reset_context else "model_switched"
         return self._command_reply(msg, t(reply_key, lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
+
+    def _handle_kb_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        query = msg.content.strip()[3:].strip()
+        if not query:
+            return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+        tool = self.tools.get("search_knowledge")
+        if tool is None:
+            return self._command_reply(msg, t("kb_empty", lang, query=query), kind="kb_search", level="warning")
+        # Knowledge search is local and synchronous from the user's perspective.
+        result = self._knowledge_search_sync(query)
+        if result.startswith("No knowledge hits"):
+            return self._command_reply(msg, t("kb_empty", lang, query=query), kind="kb_search", level="warning")
+        return self._command_reply(msg, result, kind="kb_search")
+
+    def _knowledge_search_sync(self, query: str) -> str:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(self.workspace)
+        hits = store.search(query, limit=5)
+        if not hits:
+            return f"No knowledge hits for: {query}"
+        lines = [f"Knowledge hits for: {query}\n"]
+        for idx, item in enumerate(hits, 1):
+            lines.append(f"{idx}. {item.get('title') or item.get('doc_id')}")
+            lines.append(f"   type={item.get('result_type') or 'chunk'} source={item.get('source') or '—'}")
+            if item.get("snippet"):
+                lines.append(f"   {item['snippet']}")
+        return "\n".join(lines)
 
     def _should_persist_control_reply(self, kind: str) -> bool:
         """Decide whether a slash/system reply should be stored in session history."""

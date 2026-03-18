@@ -712,6 +712,27 @@ class TestNativeBlockSchemaPersistence:
         assert any(block["type"] == "markdown" for block in assistant["blocks"])
 
     @pytest.mark.asyncio
+    async def test_kb_command_searches_ingested_knowledge(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://release-notes",
+            title="Release Notes",
+            content="Trigger history can explain delivery spikes after rollout.",
+        )
+        store.ingest_document(doc["doc_id"])
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb trigger history")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "Release Notes" in resp.content
+        assert "trigger history" in resp.content.lower()
+
+    @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
 

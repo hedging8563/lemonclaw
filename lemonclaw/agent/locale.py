@@ -44,6 +44,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "🍋 LemonClaw commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/kb <query> — Search ingested knowledge\n"
             "/model — List or switch models\n"
             "/usage — Show token usage\n"
             "/help — Show available commands"
@@ -52,6 +53,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "🍋 LemonClaw 命令：\n"
             "/new — 开始新会话\n"
             "/stop — 停止当前任务\n"
+            "/kb <查询> — 搜索已入库知识\n"
             "/model — 查看或切换模型\n"
             "/usage — 查看 Token 用量\n"
             "/help — 显示可用命令"
@@ -88,6 +90,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "unknown_command": {
         "en": "Unknown command `{cmd}`. Use `/help` to see available commands.",
         "zh": "未知命令 `{cmd}`，使用 `/help` 查看可用命令。",
+    },
+    "kb_usage": {
+        "en": "Use `/kb <query>` to search ingested knowledge.",
+        "zh": "使用 `/kb <查询>` 来搜索已入库知识。",
+    },
+    "kb_empty": {
+        "en": "No knowledge hits for `{query}`.",
+        "zh": "没有命中 `{query}` 的知识结果。",
     },
 }
 
