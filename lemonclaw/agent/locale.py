@@ -100,13 +100,17 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "Knowledge commands:\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list [limit] — List knowledge documents\n"
-            "/kb add <title> :: <content> — Add a manual knowledge note"
+            "/kb add <title> :: <content> — Add a manual knowledge note\n"
+            "/kb pin <doc_id> — Pin a knowledge document\n"
+            "/kb unpin <doc_id> — Unpin a knowledge document"
         ),
         "zh": (
             "知识命令：\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list [数量] — 列出知识文档\n"
-            "/kb add <标题> :: <内容> — 新增手动知识"
+            "/kb add <标题> :: <内容> — 新增手动知识\n"
+            "/kb pin <doc_id> — 置顶知识文档\n"
+            "/kb unpin <doc_id> — 取消置顶知识文档"
         ),
     },
     "kb_empty": {
@@ -128,6 +132,22 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "kb_list_empty": {
         "en": "No knowledge documents yet. Use `/kb add <title> :: <content>` to create one.",
         "zh": "还没有知识文档。可使用 `/kb add <标题> :: <内容>` 新建。",
+    },
+    "kb_pin_usage": {
+        "en": "Use `/kb pin <doc_id>` or `/kb unpin <doc_id>`.",
+        "zh": "使用 `/kb pin <doc_id>` 或 `/kb unpin <doc_id>`。",
+    },
+    "kb_pin_not_found": {
+        "en": "Knowledge document `{doc_id}` was not found.",
+        "zh": "没有找到知识文档 `{doc_id}`。",
+    },
+    "kb_pinned": {
+        "en": "Pinned knowledge document **{title}** (`{doc_id}`).",
+        "zh": "已置顶知识文档 **{title}** (`{doc_id}`)。",
+    },
+    "kb_unpinned": {
+        "en": "Unpinned knowledge document **{title}** (`{doc_id}`).",
+        "zh": "已取消置顶知识文档 **{title}** (`{doc_id}`)。",
     },
 }
 

@@ -786,6 +786,41 @@ class TestNativeBlockSchemaPersistence:
         assert "status=ingested" in resp.content
 
     @pytest.mark.asyncio
+    async def test_kb_pin_and_unpin_commands_toggle_document_priority(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://pin-me",
+            title="Pinned Candidate",
+            content="Keep this runbook at the top.",
+        )
+
+        pin_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content=f"/kb pin {doc['doc_id']}")
+        pin_resp = await loop._process_message(pin_msg)
+        assert pin_resp is not None
+        assert "Pinned Candidate" in pin_resp.content
+
+        pinned = store.read_document(doc["doc_id"])
+        assert pinned is not None
+        assert pinned["pinned"] is True
+
+        list_resp = await loop._process_message(InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb list 1"))
+        assert list_resp is not None
+        assert "[PIN]" in list_resp.content
+
+        unpin_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content=f"/kb unpin {doc['doc_id']}")
+        unpin_resp = await loop._process_message(unpin_msg)
+        assert unpin_resp is not None
+        assert "Pinned Candidate" in unpin_resp.content
+
+        unpinned = store.read_document(doc["doc_id"])
+        assert unpinned is not None
+        assert unpinned["pinned"] is False
+
+    @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
 

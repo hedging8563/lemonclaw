@@ -1478,6 +1478,16 @@ class AgentLoop:
             result, level = self._knowledge_add_sync(msg, payload, lang)
             return self._command_reply(msg, result, kind="kb_add", level=level)
 
+        if lowered == "pin" or lowered.startswith("pin "):
+            payload = raw[3:].strip()
+            result, level = self._knowledge_pin_sync(payload, pinned=True, lang=lang)
+            return self._command_reply(msg, result, kind="kb_pin", level=level)
+
+        if lowered == "unpin" or lowered.startswith("unpin "):
+            payload = raw[5:].strip()
+            result, level = self._knowledge_pin_sync(payload, pinned=False, lang=lang)
+            return self._command_reply(msg, result, kind="kb_unpin", level=level)
+
         tool = self.tools.get("search_knowledge")
         if tool is None:
             return self._command_reply(msg, t("kb_empty", lang, query=raw), kind="kb_search", level="warning")
@@ -1515,14 +1525,16 @@ class AgentLoop:
         for idx, doc in enumerate(docs[:limit], 1):
             next_refresh = int(doc.get("next_refresh_at_ms") or 0)
             next_refresh_text = "due" if store._is_due_document(doc) else ("—" if next_refresh <= 0 else "scheduled")
-            lines.append(f"{idx}. {doc.get('title') or doc.get('doc_id')}")
+            pin_prefix = "[PIN] " if doc.get("pinned") else ""
+            lines.append(f"{idx}. {pin_prefix}{doc.get('title') or doc.get('doc_id')}")
             lines.append(
                 "   "
                 f"id={doc.get('doc_id')} "
                 f"type={doc.get('source_type') or '—'} "
                 f"status={doc.get('status') or '—'} "
                 f"chunks={int(doc.get('chunk_count') or 0)} "
-                f"facts={int(doc.get('fact_count') or 0)}"
+                f"facts={int(doc.get('fact_count') or 0)} "
+                f"hits={int(doc.get('retrieval_count') or 0)}"
             )
             lines.append(
                 "   "
@@ -1554,6 +1566,25 @@ class AgentLoop:
         except Exception as exc:
             return t("kb_add_failed", lang, error=str(exc)[:200]), "warning"
         return t("kb_added", lang, title=doc.get("title") or doc.get("doc_id"), doc_id=doc.get("doc_id")), "info"
+
+    def _knowledge_pin_sync(self, payload: str, *, pinned: bool, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        doc_id = str(payload or "").strip()
+        if not doc_id:
+            return t("kb_pin_usage", lang), "warning"
+
+        store = KnowledgeStore(self.workspace)
+        try:
+            doc = store.update_document(doc_id, pinned=pinned)
+        except ValueError:
+            return t("kb_pin_usage", lang), "warning"
+        except KeyError:
+            return t("kb_pin_not_found", lang, doc_id=doc_id), "warning"
+
+        title = doc.get("title") or doc.get("doc_id") or doc_id
+        key = "kb_pinned" if pinned else "kb_unpinned"
+        return t(key, lang, title=title, doc_id=doc_id), "info"
 
     @staticmethod
     def _parse_kb_add_payload(payload: str) -> tuple[str, str]:
