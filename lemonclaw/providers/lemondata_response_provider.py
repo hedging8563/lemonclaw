@@ -59,7 +59,11 @@ class LemonDataResponsesProvider(LLMProvider):
         try:
             response = await self._client.responses.create(**kwargs)
             parsed = self._parse_response(response)
-            if on_chunk and parsed.content:
+            # This provider is request/response, not token-streaming. When the model
+            # also returns tool calls, the agent loop will surface response.content via
+            # on_progress before executing tools. Emitting the same full text through
+            # on_chunk here makes WebUI append it twice.
+            if on_chunk and parsed.content and not parsed.tool_calls:
                 await on_chunk(parsed.content, first=True)
             return parsed
         except Exception as exc:

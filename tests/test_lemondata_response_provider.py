@@ -58,3 +58,35 @@ async def test_lemondata_response_provider_calls_on_chunk_once() -> None:
 
     assert response.content == "Chunked once"
     on_chunk.assert_awaited_once_with("Chunked once", first=True)
+
+
+@pytest.mark.asyncio
+async def test_lemondata_response_provider_skips_on_chunk_when_tool_calls_present() -> None:
+    provider = LemonDataResponsesProvider(api_key="sk-test", api_base="https://api.lemondata.cc/v1", default_model="gpt-5.4")
+    provider._client.responses.create = AsyncMock(return_value=SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="output_text", text="I will first check the file.")],
+            ),
+            SimpleNamespace(
+                type="function_call",
+                id="fc_456",
+                call_id="call_456",
+                name="read_file",
+                arguments='{"path":"notes.md"}',
+            ),
+        ],
+        usage=None,
+        status="completed",
+    ))
+    on_chunk = AsyncMock()
+
+    response = await provider.chat(
+        messages=[{"role": "user", "content": "check notes"}],
+        on_chunk=on_chunk,
+    )
+
+    assert response.content == "I will first check the file."
+    assert response.tool_calls[0].name == "read_file"
+    on_chunk.assert_not_called()
