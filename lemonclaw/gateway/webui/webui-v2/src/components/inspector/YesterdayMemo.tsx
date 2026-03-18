@@ -7,10 +7,11 @@ const COLLAPSED_MAX_HEIGHT = 220;
 const HISTORY_COLLAPSED_MAX_HEIGHT = 180;
 
 const shellStyle = {
-  background: 'var(--bg-secondary)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-secondary) 100%)',
   border: '1px solid var(--border)',
-  borderRadius: '8px',
-  padding: '12px',
+  borderRadius: '12px',
+  padding: '14px',
+  boxShadow: '0 12px 26px rgba(0,0,0,0.14)',
 } as const;
 
 function pillStyle(active = false) {
@@ -32,6 +33,7 @@ export function YesterdayMemo() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historySectionOpen, setHistorySectionOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
@@ -50,11 +52,18 @@ export function YesterdayMemo() {
 
   const hasMemoContent = Boolean(memo && (memo.yesterday?.length || memo.today?.length));
   const historyEntries = memory.value?.history || [];
+  const hasAnyContent = hasMemoContent || historyEntries.length > 0;
 
   useEffect(() => {
-    if (!contentRef.current || !hasMemoContent) return;
+    if (historyEntries.length > 0) {
+      setHistorySectionOpen((open) => open || true);
+    }
+  }, [historyEntries.length]);
+
+  useEffect(() => {
+    if (!contentRef.current || !hasAnyContent) return;
     setOverflows(contentRef.current.scrollHeight > COLLAPSED_MAX_HEIGHT);
-  }, [hasMemoContent, memo]);
+  }, [hasAnyContent, memo, historyEntries.length, historySectionOpen, historyExpanded]);
 
   useEffect(() => {
     if (!historyRef.current || historyEntries.length === 0) return;
@@ -63,22 +72,36 @@ export function YesterdayMemo() {
 
   if (loading) return null;
 
+  const handleExpandToggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && historyEntries.length > 0) {
+      setHistorySectionOpen(true);
+    }
+  };
+
+  const openHistory = () => {
+    setExpanded(true);
+    setHistorySectionOpen(true);
+    setHistoryExpanded(true);
+  };
+
   return (
     <div style={shellStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-            // MEMO
+            // {t('memo_title')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-            <span style={pillStyle(Boolean(memo?.today?.length))}>{`${t('memo_today')}: ${memo?.today?.length || 0}`}</span>
-            <span style={pillStyle(Boolean(memo?.yesterday?.length))}>{`${t('memo_yesterday')}: ${memo?.yesterday?.length || 0}`}</span>
-            <span style={pillStyle(Boolean(historyEntries.length))}>{`${t('memory_history')}: ${historyEntries.length}`}</span>
+            <button onClick={() => setExpanded(true)} style={pillStyle(Boolean(memo?.today?.length))}>{`${t('memo_today')}: ${memo?.today?.length || 0}`}</button>
+            <button onClick={() => setExpanded(true)} style={pillStyle(Boolean(memo?.yesterday?.length))}>{`${t('memo_yesterday')}: ${memo?.yesterday?.length || 0}`}</button>
+            <button onClick={openHistory} style={pillStyle(Boolean(historyEntries.length))}>{`${t('memo_history')}: ${historyEntries.length}`}</button>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>{memo?.date || '—'}</span>
-          <button onClick={() => setExpanded((value) => !value)} style={pillStyle(expanded)}>
+          <button onClick={handleExpandToggle} style={pillStyle(expanded)}>
             {expanded ? t('memo_collapse') : t('memo_expand')}
           </button>
         </div>
@@ -92,7 +115,7 @@ export function YesterdayMemo() {
           position: 'relative',
         }}
       >
-        {!hasMemoContent ? (
+        {!hasAnyContent ? (
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('memo_empty')}</div>
         ) : (
           <div style={{ display: 'grid', gap: '12px' }}>
@@ -124,11 +147,22 @@ export function YesterdayMemo() {
               </details>
             ) : null}
 
-            <details open={historyEntries.length > 0}>
-              <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                {`${t('memory_history')} · ${historyEntries.length}`}
-              </summary>
-              <div style={{ marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: historySectionOpen ? '8px' : '0' }}>
+                <button
+                  onClick={() => setHistorySectionOpen((open) => !open)}
+                  style={{ ...pillStyle(historySectionOpen), fontSize: '10px' }}
+                >
+                  {`${t('memo_history')} · ${historyEntries.length}`}
+                </button>
+                {historyEntries.length > 0 ? (
+                  <button onClick={openHistory} style={pillStyle(historyExpanded)}>
+                    {historyExpanded ? t('memo_collapse') : t('memo_expand')}
+                  </button>
+                ) : null}
+              </div>
+              {historySectionOpen ? (
+                <div>
                 {historyEntries.length === 0 ? (
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
                 ) : (
@@ -155,13 +189,14 @@ export function YesterdayMemo() {
                     ) : null}
                   </>
                 )}
-              </div>
-            </details>
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
 
-      {hasMemoContent && overflows ? (
+      {hasAnyContent && overflows ? (
         <div style={{ position: 'relative' }}>
           {!expanded ? (
             <div

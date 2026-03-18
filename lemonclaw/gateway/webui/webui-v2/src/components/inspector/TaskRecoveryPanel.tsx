@@ -261,6 +261,14 @@ const summaryDetailStyle = {
   lineHeight: '1.45',
 } as const;
 
+const shellStyle = {
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-secondary) 100%)',
+  border: '1px solid var(--border)',
+  borderRadius: '12px',
+  padding: '14px',
+  boxShadow: '0 12px 26px rgba(0,0,0,0.14)',
+} as const;
+
 function renderStepTimeline(
   steps: TaskStepRecord[] | undefined,
   linkedFocus: LinkedFocus | null,
@@ -1060,7 +1068,7 @@ function taskCard(
               cursor: 'pointer',
             }}
           >
-            {isExpanded ? t('task_hide_details') : t('task_show_details')}
+            {isExpanded ? t('memo_collapse') : t('memo_expand')}
           </button>
           {showManualResumeCta && (
             <button
@@ -1206,7 +1214,7 @@ function recoveryQueueCard(
               cursor: 'pointer',
             }}
           >
-            {isExpanded ? t('task_hide_details') : t('task_show_details')}
+            {isExpanded ? t('memo_collapse') : t('memo_expand')}
           </button>
           {showManualResumeCta && (
             <button
@@ -1277,6 +1285,7 @@ function recoveryQueueCard(
 }
 
 export function TaskRecoveryPanel() {
+  const [expanded, setExpanded] = useState(true);
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
   const [linkedFocus, setLinkedFocus] = useState<LinkedFocus | null>(null);
   const [showSettledTasks, setShowSettledTasks] = useState(false);
@@ -1433,36 +1442,49 @@ export function TaskRecoveryPanel() {
   };
 
   return (
-    <div style={{ marginBottom: '24px' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>// {t('tasks_panel_title')}</span>
-        <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
-          {sessionTasks.value.length} {t('tasks_panel_session_count')}
-        </span>
+    <div style={shellStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: expanded ? '12px' : '0' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+            <span>// {t('tasks_panel_title')}</span>
+            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+              {sessionTasks.value.length} {t('tasks_panel_session_count')}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            <button onClick={() => setExpanded(true)} style={pillStyle(Boolean(sessionTasks.value.length))}>
+              {t('tasks_panel_session_count')}: {sessionTasks.value.length}
+            </button>
+            <button onClick={() => setExpanded(true)} style={{ ...pillStyle(Boolean(actionableTasks.length)), color: 'var(--teal)', borderColor: 'rgba(10, 186, 181, 0.24)', background: actionableTasks.length ? 'rgba(10, 186, 181, 0.08)' : 'var(--bg-primary)' }}>
+              {t('tasks_panel_actionable_count')}: {actionableTasks.length}
+            </button>
+            <button onClick={() => setExpanded(true)} style={{ ...pillStyle(Boolean(recoverySummary.value?.manual_review_required || 0)), color: 'var(--accent)', borderColor: 'rgba(255, 107, 53, 0.28)', background: (recoverySummary.value?.manual_review_required || 0) ? 'rgba(255, 107, 53, 0.1)' : 'var(--bg-primary)' }}>
+              {t('tasks_panel_manual_review_count')}: {recoverySummary.value?.manual_review_required || 0}
+            </button>
+            <button
+              onClick={() => {
+                setExpanded(true);
+                setShowSettledTasks((value) => !value || settledTasks.length > 0);
+              }}
+              style={{ ...pillStyle(Boolean(settledTasks.length)), color: 'var(--success)', borderColor: 'rgba(76, 175, 80, 0.24)', background: settledTasks.length ? 'rgba(76, 175, 80, 0.08)' : 'var(--bg-primary)' }}
+            >
+              {t('tasks_panel_settled_count')}: {settledTasks.length}
+            </button>
+          </div>
+        </div>
+        <button onClick={() => setExpanded((value) => !value)} style={pillStyle(expanded)}>
+          {expanded ? t('memo_collapse') : t('memo_expand')}
+        </button>
       </div>
 
-      {taskPanelError.value && (
-        <div style={{ marginBottom: '12px', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: 1.5 }}>
-          {taskPanelError.value}
-        </div>
-      )}
+      {expanded ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {taskPanelError.value && (
+            <div style={{ marginBottom: '4px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: 1.5 }}>
+              {taskPanelError.value}
+            </div>
+          )}
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-secondary)' }}>
-          {t('tasks_panel_session_count')}: {sessionTasks.value.length}
-        </div>
-        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(10, 186, 181, 0.24)', background: 'rgba(10, 186, 181, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--teal)' }}>
-          {t('tasks_panel_actionable_count')}: {actionableTasks.length}
-        </div>
-        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(255, 107, 53, 0.28)', background: 'rgba(255, 107, 53, 0.1)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent)' }}>
-          {t('tasks_panel_manual_review_count')}: {recoverySummary.value?.manual_review_required || 0}
-        </div>
-        <div style={{ padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(76, 175, 80, 0.24)', background: 'rgba(76, 175, 80, 0.08)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--success)' }}>
-          {t('tasks_panel_settled_count')}: {settledTasks.length}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {sessionTasks.value.length === 0 ? (
           <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks_panel_empty')}</div>
@@ -1487,17 +1509,11 @@ export function TaskRecoveryPanel() {
                   <button
                     onClick={() => setShowSettledTasks(!showSettledTasks)}
                     style={{
-                      padding: '5px 8px',
-                      background: 'transparent',
-                      border: '1px solid var(--border)',
-                      borderRadius: '6px',
-                      color: 'var(--text-secondary)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '10px',
+                      ...pillStyle(showSettledTasks),
                       cursor: 'pointer',
                     }}
                   >
-                    {showSettledTasks ? t('tasks_panel_hide_settled') : t('tasks_panel_show_settled')}
+                    {showSettledTasks ? t('memo_collapse') : t('memo_expand')}
                   </button>
                 </div>
                 {showSettledTasks && settledTasks.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
@@ -1649,7 +1665,8 @@ export function TaskRecoveryPanel() {
             {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, linkedFocus, setLinkedFocus, copiedLabel, copyValue, false)}
           </div>
         )}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -894,6 +894,10 @@ export function MemoryPanel() {
           style={inputStyle}
         />
 
+        <div style={{ ...panelStyle, fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          {t('memory_notes_redirect')}
+        </div>
+
         {creating ? (
           <div style={{ ...panelStyle, display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={sectionTitleStyle}>{t('memory_new_card')}</div>
@@ -992,11 +996,6 @@ export function MemoryPanel() {
             </div>
           ) : null}
 
-          <div style={{ ...panelStyle, fontSize: '11px', color: snapshot.today ? 'var(--text-primary)' : 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
-            <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('memory_today')}</div>
-            {snapshot.today || t('memory_empty_today')}
-          </div>
-
           {renderAccordionSection(
             t('memory_entities'),
             filteredEntities.length,
@@ -1049,7 +1048,7 @@ export function MemoryPanel() {
           )}
         </div>
 
-        {!snapshot.entities?.length && !snapshot.core && !snapshot.today && !snapshot.rules?.length ? (
+        {!snapshot.entities?.length && !snapshot.core && !snapshot.rules?.length ? (
           <div style={{ ...panelStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
         ) : null}
       </div>
