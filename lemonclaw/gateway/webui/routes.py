@@ -185,6 +185,28 @@ def get_webui_routes(
             "trigger": trigger,
         }
 
+    def _append_retrieval_markdown(lines: list[str], retrieval: dict[str, Any] | None) -> None:
+        lines.extend(["", "## Retrieval"])
+        if not retrieval:
+            lines.append("- none")
+            return
+        lines.extend([
+            f"- Strategy: {retrieval.get('strategy') or '—'}",
+            f"- Latency: {retrieval.get('latency_ms') if retrieval.get('latency_ms') is not None else '—'}",
+            f"- Fallbacks: {retrieval.get('fallback_count') if retrieval.get('fallback_count') is not None else '—'}",
+            f"- Hits: cards={retrieval.get('card_count') or 0} · rules={retrieval.get('rule_count') or 0} · knowledge={retrieval.get('knowledge_count') or 0}",
+        ])
+        hit_sources = [str(item) for item in (retrieval.get("hit_sources") or []) if item]
+        if hit_sources:
+            lines.append(f"- Hit Sources: {', '.join(hit_sources)}")
+        for card in list(retrieval.get("card_hits") or []):
+            lines.append(f"- Card: {card.get('name') or '—'} · {card.get('type') or '—'} · {card.get('source') or '—'}")
+        for rule in list(retrieval.get("rule_hits") or []):
+            lines.append(f"- Rule: {rule.get('trigger') or '—'} · {rule.get('source') or '—'}")
+        for item in list(retrieval.get("knowledge_hits") or []):
+            page = f" [{item.get('page_label')}]" if item.get("page_label") else ""
+            lines.append(f"- Knowledge: {item.get('title') or '—'}{page} · {item.get('result_type') or '—'} · {item.get('source') or '—'}")
+
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
         if request.url.scheme == "https":
@@ -1690,6 +1712,7 @@ def get_webui_routes(
         if fmt == "md":
             summary = export_view.get("summary") or {}
             task = export_view.get("task") or {}
+            retrieval = summary.get("retrieval") or task.get("retrieval") or {}
             lines = [
                 f"# Task Export: {task.get('task_id') or task_id}",
                 "",
@@ -1710,6 +1733,7 @@ def get_webui_routes(
                 ])
             else:
                 lines.append("- none")
+            _append_retrieval_markdown(lines, retrieval)
             lines.extend([
                 "",
                 "## Recovery History",
@@ -1770,6 +1794,7 @@ def get_webui_routes(
             summary = bundle.get("summary") or {}
             trigger = bundle.get("trigger") or {}
             postmortem = bundle.get("postmortem") or {}
+            retrieval = summary.get("retrieval") or task.get("retrieval") or {}
             lines = [
                 f"# Task Bundle: {task.get('task_id') or task_id}",
                 "",
@@ -1789,6 +1814,7 @@ def get_webui_routes(
                 ])
             else:
                 lines.append("- none")
+            _append_retrieval_markdown(lines, retrieval)
             lines.extend([
                 "",
                 "## Candidate",
@@ -1849,6 +1875,7 @@ def get_webui_routes(
             outbox = (postmortem.get("outbox") or {})
             lifecycle = dict(outbox.get("lifecycle") or {})
             trigger = postmortem.get("trigger") or {}
+            retrieval = dict((task.get("metadata") or {}).get("retrieval") or {})
             lines = [
                 f"# Task Postmortem: {task.get('task_id') or task_id}",
                 "",
@@ -1866,6 +1893,7 @@ def get_webui_routes(
                 ])
             else:
                 lines.append("- none")
+            _append_retrieval_markdown(lines, retrieval)
             lines.extend([
                 "",
                 "## Outbox Lifecycle",

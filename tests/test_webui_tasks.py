@@ -621,6 +621,46 @@ def test_task_export_and_postmortem_include_trigger_bundle(tmp_path):
     assert "## Postmortem" in bundle_md.text
 
 
+def test_task_markdown_exports_include_retrieval_trace(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_retrieval_export",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="trace me",
+        metadata={"retrieval": {
+            "strategy": "hybrid",
+            "latency_ms": 12,
+            "fallback_count": 0,
+            "card_count": 1,
+            "rule_count": 1,
+            "knowledge_count": 1,
+            "hit_sources": ["hybrid", "knowledge"],
+            "card_hits": [{"name": "tech-stack", "type": "tech", "source": "hybrid"}],
+            "rule_hits": [{"trigger": "deploy", "source": "hybrid"}],
+            "knowledge_hits": [{"title": "Deploy Notes", "source": "manual://deploy", "result_type": "fact", "page_label": "p.1"}],
+        }},
+    )
+
+    client = TestClient(app)
+    export_md = client.get("/api/tasks/task_retrieval_export/export", params={"format": "md"})
+    assert export_md.status_code == 200
+    assert "## Retrieval" in export_md.text
+    assert "Card: tech-stack" in export_md.text
+    assert "Rule: deploy" in export_md.text
+    assert "Knowledge: Deploy Notes [p.1]" in export_md.text
+
+    bundle_md = client.get("/api/tasks/task_retrieval_export/bundle", params={"format": "md"})
+    assert bundle_md.status_code == 200
+    assert "## Retrieval" in bundle_md.text
+
+    pm_md = client.get("/api/tasks/task_retrieval_export/postmortem", params={"format": "md"})
+    assert pm_md.status_code == 200
+    assert "## Retrieval" in pm_md.text
+
+
 def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     app, ledger = _build_app(tmp_path)
     ledger.ensure_task(
