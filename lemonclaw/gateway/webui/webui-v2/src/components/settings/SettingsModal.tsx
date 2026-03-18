@@ -11,7 +11,7 @@ import { SoulEditor } from './SoulEditor';
 import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 
 type NoticeTone = 'info' | 'warning';
-type SettingsMode = 'basic' | 'advanced' | 'expert';
+type SettingsMode = 'basic' | 'advanced';
 type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
@@ -22,6 +22,22 @@ const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'governance', 'channels', 'tools', 'skills'];
 const LEMONDATA_PROVIDER_KEYS = ['lemondata', 'lemondata_response', 'lemondata_claude', 'lemondata_minimax', 'lemondata_gemini'] as const;
 const ADVANCED_FIELD_NAMES = new Set([
+  'temperature',
+  'max_tokens',
+  'timezone',
+  'send_progress',
+  'send_tool_hints',
+  'token_budget_per_session',
+  'cost_budget_per_day',
+  'disabled_skills',
+  'system_prompt',
+  'max_results',
+  'timeout',
+  'tool_timeout',
+  'max_items',
+  'max_output',
+  'headed',
+  'content_boundaries',
   'api_base',
   'proxy',
   'env',
@@ -46,22 +62,7 @@ const ADVANCED_FIELD_NAMES = new Set([
   'command',
   'args',
 ]);
-const ADVANCED_GROUPS = new Set(['mcp_servers']);
-const EXPERT_FIELD_NAMES = new Set([
-  'env',
-  'headers',
-  'proxy',
-  'command',
-  'args',
-  'gateway_url',
-  'homeserver',
-  'device_id',
-  'intents',
-  'encoding_aes_key',
-  'encrypt_key',
-  'verification_token',
-]);
-const EXPERT_GROUPS = new Set(['mcp_servers']);
+const ADVANCED_GROUPS = new Set(['mcp_servers', 'exec']);
 
 const noticeStyle = (tone: NoticeTone) => ({
   marginBottom: '12px',
@@ -208,16 +209,9 @@ function isAdvancedField(fullPath: string, fieldKey: string): boolean {
   return false;
 }
 
-function isExpertField(fullPath: string, fieldKey: string): boolean {
-  if (EXPERT_FIELD_NAMES.has(fieldKey)) return true;
-  if (fullPath.startsWith('tools.mcp_servers')) return true;
-  return false;
-}
-
 function shouldRenderField(mode: SettingsMode, fullPath: string, fieldKey: string): boolean {
-  if (mode === 'expert') return true;
-  if (mode === 'advanced') return !isExpertField(fullPath, fieldKey);
-  return !isAdvancedField(fullPath, fieldKey) && !isExpertField(fullPath, fieldKey);
+  if (mode === 'advanced') return true;
+  return !isAdvancedField(fullPath, fieldKey);
 }
 
 // Enum fields rendered as <select> dropdowns instead of text inputs.
@@ -577,11 +571,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const dataKeys = activeTab !== 'skills' && activeTab !== 'governance' && contentData
     ? (() => {
         const keys = Object.keys(contentData).filter((key) => isGroup(contentData[key]));
-        const visibleKeys = settingsMode === 'expert'
+        const visibleKeys = settingsMode === 'advanced'
           ? keys
-          : settingsMode === 'advanced'
-            ? keys.filter((key) => !EXPERT_GROUPS.has(key))
-            : keys.filter((key) => !ADVANCED_GROUPS.has(key) && !EXPERT_GROUPS.has(key));
+          : keys.filter((key) => !ADVANCED_GROUPS.has(key));
         if (activeTab !== 'providers') return visibleKeys;
         const hasLemonData = LEMONDATA_PROVIDER_KEYS.some((key) => visibleKeys.includes(key));
         return hasLemonData
@@ -593,7 +585,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const quickJumpKeys = activeTab === 'governance'
     ? []
     : activeTab === 'tools'
-    ? ['_tool_status', ...dataKeys]
+    ? (settingsMode === 'advanced' ? ['_tool_status', ...dataKeys] : dataKeys)
     : dataKeys;
 
   const renderWorkspaceCard = () => {
@@ -1031,7 +1023,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           {([
                             ['basic', t('settings_mode_basic')],
                             ['advanced', t('settings_mode_advanced')],
-                            ['expert', t('settings_mode_expert')],
                           ] as Array<[SettingsMode, string]>).map(([mode, label]) => (
                             <button
                               key={mode}
@@ -1059,8 +1050,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
 
-                  {activeTab === 'agents' && renderWorkspaceCard()}
-                  {activeTab === 'tools' && renderToolStatusCard()}
+                  {activeTab === 'agents' && settingsMode === 'advanced' && renderWorkspaceCard()}
+                  {activeTab === 'tools' && settingsMode === 'advanced' && renderToolStatusCard()}
                   {activeTab === 'governance' ? (
                     <GovernanceTab
                       configGovernance={draft?.governance || null}

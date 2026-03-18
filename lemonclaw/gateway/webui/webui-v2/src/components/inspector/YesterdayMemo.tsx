@@ -86,6 +86,12 @@ export function YesterdayMemo() {
     setHistoryExpanded(true);
   };
 
+  const toggleHistoryExpanded = () => {
+    setExpanded(true);
+    setHistorySectionOpen(true);
+    setHistoryExpanded((value) => !value);
+  };
+
   return (
     <div style={shellStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
@@ -156,7 +162,7 @@ export function YesterdayMemo() {
                   {`${t('memo_history')} · ${historyEntries.length}`}
                 </button>
                 {historyEntries.length > 0 ? (
-                  <button onClick={openHistory} style={pillStyle(historyExpanded)}>
+                  <button onClick={toggleHistoryExpanded} style={pillStyle(historyExpanded)}>
                     {historyExpanded ? t('memo_collapse') : t('memo_expand')}
                   </button>
                 ) : null}
