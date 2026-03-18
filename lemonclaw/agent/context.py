@@ -314,14 +314,20 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                     "name": str(card.name or ""),
                     "type": str(card.meta.get("type", "") or ""),
                     "source": str((trace.get("card_sources") or {}).get(card.name) or ""),
+                    "preview": str(card.body or "").strip()[:160],
                 }
                 for card in cards
             ],
             "rule_hits": [
                 {
                     "trigger": str(rule.get("trigger") or ""),
+                    "lesson": str(rule.get("lesson") or ""),
                     "action": str(rule.get("action") or ""),
-                    "source": str((trace.get("rule_sources") or {}).get(rule.get("trigger", "")) or ""),
+                    "source": str(
+                        (trace.get("rule_sources") or {}).get(rule.get("header", ""))
+                        or (trace.get("rule_sources") or {}).get(rule.get("trigger", ""))
+                        or ""
+                    ),
                 }
                 for rule in rules
             ],

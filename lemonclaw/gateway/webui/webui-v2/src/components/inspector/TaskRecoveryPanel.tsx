@@ -520,6 +520,7 @@ function renderTaskDetailBody(
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.name || '—'}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
+                        {item.preview ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.preview}</div> : null}
                       </div>
                       {item.type ? <span style={pillStyle()}>{item.type}</span> : null}
                     </div>
@@ -535,6 +536,7 @@ function renderTaskDetailBody(
                 {retrieval.rule_hits.map((item, idx) => (
                   <div key={`${item.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-primary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.trigger || '—'}</div>
+                    {item.lesson ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.lesson}</div> : null}
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{item.action || '—'}</div>
                     {item.source ? <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', wordBreak: 'break-all' }}>{item.source}</div> : null}
                   </div>

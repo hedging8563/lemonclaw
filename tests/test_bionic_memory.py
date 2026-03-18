@@ -419,6 +419,9 @@ async def test_context_builder_resolve_retrieval_context_uses_hybrid_trace(tmp_p
     assert "需要 venv" in rules_ctx
     assert meta["strategy"] == "hybrid"
     assert meta["fallback_count"] == 0
+    assert meta["card_hits"][0]["preview"].startswith("# Tech")
+    assert meta["rule_hits"][0]["lesson"] == "需要 venv"
+    assert meta["rule_hits"][0]["source"] == "hybrid"
     assert "hybrid" in meta["hit_sources"]
 
 
@@ -440,6 +443,8 @@ async def test_context_builder_resolve_retrieval_context_falls_back_without_prov
     assert meta["strategy"] == "keyword"
     assert meta["fallback_count"] == 1
     assert meta["fallbacks"] == ["provider_unbound"]
+    assert meta["card_hits"][0]["preview"].startswith("# Tech")
+    assert meta["rule_hits"][0]["lesson"] == "需要 venv"
 
 
 @pytest.mark.asyncio

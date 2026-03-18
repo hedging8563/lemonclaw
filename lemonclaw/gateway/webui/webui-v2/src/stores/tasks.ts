@@ -47,9 +47,11 @@ export interface RetrievalMeta {
     name?: string;
     type?: string;
     source?: string;
+    preview?: string;
   }>;
   rule_hits?: Array<{
     trigger?: string;
+    lesson?: string;
     action?: string;
     source?: string;
   }>;
