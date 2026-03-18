@@ -222,6 +222,7 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from lemonclaw.providers.lemondata_response_provider import LemonDataResponsesProvider
     from lemonclaw.providers.litellm_provider import LiteLLMProvider
     from lemonclaw.providers.openai_codex_provider import OpenAICodexProvider
     from lemonclaw.providers.custom_provider import CustomProvider
@@ -233,6 +234,18 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
+
+    if provider_name == "lemondata_response" or model.startswith("lemondata_response/"):
+        if not (p and p.api_key):
+            console.print("[red]Error: No API key configured for LemonData Responses.[/red]")
+            console.print("Set one in ~/.lemonclaw/config.json under providers.lemondata_response")
+            raise typer.Exit(1)
+        return LemonDataResponsesProvider(
+            api_key=p.api_key if p else "no-key",
+            api_base=config.get_api_base(model) or "https://api.lemondata.cc/v1",
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":

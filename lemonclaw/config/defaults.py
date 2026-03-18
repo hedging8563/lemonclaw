@@ -42,6 +42,7 @@ DEFAULT_GATEWAY_BIND = "localhost"  # Fail-closed: only localhost by default
 # ---------------------------------------------------------------------------
 
 PROVIDER_LEMONDATA = "lemondata"
+PROVIDER_LEMONDATA_RESPONSE = "lemondata_response"
 PROVIDER_LEMONDATA_CLAUDE = "lemondata_claude"
 PROVIDER_LEMONDATA_MINIMAX = "lemondata_minimax"
 PROVIDER_LEMONDATA_GEMINI = "lemondata_gemini"

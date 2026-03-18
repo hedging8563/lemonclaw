@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from lemonclaw.cli.commands import app
 from lemonclaw.config.schema import Config
+from lemonclaw.providers.lemondata_response_provider import LemonDataResponsesProvider
 from lemonclaw.providers.litellm_provider import LiteLLMProvider
 from lemonclaw.providers.openai_codex_provider import _strip_model_prefix
 from lemonclaw.providers.registry import find_by_model
@@ -110,6 +111,14 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_lemondata_response_for_gpt54():
+    config = Config()
+    config.agents.defaults.model = "gpt-5.4"
+    config.providers.lemondata_response.api_key = "sk-test"
+
+    assert config.get_provider_name() == "lemondata_response"
+
+
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
     spec = find_by_model("github-copilot/gpt-5.3-codex")
 
@@ -128,6 +137,19 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_make_provider_returns_lemondata_response_provider():
+    from lemonclaw.cli.commands import _make_provider
+
+    config = Config()
+    config.agents.defaults.model = "gpt-5.4"
+    config.providers.lemondata_response.api_key = "sk-test"
+    config.providers.lemondata_response.api_base = "https://api.lemondata.cc/v1"
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, LemonDataResponsesProvider)
 
 
 def test_channels_status_lists_matrix_and_wecom():

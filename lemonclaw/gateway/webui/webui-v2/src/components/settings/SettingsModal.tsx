@@ -19,6 +19,7 @@ type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registere
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = ['soul', 'providers', 'agents', 'governance', 'channels', 'tools', 'skills'];
+const LEMONDATA_PROVIDER_KEYS = ['lemondata', 'lemondata_response', 'lemondata_claude', 'lemondata_minimax', 'lemondata_gemini'] as const;
 
 const noticeStyle = (tone: NoticeTone) => ({
   marginBottom: '12px',
@@ -387,6 +388,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   const displayLabel = (key: string): string => {
+    if (key === 'lemondata_gateway') return t('providers_lemondata_gateway');
+    if (key === 'lemondata') return t('providers_lemondata_chat');
+    if (key === 'lemondata_response') return t('providers_lemondata_responses');
+    if (key === 'lemondata_claude') return t('providers_lemondata_anthropic');
+    if (key === 'lemondata_minimax') return t('providers_lemondata_minimax');
+    if (key === 'lemondata_gemini') return t('providers_lemondata_gemini');
     if (key === 'http') return t('tools_http_title');
     if (key === 'notify') return t('tools_notify_title');
     if (key === 'db') return t('tools_db_title');
@@ -506,7 +513,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       ? activeTabData
       : activeTabData;
   const dataKeys = activeTab !== 'skills' && activeTab !== 'governance' && contentData
-    ? Object.keys(contentData).filter((key) => isGroup(contentData[key]))
+    ? (() => {
+        const keys = Object.keys(contentData).filter((key) => isGroup(contentData[key]));
+        if (activeTab !== 'providers') return keys;
+        const hasLemonData = LEMONDATA_PROVIDER_KEYS.some((key) => keys.includes(key));
+        return hasLemonData
+          ? ['lemondata_gateway', ...keys.filter((key) => !LEMONDATA_PROVIDER_KEYS.includes(key as any))]
+          : keys;
+      })()
     : [];
   // Prepend tool status card for the tools tab
   const quickJumpKeys = activeTab === 'governance'
@@ -745,6 +759,38 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       }
 
       if (isGroup(v)) {
+        if (path[0] === 'providers' && k !== 'lemondata' && LEMONDATA_PROVIDER_KEYS.includes(k as any)) {
+          return null;
+        }
+
+        if (path[0] === 'providers' && k === 'lemondata') {
+          const providersRoot = draft?.providers || {};
+          const groupedEntries = LEMONDATA_PROVIDER_KEYS.map((providerKey) => [providerKey, providersRoot[providerKey]] as const)
+            .filter(([, value]) => isGroup(value));
+          return (
+            <div id="setting-group-lemondata_gateway" key="lemondata_gateway" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+              <div style={{ marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', overflowWrap: 'anywhere' }}>
+                  <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel('lemondata_gateway')}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
+                  {t('providers_lemondata_gateway_note')}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gap: '16px' }}>
+                {groupedEntries.map(([providerKey, providerValue]) => (
+                  <div key={providerKey} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '12px', background: 'var(--bg-primary)' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '10px' }}>
+                      {displayLabel(providerKey)}
+                    </div>
+                    {renderFields(providerValue as Record<string, any>, ['providers', providerKey])}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
         let currentObj: any = v;
         let displayKey = k;
         const cPath = [...currentPath];

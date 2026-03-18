@@ -158,6 +158,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # LemonData Responses: OpenAI Responses API for GPT-5.4 family, api_base WITH /v1.
+    ProviderSpec(
+        name="lemondata_response",
+        keywords=("gpt-5.4", "gpt-5.4-pro"),
+        env_key="OPENAI_API_KEY",
+        display_name="LemonData (Responses)",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.lemondata.cc/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # LemonData main: OpenAI-compatible gateway for all other models.
     # Fallback gateway — matches when no keyword-specific provider wins.
     ProviderSpec(

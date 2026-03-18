@@ -105,6 +105,7 @@ def test_sync_model_config_preserves_custom_api_bases(monkeypatch, tmp_path: Pat
     config.providers.lemondata.api_key = 'sk-test'
     config.lemondata.api_base_url = 'https://staging.example.com'
     config.providers.lemondata.api_base = 'https://staging.example.com/v1'
+    config.providers.lemondata_response.api_base = 'https://staging.example.com/v1'
     config.providers.lemondata_claude.api_base = 'https://staging.example.com'
     config.providers.lemondata_minimax.api_base = 'https://staging.example.com'
     config.providers.lemondata_gemini.api_base = 'https://staging.example.com'
@@ -117,6 +118,7 @@ def test_sync_model_config_preserves_custom_api_bases(monkeypatch, tmp_path: Pat
     _sync_model_config(config)
 
     assert config.providers.lemondata.api_base == 'https://staging.example.com/v1'
+    assert config.providers.lemondata_response.api_base == 'https://staging.example.com/v1'
     assert config.providers.lemondata_claude.api_base == 'https://staging.example.com'
     assert config.providers.lemondata_minimax.api_base == 'https://staging.example.com'
     assert config.providers.lemondata_gemini.api_base == 'https://staging.example.com'

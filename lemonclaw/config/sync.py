@@ -33,6 +33,7 @@ from lemonclaw.config.defaults import (
     LEMONDATA_API_BASE,
     LEMONDATA_API_BASE_V1,
     PROVIDER_LEMONDATA,
+    PROVIDER_LEMONDATA_RESPONSE,
     PROVIDER_LEMONDATA_CLAUDE,
     PROVIDER_LEMONDATA_GEMINI,
     PROVIDER_LEMONDATA_MINIMAX,
@@ -137,9 +138,10 @@ def run_config_sync(config: Config) -> SyncReport:
 
 
 def _lemondata_providers(config: Config):
-    """Return the 4 LemonData provider (name, config) tuples."""
+    """Return the 5 LemonData provider (name, config) tuples."""
     return [
         (PROVIDER_LEMONDATA, config.providers.lemondata),
+        (PROVIDER_LEMONDATA_RESPONSE, config.providers.lemondata_response),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude),
         (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax),
         (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini),
@@ -147,12 +149,12 @@ def _lemondata_providers(config: Config):
 
 
 # ============================================================================
-# Operation 1: Sync API key across all 4 LemonData providers
+# Operation 1: Sync API key across all 5 LemonData providers
 # ============================================================================
 
 
 def _sync_api_key(config: Config) -> bool:
-    """Ensure API_KEY env var is applied to all 3 LemonData providers.
+    """Ensure API_KEY env var is applied to all LemonData providers.
 
     _apply_env_overrides() already does this, but we add change detection
     and handle the case where providers have stale keys.
@@ -374,9 +376,10 @@ def _migrate_base_urls(config: Config) -> bool:
 
     changed = False
 
-    # Check all 4 LemonData providers
+    # Check all 5 LemonData providers
     providers = [
         (PROVIDER_LEMONDATA, config.providers.lemondata, api_base_v1),
+        (PROVIDER_LEMONDATA_RESPONSE, config.providers.lemondata_response, api_base_v1),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude, api_base_no_v1),
         (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, api_base_no_v1),
         (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini, api_base_no_v1),
@@ -407,6 +410,7 @@ def _validate_providers(config: Config) -> bool:
 
     Rules:
     - lemondata (OpenAI-compat): must end with /v1
+    - lemondata_response (Responses API): must end with /v1
     - lemondata_claude (Anthropic): must NOT end with /v1
     - lemondata_minimax (Anthropic format): must NOT end with /v1
     - lemondata_gemini (Gemini native): must NOT end with /v1
@@ -416,6 +420,7 @@ def _validate_providers(config: Config) -> bool:
     # (provider_name, provider_config, needs_v1)
     rules = [
         (PROVIDER_LEMONDATA, config.providers.lemondata, True),
+        (PROVIDER_LEMONDATA_RESPONSE, config.providers.lemondata_response, True),
         (PROVIDER_LEMONDATA_CLAUDE, config.providers.lemondata_claude, False),
         (PROVIDER_LEMONDATA_MINIMAX, config.providers.lemondata_minimax, False),
         (PROVIDER_LEMONDATA_GEMINI, config.providers.lemondata_gemini, False),
@@ -480,6 +485,7 @@ def _sync_model_config(config: Config) -> bool:
     if api_key:
         expected = [
             (config.providers.lemondata, api_base_v1),
+            (config.providers.lemondata_response, api_base_v1),
             (config.providers.lemondata_claude, api_base_no_v1),
             (config.providers.lemondata_minimax, api_base_no_v1),
             (config.providers.lemondata_gemini, api_base_no_v1),

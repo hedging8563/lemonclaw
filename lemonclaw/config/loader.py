@@ -168,9 +168,12 @@ def _apply_env_overrides(config: Config) -> None:
         base_v1 = f"{base}/v1" if not base.endswith("/v1") else base
         base_no_v1 = base.removesuffix("/v1")
 
-        # Auto-populate the 4 LemonData providers
+        # Auto-populate the 5 LemonData providers
         config.providers.lemondata.api_key = api_key
         config.providers.lemondata.api_base = base_v1
+
+        config.providers.lemondata_response.api_key = api_key
+        config.providers.lemondata_response.api_base = base_v1
 
         config.providers.lemondata_claude.api_key = api_key
         config.providers.lemondata_claude.api_base = base_no_v1

@@ -106,7 +106,7 @@ for _ch in _CHANNEL_NAMES:
 
 # Provider names that accept full object replacement
 _PROVIDER_NAMES = {
-    "lemondata", "lemondata_claude", "lemondata_minimax", "lemondata_gemini",
+    "lemondata", "lemondata_response", "lemondata_claude", "lemondata_minimax", "lemondata_gemini",
     "custom", "anthropic", "openai", "openrouter", "deepseek", "groq",
     "zhipu", "dashscope", "vllm", "gemini", "moonshot", "minimax",
     "aihubmix", "siliconflow", "volcengine", "openai_codex", "github_copilot",
@@ -500,7 +500,7 @@ def get_settings_routes(
         # but env var API_KEY is set, show a placeholder so users know keys are active.
         import os as _os
         if _os.environ.get("API_KEY"):
-            env_providers = ("lemondata", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
+            env_providers = ("lemondata", "lemondata_response", "lemondata_claude", "lemondata_minimax", "lemondata_gemini")
             providers = data.get("providers", {})
             for pname in env_providers:
                 prov = providers.get(pname, {})
