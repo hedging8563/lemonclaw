@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
-import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, searchKnowledge, selectedKnowledgeResultType, selectedKnowledgeSourceType } from '../../stores/knowledge';
+import { activeKnowledgeChunks, activeKnowledgeDocument, activeKnowledgeFacts, filterKnowledgeDocuments, knowledgeDocuments, knowledgeError, knowledgeResults, knowledgeSummary, loadKnowledge, loadKnowledgeDocument, partitionKnowledgeDocuments, searchKnowledge, selectedKnowledgeResultType, selectedKnowledgeSourceType, type KnowledgeDocumentRecord, type KnowledgeView } from '../../stores/knowledge';
 import { memory, memoryError, type MemoryEntityRecord, loadMemory, type MemoryRuleRecord } from '../../stores/memory';
 
 function pillStyle(active = false) {
@@ -57,6 +57,7 @@ export function MemoryPanel() {
   const [knowledgeContent, setKnowledgeContent] = useState('');
   const [knowledgeRefreshHours, setKnowledgeRefreshHours] = useState('0');
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
+  const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('all');
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
   const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
@@ -286,6 +287,74 @@ export function MemoryPanel() {
   const filteredHistory = useMemo(() => (
     (snapshot?.history || []).filter((entry: string) => !query || entry.toLowerCase().includes(query))
   ), [snapshot, query]);
+  const visibleKnowledgeDocs = useMemo(
+    () => filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView),
+    [knowledgeView, knowledgeDocuments.value],
+  );
+  const groupedKnowledgeDocs = useMemo(
+    () => partitionKnowledgeDocuments(knowledgeDocuments.value),
+    [knowledgeDocuments.value],
+  );
+
+  const renderKnowledgeCard = (doc: KnowledgeDocumentRecord) => (
+    <div key={doc.doc_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+        <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => void loadKnowledgeDocument(doc.doc_id)}>
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+          <button onClick={() => {
+            setEditingKnowledgeId(doc.doc_id);
+            setEditKnowledgeTitle(doc.title || '');
+            setEditKnowledgeSource(doc.source || '');
+            setEditKnowledgeType(doc.source_type || 'url');
+            setEditKnowledgeNote(doc.note || '');
+            setEditKnowledgeContent((doc as any).content || '');
+            setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
+          }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
+          <button onClick={() => void handleToggleKnowledgePinned(doc.doc_id, !doc.pinned)} style={{ background: 'transparent', border: '1px solid var(--border)', color: doc.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{doc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}</button>
+          <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
+          <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <span style={pillStyle()}>{doc.source_type}</span>
+        <span style={pillStyle()}>{doc.status || 'registered'}</span>
+        {doc.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
+        <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${doc.chunk_count || 0}`}</span>
+        <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${doc.retrieval_count || 0}`}</span>
+        <span style={pillStyle()}>{`${t('knowledge_refresh_hours')}:${doc.refresh_interval_hours || 0}`}</span>
+        <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
+        {doc.ingested_at_ms ? <span style={pillStyle()}>{`${t('knowledge_ingested_at')}:${formatTime(doc.ingested_at_ms)}`}</span> : null}
+        {doc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(doc.next_refresh_at_ms)}`}</span> : null}
+        {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
+      </div>
+      {doc.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${doc.last_hit_query}`}</div> : null}
+      {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
+      {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
+      {editingKnowledgeId === doc.doc_id && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+          <input value={editKnowledgeTitle} onInput={(e) => setEditKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+          <select value={editKnowledgeType} onInput={(e) => setEditKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
+            <option value="url">url</option>
+            <option value="file">file</option>
+            <option value="manual">manual</option>
+          </select>
+          <input value={editKnowledgeSource} onInput={(e) => setEditKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+          <textarea value={editKnowledgeNote} onInput={(e) => setEditKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
+          <input value={editKnowledgeRefreshHours} onInput={(e) => setEditKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
+          {editKnowledgeType === 'manual' && (
+            <textarea value={editKnowledgeContent} onInput={(e) => setEditKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button onClick={() => setEditingKnowledgeId(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
+            <button onClick={() => void handleEditKnowledge(doc.doc_id)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_update')}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div>
@@ -334,6 +403,17 @@ export function MemoryPanel() {
               <span style={pillStyle()}>{t('knowledge_count_pinned')}: {knowledgeSummary.value?.pinned_count || 0}</span>
               <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
             </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+              {([
+                ['all', t('knowledge_view_all')],
+                ['pinned', t('knowledge_view_pinned')],
+                ['used', t('knowledge_view_used')],
+                ['due', t('knowledge_view_due')],
+                ['ingesting', t('knowledge_view_ingesting')],
+              ] as Array<[KnowledgeView, string]>).map(([value, label]) => (
+                <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>{label}</button>
+              ))}
+            </div>
             {creatingKnowledge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
                 <input value={knowledgeTitle} onInput={(e) => setKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
@@ -370,65 +450,36 @@ export function MemoryPanel() {
             </div>
             {knowledgeDocuments.value.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {knowledgeDocuments.value.map((doc) => (
-                  <div key={doc.doc_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
-                      <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => void loadKnowledgeDocument(doc.doc_id)}>
-                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.source}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                        <button onClick={() => {
-                          setEditingKnowledgeId(doc.doc_id);
-                          setEditKnowledgeTitle(doc.title || '');
-                          setEditKnowledgeSource(doc.source || '');
-                          setEditKnowledgeType(doc.source_type || 'url');
-                          setEditKnowledgeNote(doc.note || '');
-                          setEditKnowledgeContent((doc as any).content || '');
-                          setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
-                        }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_edit')}</button>
-                        <button onClick={() => void handleToggleKnowledgePinned(doc.doc_id, !doc.pinned)} style={{ background: 'transparent', border: '1px solid var(--border)', color: doc.pinned ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{doc.pinned ? t('knowledge_unpin') : t('knowledge_pin')}</button>
-                        <button onClick={() => void handleIngestKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--teal)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_ingest')}</button>
-                        <button onClick={() => void handleDeleteKnowledge(doc.doc_id)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_remove')}</button>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      <span style={pillStyle()}>{doc.source_type}</span>
-                      <span style={pillStyle()}>{doc.status || 'registered'}</span>
-                      {doc.pinned ? <span style={pillStyle(true)}>{t('knowledge_pin')}</span> : null}
-                      <span style={pillStyle()}>{`${t('knowledge_chunk_count')}:${doc.chunk_count || 0}`}</span>
-                      <span style={pillStyle()}>{`${t('knowledge_retrieval_count')}:${doc.retrieval_count || 0}`}</span>
-                      <span style={pillStyle()}>{`${t('knowledge_refresh_hours')}:${doc.refresh_interval_hours || 0}`}</span>
-                      <span style={pillStyle()}>{formatTime(doc.updated_at_ms)}</span>
-                      {doc.ingested_at_ms ? <span style={pillStyle()}>{`${t('knowledge_ingested_at')}:${formatTime(doc.ingested_at_ms)}`}</span> : null}
-                      {doc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(doc.next_refresh_at_ms)}`}</span> : null}
-                      {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
-                    </div>
-                    {doc.last_hit_query ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{`${t('knowledge_last_query')}: ${doc.last_hit_query}`}</div> : null}
-                    {doc.note && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div>}
-                    {doc.last_error && <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div>}
-                    {editingKnowledgeId === doc.doc_id && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                        <input value={editKnowledgeTitle} onInput={(e) => setEditKnowledgeTitle((e.target as HTMLInputElement).value)} placeholder={t('knowledge_title')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                        <select value={editKnowledgeType} onInput={(e) => setEditKnowledgeType((e.target as HTMLSelectElement).value)} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }}>
-                          <option value="url">url</option>
-                          <option value="file">file</option>
-                          <option value="manual">manual</option>
-                        </select>
-                        <input value={editKnowledgeSource} onInput={(e) => setEditKnowledgeSource((e.target as HTMLInputElement).value)} placeholder={t('knowledge_source')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                        <textarea value={editKnowledgeNote} onInput={(e) => setEditKnowledgeNote((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_note')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '72px', resize: 'vertical', outline: 'none' }} />
-                        <input value={editKnowledgeRefreshHours} onInput={(e) => setEditKnowledgeRefreshHours((e.target as HTMLInputElement).value)} placeholder={t('knowledge_refresh_hours')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', outline: 'none' }} />
-                        {editKnowledgeType === 'manual' && (
-                          <textarea value={editKnowledgeContent} onInput={(e) => setEditKnowledgeContent((e.target as HTMLTextAreaElement).value)} placeholder={t('knowledge_content')} style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', minHeight: '120px', resize: 'vertical', outline: 'none' }} />
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                          <button onClick={() => setEditingKnowledgeId(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '10px' }}>{t('memory_cancel')}</button>
-                          <button onClick={() => void handleEditKnowledge(doc.doc_id)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '10px', padding: '4px 8px' }}>{t('knowledge_update')}</button>
-                        </div>
+                {knowledgeView === 'all' ? (
+                  <>
+                    {groupedKnowledgeDocs.pinned.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_pinned')}</div>
+                        {groupedKnowledgeDocs.pinned.map(renderKnowledgeCard)}
                       </div>
                     )}
-                  </div>
-                ))}
+                    {groupedKnowledgeDocs.due.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_due')}</div>
+                        {groupedKnowledgeDocs.due.map(renderKnowledgeCard)}
+                      </div>
+                    )}
+                    {groupedKnowledgeDocs.used.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_used')}</div>
+                        {groupedKnowledgeDocs.used.map(renderKnowledgeCard)}
+                      </div>
+                    )}
+                    {groupedKnowledgeDocs.other.length > 0 && (
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>{t('knowledge_group_other')}</div>
+                        {groupedKnowledgeDocs.other.map(renderKnowledgeCard)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  visibleKnowledgeDocs.map(renderKnowledgeCard)
+                )}
               </div>
             ) : (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>

@@ -32,6 +32,8 @@ export interface KnowledgeSummary {
   used_count?: number;
 }
 
+export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting';
+
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
 export const knowledgeDocuments = signal<KnowledgeDocumentRecord[]>([]);
 export const knowledgeError = signal<string | null>(null);
@@ -41,6 +43,77 @@ export const activeKnowledgeChunks = signal<Array<Record<string, any>>>([]);
 export const activeKnowledgeFacts = signal<Array<Record<string, any>>>([]);
 export const selectedKnowledgeSourceType = signal<string>('');
 export const selectedKnowledgeResultType = signal<string>('');
+
+export function isKnowledgeUsed(doc: KnowledgeDocumentRecord): boolean {
+  return Number(doc.retrieval_count || 0) > 0 || Number(doc.last_hit_at_ms || 0) > 0;
+}
+
+export function isKnowledgeDue(doc: KnowledgeDocumentRecord, nowMs = Date.now()): boolean {
+  const nextRefresh = Number(doc.next_refresh_at_ms || 0);
+  return nextRefresh > 0 && nextRefresh <= nowMs;
+}
+
+export function filterKnowledgeDocuments(
+  docs: KnowledgeDocumentRecord[],
+  view: KnowledgeView,
+  nowMs = Date.now(),
+): KnowledgeDocumentRecord[] {
+  switch (view) {
+    case 'pinned':
+      return docs.filter((doc) => Boolean(doc.pinned));
+    case 'used':
+      return docs.filter((doc) => isKnowledgeUsed(doc));
+    case 'due':
+      return docs.filter((doc) => isKnowledgeDue(doc, nowMs));
+    case 'ingesting':
+      return docs.filter((doc) => String(doc.status || '') === 'ingesting');
+    default:
+      return docs;
+  }
+}
+
+export function partitionKnowledgeDocuments(
+  docs: KnowledgeDocumentRecord[],
+  nowMs = Date.now(),
+): {
+  pinned: KnowledgeDocumentRecord[];
+  due: KnowledgeDocumentRecord[];
+  used: KnowledgeDocumentRecord[];
+  other: KnowledgeDocumentRecord[];
+} {
+  const seen = new Set<string>();
+  const pinned: KnowledgeDocumentRecord[] = [];
+  const due: KnowledgeDocumentRecord[] = [];
+  const used: KnowledgeDocumentRecord[] = [];
+  const other: KnowledgeDocumentRecord[] = [];
+
+  for (const doc of docs) {
+    if (doc.doc_id && doc.pinned) {
+      pinned.push(doc);
+      seen.add(doc.doc_id);
+    }
+  }
+  for (const doc of docs) {
+    if (!doc.doc_id || seen.has(doc.doc_id)) continue;
+    if (isKnowledgeDue(doc, nowMs)) {
+      due.push(doc);
+      seen.add(doc.doc_id);
+    }
+  }
+  for (const doc of docs) {
+    if (!doc.doc_id || seen.has(doc.doc_id)) continue;
+    if (isKnowledgeUsed(doc)) {
+      used.push(doc);
+      seen.add(doc.doc_id);
+    }
+  }
+  for (const doc of docs) {
+    if (!doc.doc_id || seen.has(doc.doc_id)) continue;
+    other.push(doc);
+    seen.add(doc.doc_id);
+  }
+  return { pinned, due, used, other };
+}
 
 export async function loadKnowledge() {
   knowledgeError.value = null;
