@@ -326,6 +326,70 @@ def test_knowledge_url_reingest_uses_not_modified_refresh(tmp_path: Path, monkey
     assert calls[1].get("if-modified-since") == "Tue, 18 Mar 2026 12:00:00 GMT"
 
 
+def test_knowledge_url_pdf_ingest_extracts_page_chunks(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path)
+
+    class _PdfPage:
+        def extract_text(self) -> str:
+            return "Ops PDF Runbook\nRestart the dispatcher only after checking stuck outbox events."
+
+    class _FakeReader:
+        def __init__(self, _path: str):
+            self.pages = [_PdfPage()]
+            self.metadata = {}
+
+    class _Response:
+        def __init__(self, body: bytes, headers: dict[str, str]):
+            self._body = body
+            self.headers = headers
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=10):
+        return _Response(
+            b"%PDF-1.4 fake",
+            {"Content-Type": "application/pdf", "ETag": "pdf-v1"},
+        )
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_FakeReader))
+    monkeypatch.setattr("lemonclaw.knowledge.store.urlopen", _fake_urlopen)
+
+    create_resp = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "",
+            "source": "https://docs.example.com/runbook.pdf",
+            "source_type": "url",
+        },
+    )
+    assert create_resp.status_code == 200
+    doc_id = create_resp.json()["document"]["doc_id"]
+
+    ingest_resp = client.post(f"/api/knowledge/documents/{doc_id}/ingest")
+    assert ingest_resp.status_code == 200
+    document = ingest_resp.json()["document"]
+    assert document["metadata"]["content_type"] == "application/pdf"
+    assert document["metadata"]["source_url"] == "https://docs.example.com/runbook.pdf"
+    assert document["metadata"]["page_count"] == 1
+    assert document["chunk_count"] >= 1
+
+    detail_resp = client.get(f"/api/knowledge/documents/{doc_id}")
+    assert detail_resp.status_code == 200
+    chunks = detail_resp.json()["chunks"]
+    assert chunks[0]["page_label"] == "p.1"
+
+    search_resp = client.get("/api/knowledge/search?q=dispatcher stuck outbox")
+    assert search_resp.status_code == 200
+    assert search_resp.json()["results"][0]["page_label"] == "p.1"
+
+
 def test_knowledge_search_filters_and_reingest_all(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
 

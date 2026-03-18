@@ -13,6 +13,7 @@ import hashlib
 import re
 import threading
 import time
+import tempfile
 import uuid
 from html import unescape
 from pathlib import Path
@@ -589,7 +590,7 @@ class KnowledgeStore:
             try:
                 with urlopen(req, timeout=10) as response:
                     raw_bytes = response.read()
-                    raw = raw_bytes.decode("utf-8", errors="ignore")
+                    content_type = str(response.headers.get("Content-Type") or "").lower()
                     etag = str(response.headers.get("ETag") or etag).strip()
                     last_modified = str(response.headers.get("Last-Modified") or last_modified).strip()
             except HTTPError as exc:
@@ -603,6 +604,31 @@ class KnowledgeStore:
                         "last_modified": last_modified,
                     }) from exc
                 raise
+            if self._is_pdf_url_source(source, content_type):
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(raw_bytes)
+                    tmp_path = Path(tmp.name)
+                try:
+                    content = extract_pdf_content(tmp_path)
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+                meta = dict(content.get("metadata") or {})
+                meta.update({
+                    "extractor": str(meta.get("extractor") or "pdf-url"),
+                    "source_url": source,
+                    "content_bytes": len(raw_bytes),
+                    "content_hash": _sha1_hexdigest(raw_bytes),
+                    "etag": etag,
+                    "last_modified": last_modified,
+                    "content_type": content_type or "application/pdf",
+                })
+                return {
+                    "text": str(content.get("text") or ""),
+                    "title": str(meta.get("title") or document.get("title") or source),
+                    "metadata": meta,
+                    "pages": list(content.get("pages") or []),
+                }
+            raw = raw_bytes.decode("utf-8", errors="ignore")
             title = self._extract_html_title(raw) or str(document.get("title") or source)
             text = self._html_to_text(raw)
             if not text:
@@ -617,9 +643,17 @@ class KnowledgeStore:
                     "content_hash": _sha1_hexdigest(raw_bytes),
                     "etag": etag,
                     "last_modified": last_modified,
+                    "content_type": content_type,
                 },
             }
         raise ValueError("invalid source_type")
+
+    @staticmethod
+    def _is_pdf_url_source(source: str, content_type: str) -> bool:
+        lowered = str(source or "").split("?", 1)[0].lower()
+        if lowered.endswith(".pdf"):
+            return True
+        return "application/pdf" in str(content_type or "").lower()
 
     @staticmethod
     def _extract_html_title(raw: str) -> str:
