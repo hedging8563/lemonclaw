@@ -101,6 +101,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb <query> — Search ingested knowledge\n"
             "/kb list [limit] — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
+            "/kb show <doc_id> — Show one knowledge document\n"
             "/kb pin <doc_id> — Pin a knowledge document\n"
             "/kb unpin <doc_id> — Unpin a knowledge document"
         ),
@@ -109,6 +110,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list [数量] — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
+            "/kb show <doc_id> — 查看知识文档\n"
             "/kb pin <doc_id> — 置顶知识文档\n"
             "/kb unpin <doc_id> — 取消置顶知识文档"
         ),
@@ -136,6 +138,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "kb_pin_usage": {
         "en": "Use `/kb pin <doc_id>` or `/kb unpin <doc_id>`.",
         "zh": "使用 `/kb pin <doc_id>` 或 `/kb unpin <doc_id>`。",
+    },
+    "kb_show_usage": {
+        "en": "Use `/kb show <doc_id>` to inspect one knowledge document.",
+        "zh": "使用 `/kb show <doc_id>` 查看单个知识文档。",
     },
     "kb_pin_not_found": {
         "en": "Knowledge document `{doc_id}` was not found.",

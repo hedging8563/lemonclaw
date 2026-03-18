@@ -1478,6 +1478,11 @@ class AgentLoop:
             result, level = self._knowledge_add_sync(msg, payload, lang)
             return self._command_reply(msg, result, kind="kb_add", level=level)
 
+        if lowered == "show" or lowered.startswith("show "):
+            payload = raw[4:].strip()
+            result, level = self._knowledge_show_sync(payload, lang=lang)
+            return self._command_reply(msg, result, kind="kb_show", level=level)
+
         if lowered == "pin" or lowered.startswith("pin "):
             payload = raw[3:].strip()
             result, level = self._knowledge_pin_sync(payload, pinned=True, lang=lang)
@@ -1566,6 +1571,50 @@ class AgentLoop:
         except Exception as exc:
             return t("kb_add_failed", lang, error=str(exc)[:200]), "warning"
         return t("kb_added", lang, title=doc.get("title") or doc.get("doc_id"), doc_id=doc.get("doc_id")), "info"
+
+    def _knowledge_show_sync(self, payload: str, *, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        doc_id = str(payload or "").strip()
+        if not doc_id:
+            return t("kb_show_usage", lang), "warning"
+
+        store = KnowledgeStore(self.workspace)
+        try:
+            doc = store.read_document(doc_id)
+            chunks = store.list_chunks(doc_id)
+            facts = store.list_facts(doc_id)
+        except ValueError:
+            return t("kb_show_usage", lang), "warning"
+        if not doc:
+            return t("kb_pin_not_found", lang, doc_id=doc_id), "warning"
+
+        lines = [f"Knowledge document: {doc.get('title') or doc_id}\n"]
+        lines.append(
+            " ".join([
+                f"id={doc.get('doc_id')}",
+                f"type={doc.get('source_type') or '—'}",
+                f"status={doc.get('status') or '—'}",
+                f"pinned={bool(doc.get('pinned'))}",
+                f"chunks={int(doc.get('chunk_count') or 0)}",
+                f"facts={int(doc.get('fact_count') or 0)}",
+                f"hits={int(doc.get('retrieval_count') or 0)}",
+            ])
+        )
+        lines.append(f"source={doc.get('source') or '—'}")
+        if doc.get("last_hit_query"):
+            lines.append(f"last_query={doc.get('last_hit_query')}")
+        if doc.get("note"):
+            lines.append(f"\nnote: {doc.get('note')}")
+        if chunks:
+            first_chunk = chunks[0]
+            page = f" [{first_chunk.get('page_label')}]" if first_chunk.get("page_label") else ""
+            lines.append(f"\nchunk{page}: {str(first_chunk.get('text') or '')[:280]}")
+        if facts:
+            first_fact = facts[0]
+            page = f" [{first_fact.get('page_label')}]" if first_fact.get("page_label") else ""
+            lines.append(f"fact{page}: {str(first_fact.get('claim') or '')[:220]}")
+        return "\n".join(lines), "info"
 
     def _knowledge_pin_sync(self, payload: str, *, pinned: bool, lang: str = "en") -> tuple[str, str]:
         from lemonclaw.knowledge import KnowledgeStore

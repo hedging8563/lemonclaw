@@ -821,6 +821,30 @@ class TestNativeBlockSchemaPersistence:
         assert unpinned["pinned"] is False
 
     @pytest.mark.asyncio
+    async def test_kb_show_command_displays_document_detail(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://show-me",
+            title="Show Me",
+            note="Useful note",
+            content="This document explains the recovery checklist in detail.",
+        )
+        store.ingest_document(doc["doc_id"])
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content=f"/kb show {doc['doc_id']}")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "Knowledge document: Show Me" in resp.content
+        assert f"id={doc['doc_id']}" in resp.content
+        assert "chunk:" in resp.content
+        assert "fact:" in resp.content
+
+    @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
