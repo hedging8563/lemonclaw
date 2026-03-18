@@ -45,6 +45,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/kb <query> — Search ingested knowledge\n"
+            "/kb list — List knowledge documents\n"
+            "/kb add <title> :: <content> — Add a manual knowledge note\n"
             "/model — List or switch models\n"
             "/usage — Show token usage\n"
             "/help — Show available commands"
@@ -54,6 +56,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/new — 开始新会话\n"
             "/stop — 停止当前任务\n"
             "/kb <查询> — 搜索已入库知识\n"
+            "/kb list — 列出知识文档\n"
+            "/kb add <标题> :: <内容> — 新增手动知识\n"
             "/model — 查看或切换模型\n"
             "/usage — 查看 Token 用量\n"
             "/help — 显示可用命令"
@@ -92,12 +96,38 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "未知命令 `{cmd}`，使用 `/help` 查看可用命令。",
     },
     "kb_usage": {
-        "en": "Use `/kb <query>` to search ingested knowledge.",
-        "zh": "使用 `/kb <查询>` 来搜索已入库知识。",
+        "en": (
+            "Knowledge commands:\n"
+            "/kb <query> — Search ingested knowledge\n"
+            "/kb list [limit] — List knowledge documents\n"
+            "/kb add <title> :: <content> — Add a manual knowledge note"
+        ),
+        "zh": (
+            "知识命令：\n"
+            "/kb <查询> — 搜索已入库知识\n"
+            "/kb list [数量] — 列出知识文档\n"
+            "/kb add <标题> :: <内容> — 新增手动知识"
+        ),
     },
     "kb_empty": {
         "en": "No knowledge hits for `{query}`.",
         "zh": "没有命中 `{query}` 的知识结果。",
+    },
+    "kb_add_usage": {
+        "en": "Use `/kb add <title> :: <content>` to add a manual knowledge note.",
+        "zh": "使用 `/kb add <标题> :: <内容>` 来新增手动知识。",
+    },
+    "kb_added": {
+        "en": "Added knowledge note **{title}** (`{doc_id}`) and ingested it.",
+        "zh": "已新增知识 **{title}** (`{doc_id}`) 并完成入库。",
+    },
+    "kb_add_failed": {
+        "en": "Failed to add knowledge note: {error}",
+        "zh": "新增知识失败：{error}",
+    },
+    "kb_list_empty": {
+        "en": "No knowledge documents yet. Use `/kb add <title> :: <content>` to create one.",
+        "zh": "还没有知识文档。可使用 `/kb add <标题> :: <内容>` 新建。",
     },
 }
 

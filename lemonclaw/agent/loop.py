@@ -1454,16 +1454,37 @@ class AgentLoop:
         return self._command_reply(msg, t(reply_key, lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
 
     def _handle_kb_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
-        query = msg.content.strip()[3:].strip()
-        if not query:
+        raw = msg.content.strip()[3:].strip()
+        if not raw:
             return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+
+        lowered = raw.lower()
+        if lowered == "list" or lowered.startswith("list "):
+            limit_arg = raw[4:].strip()
+            limit = 8
+            if limit_arg:
+                try:
+                    limit = min(max(int(limit_arg), 1), 20)
+                except ValueError:
+                    return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+            result = self._knowledge_list_sync(limit=limit, lang=lang)
+            level = "warning" if result == t("kb_list_empty", lang) else "info"
+            return self._command_reply(msg, result, kind="kb_list", level=level)
+
+        if lowered == "add" or lowered.startswith("add "):
+            payload = raw[3:].strip()
+            if not payload:
+                return self._command_reply(msg, t("kb_add_usage", lang), kind="kb_add", level="warning")
+            result, level = self._knowledge_add_sync(msg, payload, lang)
+            return self._command_reply(msg, result, kind="kb_add", level=level)
+
         tool = self.tools.get("search_knowledge")
         if tool is None:
-            return self._command_reply(msg, t("kb_empty", lang, query=query), kind="kb_search", level="warning")
+            return self._command_reply(msg, t("kb_empty", lang, query=raw), kind="kb_search", level="warning")
         # Knowledge search is local and synchronous from the user's perspective.
-        result = self._knowledge_search_sync(query)
+        result = self._knowledge_search_sync(raw)
         if result.startswith("No knowledge hits"):
-            return self._command_reply(msg, t("kb_empty", lang, query=query), kind="kb_search", level="warning")
+            return self._command_reply(msg, t("kb_empty", lang, query=raw), kind="kb_search", level="warning")
         return self._command_reply(msg, result, kind="kb_search")
 
     def _knowledge_search_sync(self, query: str) -> str:
@@ -1480,6 +1501,74 @@ class AgentLoop:
             if item.get("snippet"):
                 lines.append(f"   {item['snippet']}")
         return "\n".join(lines)
+
+    def _knowledge_list_sync(self, *, limit: int = 8, lang: str = "en") -> str:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(self.workspace)
+        docs = store.list_documents()
+        if not docs:
+            return t("kb_list_empty", lang)
+
+        summary = store.summarize()
+        lines = [f"Knowledge documents ({summary['total']} total, {summary.get('due_count', 0)} due)\n"]
+        for idx, doc in enumerate(docs[:limit], 1):
+            next_refresh = int(doc.get("next_refresh_at_ms") or 0)
+            next_refresh_text = "due" if store._is_due_document(doc) else ("—" if next_refresh <= 0 else "scheduled")
+            lines.append(f"{idx}. {doc.get('title') or doc.get('doc_id')}")
+            lines.append(
+                "   "
+                f"id={doc.get('doc_id')} "
+                f"type={doc.get('source_type') or '—'} "
+                f"status={doc.get('status') or '—'} "
+                f"chunks={int(doc.get('chunk_count') or 0)} "
+                f"facts={int(doc.get('fact_count') or 0)}"
+            )
+            lines.append(
+                "   "
+                f"refresh={int(doc.get('refresh_interval_hours') or 0)}h "
+                f"next={next_refresh_text} "
+                f"source={doc.get('source') or '—'}"
+            )
+        return "\n".join(lines)
+
+    def _knowledge_add_sync(self, msg: InboundMessage, payload: str, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        title, content = self._parse_kb_add_payload(payload)
+        if not content:
+            return t("kb_add_usage", lang), "warning"
+
+        source_suffix = uuid.uuid4().hex[:8]
+        source = f"manual://chat/{source_suffix}"
+        store = KnowledgeStore(self.workspace)
+        try:
+            doc = store.create_document(
+                source_type="manual",
+                source=source,
+                title=title,
+                content=content,
+                note=f"Added from chat command on {msg.channel}:{msg.chat_id}",
+            )
+            store.ingest_document(str(doc.get("doc_id") or ""))
+        except Exception as exc:
+            return t("kb_add_failed", lang, error=str(exc)[:200]), "warning"
+        return t("kb_added", lang, title=doc.get("title") or doc.get("doc_id"), doc_id=doc.get("doc_id")), "info"
+
+    @staticmethod
+    def _parse_kb_add_payload(payload: str) -> tuple[str, str]:
+        text = str(payload or "").strip()
+        if not text:
+            return "", ""
+        if "::" in text:
+            title, content = text.split("::", 1)
+            title = title.strip()
+            content = content.strip()
+            if content:
+                resolved_title = title[:200] or content[:80]
+                return resolved_title, content
+        fallback = text[:200]
+        return fallback, text
 
     def _should_persist_control_reply(self, kind: str) -> bool:
         """Decide whether a slash/system reply should be stored in session history."""

@@ -733,6 +733,59 @@ class TestNativeBlockSchemaPersistence:
         assert "trigger history" in resp.content.lower()
 
     @pytest.mark.asyncio
+    async def test_kb_add_command_creates_and_ingests_manual_knowledge(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        msg = InboundMessage(
+            channel="test",
+            sender_id="u1",
+            chat_id="c1",
+            content="/kb add Runbook :: Retry the outbox queue before manual recovery.",
+        )
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "Runbook" in resp.content
+        assert "ingested" in resp.content.lower()
+
+        store = KnowledgeStore(loop.workspace)
+        docs = store.list_documents()
+        assert docs
+        assert docs[0]["title"] == "Runbook"
+        assert docs[0]["status"] == "ingested"
+
+    @pytest.mark.asyncio
+    async def test_kb_list_command_lists_documents(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        first = store.create_document(
+            source_type="manual",
+            source="manual://one",
+            title="Ops Playbook",
+            content="Watch trigger spikes after a rollout.",
+        )
+        second = store.create_document(
+            source_type="manual",
+            source="manual://two",
+            title="Escalation Guide",
+            content="Escalate after recovery and postmortem collection.",
+        )
+        store.ingest_document(first["doc_id"])
+        store.ingest_document(second["doc_id"])
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb list 2")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "Knowledge documents" in resp.content
+        assert "Escalation Guide" in resp.content
+        assert "Ops Playbook" in resp.content
+        assert "status=ingested" in resp.content
+
+    @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
