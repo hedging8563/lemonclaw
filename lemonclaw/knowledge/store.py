@@ -944,7 +944,15 @@ class KnowledgeStore:
         except Exception:
             return {"version": 1, "documents": []}
         docs = list(raw.get("documents") or [])
-        docs.sort(key=lambda item: int(item.get("updated_at_ms") or 0), reverse=True)
+        docs.sort(
+            key=lambda item: (
+                1 if bool(item.get("pinned")) else 0,
+                int(item.get("retrieval_count") or 0),
+                int(item.get("last_hit_at_ms") or 0),
+                int(item.get("updated_at_ms") or 0),
+            ),
+            reverse=True,
+        )
         return {"version": 1, "documents": docs}
 
     def _write_manifest_unlocked(self, payload: dict[str, Any]) -> None:

@@ -636,7 +636,9 @@ def test_knowledge_search_updates_usefulness_and_supports_pinning(tmp_path: Path
 
     summary_resp = client.get("/api/knowledge")
     assert summary_resp.status_code == 200
+    documents = summary_resp.json()["documents"]
     summary = summary_resp.json()["summary"]
+    assert documents[0]["doc_id"] == first["doc_id"]
     assert summary["pinned_count"] >= 1
     assert summary["used_count"] >= 1
 
