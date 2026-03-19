@@ -127,6 +127,12 @@ This split is intentional:
 
 LemonClaw now also repairs legacy WebUI task/tool-prelude history on startup so older sessions gradually stop showing duplicated draft text from tool runs.
 
+Recent runtime fixes worth knowing:
+
+- session-level `current_model` now routes through the matching provider family instead of always reusing the startup provider
+- malformed provider content blocks such as serialized `[{\"type\":\"text\",...}]` are normalized before they reach WebUI/session history
+- channel configuration failures (for example an invalid Telegram token) no longer trigger watchdog-driven full instance restart loops
+
 ## WebUI Notes
 
 The current WebUI is not just a chat shell. It includes:
@@ -196,6 +202,15 @@ Current routing defaults:
 - `gpt-5.4` / `gpt-5.4-pro` default to `lemondata_response`
 - platform-managed LemonData providers expose grouped configuration in WebUI settings
 
+Session model notes:
+
+- `agents.defaults.model` controls the default model for new sessions and new default WebUI entrypoints
+- session `current_model` is still a per-conversation override
+- when an old default WebUI session is still pinned to another family (for example `claude-sonnet-4-6`), the safe migration pattern is:
+  - archive the old `webui:default`
+  - create a fresh `webui:default` using the current default model
+  - keep the archived session intact instead of rewriting its model in place
+
 ## Docker / K8s
 
 - single-container local build: `Dockerfile`
@@ -213,6 +228,12 @@ Typical contributor flow:
 - build from local LemonClaw source
 - publish a version record
 - deploy one instance with `--deploy claw-<name>` or all managed instances with `--deploy-all`
+
+Operational notes from the current LemonData fleet workflow:
+
+- `--deploy-all` still prompts for confirmation unless you set `FORCE=1`
+- if build/publish already succeeded and rollout was interrupted, you can resume safely by reusing the published digest instead of rebuilding
+- current canary-first practice is to roll a single instance (for example `test3` or a targeted problem instance) before a fleet-wide reconcile
 
 ## Repository Layout
 
