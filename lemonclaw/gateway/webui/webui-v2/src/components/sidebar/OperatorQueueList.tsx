@@ -55,16 +55,16 @@ export function OperatorQueueList() {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', padding: '0 4px' }}>
-        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-secondary)' }}>
           {t('tasks_panel_manual_review_count')}: {recoverySummary.value?.manual_review_required || 0}
         </div>
-        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(255, 107, 53, 0.28)', background: 'rgba(255, 107, 53, 0.1)', fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--accent)' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(255, 107, 53, 0.28)', background: 'rgba(255, 107, 53, 0.1)', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--accent)' }}>
           {t('operator_queue_count')}: {operatorQueueTasks.value.length}
         </div>
       </div>
 
       {operatorQueueTasks.value.length === 0 && (
-        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', fontFamily: 'var(--font-ui)' }}>
+        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-ui)' }}>
           {t('operator_queue_empty')}
         </div>
       )}
@@ -102,14 +102,14 @@ export function OperatorQueueList() {
                 <span style={{ fontFamily: 'var(--font-ui)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
                   {formatQueueAction(queue.recommended_action, task.current_stage)}
                 </span>
-                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px', fontFamily: 'var(--font-display)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-display)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
                   {task.goal || task.task_id}
                 </span>
               </div>
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
                 {`${t('label_source')}: ${formatQueueSource(queue.source)}`}
               </div>
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
                 {`${t('label_reason')}: ${queue.reason || '—'}`}
               </div>
             </div>

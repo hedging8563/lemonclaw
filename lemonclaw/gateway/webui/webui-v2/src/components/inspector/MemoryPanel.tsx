@@ -40,7 +40,7 @@ const inputStyle = {
   color: 'var(--text-primary)',
   borderRadius: '10px',
   padding: '10px 12px',
-  fontSize: '14px',
+  fontSize: '13px',
   outline: 'none',
 } as const;
 
@@ -51,7 +51,7 @@ const textareaStyle = {
 } as const;
 
 const sectionTitleStyle = {
-  fontSize: '14px',
+  fontSize: '13px',
   fontFamily: 'var(--font-ui)',
   color: 'var(--purple)',
 } as const;
@@ -73,7 +73,7 @@ function pillStyle(active = false) {
     background: active ? 'rgba(255, 107, 53, 0.12)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-ui)',
-    fontSize: '14px',
+    fontSize: '13px',
     cursor: 'pointer',
   } as const;
 }
@@ -85,7 +85,7 @@ function actionButtonStyle(color = 'var(--text-secondary)') {
     color,
     borderRadius: '999px',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '13px',
     padding: '6px 10px',
   } as const;
 }
@@ -626,7 +626,7 @@ export function MemoryPanel() {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
           <button
             onClick={() => (isEdit ? resetKnowledgeEditForm() : resetKnowledgeCreateForm())}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}
           >
             {t('memory_cancel')}
           </button>
@@ -638,7 +638,7 @@ export function MemoryPanel() {
               }
               void handleCreateKnowledge();
             }}
-            style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '14px', padding: '4px 8px' }}
+            style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '13px', padding: '4px 8px' }}
           >
             {isEdit ? t('knowledge_update') : t('knowledge_create')}
           </button>
@@ -665,7 +665,7 @@ export function MemoryPanel() {
             />
           <div
             style={{
-              fontSize: '14px',
+              fontSize: '13px',
               color: 'var(--text-primary)',
               fontFamily: 'var(--font-ui)',
               overflow: 'hidden',
@@ -676,7 +676,7 @@ export function MemoryPanel() {
             {doc.title || doc.source}
           </div>
           </div>
-          <div style={{ fontSize: '14px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button onClick={() => beginKnowledgeEdit(doc)} style={actionButtonStyle()}>
@@ -709,13 +709,13 @@ export function MemoryPanel() {
         {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
       </div>
       {doc.last_hit_query ? (
-        <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>
           {`${t('knowledge_last_query')}: ${doc.last_hit_query}`}
         </div>
       ) : null}
-      {doc.note ? <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div> : null}
+      {doc.note ? <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div> : null}
       {doc.last_error ? (
-        <div style={{ fontSize: '14px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: '13px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
           {doc.last_error}
         </div>
       ) : null}
@@ -830,7 +830,7 @@ export function MemoryPanel() {
       ) : null}
 
       {knowledgeActionNotice ? (
-        <div style={{ fontSize: '14px', color: 'var(--success)', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.2)', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--success)', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.2)', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px' }}>
           {knowledgeActionNotice}
         </div>
       ) : null}
@@ -850,7 +850,7 @@ export function MemoryPanel() {
           renderAccordionSection(t('knowledge_sources'), visibleKnowledgeDocs.length, visibleKnowledgeDocs.map(renderKnowledgeCard), true, 360)
         )
       ) : (
-        <div style={{ ...panelStyle, fontSize: '14px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
+        <div style={{ ...panelStyle, fontSize: '13px', color: 'var(--text-muted)' }}>{t('knowledge_empty')}</div>
       )}
     </div>
   );
@@ -905,7 +905,7 @@ export function MemoryPanel() {
                 style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', cursor: item.doc_id ? 'pointer' : 'default' }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>
                     {item.title || item.doc_id || '—'}
                   </div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -935,14 +935,14 @@ export function MemoryPanel() {
                     <span style={pillStyle()}>{`score:${item.score || 0}`}</span>
                   </div>
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
-                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>{item.source || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{item.snippet || '—'}</div>
               </div>
             );
           })}
         </div>
       ) : (
-        <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>
       )}
     </div>
   );
@@ -953,10 +953,10 @@ export function MemoryPanel() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div>
             <div style={{ marginBottom: '8px', ...sectionTitleStyle }}>{t('knowledge_detail')}</div>
-            <div style={{ fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
               {activeDoc.title || activeDoc.source}
             </div>
-            <div style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeDoc.source}</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px', wordBreak: 'break-word' }}>{activeDoc.source}</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
               <button
                 onClick={() => void handleToggleKnowledgePinned(activeDoc.doc_id, !activeDoc.pinned)}
@@ -980,20 +980,20 @@ export function MemoryPanel() {
               {activeDoc.next_refresh_at_ms ? <span style={pillStyle()}>{`${t('knowledge_next_refresh')}:${formatTime(activeDoc.next_refresh_at_ms)}`}</span> : null}
             </div>
             {activeDoc.last_hit_at_ms ? (
-              <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                 {`${t('knowledge_last_hit')}: ${formatTime(activeDoc.last_hit_at_ms)}`}
               </div>
             ) : null}
             {activeDoc.last_hit_query ? (
-              <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>
                 {`${t('knowledge_last_query')}: ${activeDoc.last_hit_query}`}
               </div>
             ) : null}
             {activeDoc.note ? (
-              <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeDoc.note}</div>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeDoc.note}</div>
             ) : null}
             {activeDoc.last_error ? (
-              <div style={{ fontSize: '14px', color: 'var(--error)', marginBottom: '8px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '13px', color: 'var(--error)', marginBottom: '8px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
                 {activeDoc.last_error}
               </div>
             ) : null}
@@ -1014,14 +1014,14 @@ export function MemoryPanel() {
               <div key={chunk.chunk_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{chunk.chunk_id}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{chunk.chunk_id}</div>
                     {chunk.page_label ? <span style={pillStyle()}>{chunk.page_label}</span> : null}
                   </div>
                   <span style={pillStyle()}>{formatTime(chunk.updated_at_ms)}</span>
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{chunk.text || '—'}</div>
               </div>
-            )) : <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
+            )) : <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
             activeChunks.length <= 3,
             260,
           )}
@@ -1033,20 +1033,20 @@ export function MemoryPanel() {
               <div key={fact.fact_id} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{fact.fact_id}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{fact.fact_id}</div>
                     {fact.page_label ? <span style={pillStyle()}>{fact.page_label}</span> : null}
                   </div>
                   <span style={pillStyle()}>{formatTime(fact.updated_at_ms)}</span>
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{fact.claim || '—'}</div>
               </div>
-            )) : <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
+            )) : <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('knowledge_search_empty')}</div>,
             activeFacts.length <= 3,
             240,
           )}
         </div>
       ) : (
-        <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('knowledge_detail_empty')}</div>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('knowledge_detail_empty')}</div>
       )}
     </div>
   );
@@ -1055,7 +1055,7 @@ export function MemoryPanel() {
     if (!snapshot) {
       return (
         <div style={panelStyle}>
-          <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('memory_loading')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('memory_loading')}</div>
         </div>
       );
     }
@@ -1090,7 +1090,7 @@ export function MemoryPanel() {
           style={inputStyle}
         />
 
-        <div style={{ ...panelStyle, fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <div style={{ ...panelStyle, fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           {t('memory_notes_redirect')}
         </div>
 
@@ -1102,10 +1102,10 @@ export function MemoryPanel() {
             <input value={newKeywords} onInput={(event) => setNewKeywords((event.target as HTMLInputElement).value)} placeholder={t('memory_keywords')} style={inputStyle} />
             <textarea value={newBody} onInput={(event) => setNewBody((event.target as HTMLTextAreaElement).value)} placeholder={t('memory_body')} style={{ ...textareaStyle, minHeight: '100px' }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button onClick={() => setCreating(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}>
+              <button onClick={() => setCreating(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}>
                 {t('memory_cancel')}
               </button>
-              <button onClick={() => void handleCreateEntity()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '14px', padding: '4px 8px' }}>
+              <button onClick={() => void handleCreateEntity()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '13px', padding: '4px 8px' }}>
                 {t('memory_create')}
               </button>
             </div>
@@ -1116,7 +1116,7 @@ export function MemoryPanel() {
           {renderAccordionSection(
             t('memory_search_index'),
             snapshot.search_index?.last_indexed_docs || 0,
-            <div style={{ display: 'grid', gap: '8px', fontSize: '14px' }}>
+            <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
               {([
                 [
                   t('memory_search_available'),
@@ -1166,7 +1166,7 @@ export function MemoryPanel() {
                       setEditingCore(true);
                       setCoreDraft(snapshot.core || '');
                     }}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}
                   >
                     {t('memory_edit')}
                   </button>
@@ -1176,16 +1176,16 @@ export function MemoryPanel() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <textarea value={coreDraft} onInput={(event) => setCoreDraft((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}>
+                    <button onClick={() => setEditingCore(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}>
                       {t('memory_cancel')}
                     </button>
-                    <button onClick={() => void handleSaveCore()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '14px', padding: '4px 8px' }}>
+                    <button onClick={() => void handleSaveCore()} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '13px', padding: '4px 8px' }}>
                       {t('memory_save')}
                     </button>
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: '14px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingCore(true); setCoreDraft(snapshot.core || ''); }}>
                   {snapshot.core}
                 </div>
               )}
@@ -1197,10 +1197,10 @@ export function MemoryPanel() {
             filteredEntities.length,
             filteredEntities.length > 0 ? filteredEntities.map((entity: MemoryEntityRecord) => (
               <div key={entity.name} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-                <div style={{ fontSize: '14px', fontFamily: 'var(--font-ui)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '13px', fontFamily: 'var(--font-ui)', color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
                   <span>{entity.name}</span>
                   {editingEntity !== entity.name ? (
-                    <button onClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}>
+                    <button onClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}>
                       {t('memory_edit')}
                     </button>
                   ) : null}
@@ -1214,17 +1214,17 @@ export function MemoryPanel() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <textarea value={editBody} onInput={(event) => setEditBody((event.target as HTMLTextAreaElement).value)} style={{ ...textareaStyle, minHeight: '120px' }} />
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px' }}>{t('memory_cancel')}</button>
-                      <button onClick={() => void handleSaveEntity(entity.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '14px', padding: '4px 8px' }}>{t('memory_save')}</button>
+                      <button onClick={() => setEditingEntity(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}>{t('memory_cancel')}</button>
+                      <button onClick={() => void handleSaveEntity(entity.name)} style={{ background: 'var(--purple)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '13px', padding: '4px 8px' }}>{t('memory_save')}</button>
                     </div>
                   </div>
                 ) : (
-                  <div style={{ fontSize: '14px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }} onDblClick={() => { setEditingEntity(entity.name); setEditBody(entity.body || ''); }}>
                     {entity.body}
                   </div>
                 )}
               </div>
-            )) : <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>,
+            )) : <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>,
             filteredEntities.length <= 2,
             260,
           )}
@@ -1234,18 +1234,18 @@ export function MemoryPanel() {
             filteredRules.length,
             filteredRules.length > 0 ? filteredRules.map((rule, idx) => (
               <div key={`${rule.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
-                <div style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
-                <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--accent)', marginBottom: '4px' }}>{rule.trigger || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>{rule.lesson || '—'}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{rule.action || '—'}</div>
               </div>
-            )) : <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>,
+            )) : <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('memory_empty_rules')}</div>,
             filteredRules.length <= 2,
             220,
           )}
         </div>
 
         {!snapshot.entities?.length && !snapshot.core && !snapshot.rules?.length ? (
-          <div style={{ ...panelStyle, fontSize: '14px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
+          <div style={{ ...panelStyle, fontSize: '13px', color: 'var(--text-muted)' }}>{t('no_memory')}</div>
         ) : null}
       </div>
     );
@@ -1269,7 +1269,7 @@ export function MemoryPanel() {
     <div style={{ ...panelStyle, padding: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--purple)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
             // {t('memory_title')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -1298,7 +1298,7 @@ export function MemoryPanel() {
             ))}
           </div>
           {saveError || memoryError.value || knowledgeError.value ? (
-            <div style={{ fontSize: '14px', color: 'var(--error)', fontFamily: 'var(--font-ui)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--error)', fontFamily: 'var(--font-ui)', marginBottom: '8px', padding: '6px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '4px' }}>
               {saveError || memoryError.value || knowledgeError.value}
             </div>
           ) : null}

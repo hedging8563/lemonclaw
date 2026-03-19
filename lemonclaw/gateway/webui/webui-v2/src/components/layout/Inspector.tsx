@@ -13,7 +13,7 @@ function SelectedBlockView({ block }: { block: NonNullable<typeof selectedInspec
         <div style={{ padding: '5px 10px', background: 'rgba(124, 58, 237, 0.12)', color: 'var(--purple)', fontFamily: 'var(--font-display)', fontSize: '11px', borderRadius: '999px', alignSelf: 'flex-start', border: '1px solid rgba(168, 85, 247, 0.28)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
           🧠 Thinking Trace
         </div>
-        <div style={{ fontSize: '14px', lineHeight: 1.72, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-reading)' }}>
+        <div style={{ fontSize: '13px', lineHeight: 1.72, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-reading)' }}>
           {block.data}
         </div>
       </div>

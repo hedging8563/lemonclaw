@@ -84,13 +84,13 @@ export function TriggerList() {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', padding: '0 4px' }}>
-        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-secondary)' }}>
           {t('trigger_count')}: {triggers.value.length}
         </div>
-        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(10, 186, 181, 0.24)', background: 'rgba(10, 186, 181, 0.08)', fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--teal)' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(10, 186, 181, 0.24)', background: 'rgba(10, 186, 181, 0.08)', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--teal)' }}>
           {t('trigger_source_count')}: {Object.keys(triggerSummary.value?.by_source || {}).length}
         </div>
-        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(124, 58, 237, 0.2)', background: 'rgba(124, 58, 237, 0.08)', fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--accent)' }}>
+        <div style={{ padding: '4px 8px', borderRadius: '999px', border: '1px solid rgba(124, 58, 237, 0.2)', background: 'rgba(124, 58, 237, 0.08)', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--accent)' }}>
           {t('trigger_family_count')}: {families.length}
         </div>
       </div>
@@ -111,7 +111,7 @@ export function TriggerList() {
                 borderRadius: '999px',
                 padding: '4px 8px',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '13px',
+                fontSize: '12px',
                 cursor: 'pointer',
               }}
             >
@@ -122,13 +122,13 @@ export function TriggerList() {
       </div>
 
       {triggerPanelError.value && (
-        <div style={{ padding: '12px', color: 'var(--error)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}>
+        <div style={{ padding: '12px', color: 'var(--error)', fontFamily: 'var(--font-ui)', fontSize: '12px' }}>
           {triggerPanelError.value}
         </div>
       )}
 
       {triggers.value.length === 0 && !triggerPanelError.value && (
-        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', fontFamily: 'var(--font-ui)' }}>
+        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-ui)' }}>
           {t('trigger_empty')}
         </div>
       )}
@@ -169,14 +169,14 @@ export function TriggerList() {
                 <span style={{ fontFamily: 'var(--font-ui)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--accent)' }}>
                   {formatTriggerSource(item.source)}
                 </span>
-                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px', fontFamily: 'var(--font-display)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-display)', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
                   {item.kind || item.trigger_id}
                 </span>
               </div>
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-word' }}>
                 {item.payload_summary || item.session_key || '—'}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--text-muted)' }}>
                 <span>{`${t('label_status')}: ${formatTriggerStatus(item.status)}`}</span>
                 <span>{formatTriggerTime(item.updated_at_ms)}</span>
               </div>

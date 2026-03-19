@@ -77,7 +77,7 @@ export function SessionItem({ session }: { session: Session }) {
       }}
       style={{
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: 'stretch',
         minHeight: isMobile ? '56px' : '48px',
         padding: isMobile ? '10px 10px' : '8px 12px',
         borderRadius: '6px',
@@ -91,45 +91,49 @@ export function SessionItem({ session }: { session: Session }) {
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        {isEditing ? (
-          <input 
-            ref={inputRef}
-            value={title}
-            onInput={e => setTitle((e.target as HTMLInputElement).value)}
-            onKeyDown={e => { if(e.key === 'Enter') handleRename(); if(e.key === 'Escape') setIsEditing(false); }}
-            onBlur={handleRename}
-            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '14px' : '12px', fontFamily: 'var(--font-ui)', outline: 'none' }}
-          />
-        ) : (
-          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px', lineHeight: '1.3', fontFamily: 'var(--font-display)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
-            {session.title || t('unnamed_chat')}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: isMobile ? '8px' : '10px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {isEditing ? (
+              <input 
+                ref={inputRef}
+                value={title}
+                onInput={e => setTitle((e.target as HTMLInputElement).value)}
+                onKeyDown={e => { if(e.key === 'Enter') handleRename(); if(e.key === 'Escape') setIsEditing(false); }}
+                onBlur={handleRename}
+                style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '13px' : '11px', fontFamily: 'var(--font-ui)', outline: 'none' }}
+              />
+            ) : (
+              <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: isMobile ? '12px' : '11px', lineHeight: '1.3', fontFamily: 'var(--font-display)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
+                {session.title || t('unnamed_chat')}
+              </div>
+            )}
           </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: isMobile ? '5px' : '3px', fontFamily: 'var(--font-ui)', fontSize: isMobile ? '11px' : '10px', color: 'var(--text-muted)', flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
-          <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px' }}>●</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{formatRelativeTime(session.updated_at)}</span>
-          <span style={{ whiteSpace: 'nowrap' }}>· {session.message_count} {t('session_messages')}</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: isMobile ? '6px' : '2px', opacity: actionsVisible ? 1 : 0.16, transition: 'opacity 0.15s', justifyContent: 'flex-end', flexShrink: 0, marginTop: isMobile ? '-1px' : '-2px' }}>
+            {!isEditing && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setTitle(session.title || ''); setIsEditing(true); }}
+                style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '10px' : '9px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '4px 7px' : '1px 5px', minHeight: isMobile ? '24px' : '20px', touchAction: 'manipulation', whiteSpace: 'nowrap', lineHeight: 1.1 }}
+                title={t('rename_session')}
+              >
+                {t('rename_session')}
+              </button>
+            )}
+            <button 
+              onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
+              style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '10px' : '9px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '4px 7px' : '1px 5px', minHeight: isMobile ? '24px' : '20px', touchAction: 'manipulation', whiteSpace: 'nowrap', lineHeight: 1.1 }}
+              title={t('delete_session')}
+              onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--error)'; }}
+              onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--text-muted)'; }}
+            >
+              {t('common_delete')}
+            </button>
+          </div>
         </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '4px', opacity: actionsVisible ? 1 : 0.18, transition: 'opacity 0.15s', justifyContent: 'flex-end' }}>
-        {!isEditing && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setTitle(session.title || ''); setIsEditing(true); }}
-            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
-            title={t('rename_session')}
-          >
-            {t('rename_session')}
-          </button>
-        )}
-        <button 
-          onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
-          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
-          title={t('delete_session')}
-          onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--error)'; }}
-          onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--text-muted)'; }}
-        >
-          {t('delete_session')}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: isMobile ? '4px' : '2px', fontFamily: 'var(--font-ui)', fontSize: isMobile ? '10px' : '9px', color: 'var(--text-muted)', flexWrap: 'nowrap', minWidth: 0 }}>
+          <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px', flexShrink: 0 }}>●</span>
+          <span style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRelativeTime(session.updated_at)}</span>
+          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>· {session.message_count} {t('session_messages')}</span>
+        </div>
       </div>
     </div>
   );

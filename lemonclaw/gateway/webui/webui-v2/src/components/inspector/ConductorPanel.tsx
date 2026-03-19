@@ -19,7 +19,7 @@ function pillStyle(active = false) {
     background: active ? 'rgba(10, 186, 181, 0.12)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-ui)',
-    fontSize: '14px',
+    fontSize: '13px',
     cursor: 'pointer',
   } as const;
 }
@@ -59,7 +59,7 @@ export function ConductorPanel() {
     <div style={shellStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>// {t('conductor_title')}</span>
             {conductorBusy ? <span style={{ width: '6px', height: '6px', background: 'var(--accent)', borderRadius: '50%', animation: 'server-blink 1s infinite' }}></span> : null}
           </div>
@@ -69,7 +69,7 @@ export function ConductorPanel() {
             <span style={pillStyle(Boolean(errorAgents))}>{`errors: ${errorAgents}`}</span>
             <span style={pillStyle()}>{`agents: ${agents.value.length}`}</span>
           </div>
-          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{summaryMessage}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{summaryMessage}</div>
         </div>
         <button onClick={() => setExpanded((value) => !value)} style={pillStyle(expanded)}>
           {expanded ? t('memo_collapse') : t('memo_expand')}
@@ -81,7 +81,7 @@ export function ConductorPanel() {
           <div style={{ display: 'grid', gap: '8px', maxHeight: '320px', overflowY: 'auto', paddingRight: '4px' }}>
             {plans.value.length === 0 ? (
               <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('no_plans')}</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('no_plans')}</div>
               </div>
             ) : (
               plans.value.map((plan) => (
@@ -92,14 +92,14 @@ export function ConductorPanel() {
                       <span style={{ ...pillStyle(plan.phase === 'COMPLETED'), cursor: 'default' }}>{plan.phase || 'UNKNOWN'}</span>
                       {plan.complexity ? <span style={{ ...pillStyle(), cursor: 'default' }}>{`lvl:${plan.complexity}`}</span> : null}
                     </div>
-                    <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: plan.subtasks?.length ? '10px' : '0' }}>{plan.message}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: plan.subtasks?.length ? '10px' : '0' }}>{plan.message}</div>
                     {plan.subtasks?.length ? (
                       <details>
-                        <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{`subtasks · ${plan.subtasks.length}`}</summary>
+                        <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{`subtasks · ${plan.subtasks.length}`}</summary>
                         <div style={{ display: 'grid', gap: '6px', marginTop: '8px' }}>
                           {plan.subtasks.map((subtask: any) => (
-                            <div key={subtask.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '14px', fontFamily: 'var(--font-ui)' }}>
-                              <span style={{ color: subtask.status === 'completed' ? 'var(--success)' : subtask.status === 'executing' ? 'var(--accent)' : 'var(--text-muted)', marginTop: '2px', fontSize: '14px' }}>
+                            <div key={subtask.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', fontFamily: 'var(--font-ui)' }}>
+                              <span style={{ color: subtask.status === 'completed' ? 'var(--success)' : subtask.status === 'executing' ? 'var(--accent)' : 'var(--text-muted)', marginTop: '2px', fontSize: '13px' }}>
                                 {subtask.status === 'completed' ? '✓' : subtask.status === 'executing' ? '⚙' : '○'}
                               </span>
                               <div style={{ flex: 1, color: subtask.status === 'completed' ? 'var(--text-muted)' : 'var(--text-secondary)', lineHeight: 1.4 }}>
@@ -118,7 +118,7 @@ export function ConductorPanel() {
           </div>
 
           <details open={agents.value.length <= 6} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
               agent pool · {agents.value.length}
             </summary>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
@@ -137,7 +137,7 @@ export function ConductorPanel() {
                       borderColor: isError ? 'rgba(255, 68, 68, 0.3)' : isBusy ? 'rgba(10, 186, 181, 0.3)' : 'var(--border)',
                       padding: '4px 10px',
                       borderRadius: '20px',
-                      fontSize: '14px',
+                      fontSize: '13px',
                       fontFamily: 'var(--font-ui)',
                     }}
                   >
