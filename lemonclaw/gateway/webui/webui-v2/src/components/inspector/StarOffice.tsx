@@ -92,7 +92,7 @@ export function StarOffice() {
                   }}
                 >
                   {/* Floating Name Tag */}
-                  <div style={{ position: 'absolute', top: '-18px', left: '-10px', fontSize: '8px', color: 'var(--text-primary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', transform: slot.faceRight ? 'none' : 'scaleX(-1)' }}>
+                  <div style={{ position: 'absolute', top: '-18px', left: '-10px', fontSize: '8px', color: 'var(--text-primary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', transform: slot.faceRight ? 'none' : 'scaleX(-1)' }}>
                     {agent.id.substring(0,8)}
                   </div>
                 </div>
@@ -112,7 +112,7 @@ export function StarOffice() {
               animation: isConductorBusy ? 'cat-type 0.2s infinite' : 'none' 
             }}
           >
-             <div style={{ position: 'absolute', top: '-18px', left: '-16px', fontSize: '8px', color: 'var(--accent)', background: 'rgba(255, 107, 53, 0.1)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+             <div style={{ position: 'absolute', top: '-18px', left: '-16px', fontSize: '8px', color: 'var(--accent)', background: 'rgba(255, 107, 53, 0.1)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }}>
                ORCHESTRATOR
              </div>
           </div>

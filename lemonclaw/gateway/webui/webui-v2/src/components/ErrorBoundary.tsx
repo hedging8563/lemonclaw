@@ -20,14 +20,14 @@ export class ErrorBoundary extends Component<{ children: any }, State> {
   render() {
     if (this.state.error) {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', gap: '16px', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-          <div style={{ fontSize: '14px', color: 'var(--error)' }}>{safeT('error_boundary', 'Something went wrong')}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', maxWidth: '400px', textAlign: 'center', wordBreak: 'break-word' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', gap: '16px', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '15px', color: 'var(--error)' }}>{safeT('error_boundary', 'Something went wrong')}</div>
+          <div style={{ fontSize: '15px', color: 'var(--text-muted)', maxWidth: '400px', textAlign: 'center', wordBreak: 'break-word' }}>
             {this.state.error.message}
           </div>
           <button
             onClick={() => this.setState({ error: null })}
-            style={{ padding: '8px 24px', background: 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontFamily: 'var(--font-mono)' }}
+            style={{ padding: '8px 24px', background: 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '15px', fontFamily: 'var(--font-ui)' }}
           >
             {safeT('error_retry', 'RETRY')}
           </button>

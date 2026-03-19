@@ -24,7 +24,7 @@ function ExternalLinkButton({ href, label }: { href: string; label: string }) {
       rel="noopener noreferrer"
       aria-label={label}
       title={label}
-      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '34px', padding: '0 14px', background: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '12px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '34px', padding: '0 14px', background: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontFamily: 'var(--font-ui)', fontSize: '15px', textDecoration: 'none', whiteSpace: 'nowrap' }}
     >
       <span>{label}</span>
       <span aria-hidden="true">↗</span>
@@ -73,11 +73,11 @@ function ServerCard({ name, server, onUpdate, onDelete }: {
           style={S.headerButton}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
+            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
             <span style={S.tag(isHttp ? 'blue' : 'green')}>{isHttp ? t('mcp_mode_http') : t('mcp_mode_stdio')}</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+            <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '15px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
         </button>
         <button
           type="button"
@@ -177,16 +177,16 @@ export function MCPServersEditor({ servers, onChange }: Props) {
 
   return (
     <div id="setting-group-mcp_servers" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '16px' }}>
-      <div style={{ fontSize: '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+      <div style={{ fontSize: '15px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
         <span style={{ color: 'var(--purple)' }}>#</span> {t('mcp_servers_title')}
-        <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
+        <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({entries.length})</span>
       </div>
 
 
       <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: isMobile ? '12px' : '14px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: '12px', marginBottom: '12px' }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>{t('mcp_discovery_title')}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('mcp_discovery_note')}</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', marginBottom: '4px' }}>{t('mcp_discovery_title')}</div>
+          <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('mcp_discovery_note')}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <ExternalLinkButton href="https://registry.mcpservers.org/" label={t('mcp_discovery_registry_action')} />
@@ -195,7 +195,7 @@ export function MCPServersEditor({ servers, onChange }: Props) {
       </div>
 
       {entries.length === 0 && !adding && (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
           {t('mcp_no_servers')}
         </div>
       )}
@@ -219,8 +219,8 @@ export function MCPServersEditor({ servers, onChange }: Props) {
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAdding(false); setNewName(''); } }}
             autoFocus
           />
-          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('mcp_add')}</button>
-          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', width: isMobile ? '100%' : 'auto' }}>{t('btn_cancel')}</button>
+          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('mcp_add')}</button>
+          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', width: isMobile ? '100%' : 'auto' }}>{t('btn_cancel')}</button>
         </div>
       ) : (
         <button style={S.addBtn} onClick={() => setAdding(true)}>{t('mcp_add_server')}</button>

@@ -98,14 +98,14 @@ export function SessionItem({ session }: { session: Session }) {
             onInput={e => setTitle((e.target as HTMLInputElement).value)}
             onKeyDown={e => { if(e.key === 'Enter') handleRename(); if(e.key === 'Escape') setIsEditing(false); }}
             onBlur={handleRename}
-            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '14px' : '12px', fontFamily: 'var(--font-mono)', outline: 'none' }}
+            style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '14px' : '12px', fontFamily: 'var(--font-ui)', outline: 'none' }}
           />
         ) : (
-          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', lineHeight: '1.3', fontFamily: 'var(--font-mono)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15px', lineHeight: '1.3', fontFamily: 'var(--font-ui)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
             {session.title || t('unnamed_chat')}
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: isMobile ? '5px' : '3px', fontFamily: 'var(--font-mono)', fontSize: isMobile ? '11px' : '10px', color: 'var(--text-muted)', flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: isMobile ? '5px' : '3px', fontFamily: 'var(--font-ui)', fontSize: isMobile ? '11px' : '10px', color: 'var(--text-muted)', flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
           <span style={{ color: isActive ? 'var(--teal)' : 'var(--border)', fontSize: '8px' }}>●</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{formatRelativeTime(session.updated_at)}</span>
           <span style={{ whiteSpace: 'nowrap' }}>· {session.message_count} {t('session_messages')}</span>
@@ -115,7 +115,7 @@ export function SessionItem({ session }: { session: Session }) {
         {!isEditing && (
           <button
             onClick={(e) => { e.stopPropagation(); setTitle(session.title || ''); setIsEditing(true); }}
-            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
+            style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
             title={t('rename_session')}
           >
             {t('rename_session')}
@@ -123,7 +123,7 @@ export function SessionItem({ session }: { session: Session }) {
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); if(confirm(t('confirm_delete_session'))) deleteSession(session.key); }}
-          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-mono)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
+          style={{ background: 'none', border: '1px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: isMobile ? '11px' : '10px', fontFamily: 'var(--font-ui)', borderRadius: '999px', padding: isMobile ? '6px 10px' : '2px 6px', minHeight: isMobile ? '32px' : 'auto', touchAction: 'manipulation', whiteSpace: 'nowrap' }}
           title={t('delete_session')}
           onMouseEnter={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--error)'; }}
           onMouseLeave={(e) => { if (!isMobile) e.currentTarget.style.color = 'var(--text-muted)'; }}

@@ -12,7 +12,7 @@ export function ActivityList() {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
       {activitySessions.value.length === 0 && (
-        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{t('no_activity')}</div>
+        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '15px', fontFamily: 'var(--font-ui)' }}>{t('no_activity')}</div>
       )}
       {activitySessions.value.map(session => (
         <div 
@@ -29,12 +29,12 @@ export function ActivityList() {
         >
           <div style={{ flex: 1, minWidth: 0 }}>
              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--teal)' }}>{session.channel}</span>
-                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontFamily: 'var(--font-mono)', color: activeSessionKey.value === session.key ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                <span style={{ fontFamily: 'var(--font-ui)', fontSize: '9px', padding: '1px 6px', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--teal)' }}>{session.channel}</span>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15px', fontFamily: 'var(--font-ui)', color: activeSessionKey.value === session.key ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                   {session.title || session.key}
                 </span>
              </div>
-             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
+             <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)' }}>
                 {new Date(session.updated_at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
              </div>
           </div>

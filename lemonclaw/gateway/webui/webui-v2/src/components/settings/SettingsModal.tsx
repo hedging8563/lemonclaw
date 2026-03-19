@@ -19,7 +19,16 @@ type GroupRuntimeMap = Record<string, { effective_group_policy?: string; effecti
 type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registered?: boolean; running?: boolean; available?: boolean; error?: string }>;
 
 const MOBILE_BREAKPOINT = 768;
-const TABS = ['soul', 'providers', 'agents', 'governance', 'channels', 'tools', 'skills'];
+const TABS = [
+  { id: 'soul', icon: '🧠', label: 'Identity & Brain' },
+  { id: 'providers', icon: '⚡️', label: 'LLM Providers' },
+  { id: 'agents', icon: '🤖', label: 'Agent Defaults' },
+  { id: 'tools', icon: '🧰', label: 'Tools & Integrations' },
+  { id: 'channels', icon: '📡', label: 'Channels (IM)' },
+  { id: 'skills', icon: '✨', label: 'Skills Library' },
+  { id: 'governance', icon: '🛡️', label: 'Governance & Security' }
+];
+
 const LEMONDATA_PROVIDER_KEYS = ['lemondata', 'lemondata_response', 'lemondata_claude', 'lemondata_minimax', 'lemondata_gemini'] as const;
 const ADVANCED_FIELD_NAMES = new Set([
   'temperature',
@@ -65,36 +74,37 @@ const ADVANCED_FIELD_NAMES = new Set([
 const ADVANCED_GROUPS = new Set(['mcp_servers', 'exec']);
 
 const noticeStyle = (tone: NoticeTone) => ({
-  marginBottom: '12px',
-  padding: '10px 12px',
-  borderRadius: '6px',
-  border: `1px solid ${tone === 'warning' ? 'rgba(255, 170, 0, 0.28)' : 'rgba(100, 149, 237, 0.28)'}`,
-  background: tone === 'warning' ? 'rgba(255, 170, 0, 0.08)' : 'rgba(100, 149, 237, 0.08)',
-  color: tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11px',
+  marginBottom: '16px',
+  padding: '12px 16px',
+  borderRadius: '8px',
+  border: `1px solid ${tone === 'warning' ? 'rgba(255, 170, 0, 0.28)' : 'rgba(10, 186, 181, 0.28)'}`,
+  background: tone === 'warning' ? 'rgba(255, 170, 0, 0.08)' : 'rgba(10, 186, 181, 0.08)',
+  color: tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--teal)',
+  fontFamily: 'var(--font-ui)',
+  fontSize: '15px',
   lineHeight: 1.6,
 }) as const;
 
 const badgeStyle = (tone: 'teal' | 'amber' | 'slate') => ({
   display: 'inline-flex',
   alignItems: 'center',
-  padding: '2px 8px',
+  padding: '4px 10px',
   borderRadius: '999px',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '10px',
-  lineHeight: 1.4,
+  fontFamily: 'var(--font-ui)',
+  fontSize: '15px',
+  fontWeight: 'bold',
+  letterSpacing: '0.5px',
   border: '1px solid',
   borderColor: tone === 'teal'
-    ? 'rgba(45, 212, 191, 0.28)'
+    ? 'rgba(45, 212, 191, 0.3)'
     : tone === 'amber'
-      ? 'rgba(255, 184, 77, 0.28)'
-      : 'rgba(148, 163, 184, 0.24)',
+      ? 'rgba(255, 184, 77, 0.3)'
+      : 'rgba(148, 163, 184, 0.3)',
   background: tone === 'teal'
-    ? 'rgba(45, 212, 191, 0.10)'
+    ? 'rgba(45, 212, 191, 0.12)'
     : tone === 'amber'
-      ? 'rgba(255, 184, 77, 0.10)'
-      : 'rgba(148, 163, 184, 0.10)',
+      ? 'rgba(255, 184, 77, 0.12)'
+      : 'rgba(148, 163, 184, 0.12)',
   color: tone === 'teal'
     ? 'var(--teal, #2dd4bf)'
     : tone === 'amber'
@@ -214,9 +224,6 @@ function shouldRenderField(mode: SettingsMode, fullPath: string, fieldKey: strin
   return !isAdvancedField(fullPath, fieldKey);
 }
 
-// Enum fields rendered as <select> dropdowns instead of text inputs.
-// Key: field name (last segment of path). Value: options array.
-// Empty string option = "inherit / not set".
 const FIELD_HELP_KEYS: Record<string, string> = {
   'agents.defaults.model': 'settings_help_model',
   'agents.defaults.provider': 'settings_help_provider',
@@ -595,7 +602,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           : visibleKeys;
       })()
     : [];
-  // Prepend tool status card for the tools tab
+  
   const quickJumpKeys = activeTab === 'governance'
     ? []
     : activeTab === 'tools'
@@ -630,11 +637,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const renderWorkspaceCard = () => {
     if (!draft?.agents?.defaults?.workspace) return null;
     return (
-      <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ marginBottom: '24px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px', padding: isMobile ? '16px' : '20px' }}>
+        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '12px', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ color: 'var(--purple)' }}>#</span> {t('settings_workspace_readonly_title')}
         </div>
-        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>
+        <div style={{ marginBottom: '12px', padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', overflowWrap: 'anywhere', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }}>
           {draft.agents.defaults.workspace}
         </div>
         {renderNotice(t('settings_workspace_readonly_note'), 'info')}
@@ -666,29 +673,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     ];
 
     return (
-      <div id="setting-group-_tool_status" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '10px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div id="setting-group-_tool_status" style={{ marginBottom: '24px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px', padding: isMobile ? '16px' : '20px' }}>
+        <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', marginBottom: '16px', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ color: 'var(--purple)' }}>#</span> {t('tool_status_title')}
         </div>
         {rows.map((row) => (
-          <div key={row.id} style={{ padding: '10px 0', borderTop: row.id === 'browser' ? 'none' : '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>{row.title}</div>
+          <div key={row.id} style={{ padding: '12px 0', borderTop: row.id === 'browser' ? 'none' : '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', fontWeight: 500 }}>{row.title}</div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <span style={{ padding: '2px 6px', borderRadius: '999px', fontFamily: 'var(--font-mono)', fontSize: '10px', background: row.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: row.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '15px', background: row.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: row.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
                   {row.enabled ? t('tool_status_enabled') : t('tool_status_disabled')}
                 </span>
-                <span style={{ padding: '2px 6px', borderRadius: '999px', fontFamily: 'var(--font-mono)', fontSize: '10px', background: row.installed ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 68, 68, 0.12)', color: row.installed ? 'var(--success)' : 'var(--error)', border: '1px solid var(--border)' }}>
+                <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '15px', background: row.installed ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 68, 68, 0.12)', color: row.installed ? 'var(--success)' : 'var(--error)', border: '1px solid var(--border)' }}>
                   {row.installed ? t('tool_status_installed') : t('tool_status_missing')}
                 </span>
               </div>
             </div>
             {row.installed && row.binary ? (
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
-                {t('tool_status_binary_label')}: {row.binary}
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', overflowWrap: 'anywhere', padding: '8px', background: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                &gt; {row.binary}
               </div>
             ) : row.warning ? (
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--error)' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--error)', padding: '8px', background: 'rgba(255, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.2)' }}>
                 {t('tool_status_missing_note')}
               </div>
             ) : null}
@@ -786,28 +793,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!hasPairingState && !shouldExplainStaticAllowlist) return null;
 
     return (
-      <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '6px', border: '1px solid rgba(45, 212, 191, 0.18)', background: 'rgba(45, 212, 191, 0.08)' }}>
-        <div style={{ fontSize: '11px', color: 'var(--teal)', marginBottom: '8px', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>
-          {t('channel_paired_users_title')}
+      <div style={{ marginBottom: '16px', padding: '16px', borderRadius: '8px', border: '1px solid rgba(45, 212, 191, 0.2)', background: 'rgba(45, 212, 191, 0.05)' }}>
+        <div style={{ fontSize: '15px', color: 'var(--teal)', marginBottom: '12px', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>🔐</span> {t('channel_paired_users_title')}
         </div>
-        {typeof runtime.owner === 'string' && runtime.owner ? (
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '6px' }}>
-            {t('channel_runtime_owner')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{runtime.owner}</span>
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {typeof runtime.owner === 'string' && runtime.owner ? (
+            <div style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
+              {t('channel_runtime_owner')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px' }}>{runtime.owner}</span>
+            </div>
+          ) : null}
+          <div style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
+            {t('channel_runtime_approved')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{typeof runtime.approved_count === 'number' ? runtime.approved_count : 0}</span>
           </div>
-        ) : null}
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          {t('channel_runtime_approved')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{typeof runtime.approved_count === 'number' ? runtime.approved_count : 0}</span>
-        </div>
-        {typeof runtime.pending_count === 'number' && runtime.pending_count > 0 ? (
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            {t('channel_runtime_pending')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{runtime.pending_count}</span>
+          {typeof runtime.pending_count === 'number' && runtime.pending_count > 0 ? (
+            <div style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
+              {t('channel_runtime_pending')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{runtime.pending_count}</span>
+            </div>
+          ) : null}
+          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            {t('channel_paired_users_preview')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{renderRuntimeList(runtime.approved_preview)}</span>
           </div>
-        ) : null}
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: '6px' }}>
-          {t('channel_paired_users_preview')}: <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{renderRuntimeList(runtime.approved_preview)}</span>
         </div>
         {shouldExplainStaticAllowlist ? (
-          <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed rgba(45, 212, 191, 0.2)', fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
             {t('channel_allow_from_static_note')}
           </div>
         ) : null}
@@ -852,10 +861,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (Array.isArray(v)) {
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
-            <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '6px', fontFamily: 'var(--font-ui)' }}>{displayLabel(k)}</label>
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
+            <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'} onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'} />
           </div>
         );
       }
@@ -870,20 +879,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           const groupedEntries = LEMONDATA_PROVIDER_KEYS.map((providerKey) => [providerKey, providersRoot[providerKey]] as const)
             .filter(([, value]) => isGroup(value));
           return (
-            <div id="setting-group-lemondata_gateway" key="lemondata_gateway" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-              <div style={{ marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-                <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', overflowWrap: 'anywhere' }}>
+            <div id="setting-group-lemondata_gateway" key="lemondata_gateway" style={{ marginBottom: '24px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px', padding: isMobile ? '16px' : '24px' }}>
+              <div style={{ marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+                <div style={{ fontSize: isMobile ? '14px' : '16px', color: 'var(--accent)', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '10px', overflowWrap: 'anywhere' }}>
                   <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel('lemondata_gateway')}
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
+                <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
                   {t('providers_lemondata_gateway_note')}
                 </div>
               </div>
-              <div style={{ display: 'grid', gap: '16px' }}>
+              <div style={{ display: 'grid', gap: '20px' }}>
                 {groupedEntries.map(([providerKey, providerValue]) => (
-                  <div key={providerKey} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '12px', background: 'var(--bg-primary)' }}>
-                    <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '10px' }}>
-                      {displayLabel(providerKey)}
+                  <div key={providerKey} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '16px', background: 'var(--bg-primary)' }}>
+                    <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ color: 'var(--teal)' }}>●</span> {displayLabel(providerKey)}
                     </div>
                     {renderFields(providerValue as Record<string, any>, ['providers', providerKey])}
                   </div>
@@ -908,13 +917,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }
 
         return (
-          <div id={`setting-group-${displayKey}`} data-setting-path={cPath.join('.')} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
-            <div style={{ marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-              <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', overflowWrap: 'anywhere' }}>
+          <div id={`setting-group-${displayKey}`} data-setting-path={cPath.join('.')} key={displayKey} style={{ marginBottom: '24px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px', padding: isMobile ? '16px' : '24px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+            <div style={{ marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <div style={{ fontSize: isMobile ? '14px' : '16px', color: 'var(--accent)', fontFamily: 'var(--font-display)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '10px', overflowWrap: 'anywhere' }}>
                 <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel(displayKey)}
               </div>
               {path[0] === 'channels' && getChannelBadges(displayKey).length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
                   {getChannelBadges(displayKey).map((badge) => (
                     <span key={`${displayKey}-${badge.label}`} style={badgeStyle(badge.tone)}>
                       {badge.label}
@@ -946,29 +955,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (typeof v === 'boolean') {
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={v} onChange={(e) => handleChange(currentPath, (e.target as HTMLInputElement).checked)} />
-              <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-            </div>
-            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px', padding: '12px 16px', background: 'var(--bg-primary)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={v} onChange={(e) => handleChange(currentPath, (e.target as HTMLInputElement).checked)} style={{ width: '16px', height: '16px', accentColor: 'var(--accent)' }} />
+              <span style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontWeight: 500 }}>{displayLabel(k)}</span>
+            </label>
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.5, marginLeft: '26px' }}>{getFieldHelp(fullPath)}</div>}
           </div>
         );
       }
 
       if (typeof v === 'number') {
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
-            {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
-            <input type="number" placeholder={getFieldPlaceholder(fullPath)} value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '6px', fontFamily: 'var(--font-ui)' }}>{displayLabel(k)}</label>
+            {getFieldHelp(fullPath) && <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
+            <input type="number" placeholder={getFieldPlaceholder(fullPath)} value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'} onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'} />
           </div>
         );
       }
 
       const help = getFieldHelp(fullPath);
-      const commonLabel = <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>;
-      const helpText = help ? <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{help}</div> : null;
+      const commonLabel = <label style={{ display: 'block', fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '6px', fontFamily: 'var(--font-ui)' }}>{displayLabel(k)}</label>;
+      const helpText = help ? <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.5 }}>{help}</div> : null;
 
       // Auto-generated readonly fields with copy button (Feishu encrypt_key, verification_token)
       if ((k === 'encrypt_key' || k === 'verification_token') && path.includes('feishu')) {
@@ -976,16 +985,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         const fieldLabel = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
         const feishuTarget = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{fieldLabel}</label>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '6px', fontFamily: 'var(--font-ui)' }}>{fieldLabel}</label>
+            <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.5 }}>
               {t('feishu_token_help').replace('{target}', feishuTarget)}
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input type="text" readOnly value={val} style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', opacity: 0.8 }} />
+              <input type="text" readOnly value={val} style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', opacity: 0.8, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} />
               <button
                 onClick={() => { void copyValue(fullPath, val); }}
-                style={{ padding: '8px 12px', background: copiedField === fullPath ? 'rgba(45, 212, 191, 0.14)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', color: copiedField === fullPath ? 'var(--teal)' : 'var(--accent)', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                style={{ padding: '10px 16px', background: copiedField === fullPath ? 'rgba(45, 212, 191, 0.14)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', color: copiedField === fullPath ? 'var(--teal)' : 'var(--accent)', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
               >
                 {copiedField === fullPath ? t('copied') : t('copy')}
               </button>
@@ -996,10 +1005,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (fullPath === 'agents.defaults.system_prompt') {
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px' }}>
             {commonLabel}
             {helpText}
-            <textarea value={String(v ?? '')} placeholder={getFieldPlaceholder(fullPath)} onInput={(e) => handleChange(currentPath, (e.target as HTMLTextAreaElement).value)} style={{ width: '100%', minHeight: '120px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', resize: 'vertical' }} />
+            <textarea value={String(v ?? '')} placeholder={getFieldPlaceholder(fullPath)} onInput={(e) => handleChange(currentPath, (e.target as HTMLTextAreaElement).value)} style={{ width: '100%', minHeight: '160px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '12px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', resize: 'vertical', transition: 'border-color 0.2s', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'} onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'} />
           </div>
         );
       }
@@ -1008,10 +1017,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const selectOpts = getSelectOptions(k);
       if (selectOpts && (typeof v === 'string' || v === null || v === undefined)) {
         return (
-          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '16px' }}>
             {commonLabel}
             {helpText}
-            <select value={String(v ?? '')} onChange={(e) => handleChange(currentPath, (e.target as HTMLSelectElement).value || null)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', cursor: 'pointer', appearance: 'auto' }}>
+            <select value={String(v ?? '')} onChange={(e) => handleChange(currentPath, (e.target as HTMLSelectElement).value || null)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', cursor: 'pointer', appearance: 'auto', transition: 'border-color 0.2s', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'} onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}>
               {selectOpts.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
           </div>
@@ -1019,114 +1028,127 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       }
 
       return (
-        <div key={fullPath} style={{ marginBottom: '12px' }}>
+        <div key={fullPath} style={{ marginBottom: '16px' }}>
           {commonLabel}
           {helpText}
-          <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={String(v ?? '')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+          <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={String(v ?? '')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 14px', borderRadius: '8px', fontFamily: 'var(--font-ui)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }} onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'} onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'} />
         </div>
       );
     });
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center', padding: isMobile ? '0' : '24px', backdropFilter: 'blur(4px)' }}>
-      <div style={{ width: '100%', maxWidth: isMobile ? '100%' : '1100px', height: isMobile ? '100dvh' : '85vh', background: 'var(--bg-secondary)', border: isMobile ? 'none' : '1px solid var(--border)', borderRadius: isMobile ? '0' : '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: isMobile ? 'none' : '0 20px 60px rgba(0,0,0,0.6)' }}>
-        <div style={{ padding: isMobile ? '14px 16px' : '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '14px' : '16px', color: 'var(--text-primary)', letterSpacing: '1px', minWidth: 0 }}><span style={{ color: 'var(--purple)' }}>//</span> {t('settings_title')}</div>
-          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>×</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center', padding: isMobile ? '0' : '32px', backdropFilter: 'blur(8px)', animation: 'fadeIn 0.2s ease-out' }}>
+      <div style={{ width: '100%', maxWidth: isMobile ? '100%' : '1200px', height: isMobile ? '100dvh' : '85vh', background: 'var(--bg-primary)', border: isMobile ? 'none' : '1px solid var(--border)', borderRadius: isMobile ? '0' : '16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: isMobile ? 'none' : '0 24px 80px rgba(0,0,0,0.5)', position: 'relative' }}>
+        
+        {/* Header */}
+        <div style={{ padding: isMobile ? '16px' : '20px 32px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-secondary)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '16px' }}>⚙</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: isMobile ? '16px' : '18px', color: 'var(--text-primary)', fontWeight: 'bold', letterSpacing: '0.5px' }}>{t('settings_title')}</div>
+          </div>
+          <button onClick={handleClose} style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '50%', color: 'var(--text-secondary)', fontSize: '24px', cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' }} onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-secondary)' }}>×</button>
         </div>
 
+        {/* Main Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: isMobile ? 'column' : 'row' }}>
-          <div style={{ width: isMobile ? '100%' : '200px', minWidth: isMobile ? '100%' : '200px', maxWidth: '100%', borderRight: isMobile ? 'none' : '1px solid var(--border)', borderBottom: isMobile ? '1px solid var(--border)' : 'none', display: 'flex', flexDirection: isMobile ? 'row' : 'column', gap: '6px', padding: isMobile ? '12px 12px 8px' : '16px', overflowX: isMobile ? 'auto' : 'visible', overflowY: 'hidden', scrollbarWidth: 'none' }}>
+          
+          {/* Sidebar Tabs */}
+          <div style={{ width: isMobile ? '100%' : '260px', minWidth: isMobile ? '100%' : '260px', borderRight: isMobile ? 'none' : '1px solid var(--border)', borderBottom: isMobile ? '1px solid var(--border)' : 'none', background: 'var(--bg-secondary)', display: 'flex', flexDirection: isMobile ? 'row' : 'column', gap: '4px', padding: isMobile ? '12px' : '24px 16px', overflowX: isMobile ? 'auto' : 'visible', overflowY: isMobile ? 'hidden' : 'auto', scrollbarWidth: 'none' }}>
             {TABS.map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{ textAlign: 'left', padding: '10px 12px', minWidth: isMobile ? 'max-content' : 'auto', background: activeTab === tab ? 'var(--bg-tertiary)' : 'transparent', color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)', border: '1px solid', borderColor: activeTab === tab ? 'var(--border)' : 'transparent', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: isMobile ? '11px' : '12px', textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s', flexShrink: 0, whiteSpace: 'nowrap' }}>
-                {(t as any)(`tab_${tab}`)}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left', padding: '12px 16px', minWidth: isMobile ? 'max-content' : 'auto', background: activeTab === tab.id ? 'var(--bg-primary)' : 'transparent', color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-secondary)', border: '1px solid', borderColor: activeTab === tab.id ? 'var(--border)' : 'transparent', borderRadius: '10px', fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: activeTab === tab.id ? 600 : 500, cursor: 'pointer', transition: 'all 0.2s', flexShrink: 0, boxShadow: activeTab === tab.id ? '0 4px 12px rgba(0,0,0,0.1)' : 'none' }} onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.background = 'var(--bg-tertiary)' }} onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.background = 'transparent' }}>
+                <span style={{ fontSize: '16px', opacity: activeTab === tab.id ? 1 : 0.6 }}>{tab.icon}</span>
+                {(t as any)(`tab_${tab.id}`)}
               </button>
             ))}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, padding: isMobile ? '16px' : '32px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: isMobile ? '0' : '24px', alignItems: 'flex-start' }}>
+          {/* Content Area */}
+          <div style={{ flex: 1, minWidth: 0, padding: isMobile ? '20px' : '40px', overflowY: 'auto', background: 'var(--bg-primary)', display: 'flex', gap: isMobile ? '0' : '32px', alignItems: 'flex-start', position: 'relative' }}>
             {activeTab === 'soul' ? (
               <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}><SoulEditor /></div>
-            ) : !draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t('loading_configs')}</div> : (
+            ) : !draft ? <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', display: 'flex', alignItems: 'center', gap: '12px' }}><span class="pulse-dot"></span> {t('loading_configs')}</div> : (
               <>
-                <div style={{ flex: 1, minWidth: 0, animation: 'fadeIn 0.3s ease-out' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '18px' : '20px', color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'capitalize', overflowWrap: 'anywhere' }}>
+                <div style={{ flex: 1, minWidth: 0, animation: 'slideUpFade 0.3s ease-out' }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: isMobile ? '20px' : '24px', color: 'var(--text-primary)', marginBottom: '12px', fontWeight: 'bold', letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>
                     {(t as any)(`tab_${activeTab}`)}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: isMobile ? '20px' : '32px' }}>{settingsDesc}</div>
+                  <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: isMobile ? '24px' : '40px', lineHeight: 1.6, maxWidth: '800px' }}>{settingsDesc}</div>
+                  
                   {settingsMode === 'basic' && settingsTasks.length > 0 && (
-                    <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
-                        // {t('settings_tasks_title')}
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px' }}>
+                    <div style={{ display: 'grid', gap: '12px', marginBottom: isMobile ? '24px' : '32px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
                       {settingsTasks.map((task) => (
                         <button
                           key={task.key}
                           onClick={task.action}
-                          style={{ textAlign: 'left', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', display: 'grid', gap: '4px' }}
+                          style={{ textAlign: 'left', padding: '16px 20px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', display: 'grid', gap: '8px', transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)' }}
                         >
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{task.title}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{task.help}</span>
+                          <span style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--accent)', fontWeight: 'bold' }}>→ {task.title}</span>
+                          <span style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{task.help}</span>
                         </button>
                       ))}
                       </div>
                     </div>
                   )}
+
                   {activeTab !== 'soul' && activeTab !== 'governance' && activeTab !== 'skills' && (
-                    <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <div style={{ display: 'inline-flex', gap: '6px', padding: '4px', borderRadius: '999px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-                          {([
-                            ['basic', t('settings_mode_basic')],
-                            ['advanced', t('settings_mode_advanced')],
-                          ] as Array<[SettingsMode, string]>).map(([mode, label]) => (
-                            <button
-                              key={mode}
-                              onClick={() => setSettingsMode(mode)}
-                              style={{
-                                padding: '6px 10px',
-                                borderRadius: '999px',
-                                border: '1px solid',
-                                borderColor: settingsMode === mode ? 'var(--accent)' : 'transparent',
-                                background: settingsMode === mode ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
-                                color: settingsMode === mode ? 'var(--accent)' : 'var(--text-secondary)',
-                                fontFamily: 'var(--font-mono)',
-                                fontSize: '10px',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isMobile ? '20px' : '28px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: '15px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
+                        {settingsMode === 'basic' ? (t as any)('settings_viewing_basic') : (t as any)('settings_viewing_advanced')}
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                        {t('settings_mode_help')}
+                      <div style={{ display: 'inline-flex', padding: '4px', borderRadius: '999px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }}>
+                        {([
+                          ['basic', t('settings_mode_basic')],
+                          ['advanced', t('settings_mode_advanced')],
+                        ] as Array<[SettingsMode, string]>).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            onClick={() => setSettingsMode(mode)}
+                            style={{
+                              padding: '6px 16px',
+                              borderRadius: '999px',
+                              border: 'none',
+                              background: settingsMode === mode ? 'var(--bg-primary)' : 'transparent',
+                              color: settingsMode === mode ? 'var(--accent)' : 'var(--text-muted)',
+                              fontFamily: 'var(--font-ui)',
+                              fontSize: '15px',
+                              fontWeight: settingsMode === mode ? 'bold' : 'normal',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              boxShadow: settingsMode === mode ? '0 2px 8px rgba(0,0,0,0.1)' : 'none'
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  {activeTab === 'agents' && settingsMode === 'advanced' && renderWorkspaceCard()}
-                  {activeTab === 'tools' && settingsMode === 'advanced' && renderToolStatusCard()}
-                  {activeTab === 'governance' ? (
-                    <GovernanceTab
-                      configGovernance={draft?.governance || null}
-                      data={governanceData}
-                      loading={governanceLoading}
-                      busy={governanceBusy}
-                      error={governanceError}
-                      onToggleGlobalKillSwitch={handleToggleGlobalKillSwitch}
-                    />
-                  ) : activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
+                  <div style={{ maxWidth: '800px' }}>
+                    {activeTab === 'agents' && settingsMode === 'advanced' && renderWorkspaceCard()}
+                    {activeTab === 'tools' && settingsMode === 'advanced' && renderToolStatusCard()}
+                    {activeTab === 'governance' ? (
+                      <GovernanceTab
+                        configGovernance={draft?.governance || null}
+                        data={governanceData}
+                        loading={governanceLoading}
+                        busy={governanceBusy}
+                        error={governanceError}
+                        onToggleGlobalKillSwitch={handleToggleGlobalKillSwitch}
+                      />
+                    ) : activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
+                  </div>
                 </div>
 
+                {/* Right Side Quick Jump Mini-map */}
                 {!isMobile && settingsMode === 'advanced' && activeTab !== 'skills' && activeTab !== 'governance' && quickJumpKeys.length > 0 && (
-                  <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
+                  <div style={{ width: '200px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '8px', animation: 'fadeIn 0.3s ease-out', borderLeft: '1px solid var(--border)', paddingLeft: '24px' }}>
+                    <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '12px', letterSpacing: '1.5px', textTransform: 'uppercase' }}>ON THIS PAGE</div>
                     {quickJumpKeys.map((key) => {
-                      // Special cards rendered outside contentData
                       const isSpecial = key.startsWith('_');
                       const isEnabled = isSpecial ? undefined : contentData?.[key]?.enabled;
                       let displayKey = key;
@@ -1144,8 +1166,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       }
                       const label = key === '_tool_status' ? t('tool_status_title') : displayLabel(displayKey);
                       return (
-                        <button key={key} onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '6px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-primary)'), background: isEnabled === false ? 'rgba(255, 68, 68, 0.1)' : (isEnabled ? 'rgba(76, 175, 80, 0.1)' : 'var(--bg-secondary)'), border: '1px solid', borderColor: isEnabled === false ? 'rgba(255, 68, 68, 0.2)' : (isEnabled ? 'rgba(76, 175, 80, 0.2)' : 'var(--border)'), transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.2)'} onMouseLeave={(e) => e.currentTarget.style.filter = 'none'}>
-                          <span style={{ opacity: 0.5 }}>#</span> {label}
+                        <button key={key} onClick={() => document.getElementById(`setting-group-${displayKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', padding: '8px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-secondary)'), background: 'transparent', border: '1px solid transparent', transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}>
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isEnabled === false ? 'var(--error)' : (isEnabled ? 'var(--success)' : 'var(--text-muted)') }}></span> {label}
                         </button>
                       );
                     })}
@@ -1156,15 +1178,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div style={{ padding: isMobile ? '12px 16px calc(12px + env(safe-area-inset-bottom))' : '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '12px', background: 'var(--bg-secondary)', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' }}>
-          <div style={{ flex: isMobile ? '0 0 auto' : 1, display: 'flex', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', minHeight: '16px' }}>
-            {changedPaths.size > 0 && <span style={{ color: 'var(--accent)' }}>● {changedPaths.size} {t('unsaved_changes')}</span>}
-            {saveError && <span style={{ color: 'var(--error)', marginLeft: changedPaths.size > 0 ? '8px' : '0' }}>{saveError}</span>}
+        {/* Footer */}
+        <div style={{ padding: isMobile ? '16px' : '20px 32px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', background: 'var(--bg-secondary)', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: '16px', flexShrink: 0 }}>
+          <div style={{ flex: isMobile ? '0 0 auto' : 1, display: 'flex', alignItems: 'center', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', minHeight: '20px' }}>
+            {changedPaths.size > 0 && <span style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '6px' }}><span class="pulse-dot" style={{ background: 'var(--accent)' }}></span> {changedPaths.size} {t('unsaved_changes')}</span>}
+            {saveError && <span style={{ color: 'var(--error)', marginLeft: changedPaths.size > 0 ? '16px' : '0', background: 'rgba(255, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255, 68, 68, 0.2)' }}>{saveError}</span>}
           </div>
           <div style={{ display: 'flex', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
-            <button onClick={handleClose} style={{ padding: '10px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_cancel')}</button>
+            <button onClick={handleClose} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 500, flex: isMobile ? 1 : '0 0 auto', transition: 'all 0.2s' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{t('btn_cancel')}</button>
             {activeTab !== 'governance' ? (
-              <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '10px 24px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 'bold', flex: isMobile ? 1 : '0 0 auto' }}>{t('btn_save_apply')}</button>
+              <button onClick={handleSave} disabled={changedPaths.size === 0} style={{ padding: '12px 32px', background: changedPaths.size === 0 ? 'var(--bg-tertiary)' : 'var(--accent)', border: 'none', borderRadius: '8px', color: changedPaths.size === 0 ? 'var(--text-muted)' : '#fff', cursor: changedPaths.size === 0 ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', flex: isMobile ? 1 : '0 0 auto', transition: 'all 0.2s', boxShadow: changedPaths.size === 0 ? 'none' : '0 8px 16px rgba(255, 107, 53, 0.2)' }} onMouseEnter={e => { if (changedPaths.size > 0) e.currentTarget.style.transform = 'translateY(-1px)' }} onMouseLeave={e => { if (changedPaths.size > 0) e.currentTarget.style.transform = 'translateY(0)' }}>{t('btn_save_apply')}</button>
             ) : null}
           </div>
         </div>

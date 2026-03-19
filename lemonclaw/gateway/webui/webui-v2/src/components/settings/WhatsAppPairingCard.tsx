@@ -126,22 +126,22 @@ export function WhatsAppPairingCard({ enabled, dirty }: { enabled: boolean; dirt
 
   return (
     <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed var(--border)' }}>
-      <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '6px' }}>
+      <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '6px' }}>
         {t('whatsapp_pairing_title')}
       </div>
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '10px' }}>
+      <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '10px' }}>
         {t('whatsapp_pairing_desc')}
       </div>
 
       {summary && (
-        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '11px', lineHeight: 1.6 }}>
+        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', lineHeight: 1.6 }}>
           <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{t('whatsapp_pairing_account')}</div>
           <div>{summary}</div>
         </div>
       )}
 
       {status === 'connected' && (
-        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(76, 175, 80, 0.28)', background: 'rgba(76, 175, 80, 0.08)', color: 'var(--success)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(76, 175, 80, 0.28)', background: 'rgba(76, 175, 80, 0.08)', color: 'var(--success)', fontFamily: 'var(--font-ui)', fontSize: '15px' }}>
           {t('whatsapp_pairing_connected')}
         </div>
       )}
@@ -153,19 +153,19 @@ export function WhatsAppPairingCard({ enabled, dirty }: { enabled: boolean; dirt
       )}
 
       {error && (
-        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+        <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-ui)', fontSize: '15px' }}>
           {error}
         </div>
       )}
 
       {!error && status !== 'connected' && status !== 'idle' && status !== 'qr' && status !== 'disconnected' && (
-        <div style={{ marginBottom: '10px', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ marginBottom: '10px', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
           {status === 'starting' ? t('whatsapp_pairing_loading') : t('whatsapp_pairing_waiting')}
         </div>
       )}
 
       {disabledReason && (
-        <div style={{ marginBottom: '10px', fontSize: '11px', color: 'var(--warning, #ffb84d)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ marginBottom: '10px', fontSize: '15px', color: 'var(--warning, #ffb84d)', fontFamily: 'var(--font-ui)' }}>
           {disabledReason}
         </div>
       )}
@@ -181,8 +181,8 @@ export function WhatsAppPairingCard({ enabled, dirty }: { enabled: boolean; dirt
             border: 'none',
             borderRadius: '6px',
             cursor: Boolean(disabledReason) || loading ? 'not-allowed' : 'pointer',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
+            fontFamily: 'var(--font-ui)',
+            fontSize: '15px',
           }}
         >
           {loading ? t('whatsapp_pairing_loading') : (qrImage ? t('whatsapp_pairing_refresh') : t('whatsapp_pairing_start'))}
@@ -198,8 +198,8 @@ export function WhatsAppPairingCard({ enabled, dirty }: { enabled: boolean; dirt
             border: '1px solid var(--border)',
             borderRadius: '6px',
             cursor: Boolean(disabledReason) || loading || status !== 'connected' ? 'not-allowed' : 'pointer',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
+            fontFamily: 'var(--font-ui)',
+            fontSize: '15px',
           }}
         >
           {t('whatsapp_pairing_disconnect')}
@@ -215,8 +215,8 @@ export function WhatsAppPairingCard({ enabled, dirty }: { enabled: boolean; dirt
             border: '1px solid var(--border)',
             borderRadius: '6px',
             cursor: Boolean(disabledReason) || loading ? 'not-allowed' : 'pointer',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
+            fontFamily: 'var(--font-ui)',
+            fontSize: '15px',
           }}
         >
           {t('whatsapp_pairing_repair')}

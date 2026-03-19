@@ -40,13 +40,13 @@ function ProfileCard({
       <div style={S.headerRow}>
         <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} style={S.headerButton}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
+            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
             <span style={S.tag('green')}>{profile.host || 'postgres'}</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {(profile.dbname || t('postgres_profiles_dbname_placeholder'))}
             </span>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '15px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
         </button>
         <button type="button" style={S.deleteBtn} onClick={(e) => { e.stopPropagation(); onDelete(); }} aria-label={t('postgres_profiles_delete')} title={t('postgres_profiles_delete')}>
           ×
@@ -139,12 +139,12 @@ export function PostgresProfilesEditor({ profiles, onChange }: Props) {
   return (
     <div style={{ marginBottom: '12px' }}>
       <div style={{ marginBottom: '10px', padding: '12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('postgres_profiles_title')}</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('postgres_profiles_note')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('postgres_profiles_title')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('postgres_profiles_note')}</div>
       </div>
 
       {entries.length === 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
           {t('postgres_profiles_empty')}
         </div>
       )}
@@ -175,7 +175,7 @@ export function PostgresProfilesEditor({ profiles, onChange }: Props) {
           onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
           onKeyDown={(e) => { if (e.key === 'Enter') addProfile(); }}
         />
-        <button type="button" onClick={addProfile} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('postgres_profiles_add')}</button>
+        <button type="button" onClick={addProfile} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('postgres_profiles_add')}</button>
       </div>
     </div>
   );

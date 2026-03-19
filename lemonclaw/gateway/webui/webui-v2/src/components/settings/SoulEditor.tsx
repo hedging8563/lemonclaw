@@ -37,20 +37,20 @@ export function SoulEditor() {
   };
 
   if (content === null) {
-    return <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{t('loading_configs')}</div>;
+    return <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', fontSize: '15px' }}>{t('loading_configs')}</div>;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--text-primary)', marginBottom: '12px', fontWeight: 'bold', letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>
             {t('tab_soul')}
           </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', marginBottom: '6px' }}>
             SOUL.md
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>
             {t('soul_desc')}
           </div>
         </div>
@@ -64,8 +64,8 @@ export function SoulEditor() {
             borderRadius: '6px',
             color: '#fff',
             cursor: dirty ? 'pointer' : 'not-allowed',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
+            fontFamily: 'var(--font-ui)',
+            fontSize: '15px',
             fontWeight: 'bold',
             opacity: saving ? 0.6 : 1,
             transition: 'all 0.2s',
@@ -91,8 +91,8 @@ export function SoulEditor() {
           color: 'var(--text-primary)',
           padding: '16px',
           borderRadius: '6px',
-          fontFamily: 'var(--font-mono)',
-          fontSize: '13px',
+          fontFamily: 'var(--font-ui)',
+          fontSize: '15px',
           lineHeight: '1.6',
           resize: 'vertical',
           outline: 'none',
@@ -103,7 +103,7 @@ export function SoulEditor() {
       />
 
       {dirty && (
-        <div style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ fontSize: '15px', color: 'var(--accent)', fontFamily: 'var(--font-ui)' }}>
           ● unsaved changes
         </div>
       )}

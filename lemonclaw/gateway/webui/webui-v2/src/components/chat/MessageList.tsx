@@ -15,6 +15,7 @@ import 'highlight.js/styles/github-dark.css';
 import { marked } from 'marked';
 import { activeSessionKey } from '../../stores/sessions';
 import { inputText, isLoadingHistory, isLoadingMore, isStreaming, loadHistory, loadMoreHistory, hasMoreHistory, messages } from '../../stores/chat';
+import { sessionTasks, taskActionBusy, taskDetails, triggerSafeResume, triggerManualResume, triggerTaskRecheck } from '../../stores/tasks';
 import type { UIBlock } from '../../models/messages';
 import { t } from '../../stores/i18n';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -109,8 +110,8 @@ function MsgActions({ msg }: { msg: any }) {
 
   return (
     <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '999px', padding: '4px 8px', zIndex: 10, boxShadow: '0 8px 18px rgba(0,0,0,0.24)' }} className="msg-actions-bar">
-      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
-      {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
+      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '15px', cursor: 'pointer', fontFamily: 'var(--font-ui)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
+      {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '15px', cursor: 'pointer', fontFamily: 'var(--font-ui)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
   );
 }
@@ -169,7 +170,7 @@ export function MessageList() {
   if (isLoadingHistory.value) {
     return (
       <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{t('loading_chat_history')}</div>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '15px', fontFamily: 'var(--font-ui)' }}>{t('loading_chat_history')}</div>
         <div class="skeleton-msg user"></div>
         <div class="skeleton-msg assistant"></div>
         <div class="skeleton-msg assistant long"></div>
@@ -185,18 +186,18 @@ export function MessageList() {
     ];
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '20px 16px' : '32px' }}>
-        <div style={{ width: '100%', maxWidth: '680px', background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, var(--bg-secondary) 18%)', border: '1px solid var(--border)', borderRadius: '20px', padding: isMobile ? '20px' : '28px', boxShadow: '0 22px 50px rgba(0,0,0,0.2)' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '999px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '14px' }}>
-            <span>💬</span>
-            <span>LemonClaw</span>
+        <div style={{ width: '100%', maxWidth: '640px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '24px', padding: isMobile ? '24px' : '40px', boxShadow: '0 24px 64px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.02)' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '20px' }}>
+            <span style={{ color: 'var(--purple)' }}>◆</span>
+            <span>LemonClaw Gateway</span>
           </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '18px' : '20px', color: 'var(--text-primary)', marginBottom: '10px', lineHeight: 1.35 }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: isMobile ? '20px' : '24px', color: 'var(--text-primary)', marginBottom: '12px', lineHeight: 1.35, fontWeight: 'bold' }}>
             {t('chat_empty_title')}
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '18px', maxWidth: '560px' }}>
+          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '32px', maxWidth: '560px' }}>
             {t('chat_empty_desc')}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
             {suggestions.map((item) => (
               <button
                 key={item}
@@ -208,19 +209,24 @@ export function MessageList() {
                   });
                 }}
                 style={{
-                  padding: '12px 14px',
-                  borderRadius: '14px',
+                  padding: '14px 16px',
+                  borderRadius: '16px',
                   border: '1px solid var(--border)',
                   background: 'var(--bg-primary)',
                   color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: '15px',
                   cursor: 'pointer',
                   textAlign: 'left',
                   lineHeight: 1.45,
-                  minHeight: isMobile ? '48px' : '68px',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)',
+                  minHeight: isMobile ? '56px' : '80px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'flex-start'
                 }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)' }}
               >
                 {item}
               </button>
@@ -249,7 +255,7 @@ export function MessageList() {
             color: 'var(--text-primary)',
             zIndex: 100,
             cursor: 'pointer',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-ui)',
             fontSize: isMobile ? '11px' : '12px',
             lineHeight: 1.2,
             whiteSpace: 'nowrap',
@@ -287,16 +293,20 @@ export function MessageList() {
             }}>
               <MsgActions msg={msg} />
 
-              {msg.blocks.filter((block) => block.type === 'thinking').map((block, bi) => (
-                <ThinkingBlock key={`thinking-${bi}`} content={(block as Extract<UIBlock, { type: 'thinking' }>).text} />
-              ))}
+              {(msg.blocks.filter((b) => b.type === 'thinking' || b.type === 'tool').length > 0) && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                  {msg.blocks.filter((block) => block.type === 'thinking').map((block, bi) => (
+                    <ThinkingBlock key={`thinking-${i}-${bi}`} id={`thinking-${i}-${bi}`} content={(block as Extract<UIBlock, { type: 'thinking' }>).text} />
+                  ))}
 
-              {msg.blocks.filter((block) => block.type === 'tool').map((block, bi) => (
-                <ToolDetail key={`tool-${bi}`} tool={{ state: (block as Extract<UIBlock, { type: 'tool' }>).state, detail: (block as Extract<UIBlock, { type: 'tool' }>).detail, result: (block as Extract<UIBlock, { type: 'tool' }>).result }} />
-              ))}
+                  {msg.blocks.filter((block) => block.type === 'tool').map((block, bi) => (
+                    <ToolDetail key={`tool-${i}-${bi}`} id={`tool-${i}-${bi}`} tool={{ state: (block as Extract<UIBlock, { type: 'tool' }>).state, detail: (block as Extract<UIBlock, { type: 'tool' }>).detail, result: (block as Extract<UIBlock, { type: 'tool' }>).result }} />
+                  ))}
+                </div>
+              )}
 
               {msg.blocks.filter((block) => block.type === 'error').map((block, bi) => (
-                <div key={`error-${bi}`} style={{ margin: '6px 0', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div key={`error-${bi}`} style={{ margin: '6px 0', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', padding: '8px 12px', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {(block as Extract<UIBlock, { type: 'error' }>).text}
                 </div>
               ))}
@@ -309,7 +319,7 @@ export function MessageList() {
                   renderMarkdown={(value) => renderMd(value, isStreaming.value && i === messages.value.length - 1)}
                 />
               ) : (isStreaming.value && i === messages.value.length - 1 && !isUser) ? (
-                <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
+                <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)' }}>
                   <span class="pulse-dot" />
                   {msg.blocks.some((block) => block.type === 'tool' && (block as Extract<UIBlock, { type: 'tool' }>).state === 'running') ? t('processing_tools') : t('generating')}
                 </div>
@@ -317,10 +327,84 @@ export function MessageList() {
             </div>
 
             {isUser && (
-              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0, marginTop: '4px', fontFamily: 'var(--font-mono)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', fontWeight: 600, flexShrink: 0, marginTop: '4px', fontFamily: 'var(--font-ui)', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
                 U
               </div>
             )}
+          </div>
+        );
+      })}
+
+      {sessionTasks.value.filter(t => !['completed', 'abandoned'].includes(String(t.status || ''))).map(task => {
+        const detail = taskDetails.value[task.task_id];
+        const busy = taskActionBusy.value[task.task_id];
+        const candidate = detail?.candidate;
+        const state = task.display_state;
+        const isResumeLive = ['resume_requested', 'resume_queued', 'resume_running'].includes(state?.key || '');
+        const canRunSafeResume = Boolean(candidate?.safe_to_execute);
+        const canRecheck = ['waiting', 'verifying'].includes(task.status || '') && (!candidate || candidate?.recommended_action === 'recheck');
+        const showRetryDispatchCta = state?.key === 'resume_dispatch_failed' && canRunSafeResume && !isResumeLive;
+        const showManualResumeCta = state?.key === 'resume_manual_only' && !isResumeLive;
+        const tone = state?.tone === 'error' ? 'var(--error)' : state?.tone === 'success' ? 'var(--success)' : state?.tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--accent)';
+        const bgTone = state?.tone === 'error' ? 'rgba(255, 68, 68, 0.08)' : state?.tone === 'success' ? 'rgba(76, 175, 80, 0.08)' : state?.tone === 'warning' ? 'rgba(255, 184, 77, 0.08)' : 'rgba(124, 58, 237, 0.08)';
+        const borderTone = state?.tone === 'error' ? 'rgba(255, 68, 68, 0.28)' : state?.tone === 'success' ? 'rgba(76, 175, 80, 0.28)' : state?.tone === 'warning' ? 'rgba(255, 184, 77, 0.28)' : 'rgba(124, 58, 237, 0.28)';
+
+        if (!showRetryDispatchCta && !showManualResumeCta && !canRunSafeResume && !canRecheck && !isResumeLive) {
+          return null; // Not an active intervention card
+        }
+
+        return (
+          <div key={`rescue-${task.task_id}`} style={{ maxWidth: '680px', width: '100%', margin: '8px auto', border: `1px solid ${borderTone}`, background: bgTone, borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tone, fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              <span>🛡️</span>
+              <span>{(t as any)('task_intervention_required') || 'Intervention Required'}</span>
+            </div>
+            
+            <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              {task.goal || (t as any)('task_intervention_desc')}
+            </div>
+
+            {(showRetryDispatchCta || showManualResumeCta) && (
+              <div style={{ fontSize: '15px', color: tone, fontFamily: 'var(--font-ui)', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+              {showManualResumeCta && (
+                <button
+                  onClick={() => triggerManualResume(task.task_id)}
+                  disabled={!!busy}
+                  style={{ padding: '8px 16px', background: 'transparent', border: `1px solid ${tone}`, borderRadius: '8px', color: tone, fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: busy ? 'wait' : 'pointer', fontWeight: 600, opacity: busy ? 0.7 : 1, transition: 'all 0.2s' }}
+                  onMouseEnter={e => e.currentTarget.style.background = borderTone}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  {busy === 'manual_resume' ? t('task_action_running') : t('task_action_queue_manual_resume')}
+                </button>
+              )}
+              {canRunSafeResume && !isResumeLive && (
+                <button
+                  onClick={() => triggerSafeResume(task.task_id)}
+                  disabled={!!busy}
+                  style={{ padding: '8px 16px', background: tone, border: `1px solid ${tone}`, borderRadius: '8px', color: '#fff', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: busy ? 'wait' : 'pointer', fontWeight: 600, opacity: busy ? 0.7 : 1, transition: 'all 0.2s', boxShadow: `0 4px 12px ${borderTone}` }}
+                  onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.1)'}
+                  onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                >
+                  {busy === 'resume' ? t('task_action_running') : showRetryDispatchCta ? t('task_action_retry_resume_dispatch') : t('task_action_run_safe_resume')}
+                </button>
+              )}
+              {canRecheck && !canRunSafeResume && !isResumeLive && (
+                <button
+                  onClick={() => triggerTaskRecheck(task.task_id)}
+                  disabled={!!busy}
+                  style={{ padding: '8px 16px', background: 'transparent', border: `1px solid var(--teal)`, borderRadius: '8px', color: 'var(--teal)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: busy ? 'wait' : 'pointer', fontWeight: 600, opacity: busy ? 0.7 : 1, transition: 'all 0.2s' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(45, 212, 191, 0.1)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  {busy === 'recheck' ? t('task_action_running') : t('task_action_recheck')}
+                </button>
+              )}
+            </div>
           </div>
         );
       })}

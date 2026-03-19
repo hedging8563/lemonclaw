@@ -84,12 +84,12 @@ export function SQLiteProfilesEditor({ profiles, onChange }: Props) {
   return (
     <div style={{ marginBottom: '12px' }}>
       <div style={{ marginBottom: '10px', padding: '12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('sqlite_profiles_title')}</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('sqlite_profiles_note')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('sqlite_profiles_title')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('sqlite_profiles_note')}</div>
       </div>
 
       {entries.length === 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
           {t('sqlite_profiles_empty')}
         </div>
       )}
@@ -120,7 +120,7 @@ export function SQLiteProfilesEditor({ profiles, onChange }: Props) {
           onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
           onKeyDown={(e) => { if (e.key === 'Enter') addProfile(); }}
         />
-        <button type="button" onClick={addProfile} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('sqlite_profiles_add')}</button>
+        <button type="button" onClick={addProfile} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('sqlite_profiles_add')}</button>
       </div>
     </div>
   );

@@ -127,36 +127,36 @@ export function MessageInput() {
     .replace('{total}', String(attachments.value.length));
 
   const composerButton = isStreaming.value ? (
-    <button onClick={abortStream} style={{ background: 'transparent', color: 'var(--error)', border: '1px solid var(--error)', borderRadius: '10px', padding: isMobile ? '0 16px' : '0 20px', minHeight: '44px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 600, width: isMobile ? '100%' : 'auto' }}>
+    <button onClick={abortStream} style={{ background: 'transparent', color: 'var(--error)', border: '1px solid var(--error)', borderRadius: '10px', padding: isMobile ? '0 16px' : '0 20px', minHeight: '44px', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, width: isMobile ? '100%' : 'auto' }}>
       {t('stop')}
     </button>
   ) : (
-    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'var(--bg-primary)' : 'var(--text-primary)', color: disableSend ? 'var(--text-muted)' : 'var(--bg-primary)', border: disableSend ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '16px', padding: isMobile ? '0 16px' : '0 28px', minHeight: '52px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 600, transition: 'all 0.2s' }}>
+    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'var(--bg-tertiary)' : 'var(--text-primary)', color: disableSend ? 'var(--text-primary)' : 'var(--bg-primary)', border: 'none', borderRadius: '12px', padding: isMobile ? '0 16px' : '0 24px', minHeight: '44px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, opacity: 1, width: isMobile ? '100%' : 'auto', transition: 'all 0.2s' }}>
       {t('send')}
     </button>
   );
 
   return (
-    <div style={{ padding: isMobile ? '12px 12px calc(12px + env(safe-area-inset-bottom))' : '16px', borderTop: '1px solid var(--border)', background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, var(--bg-primary) 48%)' }}>
-      <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+    <div style={{ position: 'sticky', bottom: 0, padding: isMobile ? '12px 12px calc(12px + env(safe-area-inset-bottom))' : '16px 32px 24px', background: 'var(--bg-primary)', zIndex: 100 }}>
+      <div style={{ maxWidth: '840px', margin: '0 auto', padding: isMobile ? '0 10px' : '0 16px' }}>
         {attachments.value.length > 0 && (
-          <div style={{ marginBottom: '10px', background: 'var(--bg-secondary)', border: 'none', borderRadius: '16px', padding: isMobile ? '10px' : '12px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
+          <div style={{ marginBottom: '16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px', padding: isMobile ? '10px' : '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>
                   {t('attachment_queue_title')}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: '15px', color: 'var(--text-secondary)' }}>
                   {attachmentQueueStatus}
                 </div>
               </div>
-              <button onClick={() => { attachments.value = []; }} style={{ background: 'transparent', border: 'none', borderRadius: '999px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '6px 10px', cursor: 'pointer' }}>
+              <button onClick={() => { attachments.value = []; }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '999px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', fontSize: '15px', padding: '6px 10px', cursor: 'pointer' }}>
                 {t('common_clear')}
               </button>
             </div>
             <div style={{ display: isMobile ? 'flex' : 'grid', gap: '10px', gridTemplateColumns: isMobile ? undefined : 'repeat(auto-fit, minmax(180px, 1fr))', overflowX: isMobile ? 'auto' : 'visible', paddingBottom: isMobile ? '2px' : 0 }}>
               {attachments.value.map((att) => (
-                <div key={att.id} style={{ position: 'relative', borderRadius: '0', border: '1px solid', borderColor: att.status === 'failed' ? 'rgba(255, 68, 68, 0.35)' : att.status === 'uploading' ? 'rgba(255, 107, 53, 0.28)' : 'var(--border)', overflow: 'hidden', background: 'transparent', flex: isMobile ? '0 0 220px' : undefined, minWidth: isMobile ? '220px' : 0 }}>
+                <div key={att.id} style={{ position: 'relative', borderRadius: '14px', border: '1px solid', borderColor: att.status === 'failed' ? 'rgba(255, 68, 68, 0.35)' : att.status === 'uploading' ? 'rgba(255, 107, 53, 0.28)' : 'var(--border)', overflow: 'hidden', background: 'var(--bg-primary)', flex: isMobile ? '0 0 220px' : undefined, minWidth: isMobile ? '220px' : 0 }}>
                   <div style={{ height: isMobile ? '110px' : '124px', background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
                     {att.url?.startsWith('data:image') ? (
                       <img src={att.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -165,31 +165,31 @@ export function MessageInput() {
                     ) : (
                       <div style={{ display: 'grid', gap: '8px', placeItems: 'center', color: 'var(--text-muted)' }}>
                         <div style={{ fontSize: '28px' }}>{attachmentIcon(att.kind)}</div>
-                        <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)' }}>{attachmentKindLabel(att)}</div>
+                        <div style={{ fontSize: '15px', fontFamily: 'var(--font-ui)' }}>{attachmentKindLabel(att)}</div>
                       </div>
                     )}
-                    <div style={{ position: 'absolute', left: '10px', bottom: '10px', display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(0,0,0,0.58)', color: '#fff', fontSize: '10px', fontFamily: 'var(--font-mono)' }}>
+                    <div style={{ position: 'absolute', left: '10px', bottom: '10px', display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(0,0,0,0.58)', color: '#fff', fontSize: '15px', fontFamily: 'var(--font-ui)' }}>
                       <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: attachmentStatusColor(att) }} />
                       {attachmentStatusLabel(att)}
                     </div>
-                    <button onClick={() => removeAttachment(att.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.66)', color: '#fff', border: 'none', borderRadius: '999px', minWidth: '24px', height: '24px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                    <button onClick={() => removeAttachment(att.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.66)', color: '#fff', border: 'none', borderRadius: '999px', minWidth: '24px', height: '24px', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
                   </div>
                   <div style={{ padding: '10px', display: 'grid', gap: '8px' }}>
                     <div style={{ display: 'grid', gap: '4px' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {att.filename}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
                         <span>{attachmentKindLabel(att)}</span>
                         <span>{formatFileSize(att.file?.size)}</span>
                       </div>
                     </div>
                     {att.error ? (
-                      <div style={{ fontSize: '10px', color: 'var(--error)', lineHeight: 1.45, minHeight: '28px' }}>
+                      <div style={{ fontSize: '15px', color: 'var(--error)', lineHeight: 1.45, minHeight: '28px' }}>
                         {att.error}
                       </div>
                     ) : (
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.45, minHeight: '28px' }}>
+                      <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.45, minHeight: '28px' }}>
                         {att.status === 'ready' ? t('attachment_ready') : attachmentStatusLabel(att)}
                       </div>
                     )}
@@ -197,12 +197,12 @@ export function MessageInput() {
                       {att.status === 'failed' ? (
                         <button
                           onClick={() => void retryUploadAttachment(att.id)}
-                          style={{ padding: '7px 10px', borderRadius: '999px', border: 'none', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}
+                          style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: 'pointer' }}
                         >
                           {t('attachment_retry')}
                         </button>
                       ) : <span />}
-                      <button onClick={() => removeAttachment(att.id)} style={{ padding: '7px 10px', borderRadius: '999px', border: 'none', background: 'transparent', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}>
+                      <button onClick={() => removeAttachment(att.id)} style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: 'pointer' }}>
                         {t('common_remove')}
                       </button>
                     </div>
@@ -220,9 +220,9 @@ export function MessageInput() {
           style={{ border: isDragging ? '1px dashed var(--accent)' : '1px solid transparent', borderRadius: '16px', padding: isDragging ? '4px' : '0', transition: 'all 0.2s' }}
         >
           {isMobile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-secondary)', border: 'none', borderRadius: '16px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                <button onClick={() => fileInputRef.current?.click()} style={{ background: 'transparent', border: 'none', borderRadius: '0', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>
+                <button onClick={() => fileInputRef.current?.click()} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>
                   📎
                 </button>
                 <textarea
@@ -231,19 +231,19 @@ export function MessageInput() {
                   onInput={handleInput}
                   onKeyDown={handleKeyDown}
                   placeholder={placeholder}
-                  style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderRadius: '0', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
+                  style={{ flex: 1, minWidth: 0, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
                   disabled={isStreaming.value}
                 />
               </div>
-              <div style={{ fontSize: '11px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', paddingLeft: '2px' }}>
+              <div style={{ fontSize: '15px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-ui)', paddingLeft: '2px' }}>
                 {composerStatusText}
               </div>
               {composerButton}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'var(--bg-secondary)', border: 'none', borderRadius: '18px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
-              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'transparent', border: 'none', borderRadius: '0', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                📎
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', background: 'var(--bg-tertiary)', borderRadius: '20px', padding: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.08)' }}>
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'var(--bg-secondary)', border: 'none', borderRadius: '12px', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', transition: 'all 0.2s', flexShrink: 0 }} onMouseEnter={e => { e.currentTarget.style.color='var(--text-primary)'; e.currentTarget.style.borderColor='var(--text-muted)'; }} onMouseLeave={e => { e.currentTarget.style.color='var(--text-secondary)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
               </button>
               <textarea
                 ref={textareaRef}
@@ -251,18 +251,18 @@ export function MessageInput() {
                 onInput={handleInput}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
-                style={{ flex: 1, background: 'transparent', border: 'none', borderRadius: '0', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
+                style={{ flex: 1, background: 'var(--bg-secondary)', border: 'none', borderRadius: '12px', padding: '12px 16px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', resize: 'none', outline: 'none', maxHeight: '200px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto', transition: 'border-color 0.2s' }}
                 disabled={isStreaming.value}
               />
               {composerButton}
             </div>
           )}
           {!isMobile && (
-            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', paddingLeft: '64px', paddingRight: '4px' }}>
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
-                Enter {t('send')} · Shift+Enter {t('newline')} · {t('drop_files_hint')}
+            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', paddingLeft: '64px', paddingRight: '12px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }}>
+                {(t as any)('chat_input_hint')}
               </div>
-              <div style={{ fontSize: '12px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'transparent', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ fontSize: '12px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'transparent', fontFamily: 'var(--font-mono)', flexShrink: 0, textAlign: 'right' }}>
                 {composerStatusText}
               </div>
             </div>

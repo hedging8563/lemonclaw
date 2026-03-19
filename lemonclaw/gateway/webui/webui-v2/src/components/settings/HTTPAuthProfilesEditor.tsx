@@ -30,10 +30,10 @@ function ProfileCard({
       <div style={S.headerRow}>
         <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} style={S.headerButton}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
+            <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>{name}</span>
             <span style={S.tag('blue')}>{Object.keys(headers || {}).length} {t('http_auth_profiles_headers_badge')}</span>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '15px', flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
         </button>
         <button type="button" style={S.deleteBtn} onClick={(e) => { e.stopPropagation(); onDelete(); }} aria-label={t('http_auth_profiles_delete')} title={t('http_auth_profiles_delete')}>
           ×
@@ -43,7 +43,7 @@ function ProfileCard({
         <div style={S.cardBody as any}>
           <div>
             <label style={S.label}>{t('http_auth_profiles_headers_label')}</label>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{t('http_auth_profiles_headers_help')}</div>
+            <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{t('http_auth_profiles_headers_help')}</div>
             <textarea
               style={S.textarea as any}
               value={headersText}
@@ -95,12 +95,12 @@ export function HTTPAuthProfilesEditor({ profiles, onChange }: Props) {
   return (
     <div style={{ marginBottom: '12px' }}>
       <div style={{ marginBottom: '10px', padding: '12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>{t('http_auth_profiles_title')}</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('http_auth_profiles_note')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('http_auth_profiles_title')}</div>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('http_auth_profiles_note')}</div>
       </div>
 
       {entries.length === 0 && !adding && (
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
+        <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '4px', textAlign: 'center' }}>
           {t('http_auth_profiles_empty')}
         </div>
       )}
@@ -130,8 +130,8 @@ export function HTTPAuthProfilesEditor({ profiles, onChange }: Props) {
             }}
             autoFocus
           />
-          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('http_auth_profiles_add')}</button>
-          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12px', width: isMobile ? '100%' : 'auto' }}>{t('btn_cancel')}</button>
+          <button onClick={handleAdd} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}>{t('http_auth_profiles_add')}</button>
+          <button onClick={() => { setAdding(false); setNewName(''); }} style={{ padding: '8px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', width: isMobile ? '100%' : 'auto' }}>{t('btn_cancel')}</button>
         </div>
       ) : (
         <button type="button" style={S.addBtn} onClick={() => setAdding(true)}>{t('http_auth_profiles_add_profile')}</button>

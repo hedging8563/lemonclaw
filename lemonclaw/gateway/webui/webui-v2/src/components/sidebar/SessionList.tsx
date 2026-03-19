@@ -12,10 +12,10 @@ export function SessionList() {
     <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
       {sessions.value.length === 0 && (
         <div style={{ margin: '12px 6px', padding: '16px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '6px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', marginBottom: '6px' }}>
             {t('session_empty_title')}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
             {t('session_empty_desc')}
           </div>
         </div>
