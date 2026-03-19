@@ -10,10 +10,10 @@ function SelectedBlockView({ block }: { block: NonNullable<typeof selectedInspec
   if (block.type === 'thinking') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ padding: '4px 8px', background: 'var(--purple-dim)', color: 'var(--purple)', fontFamily: 'var(--font-mono)', fontSize: '15px', borderRadius: '4px', alignSelf: 'flex-start', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-          🧠 THINKING_TRACE
+        <div style={{ padding: '5px 10px', background: 'rgba(124, 58, 237, 0.12)', color: 'var(--purple)', fontFamily: 'var(--font-display)', fontSize: '11px', borderRadius: '999px', alignSelf: 'flex-start', border: '1px solid rgba(168, 85, 247, 0.28)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          🧠 Thinking Trace
         </div>
-        <div style={{ fontSize: '15px', lineHeight: 1.6, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ fontSize: '14px', lineHeight: 1.72, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-reading)' }}>
           {block.data}
         </div>
       </div>
@@ -28,25 +28,25 @@ function SelectedBlockView({ block }: { block: NonNullable<typeof selectedInspec
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', color: 'var(--teal)', fontFamily: 'var(--font-mono)', fontSize: '15px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+        <div style={{ padding: '5px 10px', background: 'rgba(16, 185, 129, 0.08)', color: 'var(--teal)', fontFamily: 'var(--font-display)', fontSize: '11px', borderRadius: '999px', border: '1px solid rgba(16, 185, 129, 0.2)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
           🧰 {toolName}
         </div>
-        <div style={{ fontSize: '15px', fontFamily: 'var(--font-mono)', color: tool.state === 'running' ? 'var(--accent)' : 'var(--success)' }}>
-          STATUS: {tool.state.toUpperCase()}
+        <div style={{ fontSize: '12px', fontFamily: 'var(--font-display)', color: tool.state === 'running' ? 'var(--accent)' : 'var(--success)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Status: {tool.state}
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <div style={{ color: 'var(--text-muted)', fontSize: '15px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>// Arguments</div>
-        <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowX: 'auto' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Arguments</div>
+        <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowX: 'auto', lineHeight: 1.6 }}>
           {toolArgs}
         </div>
       </div>
 
       {tool.result && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={{ color: 'var(--text-muted)', fontSize: '15px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>// Return Value</div>
-          <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowX: 'auto' }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Return Value</div>
+          <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowX: 'auto', lineHeight: 1.6 }}>
             {tool.result}
           </div>
         </div>
@@ -71,11 +71,11 @@ export function Inspector() {
       )}
       <aside class={`layout-inspector ${showInspector.value ? '' : 'closed'}`}>
         <div style={{ height: 'var(--topbar-h)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '0 12px' : '0 16px', flexShrink: 0, minWidth: 0 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--text-muted)' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             // {selectedInspectorBlock.value ? 'TRACE_INSPECTOR' : t('inspector_title')}
           </div>
           {selectedInspectorBlock.value && (
-            <button onClick={() => selectedInspectorBlock.value = null} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-secondary)', fontSize: '15px', fontFamily: 'var(--font-mono)', padding: '2px 6px', cursor: 'pointer' }}>
+            <button onClick={() => selectedInspectorBlock.value = null} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '999px', color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'var(--font-display)', padding: '5px 9px', cursor: 'pointer', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               BACK TO SYSTEM
             </button>
           )}

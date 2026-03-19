@@ -23,7 +23,7 @@ function pillStyle(active = false) {
     background: active ? 'rgba(255, 107, 53, 0.08)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-ui)',
-    fontSize: '15px',
+    fontSize: '14px',
     cursor: 'pointer',
   } as const;
 }
@@ -96,7 +96,7 @@ export function YesterdayMemo() {
     <div style={shellStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
             // {t('memo_title')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
@@ -106,7 +106,7 @@ export function YesterdayMemo() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)' }}>{memo?.date || '—'}</span>
+          <span style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)' }}>{memo?.date || '—'}</span>
           <button onClick={handleExpandToggle} style={pillStyle(expanded)}>
             {expanded ? t('memo_collapse') : t('memo_expand')}
           </button>
@@ -122,13 +122,13 @@ export function YesterdayMemo() {
         }}
       >
         {!hasAnyContent ? (
-          <div style={{ fontSize: '15px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('memo_empty')}</div>
+          <div style={{ fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.6 }}>{t('memo_empty')}</div>
         ) : (
           <div style={{ display: 'grid', gap: '12px' }}>
             {memo?.today?.length ? (
               <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
-                <div style={{ fontSize: '15px', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 'bold' }}>{t('memo_today')}</div>
-                <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 'bold' }}>{t('memo_today')}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
                   {memo.today.map((item: string, index: number) => (
                     <div key={`today-${index}`} style={{ marginBottom: index < memo.today.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>
                       {item}
@@ -140,10 +140,10 @@ export function YesterdayMemo() {
 
             {memo?.yesterday?.length ? (
               <details open>
-                <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {t('memo_yesterday')}
                 </summary>
-                <div style={{ marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', fontSize: '15px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                <div style={{ marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
                   {memo.yesterday.map((item: string, index: number) => (
                     <div key={`yesterday-${index}`} style={{ marginBottom: index < memo.yesterday.length - 1 ? '8px' : '0', paddingLeft: '8px', borderLeft: '2px solid var(--border)' }}>
                       {item}
@@ -157,7 +157,7 @@ export function YesterdayMemo() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: historySectionOpen ? '8px' : '0' }}>
                 <button
                   onClick={() => setHistorySectionOpen((open) => !open)}
-                  style={{ ...pillStyle(historySectionOpen), fontSize: '15px' }}
+                  style={{ ...pillStyle(historySectionOpen), fontSize: '14px' }}
                 >
                   {`${t('memo_history')} · ${historyEntries.length}`}
                 </button>
@@ -170,7 +170,7 @@ export function YesterdayMemo() {
               {historySectionOpen ? (
                 <div>
                 {historyEntries.length === 0 ? (
-                  <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
+                  <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('memory_empty_history')}</div>
                 ) : (
                   <>
                     <div
@@ -182,7 +182,7 @@ export function YesterdayMemo() {
                     >
                       <div style={{ display: 'grid', gap: '8px' }}>
                         {historyEntries.map((entry, index) => (
-                          <div key={`memo-history-${index}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '15px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                          <div key={`memo-history-${index}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
                             {entry}
                           </div>
                         ))}

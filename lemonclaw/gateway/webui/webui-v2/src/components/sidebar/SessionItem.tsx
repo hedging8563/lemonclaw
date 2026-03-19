@@ -101,7 +101,7 @@ export function SessionItem({ session }: { session: Session }) {
             style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--accent)', color: 'var(--text-primary)', padding: isMobile ? '4px 6px' : '2px 4px', borderRadius: '4px', fontSize: isMobile ? '14px' : '12px', fontFamily: 'var(--font-ui)', outline: 'none' }}
           />
         ) : (
-          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15px', lineHeight: '1.3', fontFamily: 'var(--font-ui)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+          <div style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px', lineHeight: '1.3', fontFamily: 'var(--font-display)', color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', letterSpacing: '-0.01em' }}>
             {session.title || t('unnamed_chat')}
           </div>
         )}

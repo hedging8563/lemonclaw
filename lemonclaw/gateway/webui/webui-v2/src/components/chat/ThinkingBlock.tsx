@@ -2,6 +2,7 @@ import { showInspector, selectedInspectorBlock } from '../../stores/ui';
 
 export function ThinkingBlock({ content, id }: { content: string, id: string }) {
   const isSelected = selectedInspectorBlock.value?.id === id;
+  const snippet = content.replace(/\s+/g, ' ').trim();
 
   const handleClick = () => {
     if (isSelected && showInspector.value) {
@@ -14,35 +15,48 @@ export function ThinkingBlock({ content, id }: { content: string, id: string }) 
   };
 
   return (
-    <button 
+    <button
       onClick={handleClick}
       title="View Thinking Process"
-      style={{ 
-        display: 'inline-flex', alignItems: 'center', gap: '6px', 
-        padding: '4px 10px', margin: '4px 6px 4px 0',
-        fontSize: '15px', fontFamily: 'var(--font-mono)', 
-        color: isSelected ? 'var(--bg-primary)' : 'var(--purple)', 
-        background: isSelected ? 'var(--purple)' : 'var(--purple-dim)',
-        border: '1px solid',
-        borderColor: isSelected ? 'var(--purple)' : 'rgba(168, 85, 247, 0.3)',
-        borderRadius: '999px',
+      class="trace-card"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        margin: '2px 8px 8px 0',
+        color: 'var(--text-primary)',
+        background: isSelected
+          ? 'linear-gradient(180deg, rgba(124, 58, 237, 0.28) 0%, rgba(124, 58, 237, 0.14) 100%)'
+          : 'linear-gradient(180deg, rgba(124, 58, 237, 0.14) 0%, rgba(124, 58, 237, 0.06) 100%)',
+        borderColor: isSelected ? 'rgba(124, 58, 237, 0.58)' : 'rgba(124, 58, 237, 0.26)',
         cursor: 'pointer',
         transition: 'all 0.2s',
-        boxShadow: isSelected ? '0 2px 8px rgba(168, 85, 247, 0.4)' : 'none'
+        boxShadow: isSelected ? '0 14px 30px rgba(124, 58, 237, 0.22)' : '0 10px 24px rgba(0,0,0,0.14)',
       }}
       onMouseEnter={e => {
         if (!isSelected) {
-          e.currentTarget.style.background = 'rgba(168, 85, 247, 0.25)';
+          e.currentTarget.style.transform = 'translateY(-1px)';
+          e.currentTarget.style.borderColor = 'rgba(124, 58, 237, 0.42)';
         }
       }}
       onMouseLeave={e => {
         if (!isSelected) {
-          e.currentTarget.style.background = 'var(--purple-dim)';
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.borderColor = 'rgba(124, 58, 237, 0.26)';
         }
       }}
     >
-      <span>🧠</span>
-      <span style={{ fontWeight: 500 }}>Thinking...</span>
+      <div class="trace-card__eyebrow" style={{ color: isSelected ? 'var(--text-primary)' : 'var(--purple)' }}>
+        <span>🧠</span>
+        <span>Reasoning</span>
+      </div>
+      <div class="trace-card__title">Thinking Trace</div>
+      <div class="trace-card__meta">Inline summary, full trace in inspector</div>
+      <div class="trace-card__snippet">{snippet || 'Model reasoning is being assembled.'}</div>
+      <div class="trace-card__foot">
+        <span>{isSelected ? 'Inspector open' : 'Open inspector'}</span>
+        <span style={{ color: isSelected ? 'var(--text-primary)' : 'var(--purple)' }}>view</span>
+      </div>
     </button>
   );
 }

@@ -21,11 +21,11 @@ function isPreviewablePdf(media: UIMedia): boolean {
 
 export function RuntimeContextCard({ content }: { content: string }) {
   return (
-    <details style={{ margin: '0 0 8px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)' }}>
-      <summary style={{ cursor: 'pointer', listStyle: 'none', padding: '8px 10px', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+    <details style={{ margin: '0 0 10px', border: '1px solid var(--border)', borderRadius: '10px', background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-secondary) 100%)' }}>
+      <summary style={{ cursor: 'pointer', listStyle: 'none', padding: '10px 12px', fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         Runtime Context
       </summary>
-      <div style={{ padding: '0 10px 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '15px', lineHeight: 1.6, color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
+      <div style={{ padding: '0 12px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px', lineHeight: 1.65, color: 'var(--text-secondary)', fontFamily: 'var(--font-reading)' }}>
         {content}
       </div>
     </details>
@@ -53,22 +53,22 @@ export function MediaMarkerCard({ media }: { media: UIMedia }) {
 
   return (
     <>
-      <div style={{ margin: '8px 0', border: '1px solid var(--border)', borderRadius: '8px', background: 'linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%)', padding: '12px 14px', boxShadow: '0 6px 18px rgba(0,0,0,0.16)' }}>
+      <div style={{ margin: '10px 0', border: '1px solid var(--border)', borderRadius: '12px', background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-secondary) 100%)', padding: '12px 14px', boxShadow: '0 10px 24px rgba(0,0,0,0.14)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '999px', background: tone.bg, color: tone.color, border: `1px solid ${tone.border}`, fontFamily: 'var(--font-ui)', fontSize: '15px', letterSpacing: '0.04em' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 9px', borderRadius: '999px', background: tone.bg, color: tone.color, border: `1px solid ${tone.border}`, fontFamily: 'var(--font-display)', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             <span>{iconMap[media.kind] || '📎'}</span>
             <span>{media.kind.toUpperCase()}</span>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '15px', color: 'var(--accent)', textDecoration: 'none', fontFamily: 'var(--font-ui)', padding: '3px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
+            <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: 'var(--accent)', textDecoration: 'none', fontFamily: 'var(--font-display)', padding: '4px 9px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
               {t('open')}
             </a>
-            <a href={url} download={media.filename || 'file'} style={{ fontSize: '15px', color: 'var(--teal)', textDecoration: 'none', fontFamily: 'var(--font-ui)', padding: '3px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
+            <a href={url} download={media.filename || 'file'} style={{ fontSize: '12px', color: 'var(--teal)', textDecoration: 'none', fontFamily: 'var(--font-display)', padding: '4px 9px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
               {t('download')}
             </a>
           </div>
         </div>
-        {media.filename && <div style={{ fontSize: '15px', color: 'var(--text-primary)', marginBottom: '8px', wordBreak: 'break-word', fontWeight: 600 }}>{media.filename}</div>}
+        {media.filename && <div style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '8px', wordBreak: 'break-word', fontWeight: 600, fontFamily: 'var(--font-reading)' }}>{media.filename}</div>}
         {canPreviewImage && (
           <button type="button" onClick={() => setLightboxOpen(true)} style={{ display: 'block', marginBottom: '8px', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }} aria-label="Open image preview">
             <img src={url} alt={media.filename || media.path} style={{ display: 'block', width: '100%', maxHeight: '240px', objectFit: 'contain', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }} loading="lazy" />
@@ -83,7 +83,7 @@ export function MediaMarkerCard({ media }: { media: UIMedia }) {
         {canPreviewPdf && (
           <iframe title={media.filename || media.path} src={url} style={{ display: 'block', width: '100%', height: '360px', marginBottom: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }} />
         )}
-        <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{media.path}</div>
+        <div style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{media.path}</div>
       </div>
       {lightboxOpen && canPreviewImage && (
         <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={() => setLightboxOpen(false)}>
@@ -104,22 +104,22 @@ export function SystemNoticeCard({ text, level = 'info' }: { text: string; level
   const bg = level === 'error' ? 'rgba(255, 68, 68, 0.08)' : level === 'warning' ? 'rgba(255, 170, 0, 0.08)' : 'rgba(100, 149, 237, 0.08)';
   const color = level === 'error' ? 'var(--error)' : level === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)';
   return (
-    <div style={{ margin: '8px 0', border: `1px solid ${border}`, borderRadius: '8px', background: bg, color, padding: '10px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontFamily: 'var(--font-ui)', fontSize: '15px', letterSpacing: '0.06em' }}>
+    <div style={{ margin: '10px 0', border: `1px solid ${border}`, borderRadius: '10px', background: bg, color, padding: '10px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontFamily: 'var(--font-display)', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
         <span>{icon}</span><span>{title}</span>
       </div>
-      <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</div>
+      <div style={{ fontFamily: 'var(--font-reading)', fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</div>
     </div>
   );
 }
 
 export function TranscriptionCard({ content }: { content: string }) {
   return (
-    <div style={{ margin: '6px 0', borderLeft: '3px solid var(--teal)', borderRadius: '4px', background: 'var(--bg-secondary)', padding: '8px 12px' }}>
-      <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--teal)', marginBottom: '4px' }}>
+    <div style={{ margin: '8px 0', borderLeft: '3px solid var(--teal)', borderRadius: '8px', background: 'var(--bg-secondary)', padding: '10px 12px' }}>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '11px', color: 'var(--teal)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         TRANSCRIPTION
       </div>
-      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '15px', lineHeight: 1.7, color: 'var(--text-primary)' }}>{content}</div>
+      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px', lineHeight: 1.7, color: 'var(--text-primary)', fontFamily: 'var(--font-reading)' }}>{content}</div>
     </div>
   );
 }

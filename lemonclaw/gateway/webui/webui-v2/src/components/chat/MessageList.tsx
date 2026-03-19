@@ -110,8 +110,8 @@ function MsgActions({ msg }: { msg: any }) {
 
   return (
     <div style={{ position: 'absolute', top: '-14px', right: '0px', display: 'flex', gap: '6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '999px', padding: '4px 8px', zIndex: 10, boxShadow: '0 8px 18px rgba(0,0,0,0.24)' }} className="msg-actions-bar">
-      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '15px', cursor: 'pointer', fontFamily: 'var(--font-ui)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
-      {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '15px', cursor: 'pointer', fontFamily: 'var(--font-ui)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
+      <button onClick={handleCopy} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font-display)' }} onMouseEnter={e => e.currentTarget.style.color='var(--teal)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{copied ? t('copied') : copyFailed ? 'COPY FAILED' : t('copy')}</button>
+      {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font-display)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
   );
 }
@@ -187,14 +187,14 @@ export function MessageList() {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '20px 16px' : '32px' }}>
         <div style={{ width: '100%', maxWidth: '640px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '24px', padding: isMobile ? '24px' : '40px', boxShadow: '0 24px 64px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '20px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: 'var(--bg-primary)', border: '1px solid var(--border)', fontFamily: 'var(--font-display)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '20px' }}>
             <span style={{ color: 'var(--purple)' }}>◆</span>
             <span>LemonClaw Gateway</span>
           </div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: isMobile ? '20px' : '24px', color: 'var(--text-primary)', marginBottom: '12px', lineHeight: 1.35, fontWeight: 'bold' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: isMobile ? '21px' : '25px', color: 'var(--text-primary)', marginBottom: '12px', lineHeight: 1.28, fontWeight: 600, letterSpacing: '-0.03em' }}>
             {t('chat_empty_title')}
           </div>
-          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '32px', maxWidth: '560px' }}>
+          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '32px', maxWidth: '560px', fontFamily: 'var(--font-reading)' }}>
             {t('chat_empty_desc')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
@@ -214,7 +214,7 @@ export function MessageList() {
                   border: '1px solid var(--border)',
                   background: 'var(--bg-primary)',
                   color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-ui)',
+                  fontFamily: 'var(--font-reading)',
                   fontSize: '15px',
                   cursor: 'pointer',
                   textAlign: 'left',
@@ -294,7 +294,7 @@ export function MessageList() {
               <MsgActions msg={msg} />
 
               {(msg.blocks.filter((b) => b.type === 'thinking' || b.type === 'tool').length > 0) && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
                   {msg.blocks.filter((block) => block.type === 'thinking').map((block, bi) => (
                     <ThinkingBlock key={`thinking-${i}-${bi}`} id={`thinking-${i}-${bi}`} content={(block as Extract<UIBlock, { type: 'thinking' }>).text} />
                   ))}
@@ -306,7 +306,7 @@ export function MessageList() {
               )}
 
               {msg.blocks.filter((block) => block.type === 'error').map((block, bi) => (
-                <div key={`error-${bi}`} style={{ margin: '6px 0', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', padding: '8px 12px', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div key={`error-${bi}`} style={{ margin: '8px 0', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '10px', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', padding: '10px 12px', fontFamily: 'var(--font-reading)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
                   {(block as Extract<UIBlock, { type: 'error' }>).text}
                 </div>
               ))}
@@ -319,7 +319,7 @@ export function MessageList() {
                   renderMarkdown={(value) => renderMd(value, isStreaming.value && i === messages.value.length - 1)}
                 />
               ) : (isStreaming.value && i === messages.value.length - 1 && !isUser) ? (
-                <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)' }}>
+                <div class="streaming-indicator" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', fontFamily: 'var(--font-display)', fontSize: '13px', color: 'var(--text-muted)', letterSpacing: '0.02em' }}>
                   <span class="pulse-dot" />
                   {msg.blocks.some((block) => block.type === 'tool' && (block as Extract<UIBlock, { type: 'tool' }>).state === 'running') ? t('processing_tools') : t('generating')}
                 </div>

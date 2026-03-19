@@ -34,7 +34,7 @@ function pillStyle(active = false) {
     background: active ? 'rgba(124, 58, 237, 0.1)' : 'var(--bg-primary)',
     color: active ? 'var(--accent)' : 'var(--text-secondary)',
     fontFamily: 'var(--font-ui)',
-    fontSize: '15px',
+    fontSize: '14px',
   } as const;
 }
 
@@ -248,7 +248,7 @@ const summaryCardStyle = {
 } as const;
 
 const summaryLabelStyle = {
-  fontSize: '15px',
+  fontSize: '14px',
   color: 'var(--text-muted)',
   fontFamily: 'var(--font-ui)',
   textTransform: 'uppercase',
@@ -256,7 +256,7 @@ const summaryLabelStyle = {
 } as const;
 
 const summaryDetailStyle = {
-  fontSize: '15px',
+  fontSize: '14px',
   color: 'var(--text-secondary)',
   lineHeight: '1.45',
 } as const;
@@ -276,7 +276,7 @@ function renderStepTimeline(
 ) {
   if (!steps || steps.length === 0) {
     return (
-      <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>
+      <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
         {t('task_steps_empty')}
       </div>
     );
@@ -296,21 +296,21 @@ function renderStepTimeline(
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{step.name || step.step_id}</div>
-                <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', wordBreak: 'break-all' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{step.name || step.step_id}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', wordBreak: 'break-all' }}>
                   {step.step_type} · {step.step_id}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '15px', fontFamily: 'var(--font-ui)', ...tone }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '14px', fontFamily: 'var(--font-ui)', ...tone }}>
                   {formatStepStatus(step.status)}
                 </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', fontSize: '15px', fontFamily: 'var(--font-ui)', color: 'var(--text-muted)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', fontSize: '14px', fontFamily: 'var(--font-ui)', color: 'var(--text-muted)' }}>
                   {step.replayable === false ? t('task_step_non_replayable') : t('task_step_replayable')}
                 </span>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '15px', lineHeight: '1.55' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '14px', lineHeight: '1.55' }}>
               <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_step_started_at')}</div>
               <div style={{ color: 'var(--text-primary)' }}>{formatEventTime(step.started_at_ms)}</div>
               <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_step_ended_at')}</div>
@@ -318,14 +318,14 @@ function renderStepTimeline(
             </div>
             {step.input_summary && (
               <div>
-                <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_step_input')}</div>
-                <pre style={{ margin: 0, maxHeight: '120px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_step_input')}</div>
+                <pre style={{ margin: 0, maxHeight: '120px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {step.input_summary}
                 </pre>
               </div>
             )}
             {step.error && (
-              <div style={{ fontSize: '15px', color: 'var(--error)', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', padding: '8px 10px', lineHeight: '1.55', wordBreak: 'break-word' }}>
+              <div style={{ fontSize: '14px', color: 'var(--error)', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.24)', borderRadius: '6px', padding: '8px 10px', lineHeight: '1.55', wordBreak: 'break-word' }}>
                 {step.error}
               </div>
             )}
@@ -344,7 +344,7 @@ function renderRecoveryHistory(
 ) {
   if (!history || history.length === 0) {
     return (
-      <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>
+      <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
         {t('task_recovery_history_empty')}
       </div>
     );
@@ -382,19 +382,19 @@ function renderRecoveryHistory(
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+              <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                 {formatRecoveryAction(entry.action)}
               </div>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
                 {(entry.source || '—')} · {formatEventTime(entry.at_ms)}
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
             {entry.reason || '—'}
           </div>
           {entry.details && Object.keys(entry.details).length > 0 && (
-            <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {JSON.stringify(entry.details, null, 2)}
             </pre>
           )}
@@ -447,7 +447,7 @@ function renderCountChips(counts: Record<string, number> | undefined, formatter:
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
       {entries.map(([key, count]) => (
-        <span key={key} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px' }}>
+        <span key={key} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px' }}>
           {formatter(key)} · {count}
         </span>
       ))}
@@ -461,7 +461,7 @@ function renderStringChips(values: string[] | undefined) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
       {entries.map((value) => (
-        <span key={value} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', maxWidth: '100%', wordBreak: 'break-all' }}>
+        <span key={value} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', maxWidth: '100%', wordBreak: 'break-all' }}>
           {value}
         </span>
       ))}
@@ -533,7 +533,7 @@ function renderTaskDetailBody(
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
         <div style={summaryCardStyle}>
           <div style={summaryLabelStyle}>{t('task_current_status')}</div>
-          <div style={{ fontSize: '15px', color: statusTone.color, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ fontSize: '14px', color: statusTone.color, display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '7px', height: '7px', borderRadius: '999px', background: statusTone.color }} />
             {formatDisplayState(state)}
           </div>
@@ -541,12 +541,12 @@ function renderTaskDetailBody(
         </div>
         <div style={summaryCardStyle}>
           <div style={summaryLabelStyle}>{t('task_suggested_action')}</div>
-          <div style={{ fontSize: '15px', color: 'var(--text-primary)' }}>{summaryAction}</div>
+          <div style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{summaryAction}</div>
           <div style={summaryDetailStyle}>{summaryReason}</div>
         </div>
         <div style={summaryCardStyle}>
           <div style={summaryLabelStyle}>{t('task_workflow_title')}</div>
-          <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
+          <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
           <div style={summaryDetailStyle}>{workflowInstruction(task)}</div>
         </div>
       </div>
@@ -561,7 +561,7 @@ function renderTaskDetailBody(
               borderRadius: '6px',
               color: 'var(--text-secondary)',
               fontFamily: 'var(--font-ui)',
-              fontSize: '15px',
+              fontSize: '14px',
               cursor: 'pointer',
             }}
           >
@@ -571,13 +571,13 @@ function renderTaskDetailBody(
       )}
       {(detail.summary?.status_counts || detail.summary?.outbox_status_counts || detail.summary?.outbox_effect_type_counts || showResumeStats || detail.summary?.recovery_history) && (
         <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_execution_snapshot')}
           </summary>
           <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
             {detail.summary?.status_counts && (
               <div style={{ display: 'grid', gap: '6px' }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {t('task_step_status_summary')}
                 </div>
                 {renderCountChips(detail.summary.status_counts, formatStepStatus)}
@@ -585,7 +585,7 @@ function renderTaskDetailBody(
             )}
             {detail.summary?.outbox_status_counts && (
               <div style={{ display: 'grid', gap: '6px' }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {t('task_outbox_status_summary')}
                 </div>
                 {renderCountChips(detail.summary.outbox_status_counts, (key) => key)}
@@ -593,11 +593,11 @@ function renderTaskDetailBody(
             )}
             {detail.summary?.outbox_effect_type_counts && (
               <div style={{ display: 'grid', gap: '6px' }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {t('task_outbox_effect_summary')}
                 </div>
                 {renderCountChips(detail.summary.outbox_effect_type_counts, (key) => key)}
-                <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
                   {t('task_outbox_active_count')}: {detail.summary?.outbox_active_count ?? 0} · {t('task_outbox_terminal_count')}: {detail.summary?.outbox_terminal_count ?? 0}
                 </div>
               </div>
@@ -605,18 +605,18 @@ function renderTaskDetailBody(
             {showResumeStats && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
                 <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
                     {t('task_last_successful_step')}
                   </div>
-                  <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                     {detail.summary?.last_successful_step || '—'}
                   </div>
                 </div>
                 <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
                     {t('task_resume_from_step')}
                   </div>
-                  <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                     {detail.summary?.resume_from_step || '—'}
                   </div>
                 </div>
@@ -627,11 +627,11 @@ function renderTaskDetailBody(
       )}
       {retrieval && (
         <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_retrieval_summary')}
           </summary>
           <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '15px', lineHeight: '1.55' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '14px', lineHeight: '1.55' }}>
             <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_strategy')}</div>
             <div style={{ color: 'var(--text-primary)' }}>{String(retrieval.strategy || '—')}</div>
             <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_latency')}</div>
@@ -645,21 +645,21 @@ function renderTaskDetailBody(
           </div>
           {renderStringChips(retrieval.hit_sources) && (
             <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_hit_sources')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_hit_sources')}</div>
               {renderStringChips(retrieval.hit_sources)}
             </div>
           )}
           {retrieval.card_hits && retrieval.card_hits.length > 0 && (
             <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_card_hits')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_card_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {retrieval.card_hits.map((item: NonNullable<typeof retrieval.card_hits>[number], idx: number) => (
                   <div key={`${item.name || 'card'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.name || '—'}</div>
-                        <div style={{ fontSize: '15px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
-                        {item.preview ? <div style={{ fontSize: '15px', color: 'var(--text-secondary)', marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.preview}</div> : null}
+                        <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.name || '—'}</div>
+                        <div style={{ fontSize: '14px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
+                        {item.preview ? <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.preview}</div> : null}
                       </div>
                       {item.type ? <span style={pillStyle()}>{item.type}</span> : null}
                     </div>
@@ -670,14 +670,14 @@ function renderTaskDetailBody(
           )}
           {retrieval.rule_hits && retrieval.rule_hits.length > 0 && (
             <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_rule_hits')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_rule_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {retrieval.rule_hits.map((item: NonNullable<typeof retrieval.rule_hits>[number], idx: number) => (
                   <div key={`${item.trigger || 'rule'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
-                    <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.trigger || '—'}</div>
-                    {item.lesson ? <div style={{ fontSize: '15px', color: 'var(--text-secondary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.lesson}</div> : null}
-                    <div style={{ fontSize: '15px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{item.action || '—'}</div>
-                    {item.source ? <div style={{ fontSize: '15px', color: 'var(--text-muted)', marginTop: '4px', wordBreak: 'break-all' }}>{item.source}</div> : null}
+                    <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.trigger || '—'}</div>
+                    {item.lesson ? <div style={{ fontSize: '14px', color: 'var(--text-secondary)', wordBreak: 'break-word', marginBottom: '4px' }}>{item.lesson}</div> : null}
+                    <div style={{ fontSize: '14px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{item.action || '—'}</div>
+                    {item.source ? <div style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '4px', wordBreak: 'break-all' }}>{item.source}</div> : null}
                   </div>
                 ))}
               </div>
@@ -685,13 +685,13 @@ function renderTaskDetailBody(
           )}
           {renderStringChips(retrieval.knowledge_sources) && (
             <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_knowledge_sources')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_knowledge_sources')}</div>
               {renderStringChips(retrieval.knowledge_sources)}
             </div>
           )}
           {retrieval.knowledge_hits && retrieval.knowledge_hits.length > 0 && (
             <div style={{ display: 'grid', gap: '6px' }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_knowledge_hits')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_knowledge_hits')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {retrieval.knowledge_hits.map((item: NonNullable<typeof retrieval.knowledge_hits>[number], idx: number) => (
                   <div
@@ -701,8 +701,8 @@ function renderTaskDetailBody(
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.title || '—'}</div>
-                        <div style={{ fontSize: '15px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
+                        <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item.title || '—'}</div>
+                        <div style={{ fontSize: '14px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source || '—'}</div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         {item.doc_id ? (
@@ -711,7 +711,7 @@ function renderTaskDetailBody(
                               e.stopPropagation();
                               openKnowledgeDetail(item.doc_id);
                             }}
-                            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '15px', padding: '4px 8px' }}
+                            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', padding: '4px 8px' }}
                           >
                             {t('open')}
                           </button>
@@ -730,7 +730,7 @@ function renderTaskDetailBody(
       )}
       {(showRetryDispatchCta || showManualResumeCta) && (
         <div style={{
-          fontSize: '15px',
+          fontSize: '14px',
           lineHeight: '1.55',
           color: showRetryDispatchCta ? 'var(--error)' : 'var(--accent)',
           background: showRetryDispatchCta ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 53, 0.08)',
@@ -745,11 +745,11 @@ function renderTaskDetailBody(
       )}
       {showWorkflow && (
         <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_workflow_title')}
           </summary>
           <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '15px', lineHeight: '1.55' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '14px', lineHeight: '1.55' }}>
             <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_workflow_queued_by')}</div>
             <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{recovery.source || '—'}</div>
             <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_workflow_queued_at')}</div>
@@ -763,7 +763,7 @@ function renderTaskDetailBody(
         </details>
       )}
       <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_steps_title')}
         </summary>
         <div style={{ marginTop: '10px' }}>
@@ -771,7 +771,7 @@ function renderTaskDetailBody(
         </div>
       </details>
       <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_recovery_history_title')}
         </summary>
         <div style={{ marginTop: '10px' }}>
@@ -779,12 +779,12 @@ function renderTaskDetailBody(
         </div>
       </details>
       <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
           {t('task_outbox_title')}
         </summary>
         <div style={{ marginTop: '10px' }}>
         {!detail.outboxEvents || detail.outboxEvents.length === 0 ? (
-          <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
+          <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('task_outbox_empty')}</div>
         ) : detail.outboxEvents.map((event) => {
           const isOutboxOpen = expandedOutboxId === event.event_id;
           const eventTone = toneStyles(
@@ -810,14 +810,14 @@ function renderTaskDetailBody(
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '15px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                     {event.effect_type}
                   </div>
-                  <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', wordBreak: 'break-all' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', wordBreak: 'break-all' }}>
                     {event.event_id}
                   </div>
                 </div>
-                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '15px', fontFamily: 'var(--font-ui)', ...eventTone }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '14px', fontFamily: 'var(--font-ui)', ...eventTone }}>
                   {event.status}
                 </span>
               </div>
@@ -831,7 +831,7 @@ function renderTaskDetailBody(
                     borderRadius: '6px',
                     color: 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -848,7 +848,7 @@ function renderTaskDetailBody(
                       borderRadius: '6px',
                       color: 'var(--accent)',
                       fontFamily: 'var(--font-ui)',
-                      fontSize: '15px',
+                      fontSize: '14px',
                       cursor: outboxBusy ? 'wait' : 'pointer',
                       opacity: outboxBusy ? 0.7 : 1,
                     }}
@@ -870,7 +870,7 @@ function renderTaskDetailBody(
                       borderRadius: '6px',
                       color: 'var(--warning, #ffb84d)',
                       fontFamily: 'var(--font-ui)',
-                      fontSize: '15px',
+                      fontSize: '14px',
                       cursor: outboxBusy ? 'wait' : 'pointer',
                       opacity: outboxBusy ? 0.7 : 1,
                     }}
@@ -891,7 +891,7 @@ function renderTaskDetailBody(
                         borderRadius: '6px',
                         color: copiedLabel === `event:${event.event_id}` ? 'var(--success)' : 'var(--text-secondary)',
                         fontFamily: 'var(--font-ui)',
-                        fontSize: '15px',
+                        fontSize: '14px',
                         cursor: 'pointer',
                       }}
                     >
@@ -906,14 +906,14 @@ function renderTaskDetailBody(
                         borderRadius: '6px',
                         color: copiedLabel === `payload:${event.event_id}` ? 'var(--success)' : 'var(--text-secondary)',
                         fontFamily: 'var(--font-ui)',
-                        fontSize: '15px',
+                        fontSize: '14px',
                         cursor: 'pointer',
                       }}
                     >
                       {copiedLabel === `payload:${event.event_id}` ? t('task_copy_done') : t('task_copy_payload')}
                     </button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '15px', lineHeight: '1.55' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '14px', lineHeight: '1.55' }}>
                     <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_outbox_effect')}</div>
                     <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                       {event.effect?.category || '—'} · {event.effect?.target_kind || '—'}
@@ -936,31 +936,31 @@ function renderTaskDetailBody(
                     <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{event.error || '—'}</div>
                   </div>
                   {event.effect?.description ? (
-                    <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.55' }}>
                       {event.effect.description}
                     </div>
                   ) : null}
                   <div>
-                    <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_last_result')}</div>
-                    <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_last_result')}</div>
+                    <pre style={{ margin: 0, maxHeight: '140px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {JSON.stringify(event.lifecycle?.last_delivery_result || {}, null, 2)}
                     </pre>
                   </div>
                   <div>
-                    <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_history')}</div>
-                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_history')}</div>
+                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {JSON.stringify(event.lifecycle?.delivery_history || [], null, 2)}
                     </pre>
                   </div>
                   <div>
-                    <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
-                    <pre style={{ margin: 0, maxHeight: '180px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_payload')}</div>
+                    <pre style={{ margin: 0, maxHeight: '180px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {JSON.stringify(event.payload || {}, null, 2)}
                     </pre>
                   </div>
                   <div>
-                    <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_metadata')}</div>
-                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>{t('task_outbox_metadata')}</div>
+                    <pre style={{ margin: 0, maxHeight: '160px', overflow: 'auto', padding: '8px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '14px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {JSON.stringify(event.metadata || {}, null, 2)}
                     </pre>
                   </div>
@@ -993,7 +993,7 @@ function taskCard(
     <div key={task.task_id} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
             {task.goal || task.task_id}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
@@ -1004,23 +1004,23 @@ function taskCard(
               padding: '2px 8px',
               borderRadius: '999px',
               border: '1px solid',
-              fontSize: '15px',
+              fontSize: '14px',
               fontFamily: 'var(--font-ui)',
               ...tone,
             }}>
               {state?.key === 'resume_running' && <span class="pulse-dot" style={{ background: tone.color }} />}
               {formatDisplayState(state)}
             </span>
-              <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+              <span style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
                 {formatTaskStage(task.current_stage)}
               </span>
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
             {t('task_updated_at')}
           </div>
-          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
             {formatUpdatedAt(task)}
           </div>
         </div>
@@ -1028,7 +1028,7 @@ function taskCard(
 
       {state?.detail && (
         <div style={{
-          fontSize: '15px',
+          fontSize: '14px',
           lineHeight: '1.55',
           color: tone.color,
           background: tone.background,
@@ -1044,10 +1044,10 @@ function taskCard(
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
-          <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
             {t('task_workflow_route')}
           </div>
-          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', wordBreak: 'break-word' }}>
             {route}
           </div>
         </div>
@@ -1064,7 +1064,7 @@ function taskCard(
               borderRadius: '6px',
               color: 'var(--text-secondary)',
               fontFamily: 'var(--font-ui)',
-              fontSize: '15px',
+              fontSize: '14px',
               cursor: 'pointer',
             }}
           >
@@ -1081,7 +1081,7 @@ function taskCard(
                 borderRadius: '6px',
                 color: 'var(--accent)',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1100,7 +1100,7 @@ function taskCard(
                 borderRadius: '6px',
                 color: '#fff',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1123,7 +1123,7 @@ function taskCard(
                 borderRadius: '6px',
                 color: 'var(--teal)',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1156,29 +1156,29 @@ function recoveryQueueCard(
     <div key={`recovery-${task.task_id}`} style={{ background: tone.background, border: '1px solid', borderColor: tone.borderColor, borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
             {task.goal || task.task_id}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '15px', fontFamily: 'var(--font-ui)', ...tone }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '14px', fontFamily: 'var(--font-ui)', ...tone }}>
               {formatDisplayState(state)}
             </span>
-            <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            <span style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
               {formatTaskStage(queue.recommended_action || task.current_stage)}
             </span>
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
             {t('task_workflow_queued_at')}
           </div>
-          <div style={{ fontSize: '15px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
+          <div style={{ fontSize: '14px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)' }}>
             {formatEventTime(queue.queued_at_ms)}
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '15px', lineHeight: '1.55' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '6px 10px', fontSize: '14px', lineHeight: '1.55' }}>
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_workflow_queued_by')}</div>
         <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{formatWorkflowSource(queue.source)}</div>
         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_workflow_route')}</div>
@@ -1188,13 +1188,13 @@ function recoveryQueueCard(
       </div>
 
       {queue.reason && (
-        <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
+        <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.55', wordBreak: 'break-word' }}>
           {queue.reason}
         </div>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+        <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
           {t('task_workflow_route')}
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -1210,7 +1210,7 @@ function recoveryQueueCard(
               borderRadius: '6px',
               color: 'var(--text-secondary)',
               fontFamily: 'var(--font-ui)',
-              fontSize: '15px',
+              fontSize: '14px',
               cursor: 'pointer',
             }}
           >
@@ -1227,7 +1227,7 @@ function recoveryQueueCard(
                 borderRadius: '6px',
                 color: 'var(--accent)',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1246,7 +1246,7 @@ function recoveryQueueCard(
                 borderRadius: '6px',
                 color: '#fff',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1269,7 +1269,7 @@ function recoveryQueueCard(
                 borderRadius: '6px',
                 color: 'var(--teal)',
                 fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
+                fontSize: '14px',
                 cursor: busy ? 'wait' : 'pointer',
                 opacity: busy ? 0.7 : 1,
               }}
@@ -1445,7 +1445,7 @@ export function TaskRecoveryPanel() {
     <div style={shellStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: expanded ? '12px' : '0' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
             <span>// {t('tasks_panel_title')}</span>
             <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
               {sessionTasks.value.length} {t('tasks_panel_session_count')}
@@ -1480,20 +1480,20 @@ export function TaskRecoveryPanel() {
       {expanded ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {taskPanelError.value && (
-            <div style={{ marginBottom: '4px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-ui)', fontSize: '15px', lineHeight: 1.5 }}>
+            <div style={{ marginBottom: '4px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 68, 68, 0.28)', background: 'rgba(255, 68, 68, 0.08)', color: 'var(--error)', fontFamily: 'var(--font-ui)', fontSize: '14px', lineHeight: 1.5 }}>
               {taskPanelError.value}
             </div>
           )}
 
         {sessionTasks.value.length === 0 ? (
           <div style={{ padding: '12px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px' }}>
-            <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>{t('tasks_panel_empty')}</div>
+            <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('tasks_panel_empty')}</div>
           </div>
         ) : (
           <>
             {actionableTasks.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
                   {t('tasks_panel_actionable')}
                 </div>
                 {actionableTasks.map((task) => taskCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))}
@@ -1503,7 +1503,7 @@ export function TaskRecoveryPanel() {
             {settledTasks.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
+                  <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px' }}>
                     {t('tasks_panel_settled')}
                   </div>
                   <button
@@ -1524,11 +1524,11 @@ export function TaskRecoveryPanel() {
 
         {recoveryTasks.value.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginTop: '4px' }}>
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.2px', marginTop: '4px' }}>
               {t('tasks_panel_manual_review')}
             </div>
             {recoveryQueueTasks.length === 0 ? (
-              <div style={{ fontSize: '15px', color: 'var(--text-muted)' }}>{t('tasks_panel_manual_review_in_session')}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{t('tasks_panel_manual_review_in_session')}</div>
             ) : (
               recoveryQueueTasks.map((task) => recoveryQueueCard(task, expandedTaskId, setExpandedTaskId, expandedOutboxId, setExpandedOutboxId))
             )}
@@ -1539,17 +1539,17 @@ export function TaskRecoveryPanel() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '6px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '6px' }}>
                   {t('task_detail_panel_title')}
                 </div>
-                <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: '1.45', marginBottom: '6px', wordBreak: 'break-word' }}>
                   {selectedTask.goal || selectedTask.task_id}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '15px', fontFamily: 'var(--font-ui)', ...selectedTone }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 8px', borderRadius: '999px', border: '1px solid', fontSize: '14px', fontFamily: 'var(--font-ui)', ...selectedTone }}>
                     {formatDisplayState(selectedState)}
                   </span>
-                  <span style={{ fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+                  <span style={{ fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
                     {formatResumeRoute(selectedTask)}
                   </span>
                 </div>
@@ -1563,7 +1563,7 @@ export function TaskRecoveryPanel() {
                   borderRadius: '6px',
                   color: 'var(--text-secondary)',
                   fontFamily: 'var(--font-ui)',
-                  fontSize: '15px',
+                  fontSize: '14px',
                   cursor: 'pointer',
                 }}
               >
@@ -1571,7 +1571,7 @@ export function TaskRecoveryPanel() {
               </button>
             </div>
             <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '15px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                 {t('task_export_tools')}
               </summary>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
@@ -1584,7 +1584,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: copiedLabel === `copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -1599,7 +1599,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -1614,7 +1614,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -1629,7 +1629,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -1644,7 +1644,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: copiedLabel === `postmortem:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >
@@ -1659,7 +1659,7 @@ export function TaskRecoveryPanel() {
                     borderRadius: '6px',
                     color: 'var(--text-secondary)',
                     fontFamily: 'var(--font-ui)',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     cursor: 'pointer',
                   }}
                 >

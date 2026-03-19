@@ -9,6 +9,10 @@ import { TriggerList } from '../sidebar/TriggerList';
 
 export function Sidebar() {
   const [isMobile, setIsMobile] = useState(false);
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    if (typeof document === 'undefined') return 'dark';
+    return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  });
 
   useEffect(() => {
     const updateViewport = () => {
@@ -21,11 +25,28 @@ export function Sidebar() {
     return () => window.removeEventListener('resize', updateViewport);
   }, []);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    setThemeMode(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+  }, []);
+
   const handleNewChat = () => {
     sidebarTab.value = 'sessions';
     const newKey = `webui:${Math.random().toString(36).substring(2, 9)}`;
     activeSessionKey.value = newKey;
     mobileMenuOpen.value = false;
+  };
+
+  const toggleTheme = () => {
+    const nextMode = themeMode === 'light' ? 'dark' : 'light';
+    if (nextMode === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('lc_theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('lc_theme', 'dark');
+    }
+    setThemeMode(nextMode);
   };
 
   return (
@@ -80,17 +101,36 @@ export function Sidebar() {
           <button onClick={toggleLang} style={{ width: '40px', minHeight: isMobile ? '40px' : '32px', padding: isMobile ? '0' : '8px 0', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', touchAction: 'manipulation' }} onMouseEnter={(e) => { if (!isMobile) { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; } }} onMouseLeave={(e) => { if (!isMobile) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; } }}>
             {lang.value === 'en' ? '中' : 'EN'}
           </button>
-          <button onClick={() => {
-            const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-            if (isLight) {
-              document.documentElement.removeAttribute('data-theme');
-              localStorage.setItem('lc_theme', 'dark');
-            } else {
-              document.documentElement.setAttribute('data-theme', 'light');
-              localStorage.setItem('lc_theme', 'light');
-            }
-          }} style={{ width: '40px', minHeight: isMobile ? '40px' : '32px', padding: isMobile ? '0' : '8px 0', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', touchAction: 'manipulation' }} onMouseEnter={(e) => { if (!isMobile) { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; } }} onMouseLeave={(e) => { if (!isMobile) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; } }} title={t('toggle_theme')}>
-            🌓
+          <button onClick={toggleTheme} style={{ width: '40px', minHeight: isMobile ? '40px' : '32px', padding: 0, background: 'transparent', border: '1px solid transparent', borderRadius: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', touchAction: 'manipulation', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onMouseEnter={(e) => { if (!isMobile) { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; } }} onMouseLeave={(e) => { if (!isMobile) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; } }} title={t('toggle_theme')}>
+            <span
+              aria-hidden="true"
+              style={{
+                position: 'relative',
+                width: isMobile ? '24px' : '22px',
+                height: isMobile ? '24px' : '22px',
+                borderRadius: '999px',
+                background: themeMode === 'light'
+                  ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 48%, #f7d76a 49%, #fde68a 100%)'
+                  : 'linear-gradient(135deg, #f8fafc 0%, #dbeafe 42%, #7c3aed 43%, #312e81 100%)',
+                boxShadow: themeMode === 'light'
+                  ? '0 0 0 1px rgba(15, 23, 42, 0.08), 0 6px 14px rgba(15, 23, 42, 0.18)'
+                  : '0 0 0 1px rgba(124, 58, 237, 0.16), 0 6px 14px rgba(76, 29, 149, 0.24)',
+                overflow: 'hidden',
+                display: 'inline-block',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  inset: themeMode === 'light' ? '2px auto auto 3px' : '2px 3px auto auto',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '999px',
+                  background: themeMode === 'light' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.72)',
+                  boxShadow: themeMode === 'light' ? '0 0 0 1px rgba(255,255,255,0.12)' : '0 0 0 1px rgba(255,255,255,0.28)',
+                }}
+              />
+            </span>
           </button>
           <button onClick={() => showSettings.value = true} style={{ flex: 1, minWidth: 0, minHeight: isMobile ? '40px' : '32px', padding: isMobile ? '0 8px' : '8px', background: 'transparent', border: '1px solid transparent', borderRadius: '6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', fontSize: '14px', cursor: 'pointer', display: 'flex', justifyContent: 'center', gap: isMobile ? '6px' : '8px', alignItems: 'center', transition: 'all 0.2s', touchAction: 'manipulation', fontWeight: 500 }} onMouseEnter={(e) => { if (!isMobile) { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; } }} onMouseLeave={(e) => { if (!isMobile) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; } }}>
             <span style={{ color: 'var(--purple)' }}>⚙</span> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('settings')}</span>
