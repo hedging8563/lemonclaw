@@ -19,6 +19,8 @@ export interface KnowledgeDocumentRecord {
   last_hit_query?: string;
   last_error?: string;
   metadata?: Record<string, any>;
+  archived?: boolean;
+  archived_at_ms?: number | null;
   refresh_interval_hours?: number;
   next_refresh_at_ms?: number | null;
 }
@@ -33,10 +35,12 @@ export interface KnowledgeSummary {
   error_count?: number;
   registered_count?: number;
   ingesting_count?: number;
+  archived_count?: number;
 }
 
-export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting' | 'error' | 'registered';
+export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting' | 'error' | 'registered' | 'archived';
 export type MemoryPanelTab = 'sources' | 'search' | 'detail' | 'memory';
+export type KnowledgeSort = 'health' | 'freshness' | 'usage' | 'updated';
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
 export const knowledgeDocuments = signal<KnowledgeDocumentRecord[]>([]);
@@ -63,21 +67,24 @@ export function filterKnowledgeDocuments(
   view: KnowledgeView,
   nowMs = Date.now(),
 ): KnowledgeDocumentRecord[] {
+  const visible = docs.filter((doc) => view === 'archived' ? Boolean(doc.archived) : !doc.archived);
   switch (view) {
     case 'pinned':
-      return docs.filter((doc) => Boolean(doc.pinned));
+      return visible.filter((doc) => Boolean(doc.pinned));
     case 'used':
-      return docs.filter((doc) => isKnowledgeUsed(doc));
+      return visible.filter((doc) => isKnowledgeUsed(doc));
     case 'due':
-      return docs.filter((doc) => isKnowledgeDue(doc, nowMs));
+      return visible.filter((doc) => isKnowledgeDue(doc, nowMs));
     case 'ingesting':
-      return docs.filter((doc) => String(doc.status || '') === 'ingesting');
+      return visible.filter((doc) => String(doc.status || '') === 'ingesting');
     case 'error':
-      return docs.filter((doc) => String(doc.status || '') === 'error');
+      return visible.filter((doc) => String(doc.status || '') === 'error');
     case 'registered':
-      return docs.filter((doc) => String(doc.status || '') === 'registered');
+      return visible.filter((doc) => String(doc.status || '') === 'registered');
+    case 'archived':
+      return visible;
     default:
-      return docs;
+      return visible;
   }
 }
 
@@ -91,32 +98,33 @@ export function partitionKnowledgeDocuments(
   other: KnowledgeDocumentRecord[];
 } {
   const seen = new Set<string>();
+  const visible = docs.filter((doc) => !doc.archived);
   const pinned: KnowledgeDocumentRecord[] = [];
   const due: KnowledgeDocumentRecord[] = [];
   const used: KnowledgeDocumentRecord[] = [];
   const other: KnowledgeDocumentRecord[] = [];
 
-  for (const doc of docs) {
+  for (const doc of visible) {
     if (doc.doc_id && doc.pinned) {
       pinned.push(doc);
       seen.add(doc.doc_id);
     }
   }
-  for (const doc of docs) {
+  for (const doc of visible) {
     if (!doc.doc_id || seen.has(doc.doc_id)) continue;
     if (isKnowledgeDue(doc, nowMs)) {
       due.push(doc);
       seen.add(doc.doc_id);
     }
   }
-  for (const doc of docs) {
+  for (const doc of visible) {
     if (!doc.doc_id || seen.has(doc.doc_id)) continue;
     if (isKnowledgeUsed(doc)) {
       used.push(doc);
       seen.add(doc.doc_id);
     }
   }
-  for (const doc of docs) {
+  for (const doc of visible) {
     if (!doc.doc_id || seen.has(doc.doc_id)) continue;
     other.push(doc);
     seen.add(doc.doc_id);
@@ -124,10 +132,46 @@ export function partitionKnowledgeDocuments(
   return { pinned, due, used, other };
 }
 
+export function sortKnowledgeDocuments(
+  docs: KnowledgeDocumentRecord[],
+  sort: KnowledgeSort,
+  nowMs = Date.now(),
+): KnowledgeDocumentRecord[] {
+  const healthRank = (doc: KnowledgeDocumentRecord) => {
+    const status = String(doc.status || '');
+    if (doc.archived) return -1;
+    if (status === 'error') return 6;
+    if (status === 'registered') return 5;
+    if (isKnowledgeDue(doc, nowMs)) return 4;
+    if (status === 'ingesting') return 3;
+    if (doc.pinned) return 2;
+    if (isKnowledgeUsed(doc)) return 1;
+    return 0;
+  };
+  return [...docs].sort((a, b) => {
+    if (sort === 'usage') {
+      const usageA = Number(a.retrieval_count || 0) * 10000000000000 + Number(a.last_hit_at_ms || 0);
+      const usageB = Number(b.retrieval_count || 0) * 10000000000000 + Number(b.last_hit_at_ms || 0);
+      return usageB - usageA;
+    }
+    if (sort === 'freshness') {
+      const freshnessA = Math.max(Number(a.updated_at_ms || 0), Number(a.ingested_at_ms || 0), Number(a.next_refresh_at_ms || 0));
+      const freshnessB = Math.max(Number(b.updated_at_ms || 0), Number(b.ingested_at_ms || 0), Number(b.next_refresh_at_ms || 0));
+      return freshnessB - freshnessA;
+    }
+    if (sort === 'updated') {
+      return Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0);
+    }
+    const healthDiff = healthRank(b) - healthRank(a);
+    if (healthDiff !== 0) return healthDiff;
+    return Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0);
+  });
+}
+
 export async function loadKnowledge() {
   knowledgeError.value = null;
   try {
-    const res = await apiFetch('/api/knowledge');
+    const res = await apiFetch('/api/knowledge?include_archived=1');
     const data = await res.json();
     knowledgeSummary.value = data.summary || null;
     knowledgeDocuments.value = data.documents || [];

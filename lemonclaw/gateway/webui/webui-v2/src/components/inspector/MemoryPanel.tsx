@@ -15,9 +15,11 @@ import {
   loadKnowledgeDocument,
   partitionKnowledgeDocuments,
   searchKnowledge,
+  sortKnowledgeDocuments,
   selectedKnowledgeResultType,
   selectedKnowledgeSourceType,
   type KnowledgeDocumentRecord,
+  type KnowledgeSort,
   type MemoryPanelTab,
   type KnowledgeView,
 } from '../../stores/knowledge';
@@ -153,6 +155,7 @@ export function MemoryPanel() {
   const [knowledgeRefreshHours, setKnowledgeRefreshHours] = useState('0');
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('all');
+  const [knowledgeSort, setKnowledgeSort] = useState<KnowledgeSort>('health');
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
   const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
@@ -207,13 +210,21 @@ export function MemoryPanel() {
   );
 
   const visibleKnowledgeDocs = useMemo(
-    () => filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView),
-    [knowledgeView, knowledgeDocuments.value],
+    () => sortKnowledgeDocuments(filterKnowledgeDocuments(knowledgeDocuments.value, knowledgeView), knowledgeSort),
+    [knowledgeSort, knowledgeView, knowledgeDocuments.value],
   );
 
   const groupedKnowledgeDocs = useMemo(
-    () => partitionKnowledgeDocuments(knowledgeDocuments.value),
-    [knowledgeDocuments.value],
+    () => {
+      const groups = partitionKnowledgeDocuments(knowledgeDocuments.value);
+      return {
+        pinned: sortKnowledgeDocuments(groups.pinned, knowledgeSort),
+        due: sortKnowledgeDocuments(groups.due, knowledgeSort),
+        used: sortKnowledgeDocuments(groups.used, knowledgeSort),
+        other: sortKnowledgeDocuments(groups.other, knowledgeSort),
+      };
+    },
+    [knowledgeDocuments.value, knowledgeSort],
   );
 
   const knowledgeDocumentMap = useMemo(
@@ -447,6 +458,29 @@ export function MemoryPanel() {
     }
   };
 
+  const handleArchiveInvalid = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/archive-invalid', { method: 'POST' });
+      await loadKnowledge();
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
+    }
+  };
+
+  const handleDeleteInvalid = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/delete-invalid', { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_delete_failed'));
+    }
+  };
+
   const beginKnowledgeEdit = (doc: KnowledgeDocumentRecord) => {
     setEditingKnowledgeId(doc.doc_id);
     setEditKnowledgeTitle(doc.title || '');
@@ -652,6 +686,12 @@ export function MemoryPanel() {
           <button onClick={() => void handleIngestPending()} style={pillStyle(Boolean(knowledgeSummary.value?.registered_count))}>
             {t('knowledge_ingest_pending')}
           </button>
+          <button onClick={() => void handleArchiveInvalid()} style={pillStyle(Boolean(knowledgeSummary.value?.error_count))}>
+            {t('knowledge_archive_invalid')}
+          </button>
+          <button onClick={() => void handleDeleteInvalid()} style={pillStyle(Boolean(knowledgeSummary.value?.error_count))}>
+            {t('knowledge_delete_invalid')}
+          </button>
           <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>
             {t('knowledge_add_source')}
           </button>
@@ -666,9 +706,10 @@ export function MemoryPanel() {
         <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
         <span style={pillStyle(Boolean(knowledgeSummary.value?.registered_count))}>{t('knowledge_count_registered')}: {knowledgeSummary.value?.registered_count || 0}</span>
         <span style={pillStyle(Boolean(knowledgeSummary.value?.error_count))}>{t('knowledge_count_errors')}: {knowledgeSummary.value?.error_count || 0}</span>
+        <span style={pillStyle(Boolean(knowledgeSummary.value?.archived_count))}>{t('knowledge_count_archived')}: {knowledgeSummary.value?.archived_count || 0}</span>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         {([
           ['all', t('knowledge_view_all')],
           ['pinned', t('knowledge_view_pinned')],
@@ -677,8 +718,22 @@ export function MemoryPanel() {
           ['ingesting', t('knowledge_view_ingesting')],
           ['registered', t('knowledge_view_registered')],
           ['error', t('knowledge_view_error')],
+          ['archived', t('knowledge_view_archived')],
         ] as Array<[KnowledgeView, string]>).map(([value, label]) => (
           <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+        {([
+          ['health', t('knowledge_sort_health')],
+          ['freshness', t('knowledge_sort_freshness')],
+          ['usage', t('knowledge_sort_usage')],
+          ['updated', t('knowledge_sort_updated')],
+        ] as Array<[KnowledgeSort, string]>).map(([value, label]) => (
+          <button key={value} onClick={() => setKnowledgeSort(value)} style={pillStyle(knowledgeSort === value)}>
             {label}
           </button>
         ))}

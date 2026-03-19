@@ -416,6 +416,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <div style={noticeStyle(tone)}>{message}</div>
   );
 
+  const scrollToSetting = (target: string) => {
+    const field = typeof document !== 'undefined'
+      ? document.querySelector(`[data-setting-path="${target}"]`)
+      : null;
+    if (field instanceof HTMLElement) {
+      field.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const group = typeof document !== 'undefined'
+      ? document.getElementById(`setting-group-${target}`)
+      : null;
+    group?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const copyValue = async (fieldPath: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -587,6 +601,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     : activeTab === 'tools'
     ? (settingsMode === 'advanced' ? ['_tool_status', ...dataKeys] : dataKeys)
     : dataKeys;
+
+  const settingsTasks = (() => {
+    switch (activeTab) {
+      case 'providers':
+        return [
+          { key: 'gateway', title: t('settings_task_gateway'), help: t('settings_task_gateway_help'), action: () => scrollToSetting('lemondata_gateway') },
+        ];
+      case 'agents':
+        return [
+          { key: 'model', title: t('settings_task_model'), help: t('settings_task_model_help'), action: () => scrollToSetting('agents.defaults.model') },
+          { key: 'budgets', title: t('settings_task_budgets'), help: t('settings_task_budgets_help'), action: () => { setSettingsMode('advanced'); window.setTimeout(() => scrollToSetting('agents.defaults.token_budget_per_session'), 0); } },
+        ];
+      case 'channels':
+        return [
+          { key: 'channels', title: t('settings_task_channels'), help: t('settings_task_channels_help'), action: () => { setSettingsMode('advanced'); window.setTimeout(() => scrollToSetting('channels.telegram'), 0); } },
+          { key: 'whatsapp', title: t('settings_task_whatsapp'), help: t('settings_task_whatsapp_help'), action: () => scrollToSetting('whatsapp') },
+        ];
+      case 'tools':
+        return [
+          { key: 'tools', title: t('settings_task_tools'), help: t('settings_task_tools_help'), action: () => { setSettingsMode('advanced'); window.setTimeout(() => scrollToSetting('tools.browser'), 0); } },
+        ];
+      default:
+        return [];
+    }
+  })();
 
   const renderWorkspaceCard = () => {
     if (!draft?.agents?.defaults?.workspace) return null;
@@ -813,7 +852,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (Array.isArray(v)) {
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
             {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
             <input type="text" placeholder={getFieldPlaceholder(fullPath)} value={v.join(', ')} onInput={(e) => handleChange(currentPath, (e.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
@@ -869,7 +908,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }
 
         return (
-          <div id={`setting-group-${displayKey}`} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
+          <div id={`setting-group-${displayKey}`} data-setting-path={cPath.join('.')} key={displayKey} style={{ marginBottom: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: isMobile ? '12px' : '16px' }}>
             <div style={{ marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
               <div style={{ fontSize: isMobile ? '13px' : '14px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', overflowWrap: 'anywhere' }}>
                 <span style={{ color: 'var(--purple)' }}>#</span> {displayLabel(displayKey)}
@@ -907,7 +946,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (typeof v === 'boolean') {
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input type="checkbox" checked={v} onChange={(e) => handleChange(currentPath, (e.target as HTMLInputElement).checked)} />
               <label style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
@@ -919,7 +958,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (typeof v === 'number') {
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{displayLabel(k)}</label>
             {getFieldHelp(fullPath) && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>{getFieldHelp(fullPath)}</div>}
             <input type="number" placeholder={getFieldPlaceholder(fullPath)} value={v as number} onInput={(e) => handleChange(currentPath, Number((e.target as HTMLInputElement).value))} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
@@ -937,7 +976,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         const fieldLabel = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
         const feishuTarget = k === 'encrypt_key' ? 'Encrypt Key' : 'Verification Token';
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', fontFamily: 'var(--font-mono)' }}>{fieldLabel}</label>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', lineHeight: 1.5 }}>
               {t('feishu_token_help').replace('{target}', feishuTarget)}
@@ -957,7 +996,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (fullPath === 'agents.defaults.system_prompt') {
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             {commonLabel}
             {helpText}
             <textarea value={String(v ?? '')} placeholder={getFieldPlaceholder(fullPath)} onInput={(e) => handleChange(currentPath, (e.target as HTMLTextAreaElement).value)} style={{ width: '100%', minHeight: '120px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', resize: 'vertical' }} />
@@ -969,7 +1008,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const selectOpts = getSelectOptions(k);
       if (selectOpts && (typeof v === 'string' || v === null || v === undefined)) {
         return (
-          <div key={fullPath} style={{ marginBottom: '12px' }}>
+          <div key={fullPath} data-setting-path={fullPath} style={{ marginBottom: '12px' }}>
             {commonLabel}
             {helpText}
             <select value={String(v ?? '')} onChange={(e) => handleChange(currentPath, (e.target as HTMLSelectElement).value || null)} style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '8px 10px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px', outline: 'none', boxSizing: 'border-box', cursor: 'pointer', appearance: 'auto' }}>
@@ -1016,6 +1055,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {(t as any)(`tab_${activeTab}`)}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: isMobile ? '20px' : '32px' }}>{settingsDesc}</div>
+                  {settingsTasks.length > 0 && (
+                    <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
+                        // {t('settings_tasks_title')}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                      {settingsTasks.map((task) => (
+                        <button
+                          key={task.key}
+                          onClick={task.action}
+                          style={{ textAlign: 'left', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', display: 'grid', gap: '6px' }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{task.title}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{task.help}</span>
+                        </button>
+                      ))}
+                      </div>
+                    </div>
+                  )}
                   {activeTab !== 'soul' && activeTab !== 'governance' && activeTab !== 'skills' && (
                     <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
                       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

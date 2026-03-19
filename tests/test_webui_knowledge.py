@@ -220,6 +220,50 @@ def test_knowledge_summary_and_batch_retry_controls(tmp_path: Path, monkeypatch)
     assert summary_after["error_count"] == 0
 
 
+def test_knowledge_archive_and_delete_invalid_documents(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path)
+
+    from lemonclaw.knowledge.store import KnowledgeStore
+
+    docs = []
+    for idx in range(2):
+        docs.append(client.post(
+            "/api/knowledge/documents",
+            json={
+                "title": f"Broken {idx}",
+                "source": f"manual://broken-{idx}",
+                "source_type": "manual",
+                "content": f"broken {idx}",
+            },
+        ).json()["document"])
+
+    def _always_fail(self, document):
+        raise RuntimeError("broken source")
+
+    monkeypatch.setattr(KnowledgeStore, "_load_document_content", _always_fail)
+
+    for doc in docs:
+        resp = client.post(f"/api/knowledge/documents/{doc['doc_id']}/ingest")
+        assert resp.status_code == 500
+
+    archive_resp = client.post("/api/knowledge/archive-invalid")
+    assert archive_resp.status_code == 200
+    assert archive_resp.json()["updated"] == 2
+
+    payload = client.get("/api/knowledge").json()
+    assert payload["summary"]["archived_count"] >= 2
+    assert payload["summary"]["error_count"] == 0
+    assert all(item["doc_id"] not in {doc["doc_id"] for doc in docs} for item in payload["documents"])
+
+    archived = client.get("/api/knowledge?include_archived=1").json()["documents"]
+    archived_ids = {item["doc_id"] for item in archived if item.get("archived")}
+    assert {doc["doc_id"] for doc in docs}.issubset(archived_ids)
+
+    delete_resp = client.post("/api/knowledge/delete-invalid")
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["deleted"] == 0
+
+
 def test_knowledge_reingest_can_run_async(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
 

@@ -1070,9 +1070,10 @@ def get_webui_routes(
         ok, err = _require_auth(request)
         if not ok:
             return err  # type: ignore[return-value]
+        include_archived = str(request.query_params.get("include_archived", "0") or "0").strip() not in {"0", "false", "False"}
         resp = _json({
             "summary": _knowledge.summarize(),
-            "documents": _knowledge.list_documents(),
+            "documents": _knowledge.list_documents(include_archived=include_archived),
         })
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -1177,6 +1178,24 @@ def get_webui_routes(
             _maybe_refresh_cookie(request, resp)
             return resp
         result = await asyncio.to_thread(_knowledge.ingest_pending)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def archive_invalid_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        result = await asyncio.to_thread(_knowledge.archive_invalid)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def delete_invalid_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        result = await asyncio.to_thread(_knowledge.delete_invalid)
         resp = _json(result)
         _maybe_refresh_cookie(request, resp)
         return resp
@@ -2188,6 +2207,8 @@ def get_webui_routes(
         Route("/api/knowledge/refresh-due", refresh_due_knowledge, methods=["POST"]),
         Route("/api/knowledge/retry-failed", retry_failed_knowledge, methods=["POST"]),
         Route("/api/knowledge/ingest-pending", ingest_pending_knowledge, methods=["POST"]),
+        Route("/api/knowledge/archive-invalid", archive_invalid_knowledge, methods=["POST"]),
+        Route("/api/knowledge/delete-invalid", delete_invalid_knowledge, methods=["POST"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", get_knowledge_document, methods=["GET"]),
         Route("/api/knowledge/documents/{doc_id}", update_knowledge_document, methods=["PATCH"]),

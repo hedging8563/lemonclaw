@@ -69,9 +69,12 @@ class KnowledgeStore:
     def is_valid_doc_id(doc_id: str) -> bool:
         return bool(_SAFE_DOC_ID.match(doc_id))
 
-    def list_documents(self) -> list[dict[str, Any]]:
+    def list_documents(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         with self._lock:
-            return list(self._read_manifest_unlocked()["documents"])
+            docs = list(self._read_manifest_unlocked()["documents"])
+            if include_archived:
+                return docs
+            return [doc for doc in docs if not bool(doc.get("archived"))]
 
     def read_document(self, doc_id: str) -> dict[str, Any] | None:
         if not self.is_valid_doc_id(doc_id):
@@ -99,7 +102,8 @@ class KnowledgeStore:
         return updated
 
     def summarize(self) -> dict[str, Any]:
-        docs = self.list_documents()
+        all_docs = self.list_documents(include_archived=True)
+        docs = [doc for doc in all_docs if not bool(doc.get("archived"))]
         by_type: dict[str, int] = {}
         by_status: dict[str, int] = {}
         due_count = 0
@@ -108,6 +112,7 @@ class KnowledgeStore:
         error_count = 0
         registered_count = 0
         ingesting_count = 0
+        archived_count = sum(1 for doc in all_docs if bool(doc.get("archived")))
         for doc in docs:
             by_type[doc["source_type"]] = by_type.get(doc["source_type"], 0) + 1
             status = str(doc.get("status") or "")
@@ -134,6 +139,7 @@ class KnowledgeStore:
             "error_count": error_count,
             "registered_count": registered_count,
             "ingesting_count": ingesting_count,
+            "archived_count": archived_count,
         }
 
     def create_document(
@@ -169,6 +175,8 @@ class KnowledgeStore:
             "last_hit_at_ms": None,
             "last_hit_query": "",
             "metadata": {},
+            "archived": False,
+            "archived_at_ms": None,
             "refresh_interval_hours": refresh_interval_hours,
             "next_refresh_at_ms": None,
             "created_at_ms": now,
@@ -193,6 +201,20 @@ class KnowledgeStore:
             self._delete_chunks_unlocked(doc_id)
             self._delete_facts_unlocked(doc_id)
             return True
+
+    def archive_document(self, doc_id: str, *, archived: bool = True) -> dict[str, Any]:
+        if not self.is_valid_doc_id(doc_id):
+            raise ValueError("invalid doc_id")
+        with self._lock:
+            data = self._read_manifest_unlocked()
+            target = next((item for item in data["documents"] if item.get("doc_id") == doc_id), None)
+            if not target:
+                raise KeyError("document not found")
+            target["archived"] = bool(archived)
+            target["archived_at_ms"] = _now_ms() if archived else None
+            target["updated_at_ms"] = _now_ms()
+            self._write_manifest_unlocked(data)
+            return dict(target)
 
     def update_document(
         self,
@@ -425,6 +447,22 @@ class KnowledgeStore:
             "failed": failed,
             "errors": errors,
         }
+
+    def archive_invalid(self, *, limit: int = 100) -> dict[str, Any]:
+        docs = [doc for doc in self.list_documents() if str(doc.get("status") or "") == "error"][:max(1, int(limit))]
+        updated = 0
+        for doc in docs:
+            self.archive_document(str(doc.get("doc_id") or ""), archived=True)
+            updated += 1
+        return {"updated": updated}
+
+    def delete_invalid(self, *, limit: int = 100) -> dict[str, Any]:
+        docs = [doc for doc in self.list_documents() if str(doc.get("status") or "") == "error"][:max(1, int(limit))]
+        deleted = 0
+        for doc in docs:
+            if self.delete_document(str(doc.get("doc_id") or "")):
+                deleted += 1
+        return {"deleted": deleted}
 
     def search(
         self,
