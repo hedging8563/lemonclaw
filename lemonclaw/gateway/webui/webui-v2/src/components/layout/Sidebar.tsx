@@ -51,7 +51,7 @@ export function Sidebar() {
 
   return (
     <aside class={`layout-sidebar ${mobileMenuOpen.value ? 'open' : ''}`}>
-      <div style={{ padding: isMobile ? '12px' : '0 16px', height: '56px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: '8px' }}>
+      <div style={{ padding: isMobile ? '0 12px' : '0 16px', height: 'var(--topbar-h)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <img src="/logo-icon.svg" alt="" style={{ width: '22px', height: '22px', flexShrink: 0 }} />
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: isMobile ? '16px' : '18px', letterSpacing: '-0.5px', minWidth: 0, color: 'var(--text-primary)' }}>
