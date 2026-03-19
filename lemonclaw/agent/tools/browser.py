@@ -212,7 +212,15 @@ class BrowserTool(Tool):
                 response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/open", headers=headers)
                 payload = response.json()
                 if response.status_code != 200 or payload.get("code") != 0:
-                    return f"Error: DICloak open_profile failed: {payload.get('msg') or response.text}"
+                    details = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                    detail_message = str((details or {}).get("message") or "")
+                    if detail_message == "BROWSER_NOT_INSTALL_2":
+                        return (
+                            "Error: DICloak open_profile failed because the selected profile kernel is not installed "
+                            "for this runtime yet (BROWSER_NOT_INSTALL_2). Known supported kernel candidates are "
+                            "120, 134, 142, 143."
+                        )
+                    return f"Error: DICloak open_profile failed: {detail_message or payload.get('msg') or response.text}"
                 data = payload.get("data") or {}
                 debug_port = data.get("debug_port")
                 if not debug_port:

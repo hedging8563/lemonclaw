@@ -189,3 +189,39 @@ async def test_browser_dicloak_profile_lifecycle(monkeypatch: pytest.MonkeyPatch
     assert "closed: p_1" in closed
     assert any(list(call[0])[-2:] == ["connect", "45500"] for call in calls)
     assert any(list(call[0])[-1] == "close" for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_browser_dicloak_open_profile_surfaces_kernel_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict, status_code: int = 200):
+            self._payload = payload
+            self.status_code = status_code
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def patch(self, url, headers=None):
+            assert url.endswith("/open")
+            return FakeResponse({"code": 5000, "msg": "fail", "data": {"message": "BROWSER_NOT_INSTALL_2"}})
+
+    monkeypatch.setattr("lemonclaw.agent.tools.browser.httpx.AsyncClient", lambda **kwargs: FakeClient())
+
+    tool = BrowserTool()
+    tool._dicloak_enabled = True
+    tool._dicloak_api_base_url = "http://127.0.0.1:52140/openapi"
+    tool._dicloak_api_key = "dicloak-test"
+    tool._cli_path = "/usr/bin/agent-browser"
+
+    result = await tool.execute("dicloak open_profile p_1", _session_key="webui:dicloak")
+
+    assert "kernel is not installed" in result
+    assert "BROWSER_NOT_INSTALL_2" in result
