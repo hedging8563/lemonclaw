@@ -421,6 +421,32 @@ export function MemoryPanel() {
     }
   };
 
+  const handleRetryFailed = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/retry-failed?wait=0', { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
+    }
+  };
+
+  const handleIngestPending = async () => {
+    setSaveError(null);
+    try {
+      await apiFetch('/api/knowledge/ingest-pending?wait=0', { method: 'POST' });
+      await loadKnowledge();
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+    } catch (error: any) {
+      setSaveError(error.message || t('knowledge_ingest_failed'));
+    }
+  };
+
   const beginKnowledgeEdit = (doc: KnowledgeDocumentRecord) => {
     setEditingKnowledgeId(doc.doc_id);
     setEditKnowledgeTitle(doc.title || '');
@@ -599,7 +625,11 @@ export function MemoryPanel() {
         </div>
       ) : null}
       {doc.note ? <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.note}</div> : null}
-      {doc.last_error ? <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{doc.last_error}</div> : null}
+      {doc.last_error ? (
+        <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '6px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
+          {doc.last_error}
+        </div>
+      ) : null}
       {editingKnowledgeId === doc.doc_id ? renderKnowledgeForm('edit', doc.doc_id) : null}
     </div>
   );
@@ -616,6 +646,12 @@ export function MemoryPanel() {
           <button onClick={() => void handleRefreshDue()} style={pillStyle()}>
             {t('knowledge_refresh_due')}
           </button>
+          <button onClick={() => void handleRetryFailed()} style={pillStyle(Boolean(knowledgeSummary.value?.error_count))}>
+            {t('knowledge_retry_failed')}
+          </button>
+          <button onClick={() => void handleIngestPending()} style={pillStyle(Boolean(knowledgeSummary.value?.registered_count))}>
+            {t('knowledge_ingest_pending')}
+          </button>
           <button onClick={() => setCreatingKnowledge((value) => !value)} style={pillStyle(creatingKnowledge)}>
             {t('knowledge_add_source')}
           </button>
@@ -628,6 +664,8 @@ export function MemoryPanel() {
         <span style={pillStyle()}>{t('knowledge_count_due')}: {knowledgeSummary.value?.due_count || 0}</span>
         <span style={pillStyle()}>{t('knowledge_count_pinned')}: {knowledgeSummary.value?.pinned_count || 0}</span>
         <span style={pillStyle()}>{t('knowledge_count_used')}: {knowledgeSummary.value?.used_count || 0}</span>
+        <span style={pillStyle(Boolean(knowledgeSummary.value?.registered_count))}>{t('knowledge_count_registered')}: {knowledgeSummary.value?.registered_count || 0}</span>
+        <span style={pillStyle(Boolean(knowledgeSummary.value?.error_count))}>{t('knowledge_count_errors')}: {knowledgeSummary.value?.error_count || 0}</span>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
@@ -637,6 +675,8 @@ export function MemoryPanel() {
           ['used', t('knowledge_view_used')],
           ['due', t('knowledge_view_due')],
           ['ingesting', t('knowledge_view_ingesting')],
+          ['registered', t('knowledge_view_registered')],
+          ['error', t('knowledge_view_error')],
         ] as Array<[KnowledgeView, string]>).map(([value, label]) => (
           <button key={value} onClick={() => setKnowledgeView(value)} style={pillStyle(knowledgeView === value)}>
             {label}
@@ -800,6 +840,11 @@ export function MemoryPanel() {
             ) : null}
             {activeDoc.note ? (
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{activeDoc.note}</div>
+            ) : null}
+            {activeDoc.last_error ? (
+              <div style={{ fontSize: '11px', color: 'var(--error)', marginBottom: '8px', whiteSpace: 'pre-wrap', background: 'rgba(255, 68, 68, 0.08)', border: '1px solid rgba(255, 68, 68, 0.2)', borderRadius: '8px', padding: '8px 10px', lineHeight: 1.5 }}>
+                {activeDoc.last_error}
+              </div>
             ) : null}
             {activeDoc.metadata && Object.keys(activeDoc.metadata).length > 0 ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>

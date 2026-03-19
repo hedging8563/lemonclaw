@@ -256,6 +256,17 @@ def create_app(
         config_path=config_path,
         config_watcher=config_watcher,
     )
+    if runtime.session_manager:
+        try:
+            repair_stats = runtime.session_manager.repair_ui_histories()
+            if repair_stats.get("repaired"):
+                logger.info(
+                    "Session UI history repair completed: {} repaired / {} scanned",
+                    repair_stats.get("repaired", 0),
+                    repair_stats.get("scanned", 0),
+                )
+        except Exception:
+            logger.exception("Session UI history repair failed")
     set_context(version=runtime.version, channel_manager=runtime.channel_manager)
 
     routes = [

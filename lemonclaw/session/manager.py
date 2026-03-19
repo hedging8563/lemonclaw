@@ -20,6 +20,8 @@ from lemonclaw.utils.attachments import (
 )
 from lemonclaw.utils.helpers import ensure_dir, safe_filename
 
+_UI_PRIMARY_BLOCK_TYPES = frozenset({"markdown", "runtime_context", "transcription", "media"})
+
 
 @dataclass
 class Session:
@@ -275,12 +277,56 @@ class SessionManager:
                 last_consolidated=last_consolidated,
                 version=version,
             )
-            if truncated:
+            repaired, changed = self._repair_ui_messages(session.messages)
+            if changed:
+                session.messages = repaired
+            if truncated or changed:
                 self._atomic_save(path, session)
             return session
         except (json.JSONDecodeError, OSError, ValueError) as exc:
             logger.warning("Failed to load session {}: {} ({})", key, type(exc).__name__, exc)
             return None
+
+    @staticmethod
+    def _repair_ui_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+        repaired: list[dict[str, Any]] = []
+        changed = False
+        for message in messages:
+            if not isinstance(message, dict):
+                repaired.append(message)
+                continue
+            next_message = dict(message)
+            blocks = next_message.get("blocks")
+            tool_calls = next_message.get("tool_calls")
+            if (
+                str(next_message.get("role") or "") == "assistant"
+                and isinstance(tool_calls, list)
+                and tool_calls
+                and isinstance(blocks, list)
+            ):
+                filtered_blocks = [
+                    block for block in blocks
+                    if not (isinstance(block, dict) and str(block.get("type") or "") in _UI_PRIMARY_BLOCK_TYPES)
+                ]
+                if len(filtered_blocks) != len(blocks):
+                    next_message["blocks"] = filtered_blocks
+                    changed = True
+            repaired.append(next_message)
+        return repaired, changed
+
+    def repair_ui_histories(self) -> dict[str, int]:
+        scanned = 0
+        repaired = 0
+        for path in self.sessions_dir.glob("*.jsonl"):
+            scanned += 1
+            key = path.stem.replace("_", ":", 1)
+            before = path.read_text(encoding="utf-8")
+            self.invalidate(key)
+            self.get_or_create(key)
+            after = path.read_text(encoding="utf-8")
+            if after != before:
+                repaired += 1
+        return {"scanned": scanned, "repaired": repaired}
 
     def _atomic_save(self, path: Path, session: Session) -> None:
         tmp_path = path.with_suffix(f".jsonl.{os.getpid()}.tmp")

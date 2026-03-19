@@ -30,9 +30,12 @@ export interface KnowledgeSummary {
   due_count?: number;
   pinned_count?: number;
   used_count?: number;
+  error_count?: number;
+  registered_count?: number;
+  ingesting_count?: number;
 }
 
-export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting';
+export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting' | 'error' | 'registered';
 export type MemoryPanelTab = 'sources' | 'search' | 'detail' | 'memory';
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
@@ -69,6 +72,10 @@ export function filterKnowledgeDocuments(
       return docs.filter((doc) => isKnowledgeDue(doc, nowMs));
     case 'ingesting':
       return docs.filter((doc) => String(doc.status || '') === 'ingesting');
+    case 'error':
+      return docs.filter((doc) => String(doc.status || '') === 'error');
+    case 'registered':
+      return docs.filter((doc) => String(doc.status || '') === 'registered');
     default:
       return docs;
   }

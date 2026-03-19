@@ -116,3 +116,32 @@ def test_serialize_ui_message_dedupes_same_media_from_content_and_media_array() 
     assert len(media_blocks) == 1
     assert msg['media'][0]['path'] == path
 
+
+def test_session_load_repairs_assistant_tool_prelude_blocks(tmp_path: Path) -> None:
+    mgr = SessionManager(tmp_path)
+    session = mgr.get_or_create('webui:test-repair')
+    session.messages.append({
+        'role': 'assistant',
+        'content': '我先检查一下文件。',
+        'blocks': [
+            {'type': 'tool', 'state': 'done', 'detail': 'read_file("notes.md")'},
+            {'type': 'markdown', 'text': '我先检查一下文件。'},
+        ],
+        'media': [],
+        'tool_calls': [
+            {
+                'id': 'call_1',
+                'type': 'function',
+                'function': {'name': 'read_file', 'arguments': '{"path":"notes.md"}'},
+            }
+        ],
+    })
+    mgr.save(session)
+
+    mgr.invalidate('webui:test-repair')
+    reloaded = mgr.get_or_create('webui:test-repair')
+
+    assistant = reloaded.messages[0]
+    assert assistant['content'] == '我先检查一下文件。'
+    assert any(block['type'] == 'tool' for block in assistant['blocks'])
+    assert not any(block['type'] == 'markdown' for block in assistant['blocks'])

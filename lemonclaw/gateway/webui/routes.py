@@ -1129,6 +1129,58 @@ def get_webui_routes(
         _maybe_refresh_cookie(request, resp)
         return resp
 
+    async def retry_failed_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        wait = str(request.query_params.get("wait", "1") or "1").strip() not in {"0", "false", "False"}
+        if not wait:
+            docs = [doc for doc in _knowledge.list_documents() if str(doc.get("status") or "") == "error"]
+            doc_ids = [str(item.get("doc_id") or "") for item in docs]
+            if doc_ids:
+                _knowledge.mark_documents_ingesting(doc_ids)
+            running = _knowledge_batch_tasks.get("retry_failed")
+            if running is None or running.done():
+                async def _run_retry_failed() -> None:
+                    try:
+                        await asyncio.to_thread(_knowledge.retry_failed)
+                    finally:
+                        _knowledge_batch_tasks.pop("retry_failed", None)
+                _knowledge_batch_tasks["retry_failed"] = asyncio.create_task(_run_retry_failed())
+            resp = _json({"queued": True, "count": len(doc_ids)}, 202)
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        result = await asyncio.to_thread(_knowledge.retry_failed)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
+    async def ingest_pending_knowledge(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        wait = str(request.query_params.get("wait", "1") or "1").strip() not in {"0", "false", "False"}
+        if not wait:
+            docs = [doc for doc in _knowledge.list_documents() if str(doc.get("status") or "") == "registered"]
+            doc_ids = [str(item.get("doc_id") or "") for item in docs]
+            if doc_ids:
+                _knowledge.mark_documents_ingesting(doc_ids)
+            running = _knowledge_batch_tasks.get("ingest_pending")
+            if running is None or running.done():
+                async def _run_ingest_pending() -> None:
+                    try:
+                        await asyncio.to_thread(_knowledge.ingest_pending)
+                    finally:
+                        _knowledge_batch_tasks.pop("ingest_pending", None)
+                _knowledge_batch_tasks["ingest_pending"] = asyncio.create_task(_run_ingest_pending())
+            resp = _json({"queued": True, "count": len(doc_ids)}, 202)
+            _maybe_refresh_cookie(request, resp)
+            return resp
+        result = await asyncio.to_thread(_knowledge.ingest_pending)
+        resp = _json(result)
+        _maybe_refresh_cookie(request, resp)
+        return resp
+
     async def get_knowledge_document(request: Request) -> Response:
         ok, err = _require_auth(request)
         if not ok:
@@ -2134,6 +2186,8 @@ def get_webui_routes(
         Route("/api/knowledge/search", search_knowledge, methods=["GET"]),
         Route("/api/knowledge/reingest", reingest_knowledge, methods=["POST"]),
         Route("/api/knowledge/refresh-due", refresh_due_knowledge, methods=["POST"]),
+        Route("/api/knowledge/retry-failed", retry_failed_knowledge, methods=["POST"]),
+        Route("/api/knowledge/ingest-pending", ingest_pending_knowledge, methods=["POST"]),
         Route("/api/knowledge/documents", create_knowledge_document, methods=["POST"]),
         Route("/api/knowledge/documents/{doc_id}", get_knowledge_document, methods=["GET"]),
         Route("/api/knowledge/documents/{doc_id}", update_knowledge_document, methods=["PATCH"]),

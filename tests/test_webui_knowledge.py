@@ -164,6 +164,62 @@ def test_knowledge_manual_ingest_can_run_async(tmp_path: Path) -> None:
     assert settled["document"]["chunk_count"] >= 1
 
 
+def test_knowledge_summary_and_batch_retry_controls(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path)
+
+    pending = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Pending Notes",
+            "source": "manual://pending",
+            "source_type": "manual",
+            "content": "This note has not been ingested yet.",
+        },
+    ).json()["document"]
+
+    failing = client.post(
+        "/api/knowledge/documents",
+        json={
+            "title": "Failing Notes",
+            "source": "manual://failing",
+            "source_type": "manual",
+            "content": "This note fails once before succeeding.",
+        },
+    ).json()["document"]
+
+    from lemonclaw.knowledge.store import KnowledgeStore
+
+    original_loader = KnowledgeStore._load_document_content
+    failed_once = {"value": False}
+
+    def _flaky_loader(self, document):
+        if document.get("doc_id") == failing["doc_id"] and not failed_once["value"]:
+            failed_once["value"] = True
+            raise RuntimeError("temporary ingest failure")
+        return original_loader(self, document)
+
+    monkeypatch.setattr(KnowledgeStore, "_load_document_content", _flaky_loader)
+
+    first_ingest = client.post(f"/api/knowledge/documents/{failing['doc_id']}/ingest")
+    assert first_ingest.status_code == 500
+
+    summary_before = client.get("/api/knowledge").json()["summary"]
+    assert summary_before["registered_count"] >= 1
+    assert summary_before["error_count"] >= 1
+
+    pending_resp = client.post("/api/knowledge/ingest-pending")
+    assert pending_resp.status_code == 200
+    assert pending_resp.json()["updated"] >= 1
+
+    retry_resp = client.post("/api/knowledge/retry-failed")
+    assert retry_resp.status_code == 200
+    assert retry_resp.json()["updated"] >= 1
+
+    summary_after = client.get("/api/knowledge").json()["summary"]
+    assert summary_after["registered_count"] == 0
+    assert summary_after["error_count"] == 0
+
+
 def test_knowledge_reingest_can_run_async(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
 

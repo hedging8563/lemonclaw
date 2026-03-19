@@ -105,15 +105,25 @@ class KnowledgeStore:
         due_count = 0
         pinned_count = 0
         used_count = 0
+        error_count = 0
+        registered_count = 0
+        ingesting_count = 0
         for doc in docs:
             by_type[doc["source_type"]] = by_type.get(doc["source_type"], 0) + 1
-            by_status[doc["status"]] = by_status.get(doc["status"], 0) + 1
+            status = str(doc.get("status") or "")
+            by_status[status] = by_status.get(status, 0) + 1
             if self._is_due_document(doc):
                 due_count += 1
             if bool(doc.get("pinned")):
                 pinned_count += 1
             if int(doc.get("retrieval_count") or 0) > 0:
                 used_count += 1
+            if status == "error":
+                error_count += 1
+            elif status == "registered":
+                registered_count += 1
+            elif status == "ingesting":
+                ingesting_count += 1
         return {
             "total": len(docs),
             "by_type": by_type,
@@ -121,6 +131,9 @@ class KnowledgeStore:
             "due_count": due_count,
             "pinned_count": pinned_count,
             "used_count": used_count,
+            "error_count": error_count,
+            "registered_count": registered_count,
+            "ingesting_count": ingesting_count,
         }
 
     def create_document(
@@ -271,6 +284,15 @@ class KnowledgeStore:
                 target["updated_at_ms"] = now
                 self._write_manifest_unlocked(data)
                 return dict(target)
+            except Exception as exc:
+                target["status"] = "error"
+                target["chunk_count"] = 0
+                target["fact_count"] = 0
+                target["last_error"] = str(exc)[:500]
+                target["metadata"] = {}
+                target["updated_at_ms"] = _now_ms()
+                self._write_manifest_unlocked(data)
+                raise
             try:
                 text = str(raw.get("text") or "")
                 detected_title = str(raw.get("title") or "")
@@ -343,6 +365,48 @@ class KnowledgeStore:
 
     def refresh_due(self, *, limit: int = 20) -> dict[str, Any]:
         docs = [doc for doc in self.list_documents() if self._is_due_document(doc)][:max(1, int(limit))]
+        updated = 0
+        failed = 0
+        errors: list[dict[str, str]] = []
+        for doc in docs:
+            try:
+                self.ingest_document(str(doc.get("doc_id") or ""))
+                updated += 1
+            except Exception as exc:
+                failed += 1
+                errors.append({
+                    "doc_id": str(doc.get("doc_id") or ""),
+                    "error": str(exc)[:200],
+                })
+        return {
+            "updated": updated,
+            "failed": failed,
+            "errors": errors,
+        }
+
+    def retry_failed(self, *, limit: int = 20) -> dict[str, Any]:
+        docs = [doc for doc in self.list_documents() if str(doc.get("status") or "") == "error"][:max(1, int(limit))]
+        updated = 0
+        failed = 0
+        errors: list[dict[str, str]] = []
+        for doc in docs:
+            try:
+                self.ingest_document(str(doc.get("doc_id") or ""))
+                updated += 1
+            except Exception as exc:
+                failed += 1
+                errors.append({
+                    "doc_id": str(doc.get("doc_id") or ""),
+                    "error": str(exc)[:200],
+                })
+        return {
+            "updated": updated,
+            "failed": failed,
+            "errors": errors,
+        }
+
+    def ingest_pending(self, *, limit: int = 20) -> dict[str, Any]:
+        docs = [doc for doc in self.list_documents() if str(doc.get("status") or "") == "registered"][:max(1, int(limit))]
         updated = 0
         failed = 0
         errors: list[dict[str, str]] = []

@@ -8,7 +8,7 @@
   </p>
 </div>
 
-LemonClaw is a hard fork of [nanobot](https://github.com/HKUDS/nanobot) (MIT), rebuilt into a lightweight AI agent runtime with native MCP support, local tools, WebUI, and 10 IM channels. It ships well for dedicated self-hosted machines and K8s-style single-tenant deployments.
+LemonClaw is a hard fork of [nanobot](https://github.com/HKUDS/nanobot) (MIT), rebuilt into a lightweight AI agent runtime with native MCP support, local tools, WebUI, and 11 IM channels. It ships well for dedicated self-hosted machines and K8s-style single-tenant deployments.
 
 ## Quick Start
 
@@ -103,6 +103,50 @@ The `init` wizard will create these service definitions for you.
 
 Telegram, Discord, WhatsApp, Feishu, Slack, DingTalk, Email, QQ, Matrix, Mochat, WeCom (企业微信)
 
+## Current Product Surface
+
+The current LemonClaw product surface is centered on four areas:
+
+- chat and session management in WebUI
+- long-running task / recovery / operator workflows
+- knowledge ingestion, retrieval, and long-term memory
+- lightweight runtime governance and kill switch visibility
+
+In the current WebUI inspector:
+
+- `Notes` / `备忘录` holds time-based working notes: today notes, yesterday summary, and history
+- `Knowledge` / `知识` holds durable, structured information: sources, search, detail, and long-term memory cards/rules
+- `Tasks & Recovery` / `任务与恢复` is the operator-facing task lifecycle and outbox/recovery surface
+- `Current Work` / `当前执行` summarizes conductor / plan / agent activity
+
+This split is intentional:
+
+- notes are timeline-oriented
+- knowledge is long-term and searchable
+- task recovery is operational state
+
+LemonClaw now also repairs legacy WebUI task/tool-prelude history on startup so older sessions gradually stop showing duplicated draft text from tool runs.
+
+## WebUI Notes
+
+The current WebUI is not just a chat shell. It includes:
+
+- sessions, activity, operator queue, and triggers in the left sidebar
+- a right-side inspector for notes, task recovery, current work, and knowledge
+- knowledge source management with ingestion, pinning, search, detail, and retrieval previews
+- knowledge governance controls for retrying failed ingests, ingesting pending sources, refreshing due sources, and reingesting all
+- task export / bundle / postmortem surfaces for operator review
+- settings split into `Basic` / `Advanced`
+
+`Basic` shows the settings most users actually change. `Advanced` adds budgets, timeouts, proxies, bridge settings, MCP, and shell/runtime controls.
+
+Knowledge lifecycle states currently surfaced in WebUI:
+
+- `registered` — source saved but not ingested yet
+- `ingesting` — ingest job is running
+- `ingested` — chunks/facts are available for retrieval
+- `error` — the last ingest failed and needs review or retry
+
 ## Architecture
 
 ```text
@@ -135,18 +179,40 @@ If you run LemonClaw on a machine that also contains unrelated sensitive data, a
 
 Config file: `~/.lemonclaw/config.json`
 
+Default chat model:
+
+- `gpt-5.4`
+
 Default LemonData provider names used by the setup wizard:
 
 - `lemondata` — OpenAI-compatible (`/v1`)
+- `lemondata_response` — OpenAI Responses API (`/v1`), used by the `gpt-5.4` family by default
 - `lemondata_claude` — Anthropic-compatible
 - `lemondata_minimax` — MiniMax native / Anthropic-compatible
 - `lemondata_gemini` — Gemini native format
+
+Current routing defaults:
+
+- `gpt-5.4` / `gpt-5.4-pro` default to `lemondata_response`
+- platform-managed LemonData providers expose grouped configuration in WebUI settings
 
 ## Docker / K8s
 
 - single-container local build: `Dockerfile`
 - local compose example: `docker-compose.yml`
 - K8s deployment should be integrated through your own manifests / deployment repo
+
+For the LemonData runtime workflow used in this repository, the release/deploy entry point is:
+
+```bash
+./deploy/k3s/claw/lemonclaw-runtime/build-and-deploy.sh
+```
+
+Typical contributor flow:
+
+- build from local LemonClaw source
+- publish a version record
+- deploy one instance with `--deploy claw-<name>` or all managed instances with `--deploy-all`
 
 ## Repository Layout
 
