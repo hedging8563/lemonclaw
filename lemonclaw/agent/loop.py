@@ -123,6 +123,7 @@ class AgentLoop:
         disabled_skills: list[str] | None = None,
         governance_config: Any | None = None,
         trigger_runtime: TriggerRuntime | None = None,
+        provider_factory: Callable[[str | None], LLMProvider] | None = None,
     ):
         from lemonclaw.config.schema import ExecToolConfig
         self.agent_id = agent_id
@@ -130,6 +131,7 @@ class AgentLoop:
         self.channels_config = channels_config
         self.default_timezone = default_timezone
         self.provider = provider
+        self._provider_factory = provider_factory
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
@@ -186,6 +188,22 @@ class AgentLoop:
         self._session_lock_order: list[str] = []  # LRU tracking for session locks
         self._MAX_SESSION_LOCKS = 1000  # Upper bound to prevent unbounded growth
         self._register_default_tools()
+
+    def _provider_for_model(self, model: str | None) -> LLMProvider:
+        effective_model = model or self.model
+        if not effective_model or not self._provider_factory:
+            return self.provider
+
+        current_model = getattr(self.provider, "default_model", None) or self.model
+        if provider_family_for_model(str(current_model or "")) == provider_family_for_model(effective_model):
+            return self.provider
+
+        try:
+            resolved = self._provider_factory(effective_model)
+        except Exception:
+            logger.exception("Failed to resolve provider for model {}", effective_model)
+            return self.provider
+        return resolved or self.provider
 
     def _track_background_task(self, task: asyncio.Task, *, bucket: set[asyncio.Task], label: str) -> None:
         """Keep a strong ref for background tasks and log failures consistently."""
@@ -661,6 +679,7 @@ class AgentLoop:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
         _lang = lang
         effective_model = session_model or self.model
+        active_provider = self._provider_for_model(effective_model)
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -683,11 +702,11 @@ class AgentLoop:
             if iteration > 1:
                 from lemonclaw.session.compaction import compact, needs_compaction
                 if needs_compaction(messages, effective_model):
-                    messages = await compact(messages, effective_model, self.provider)
+                    messages = await compact(messages, effective_model, active_provider)
 
             try:
                 response = await asyncio.wait_for(
-                    self.provider.chat(
+                    active_provider.chat(
                         messages=messages,
                         tools=self.tools.get_definitions(),
                         model=effective_model,
@@ -1047,11 +1066,13 @@ class AgentLoop:
                 logger.exception("Error processing message for session {}", msg.session_key)
                 # Procedural memory: reflect on failure to learn from it
                 try:
+                    active_model = self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model
+                    active_provider = self._provider_for_model(active_model)
                     await self.context.memory.procedural.reflect(
-                        self.provider,
+                        active_provider,
                         task_description=msg.content[:200],
                         error=str(exc)[:200],
-                        model=self.model,
+                        model=active_model,
                     )
                 except Exception:
                     pass  # reflect is best-effort, never block error handling
@@ -1118,6 +1139,8 @@ class AgentLoop:
             key = session_key or msg.session_key
             session = self.sessions.get_or_create(key)
             session_model = session.metadata.get("current_model")
+            active_provider = self._provider_for_model(session_model or self.model)
+            self.context.memory.set_provider(active_provider)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), session_key=key)
             history = session.get_history(max_messages=self.memory_window)
             memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
@@ -1133,7 +1156,7 @@ class AgentLoop:
             # Token-level compaction for system messages too
             from lemonclaw.session.compaction import compact, needs_compaction
             if needs_compaction(messages, session_model or self.model):
-                messages = await compact(messages, session_model or self.model, self.provider)
+                messages = await compact(messages, session_model or self.model, active_provider)
             final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
                 messages, session_key=key, stop_event=stop_event, session_model=session_model,
                 lang=session_lang(session),
@@ -1176,6 +1199,9 @@ class AgentLoop:
             })
 
         session = self.sessions.get_or_create(key)
+        session_model = session.metadata.get("current_model")
+        active_provider = self._provider_for_model(session_model or self.model)
+        self.context.memory.set_provider(active_provider)
 
         # Auto-detect language from first message if not set
         if "lang" not in session.metadata:
@@ -1282,9 +1308,6 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_turn_state = message_tool.start_turn()
 
-        # Per-session model override
-        session_model = session.metadata.get("current_model")
-
         history = session.get_history(max_messages=self.memory_window)
         memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
         logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
@@ -1307,7 +1330,7 @@ class AgentLoop:
         from lemonclaw.session.compaction import compact, needs_compaction
         if needs_compaction(initial_messages, session_model or self.model):
             initial_messages = await compact(
-                initial_messages, session_model or self.model, self.provider,
+                initial_messages, session_model or self.model, active_provider,
             )
         initial_message_count = len(initial_messages)
 

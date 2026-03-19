@@ -1185,6 +1185,46 @@ class TestWebUIRoutes:
         assert any(message.get('role') == 'assistant' for message in new_session.messages)
 
     @pytest.mark.asyncio
+    async def test_process_direct_uses_provider_for_session_model(self, make_agent_loop):
+        from lemonclaw.providers.base import LLMResponse
+
+        class RecordingProvider:
+            def __init__(self, default_model: str, label: str):
+                self.default_model = default_model
+                self.label = label
+                self.models: list[str | None] = []
+
+            def get_default_model(self) -> str:
+                return self.default_model
+
+            async def chat(self, messages: list[dict], **kwargs):
+                self.models.append(kwargs.get("model"))
+                return LLMResponse(content=f"{self.label}:{kwargs.get('model')}")
+
+        default_provider = RecordingProvider("gpt-5.4", "default")
+        claude_provider = RecordingProvider("claude-sonnet-4-6", "claude")
+
+        loop, _bus = make_agent_loop(
+            provider=default_provider,
+            model="gpt-5.4",
+            provider_factory=lambda model=None: claude_provider if model == "claude-sonnet-4-6" else default_provider,
+        )
+        session = loop.sessions.get_or_create("webui:provider-switch")
+        session.metadata["current_model"] = "claude-sonnet-4-6"
+        loop.sessions.save(session)
+
+        response = await loop.process_direct(
+            "hello",
+            session_key="webui:provider-switch",
+            channel="webui",
+            chat_id="webui",
+        )
+
+        assert response == "claude:claude-sonnet-4-6"
+        assert default_provider.models == []
+        assert claude_provider.models == ["claude-sonnet-4-6"]
+
+    @pytest.mark.asyncio
     async def test_webui_disabled(self, make_agent_loop):
         from starlette.testclient import TestClient
 

@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from lemonclaw.cli.commands import app
 from lemonclaw.config.schema import Config
+from lemonclaw.providers.base import LLMResponse
 from lemonclaw.providers.lemondata_response_provider import LemonDataResponsesProvider
 from lemonclaw.providers.litellm_provider import LiteLLMProvider
 from lemonclaw.providers.openai_codex_provider import _strip_model_prefix
@@ -181,3 +182,9 @@ def test_runtime_version_falls_back_to_package_version(monkeypatch):
 
     monkeypatch.delenv("LEMONCLAW_RUNTIME_VERSION", raising=False)
     assert _runtime_version() == "2026.2.28.1"
+
+
+def test_llm_response_normalizes_stringified_text_blocks():
+    response = LLMResponse(content='[{"type":"text","text":"hello world"}]')
+
+    assert response.content == "hello world"

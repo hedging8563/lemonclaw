@@ -3,7 +3,58 @@
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+import json
 from typing import Any
+
+
+def _extract_text_parts(content: Any) -> list[str]:
+    parts: list[str] = []
+
+    if content is None:
+        return parts
+
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith(("[", "{")):
+            try:
+                parsed = json.loads(stripped)
+            except Exception:
+                return [content]
+            parsed_parts = _extract_text_parts(parsed)
+            if parsed_parts:
+                return parsed_parts
+        return [content]
+
+    if isinstance(content, list):
+        for item in content:
+            parts.extend(_extract_text_parts(item))
+        return parts
+
+    if isinstance(content, dict):
+        item_type = str(content.get("type") or "")
+        if item_type in {"text", "input_text", "output_text"}:
+            text = content.get("text")
+            if isinstance(text, dict):
+                value = text.get("value")
+                if isinstance(value, str) and value:
+                    return [value]
+            if isinstance(text, str) and text:
+                return [text]
+        nested_content = content.get("content")
+        if isinstance(nested_content, (list, dict)):
+            return _extract_text_parts(nested_content)
+        output = content.get("output")
+        if isinstance(output, str) and output:
+            return [output]
+
+    return parts
+
+
+def normalize_text_content(content: Any) -> str | None:
+    parts = [part.strip() for part in _extract_text_parts(content) if isinstance(part, str) and part.strip()]
+    if not parts:
+        return None
+    return "\n".join(parts)
 
 # Callback type for streaming text chunks to the caller.
 # (delta_text, *, first: bool) — first=True on the first text chunk of a stream.
@@ -31,6 +82,10 @@ class LLMResponse:
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return len(self.tool_calls) > 0
+
+    def __post_init__(self) -> None:
+        self.content = normalize_text_content(self.content)
+        self.reasoning_content = normalize_text_content(self.reasoning_content)
 
 
 class LLMProvider(ABC):

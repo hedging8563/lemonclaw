@@ -220,14 +220,14 @@ def onboard():
 
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config, model: str | None = None):
     """Create the appropriate LLM provider from config."""
     from lemonclaw.providers.lemondata_response_provider import LemonDataResponsesProvider
     from lemonclaw.providers.litellm_provider import LiteLLMProvider
     from lemonclaw.providers.openai_codex_provider import OpenAICodexProvider
     from lemonclaw.providers.custom_provider import CustomProvider
 
-    model = config.agents.defaults.model
+    model = model or config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
@@ -323,6 +323,7 @@ def gateway(
     trigger_runtime = TriggerRuntime(config.workspace_path)
     bus = MessageBus(trigger_runtime=trigger_runtime)
     provider = _make_provider(config)
+    provider_factory = lambda selected_model=None: _make_provider(load_config(), selected_model)
     session_manager = SessionManager(config.workspace_path)
 
     # Create usage tracker with budget config
@@ -371,6 +372,7 @@ def gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         governance_config=config.governance,
         trigger_runtime=trigger_runtime,
+        provider_factory=provider_factory,
     )
 
     # Set cron callback (needs agent)
@@ -636,6 +638,7 @@ def agent(
     
     bus = MessageBus()
     provider = _make_provider(config)
+    provider_factory = lambda selected_model=None: _make_provider(load_config(), selected_model)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -670,6 +673,7 @@ def agent(
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
         governance_config=config.governance,
+        provider_factory=provider_factory,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1123,6 +1127,7 @@ def cron_run(
 
     config = load_config()
     provider = _make_provider(config)
+    provider_factory = lambda selected_model=None: _make_provider(load_config(), selected_model)
     bus = MessageBus()
     agent_loop = AgentLoop(
         bus=bus,
@@ -1147,6 +1152,7 @@ def cron_run(
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
         governance_config=config.governance,
+        provider_factory=provider_factory,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
