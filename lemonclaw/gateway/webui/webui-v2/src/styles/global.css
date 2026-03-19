@@ -56,7 +56,7 @@ body {
   background: radial-gradient(circle at top, rgba(255, 107, 53, 0.06), transparent 30%), var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* ── Layout ───────────────────────────────────────────────────────── */

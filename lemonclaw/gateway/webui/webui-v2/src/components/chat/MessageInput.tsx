@@ -131,7 +131,7 @@ export function MessageInput() {
       {t('stop')}
     </button>
   ) : (
-    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'var(--bg-tertiary)' : 'var(--accent)', color: '#fff', border: 'none', borderRadius: '10px', padding: isMobile ? '0 16px' : '0 20px', minHeight: '44px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: disableSend ? 0.5 : 1, width: isMobile ? '100%' : 'auto', boxShadow: disableSend ? 'none' : '0 10px 22px rgba(255, 107, 53, 0.22)' }}>
+    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'rgba(255,255,255,0.06)' : 'var(--text-primary)', color: disableSend ? 'var(--text-muted)' : 'var(--bg-primary)', border: 'none', borderRadius: '12px', padding: isMobile ? '0 16px' : '0 24px', minHeight: '44px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontSize: '14px', fontWeight: 600, transition: 'all 0.2s' }}>
       {t('send')}
     </button>
   );
@@ -140,7 +140,7 @@ export function MessageInput() {
     <div style={{ padding: isMobile ? '12px 12px calc(12px + env(safe-area-inset-bottom))' : '16px', borderTop: '1px solid var(--border)', background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, var(--bg-primary) 48%)' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
         {attachments.value.length > 0 && (
-          <div style={{ marginBottom: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px', padding: isMobile ? '10px' : '12px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
+          <div style={{ marginBottom: '10px', background: 'var(--bg-secondary)', border: 'none', borderRadius: '16px', padding: isMobile ? '10px' : '12px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>
@@ -150,13 +150,13 @@ export function MessageInput() {
                   {attachmentQueueStatus}
                 </div>
               </div>
-              <button onClick={() => { attachments.value = []; }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '999px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '6px 10px', cursor: 'pointer' }}>
+              <button onClick={() => { attachments.value = []; }} style={{ background: 'transparent', border: 'none', borderRadius: '999px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '6px 10px', cursor: 'pointer' }}>
                 {t('common_clear')}
               </button>
             </div>
             <div style={{ display: isMobile ? 'flex' : 'grid', gap: '10px', gridTemplateColumns: isMobile ? undefined : 'repeat(auto-fit, minmax(180px, 1fr))', overflowX: isMobile ? 'auto' : 'visible', paddingBottom: isMobile ? '2px' : 0 }}>
               {attachments.value.map((att) => (
-                <div key={att.id} style={{ position: 'relative', borderRadius: '14px', border: '1px solid', borderColor: att.status === 'failed' ? 'rgba(255, 68, 68, 0.35)' : att.status === 'uploading' ? 'rgba(255, 107, 53, 0.28)' : 'var(--border)', overflow: 'hidden', background: 'var(--bg-primary)', flex: isMobile ? '0 0 220px' : undefined, minWidth: isMobile ? '220px' : 0 }}>
+                <div key={att.id} style={{ position: 'relative', borderRadius: '0', border: '1px solid', borderColor: att.status === 'failed' ? 'rgba(255, 68, 68, 0.35)' : att.status === 'uploading' ? 'rgba(255, 107, 53, 0.28)' : 'var(--border)', overflow: 'hidden', background: 'transparent', flex: isMobile ? '0 0 220px' : undefined, minWidth: isMobile ? '220px' : 0 }}>
                   <div style={{ height: isMobile ? '110px' : '124px', background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
                     {att.url?.startsWith('data:image') ? (
                       <img src={att.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -197,12 +197,12 @@ export function MessageInput() {
                       {att.status === 'failed' ? (
                         <button
                           onClick={() => void retryUploadAttachment(att.id)}
-                          style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}
+                          style={{ padding: '7px 10px', borderRadius: '999px', border: 'none', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}
                         >
                           {t('attachment_retry')}
                         </button>
                       ) : <span />}
-                      <button onClick={() => removeAttachment(att.id)} style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}>
+                      <button onClick={() => removeAttachment(att.id)} style={{ padding: '7px 10px', borderRadius: '999px', border: 'none', background: 'transparent', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', cursor: 'pointer' }}>
                         {t('common_remove')}
                       </button>
                     </div>
@@ -220,9 +220,9 @@ export function MessageInput() {
           style={{ border: isDragging ? '1px dashed var(--accent)' : '1px solid transparent', borderRadius: '16px', padding: isDragging ? '4px' : '0', transition: 'all 0.2s' }}
         >
           {isMobile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-secondary)', border: 'none', borderRadius: '16px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                <button onClick={() => fileInputRef.current?.click()} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>
+                <button onClick={() => fileInputRef.current?.click()} style={{ background: 'transparent', border: 'none', borderRadius: '0', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>
                   📎
                 </button>
                 <textarea
@@ -231,7 +231,7 @@ export function MessageInput() {
                   onInput={handleInput}
                   onKeyDown={handleKeyDown}
                   placeholder={placeholder}
-                  style={{ flex: 1, minWidth: 0, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
+                  style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderRadius: '0', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
                   disabled={isStreaming.value}
                 />
               </div>
@@ -241,8 +241,8 @@ export function MessageInput() {
               {composerButton}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '18px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
-              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'var(--bg-secondary)', border: 'none', borderRadius: '18px', padding: '10px', boxShadow: '0 14px 30px rgba(0,0,0,0.16)' }}>
+              <button onClick={() => fileInputRef.current?.click()} style={{ background: 'transparent', border: 'none', borderRadius: '0', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 📎
               </button>
               <textarea
@@ -251,15 +251,20 @@ export function MessageInput() {
                 onInput={handleInput}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
-                style={{ flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
+                style={{ flex: 1, background: 'transparent', border: 'none', borderRadius: '0', padding: '12px 14px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', fontSize: '14px', resize: 'none', outline: 'none', maxHeight: '160px', minHeight: '44px', lineHeight: '1.5', overflowY: 'auto' }}
                 disabled={isStreaming.value}
               />
               {composerButton}
             </div>
           )}
           {!isMobile && (
-            <div style={{ marginTop: '8px', fontSize: '11px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', paddingLeft: '56px' }}>
-              {composerStatusText}
+            <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between', paddingLeft: '56px', paddingRight: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', opacity: 0.6 }}>
+                Enter {t('send')} · Shift+Enter {t('newline')} · {t('drop_files_hint')}
+              </div>
+              <div style={{ fontSize: '11px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'transparent', fontFamily: 'var(--font-mono)' }}>
+                {composerStatusText}
+              </div>
             </div>
           )}
 
