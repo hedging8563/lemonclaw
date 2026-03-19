@@ -447,7 +447,8 @@ class ChannelManager:
         """Get status of all channels."""
         return {
             name: {
-                "enabled": True,
+                **dict(self._channel_status.get(name, {})),
+                "enabled": bool(self._channel_status.get(name, {}).get("configured_enabled", True)),
                 "running": channel.is_running,
                 **dict(self._restart_state.get(name, {})),
             }

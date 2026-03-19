@@ -90,7 +90,7 @@ async def test_watchdog_start_offloads_startup_scan_to_thread(tmp_path: Path, mo
 
 
 def test_watchdog_detects_down_channels():
-    manager = type("Mgr", (), {"get_status": lambda self: {"telegram": {"enabled": True, "running": False}}})()
+    manager = type("Mgr", (), {"get_status": lambda self: {"telegram": {"enabled": True, "available": True, "running": False}}})()
     watchdog = WatchdogService(channel_manager=manager)
 
     check = watchdog._check_channels()
@@ -98,10 +98,30 @@ def test_watchdog_detects_down_channels():
     assert check == HealthCheck("channel_down", False, "down: telegram")
 
 
+def test_watchdog_ignores_unavailable_channels_with_config_errors():
+    manager = type("Mgr", (), {
+        "get_status": lambda self: {
+            "telegram": {
+                "enabled": True,
+                "available": False,
+                "running": False,
+                "error": "token rejected by upstream",
+            },
+        },
+    })()
+    watchdog = WatchdogService(channel_manager=manager)
+
+    check = watchdog._check_channels()
+
+    assert check.healthy is True
+    assert check.name == "channel_down"
+    assert "blocked:" in check.detail
+
+
 @pytest.mark.asyncio
 async def test_watchdog_soft_recovery_restarts_down_channels():
     manager = type("Mgr", (), {
-        "get_status": lambda self: {"telegram": {"enabled": True, "running": False}},
+        "get_status": lambda self: {"telegram": {"enabled": True, "available": True, "running": False}},
         "restart_channel": AsyncMock(return_value={"channel": "telegram", "running": True, "task_done": False}),
     })()
     watchdog = WatchdogService(channel_manager=manager)
@@ -111,6 +131,19 @@ async def test_watchdog_soft_recovery_restarts_down_channels():
     manager.restart_channel.assert_awaited_once_with(
         "telegram", reason="channel_down detected", source="watchdog",
     )
+
+
+@pytest.mark.asyncio
+async def test_watchdog_soft_recovery_skips_unavailable_channels():
+    manager = type("Mgr", (), {
+        "get_status": lambda self: {"telegram": {"enabled": True, "available": False, "running": False, "error": "token rejected"}},
+        "restart_channel": AsyncMock(return_value={"channel": "telegram", "running": True, "task_done": False}),
+    })()
+    watchdog = WatchdogService(channel_manager=manager)
+
+    await watchdog._soft_recovery([HealthCheck("channel_down", False, "down: telegram")])
+
+    manager.restart_channel.assert_not_awaited()
 
 
 @pytest.mark.asyncio

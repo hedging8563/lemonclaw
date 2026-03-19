@@ -337,9 +337,21 @@ class WatchdogService:
         if not self._channel_manager:
             return HealthCheck("channel_down", True, "no channel manager")
         status = self._channel_manager.get_status()
-        down = [name for name, info in status.items() if not bool(info.get("running"))]
+        down = []
+        blocked = []
+        for name, info in status.items():
+            if not bool(info.get("enabled", info.get("configured_enabled", True))):
+                continue
+            if info.get("available") is False:
+                error = str(info.get("error") or "").strip()
+                blocked.append(f"{name}: {error}" if error else name)
+                continue
+            if not bool(info.get("running")):
+                down.append(name)
         if down:
             return HealthCheck("channel_down", False, f"down: {', '.join(down[:5])}")
+        if blocked:
+            return HealthCheck("channel_down", True, f"blocked: {', '.join(blocked[:3])}")
         return HealthCheck("channel_down", True)
 
     def _check_error_rate(self) -> HealthCheck:
@@ -447,6 +459,8 @@ class WatchdogService:
                     logger.warning("watchdog: stale-task recovery annotated {} task(s)", recovered)
             if c.name == "channel_down" and self._channel_manager is not None:
                 for name, info in self._channel_manager.get_status().items():
+                    if info.get("available") is False:
+                        continue
                     if bool(info.get("running")):
                         continue
                     try:
