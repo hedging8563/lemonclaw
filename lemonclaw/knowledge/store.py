@@ -226,6 +226,7 @@ class KnowledgeStore:
         source_type: str | None = None,
         content: str | None = None,
         pinned: bool | None = None,
+        archived: bool | None = None,
         refresh_interval_hours: int | None = None,
     ) -> dict[str, Any]:
         if not self.is_valid_doc_id(doc_id):
@@ -262,6 +263,9 @@ class KnowledgeStore:
                     needs_reingest = True
             if pinned is not None:
                 target["pinned"] = bool(pinned)
+            if archived is not None:
+                target["archived"] = bool(archived)
+                target["archived_at_ms"] = _now_ms() if archived else None
             if refresh_interval_hours is not None:
                 interval = max(0, int(refresh_interval_hours or 0))
                 if interval != int(target.get("refresh_interval_hours") or 0):

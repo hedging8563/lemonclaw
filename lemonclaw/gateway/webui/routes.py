@@ -1262,6 +1262,7 @@ def get_webui_routes(
                 source_type=body.get("source_type"),
                 content=body.get("content"),
                 pinned=body.get("pinned"),
+                archived=body.get("archived"),
                 refresh_interval_hours=body.get("refresh_interval_hours"),
             )
         except ValueError as exc:

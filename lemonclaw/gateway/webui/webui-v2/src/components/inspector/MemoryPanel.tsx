@@ -156,6 +156,8 @@ export function MemoryPanel() {
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [knowledgeView, setKnowledgeView] = useState<KnowledgeView>('all');
   const [knowledgeSort, setKnowledgeSort] = useState<KnowledgeSort>('health');
+  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>([]);
+  const [knowledgeActionNotice, setKnowledgeActionNotice] = useState<string | null>(null);
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
   const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
@@ -180,6 +182,11 @@ export function MemoryPanel() {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [knowledgeDocuments.value.map((doc) => `${doc.doc_id}:${doc.status || ''}`).join('|'), activeKnowledgeDocument.value?.doc_id]);
+
+  useEffect(() => {
+    const known = new Set(knowledgeDocuments.value.map((doc) => doc.doc_id));
+    setSelectedKnowledgeIds((current) => current.filter((docId) => known.has(docId)));
+  }, [knowledgeDocuments.value.map((doc) => doc.doc_id).join('|')]);
 
   const snapshot = memory.value;
   const activeTab = activeMemoryPanelTab.value;
@@ -231,6 +238,15 @@ export function MemoryPanel() {
     () => new Map(knowledgeDocuments.value.map((doc) => [doc.doc_id, doc])),
     [knowledgeDocuments.value],
   );
+  const selectedVisibleDocs = visibleKnowledgeDocs.filter((doc) => selectedKnowledgeIds.includes(doc.doc_id));
+  const allVisibleSelected = visibleKnowledgeDocs.length > 0 && visibleKnowledgeDocs.every((doc) => selectedKnowledgeIds.includes(doc.doc_id));
+
+  const flashKnowledgeNotice = (message: string) => {
+    setKnowledgeActionNotice(message);
+    window.setTimeout(() => {
+      setKnowledgeActionNotice((current) => current === message ? null : current);
+    }, 1800);
+  };
 
   const openKnowledgeDetail = (docId: string) => {
     void loadKnowledgeDocument(docId);
@@ -491,6 +507,37 @@ export function MemoryPanel() {
     setEditKnowledgeRefreshHours(String(doc.refresh_interval_hours || 0));
   };
 
+  const toggleKnowledgeSelection = (docId: string) => {
+    setSelectedKnowledgeIds((current) => current.includes(docId) ? current.filter((item) => item !== docId) : [...current, docId]);
+  };
+
+  const selectVisibleKnowledge = () => {
+    setSelectedKnowledgeIds((current) => Array.from(new Set([...current, ...visibleKnowledgeDocs.map((doc) => doc.doc_id)])));
+  };
+
+  const clearKnowledgeSelection = () => {
+    setSelectedKnowledgeIds([]);
+  };
+
+  const runBulkKnowledgeAction = async (label: string, action: (doc: KnowledgeDocumentRecord) => Promise<void>) => {
+    if (selectedVisibleDocs.length === 0) return;
+    setSaveError(null);
+    try {
+      await Promise.all(selectedVisibleDocs.map((doc) => action(doc)));
+      await loadKnowledge();
+      if (activeDoc?.doc_id) {
+        await loadKnowledgeDocument(activeDoc.doc_id);
+      }
+      if (knowledgeQuery.trim()) {
+        await searchKnowledge(knowledgeQuery);
+      }
+      flashKnowledgeNotice(t('knowledge_bulk_done').replace('{count}', String(selectedVisibleDocs.length)));
+      setSelectedKnowledgeIds([]);
+    } catch (error: any) {
+      setSaveError(error.message || label);
+    }
+  };
+
   const renderKnowledgeForm = (mode: 'create' | 'edit', docId?: string) => {
     const isEdit = mode === 'edit';
     const currentType = isEdit ? editKnowledgeType : knowledgeType;
@@ -609,6 +656,13 @@ export function MemoryPanel() {
             openKnowledgeDetail(doc.doc_id);
           }}
         >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <input
+              type="checkbox"
+              checked={selectedKnowledgeIds.includes(doc.doc_id)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={() => toggleKnowledgeSelection(doc.doc_id)}
+            />
           <div
             style={{
               fontSize: '12px',
@@ -620,6 +674,7 @@ export function MemoryPanel() {
             }}
           >
             {doc.title || doc.source}
+          </div>
           </div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
         </div>
@@ -738,6 +793,47 @@ export function MemoryPanel() {
           </button>
         ))}
       </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+        <button onClick={() => allVisibleSelected ? clearKnowledgeSelection() : selectVisibleKnowledge()} style={pillStyle(allVisibleSelected)}>
+          {allVisibleSelected ? t('knowledge_clear_selection') : t('knowledge_select_visible')}
+        </button>
+        {selectedKnowledgeIds.length > 0 ? (
+          <span style={pillStyle(true)}>{t('knowledge_selected_count').replace('{count}', String(selectedKnowledgeIds.length))}</span>
+        ) : null}
+      </div>
+
+      {selectedVisibleDocs.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+          <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_pin'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'PATCH', body: JSON.stringify({ pinned: true }) }).then(() => undefined))} style={pillStyle()}>
+            {t('knowledge_bulk_pin')}
+          </button>
+          <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_unpin'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'PATCH', body: JSON.stringify({ pinned: false }) }).then(() => undefined))} style={pillStyle()}>
+            {t('knowledge_bulk_unpin')}
+          </button>
+          <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_sync'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}/ingest?wait=0`, { method: 'POST' }).then(() => undefined))} style={pillStyle()}>
+            {t('knowledge_bulk_sync')}
+          </button>
+          {knowledgeView === 'archived' ? (
+            <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_restore'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'PATCH', body: JSON.stringify({ archived: false }) }).then(() => undefined))} style={pillStyle()}>
+              {t('knowledge_bulk_restore')}
+            </button>
+          ) : (
+            <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_archive'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) }).then(() => undefined))} style={pillStyle()}>
+              {t('knowledge_bulk_archive')}
+            </button>
+          )}
+          <button onClick={() => void runBulkKnowledgeAction(t('knowledge_bulk_delete'), (doc) => apiFetch(`/api/knowledge/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'DELETE' }).then(() => undefined))} style={pillStyle()}>
+            {t('knowledge_bulk_delete')}
+          </button>
+        </div>
+      ) : null}
+
+      {knowledgeActionNotice ? (
+        <div style={{ fontSize: '11px', color: 'var(--success)', background: 'rgba(76, 175, 80, 0.08)', border: '1px solid rgba(76, 175, 80, 0.2)', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px' }}>
+          {knowledgeActionNotice}
+        </div>
+      ) : null}
 
       {creatingKnowledge ? <div style={{ marginBottom: '10px' }}>{renderKnowledgeForm('create')}</div> : null}
       </div>

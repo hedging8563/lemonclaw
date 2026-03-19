@@ -1055,17 +1055,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {(t as any)(`tab_${activeTab}`)}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: isMobile ? '20px' : '32px' }}>{settingsDesc}</div>
-                  {settingsTasks.length > 0 && (
+                  {settingsMode === 'basic' && settingsTasks.length > 0 && (
                     <div style={{ display: 'grid', gap: '10px', marginBottom: isMobile ? '16px' : '20px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
                         // {t('settings_tasks_title')}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px' }}>
                       {settingsTasks.map((task) => (
                         <button
                           key={task.key}
                           onClick={task.action}
-                          style={{ textAlign: 'left', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', display: 'grid', gap: '6px' }}
+                          style={{ textAlign: 'left', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', cursor: 'pointer', display: 'grid', gap: '4px' }}
                         >
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{task.title}</span>
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{task.help}</span>
@@ -1122,7 +1122,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   ) : activeTab === 'skills' ? <SkillsTab /> : renderFields(contentData, [activeTab])}
                 </div>
 
-                {!isMobile && activeTab !== 'skills' && activeTab !== 'governance' && quickJumpKeys.length > 0 && (
+                {!isMobile && settingsMode === 'advanced' && activeTab !== 'skills' && activeTab !== 'governance' && quickJumpKeys.length > 0 && (
                   <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.3s ease-out' }}>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '1px' }}>// QUICK JUMP</div>
                     {quickJumpKeys.map((key) => {

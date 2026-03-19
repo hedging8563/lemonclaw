@@ -1045,7 +1045,7 @@ function taskCard(
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {task.task_id}
+            {t('task_workflow_route')}
           </div>
           <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>
             {route}
@@ -1068,7 +1068,7 @@ function taskCard(
               cursor: 'pointer',
             }}
           >
-            {isExpanded ? t('memo_collapse') : t('memo_expand')}
+            {isExpanded ? t('task_close_detail') : t('task_open_detail')}
           </button>
           {showManualResumeCta && (
             <button
@@ -1195,7 +1195,7 @@ function recoveryQueueCard(
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {task.task_id}
+          {t('task_workflow_route')}
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
@@ -1214,7 +1214,7 @@ function recoveryQueueCard(
               cursor: 'pointer',
             }}
           >
-            {isExpanded ? t('memo_collapse') : t('memo_expand')}
+            {isExpanded ? t('task_close_detail') : t('task_open_detail')}
           </button>
           {showManualResumeCta && (
             <button
@@ -1570,98 +1570,103 @@ export function TaskRecoveryPanel() {
                 {t('task_detail_panel_close')}
               </button>
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => exportTask(selectedTask.task_id, 'md', 'copy')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: copiedLabel === `copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {copiedLabel === `copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_summary')}
-              </button>
-              <button
-                onClick={() => exportTask(selectedTask.task_id, 'json', 'download')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {t('task_export_json')}
-              </button>
-              <button
-                onClick={() => exportBundle(selectedTask.task_id, 'md', 'copy')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_bundle_copy')}
-              </button>
-              <button
-                onClick={() => exportBundle(selectedTask.task_id, 'json', 'download')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {t('task_export_bundle_json')}
-              </button>
-              <button
-                onClick={() => exportPostmortem(selectedTask.task_id, 'md', 'copy')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: copiedLabel === `postmortem:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {copiedLabel === `postmortem:copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_postmortem_copy')}
-              </button>
-              <button
-                onClick={() => exportPostmortem(selectedTask.task_id, 'json', 'download')}
-                style={{
-                  padding: '6px 10px',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                {t('task_export_postmortem_json')}
-              </button>
-            </div>
+            <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {t('task_export_tools')}
+              </summary>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                <button
+                  onClick={() => exportTask(selectedTask.task_id, 'md', 'copy')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: copiedLabel === `copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedLabel === `copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_summary')}
+                </button>
+                <button
+                  onClick={() => exportTask(selectedTask.task_id, 'json', 'download')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('task_export_json')}
+                </button>
+                <button
+                  onClick={() => exportBundle(selectedTask.task_id, 'md', 'copy')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedLabel === `bundle:copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_bundle_copy')}
+                </button>
+                <button
+                  onClick={() => exportBundle(selectedTask.task_id, 'json', 'download')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('task_export_bundle_json')}
+                </button>
+                <button
+                  onClick={() => exportPostmortem(selectedTask.task_id, 'md', 'copy')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: copiedLabel === `postmortem:copy:md:${selectedTask.task_id}` ? 'var(--success)' : 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedLabel === `postmortem:copy:md:${selectedTask.task_id}` ? t('task_copy_done') : t('task_export_postmortem_copy')}
+                </button>
+                <button
+                  onClick={() => exportPostmortem(selectedTask.task_id, 'json', 'download')}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('task_export_postmortem_json')}
+                </button>
+              </div>
+            </details>
             {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, linkedFocus, setLinkedFocus, copiedLabel, copyValue, false)}
           </div>
         )}
