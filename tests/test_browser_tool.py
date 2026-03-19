@@ -128,3 +128,64 @@ async def test_browser_cleanup_kills_process_on_timeout(monkeypatch: pytest.Monk
     assert process.killed is True
     assert tool._active_sessions == set()
 
+
+@pytest.mark.asyncio
+async def test_browser_dicloak_commands_fail_closed_when_not_enabled() -> None:
+    tool = BrowserTool()
+
+    result = await tool.execute("dicloak list_profiles")
+
+    assert "not enabled" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_browser_dicloak_profile_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict, status_code: int = 200):
+            self._payload = payload
+            self.status_code = status_code
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, params=None, headers=None):
+            return FakeResponse({"code": 0, "data": {"list": [{"id": "p_1", "name": "Main"}]}})
+
+        async def patch(self, url, headers=None):
+            if url.endswith("/open"):
+                return FakeResponse({"code": 0, "data": {"debug_port": 45500}})
+            return FakeResponse({"code": 0, "data": {}})
+
+    monkeypatch.setattr("lemonclaw.agent.tools.browser.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    calls: list[tuple[tuple, dict]] = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        return DummyProcess(stdout=b"connected")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    tool = BrowserTool()
+    tool._dicloak_enabled = True
+    tool._dicloak_api_base_url = "http://127.0.0.1:52140/openapi"
+    tool._dicloak_api_key = "dicloak-test"
+    tool._cli_path = "/usr/bin/agent-browser"
+
+    listing = await tool.execute("dicloak list_profiles")
+    opened = await tool.execute("dicloak open_profile p_1", _session_key="webui:dicloak")
+    closed = await tool.execute("dicloak close_profile", _session_key="webui:dicloak")
+
+    assert "p_1" in listing
+    assert '"status": "opened"' in opened
+    assert '"agent_browser": "connected"' in opened
+    assert "closed: p_1" in closed
+    assert any(list(call[0])[-2:] == ["connect", "45500"] for call in calls)
+    assert any(list(call[0])[-1] == "close" for call in calls)

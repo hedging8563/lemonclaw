@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from loguru import logger
 
 from lemonclaw.agent.tools.base import Tool
@@ -46,6 +48,10 @@ class BrowserTool(Tool):
         self._workspace = Path(workspace).expanduser().resolve() if workspace else None
         self._cli_path = shutil.which("agent-browser")
         self._active_sessions: set[str] = set()
+        self._dicloak_enabled = os.environ.get("DICLOAK_ENABLED", "").lower() == "true"
+        self._dicloak_api_base_url = (os.environ.get("DICLOAK_API_BASE_URL") or "").rstrip("/")
+        self._dicloak_api_key = os.environ.get("DICLOAK_API_KEY", "")
+        self._dicloak_leases: dict[str, dict[str, Any]] = {}
 
 
     @property
@@ -69,6 +75,8 @@ class BrowserTool(Tool):
             "Examples: 'open https://example.com', 'snapshot -i', 'click @e1', "
             "'fill @e2 \"text\"', 'screenshot', 'close'. "
             "Always snapshot after navigation to get fresh element refs (@e1, @e2...)."
+            " When DICloak is enabled, explicit profile lifecycle commands are available: "
+            "'dicloak list_profiles', 'dicloak open_profile <profile_id>', 'dicloak close_profile [profile_id]'."
             f"{domains}{workspace}"
         )
 
@@ -82,7 +90,9 @@ class BrowserTool(Tool):
                     "description": (
                         "agent-browser command (without the 'agent-browser' prefix). "
                         "Examples: 'open https://example.com', 'snapshot -i', "
-                        "'click @e1', 'fill @e2 \"text\"', 'screenshot', 'close'"
+                        "'click @e1', 'fill @e2 \"text\"', 'screenshot', 'close'. "
+                        "DICloak commands: 'dicloak list_profiles', 'dicloak open_profile <profile_id>', "
+                        "'dicloak close_profile [profile_id]'."
                     ),
                 },
             },
@@ -100,6 +110,9 @@ class BrowserTool(Tool):
 
     async def execute(self, command: str, _session_key: str | None = None, **kwargs: Any) -> str:
         del kwargs
+        dicloak_result = await self._maybe_execute_dicloak(command, _session_key)
+        if dicloak_result is not None:
+            return dicloak_result
         if not self._cli_path:
             return "Error: agent-browser CLI is not installed. Install with: npm install -g agent-browser"
 
@@ -159,6 +172,97 @@ class BrowserTool(Tool):
 
         combined = "\n".join(part for part in outputs if part).strip()
         return self._truncate(combined) if combined else "(no output)"
+
+    async def _maybe_execute_dicloak(self, command: str, session_key: str | None) -> str | None:
+        stripped = command.strip()
+        if not stripped.lower().startswith("dicloak"):
+            return None
+        if not self._dicloak_enabled or not self._dicloak_api_base_url or not self._dicloak_api_key:
+            return "Error: DICloak backend is not enabled for this instance."
+
+        parts = stripped.split()
+        if len(parts) < 2:
+            return "Error: missing DICloak command."
+        action = parts[1].lower()
+        session_name = self._resolve_session_name(session_key)
+
+        async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+            headers = {"X-API-KEY": self._dicloak_api_key}
+            if action == "list_profiles":
+                response = await client.get(f"{self._dicloak_api_base_url}/v1/env/list", params={"page_no": 1, "page_size": 20}, headers=headers)
+                payload = response.json()
+                if response.status_code != 200 or payload.get("code") != 0:
+                    return f"Error: DICloak list_profiles failed: {payload.get('msg') or response.text}"
+                rows = []
+                for item in list(((payload.get("data") or {}).get("list") or []))[:20]:
+                    if not isinstance(item, dict):
+                        continue
+                    rows.append(f"- {item.get('id') or '—'} · {item.get('name') or 'Unnamed'} · {item.get('operate_status') or item.get('status') or 'unknown'}")
+                return "DICloak profiles:\n" + ("\n".join(rows) if rows else "(no profiles)")
+
+            if action == "open_profile":
+                if len(parts) < 3:
+                    return "Error: missing profile_id for DICloak open_profile."
+                if not self._cli_path:
+                    return "Error: agent-browser CLI is required for DICloak profile sessions."
+                profile_id = parts[2]
+                existing_profile_id = str((self._dicloak_leases.get(session_name) or {}).get("profile_id") or "")
+                if existing_profile_id and existing_profile_id != profile_id:
+                    await self._maybe_execute_dicloak(f"dicloak close_profile {existing_profile_id}", session_key)
+                response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/open", headers=headers)
+                payload = response.json()
+                if response.status_code != 200 or payload.get("code") != 0:
+                    return f"Error: DICloak open_profile failed: {payload.get('msg') or response.text}"
+                data = payload.get("data") or {}
+                debug_port = data.get("debug_port")
+                if not debug_port:
+                    return "Error: DICloak open_profile returned no debug_port."
+                env = self._build_env()
+                cwd = str(self._workspace) if self._workspace else None
+                connect_output, connect_error = await self._run_step(
+                    step_args=["connect", str(debug_port)],
+                    session_name=session_name,
+                    env=env,
+                    cwd=cwd,
+                    timeout=min(self._timeout, 15.0),
+                )
+                if connect_error:
+                    return connect_error
+                self._active_sessions.add(session_name)
+                self._dicloak_leases[session_name] = {
+                    "profile_id": profile_id,
+                    "debug_port": debug_port,
+                    "opened_at": data.get("serial_number"),
+                }
+                return self._truncate(json.dumps({
+                    "profile_id": profile_id,
+                    "debug_port": debug_port,
+                    "agent_browser": connect_output or "connected",
+                    "status": "opened",
+                }, ensure_ascii=False))
+
+            if action == "close_profile":
+                profile_id = parts[2] if len(parts) >= 3 else str((self._dicloak_leases.get(session_name) or {}).get("profile_id") or "")
+                if not profile_id:
+                    return "Error: no DICloak profile is currently leased for this session."
+                if self._cli_path:
+                    env = self._build_env()
+                    cwd = str(self._workspace) if self._workspace else None
+                    await self._run_step(
+                        step_args=["close"],
+                        session_name=session_name,
+                        env=env,
+                        cwd=cwd,
+                        timeout=min(self._timeout, 10.0),
+                    )
+                response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/close", headers=headers)
+                payload = response.json()
+                if response.status_code != 200 or payload.get("code") != 0:
+                    return f"Error: DICloak close_profile failed: {payload.get('msg') or response.text}"
+                self._dicloak_leases.pop(session_name, None)
+                return f"DICloak profile closed: {profile_id}"
+
+        return "Error: unsupported DICloak command. Supported: list_profiles, open_profile, close_profile."
 
     async def _run_step(
         self,
