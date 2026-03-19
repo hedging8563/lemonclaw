@@ -131,7 +131,7 @@ export function MessageInput() {
       {t('stop')}
     </button>
   ) : (
-    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'rgba(255,255,255,0.06)' : 'var(--text-primary)', color: disableSend ? 'var(--text-muted)' : 'var(--bg-primary)', border: 'none', borderRadius: '12px', padding: isMobile ? '0 16px' : '0 24px', minHeight: '44px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontSize: '14px', fontWeight: 600, transition: 'all 0.2s' }}>
+    <button onClick={submit} disabled={disableSend} style={{ background: disableSend ? 'var(--bg-primary)' : 'var(--text-primary)', color: disableSend ? 'var(--text-muted)' : 'var(--bg-primary)', border: disableSend ? '1px solid var(--border)' : '1px solid transparent', borderRadius: '16px', padding: isMobile ? '0 16px' : '0 28px', minHeight: '52px', cursor: disableSend ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 600, transition: 'all 0.2s' }}>
       {t('send')}
     </button>
   );
@@ -258,11 +258,11 @@ export function MessageInput() {
             </div>
           )}
           {!isMobile && (
-            <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between', paddingLeft: '56px', paddingRight: '4px' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', opacity: 0.6 }}>
+            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', paddingLeft: '64px', paddingRight: '4px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
                 Enter {t('send')} · Shift+Enter {t('newline')} · {t('drop_files_hint')}
               </div>
-              <div style={{ fontSize: '11px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'transparent', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ fontSize: '12px', color: hasFailed ? 'var(--error)' : hasUploading ? 'var(--accent)' : 'transparent', fontFamily: 'var(--font-mono)' }}>
                 {composerStatusText}
               </div>
             </div>

@@ -721,6 +721,8 @@ const DICT = {
     sp_placeholder: '为当前会话覆盖全局 System Prompt...',
     type_message: '输入消息，或拖拽文件...',
     send: '发送',
+  drop_files_hint: '也可以直接拖入文件',
+  newline: '换行',
     stop: '停止',
     start_conversation: '开始新的对话',
     copy: '复制',
