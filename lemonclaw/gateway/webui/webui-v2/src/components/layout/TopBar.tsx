@@ -104,8 +104,8 @@ export function TopBar() {
   const compactActionHeight = isMobile ? '40px' : '32px';
 
   return (
-    <div class="topbar-root" style={{ position: isMobile ? 'sticky' : 'relative', top: isMobile ? 0 : undefined, left: 0, right: 0, display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-primary)', zIndex: 20, backdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined, WebkitBackdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined }}>
-      <div style={{ height: 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: isMobile ? '8px' : '12px', padding: isMobile ? '8px 10px' : '0 24px' }}>
+    <div class="topbar-root" style={{ position: isMobile ? 'sticky' : 'relative', top: isMobile ? 0 : undefined, left: 0, right: 0, display: 'flex', flexDirection: 'column', flexShrink: 0, background: 'var(--bg-primary)', zIndex: 20, backdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined, WebkitBackdropFilter: isMobile ? 'saturate(120%) blur(8px)' : undefined }}>
+      <div style={{ height: 'var(--topbar-h)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: isMobile ? '8px' : '12px', padding: isMobile ? '8px 10px' : '0 24px', borderBottom: isMobile ? 'none' : '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '12px', minWidth: 0, flex: 1 }}>
           <button class="topbar-mobile-btn" onClick={() => mobileMenuOpen.value = true} style={{ display: isMobile ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid transparent', color: 'var(--text-primary)', fontSize: '24px', cursor: 'pointer', padding: isMobile ? '8px' : '0 8px', marginRight: isMobile ? 0 : '4px', flexShrink: 0, minWidth: isMobile ? '40px' : 'auto', minHeight: isMobile ? '40px' : 'auto', height: isMobile ? compactActionHeight : 'auto', width: isMobile ? '40px' : 'auto', borderRadius: isMobile ? '10px' : '0', touchAction: 'manipulation' }}>☰</button>
           <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
@@ -173,7 +173,7 @@ export function TopBar() {
       </div>
 
       {isMobile && isWebUI && (
-        <div style={{ padding: '0 12px 10px', display: 'flex' }}>
+        <div style={{ padding: '0 12px 10px', display: 'flex', borderBottom: '1px solid var(--border)' }}>
           <select
             value={currentModel.value}
             onChange={(e) => currentModel.value = (e.target as HTMLSelectElement).value}
