@@ -1,7 +1,12 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import mimetypes
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import httpx
 
 from loguru import logger
 
@@ -24,6 +29,8 @@ except ImportError:
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage, GroupMessage
+
+_QQ_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 
 def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
@@ -58,6 +65,7 @@ class QQChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
+        self._http: httpx.AsyncClient | None = None
         self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
 
     async def start(self) -> None:
@@ -73,6 +81,7 @@ class QQChannel(BaseChannel):
         self._running = True
         BotClass = _make_bot_class(self)
         self._client = BotClass()
+        self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
         logger.info("QQ bot started (C2C + group @ message)")
         if self.config.group_policy == "open" and not self.config.group_require_mention:
@@ -96,6 +105,9 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
+        if self._http:
+            await self._http.aclose()
+            self._http = None
         if self._client:
             try:
                 await self._client.close()
@@ -144,8 +156,17 @@ class QQChannel(BaseChannel):
                 or getattr(author, 'member_openid', 'unknown')
             )
             content = (data.content or "").strip()
-            if not content:
+            content_parts = [content] if content else []
+            media_paths: list[str] = []
+            for attachment in list(getattr(data, "attachments", []) or []):
+                marker, file_path = await self._download_attachment(attachment)
+                if marker:
+                    content_parts.append(marker)
+                if file_path:
+                    media_paths.append(file_path)
+            if not content_parts and not media_paths:
                 return
+            content = "\n".join(part for part in content_parts if part).strip()
             reply_to = str(getattr(getattr(data, "message_reference", None), "message_id", "") or "")
 
             chat_id = str(getattr(data, "group_openid", "") or user_id)
@@ -163,8 +184,19 @@ class QQChannel(BaseChannel):
                 sender_id=user_id,
                 chat_id=chat_id,
                 content=content,
+                media=media_paths or None,
                 metadata={
                     "message_id": data.id,
+                    "attachments": [
+                        {
+                            "id": str(getattr(item, "id", "") or ""),
+                            "filename": str(getattr(item, "filename", "") or ""),
+                            "content_type": str(getattr(item, "content_type", "") or ""),
+                            "size": int(getattr(item, "size", 0) or 0),
+                            "url": str(getattr(item, "url", "") or ""),
+                        }
+                        for item in list(getattr(data, "attachments", []) or [])
+                    ],
                     "reply_to": reply_to or None,
                     "qq": {
                         "is_group": is_group,
@@ -176,3 +208,33 @@ class QQChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling QQ message")
+
+    async def _download_attachment(self, attachment: object) -> tuple[str | None, str | None]:
+        filename = str(getattr(attachment, "filename", "") or "attachment")
+        url = str(getattr(attachment, "url", "") or "")
+        size = int(getattr(attachment, "size", 0) or 0)
+        content_type = str(getattr(attachment, "content_type", "") or "")
+        attachment_id = str(getattr(attachment, "id", "") or "file")
+
+        if size and size > _QQ_MAX_ATTACHMENT_BYTES:
+            return f"[attachment: {filename} - too large]", None
+        if not url or not self._http:
+            return f"[attachment: {filename} - download failed]", None
+
+        media_dir = Path.home() / ".lemonclaw" / "media" / "qq"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^\w\s.\-\u4e00-\u9fff]", "_", filename).strip() or "attachment"
+        suffix = Path(safe_name).suffix
+        if not suffix and content_type:
+            suffix = mimetypes.guess_extension(content_type.split(";", 1)[0].strip()) or ""
+            safe_name = f"{safe_name}{suffix}"
+        file_path = media_dir / f"{attachment_id}_{safe_name}"
+
+        try:
+            response = await self._http.get(url)
+            response.raise_for_status()
+            file_path.write_bytes(response.content)
+            return f"[attachment: {file_path}]", str(file_path)
+        except Exception as exc:
+            logger.warning("Failed to download QQ attachment {}: {}", filename, exc)
+            return f"[attachment: {filename} - download failed]", None
