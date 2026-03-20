@@ -6,6 +6,7 @@ import imaplib
 import re
 import smtplib
 import ssl
+from pathlib import Path
 from datetime import date
 from email import policy
 from email.header import decode_header, make_header
@@ -91,6 +92,7 @@ class EmailChannel(BaseChannel):
                         sender_id=sender,
                         chat_id=sender,
                         content=item["content"],
+                        media=item.get("media"),
                         metadata=item.get("metadata", {}),
                     )
             except Exception as e:
@@ -277,6 +279,10 @@ class EmailChannel(BaseChannel):
                 date_value = parsed.get("Date", "")
                 message_id = parsed.get("Message-ID", "").strip()
                 body = self._extract_text_body(parsed)
+                attachment_paths, attachment_markers, attachments_meta = self._extract_attachments(
+                    parsed,
+                    uid or message_id or "email",
+                )
 
                 if not body:
                     body = "(empty email body)"
@@ -289,6 +295,8 @@ class EmailChannel(BaseChannel):
                     f"Date: {date_value}\n\n"
                     f"{body}"
                 )
+                if attachment_markers:
+                    content = f"{content}\n\n" + "\n".join(attachment_markers)
 
                 metadata = {
                     "message_id": message_id,
@@ -296,6 +304,7 @@ class EmailChannel(BaseChannel):
                     "date": date_value,
                     "sender_email": sender,
                     "uid": uid,
+                    "attachments": attachments_meta,
                 }
                 messages.append(
                     {
@@ -303,6 +312,7 @@ class EmailChannel(BaseChannel):
                         "subject": subject,
                         "message_id": message_id,
                         "content": content,
+                        "media": attachment_paths,
                         "metadata": metadata,
                     }
                 )
@@ -395,6 +405,38 @@ class EmailChannel(BaseChannel):
         if msg.get_content_type() == "text/html":
             return cls._html_to_text(payload).strip()
         return payload.strip()
+
+    @staticmethod
+    def _extract_attachments(msg: Any, message_key: str) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+        media_paths: list[str] = []
+        markers: list[str] = []
+        attachments: list[dict[str, Any]] = []
+        if not msg.is_multipart():
+            return media_paths, markers, attachments
+
+        media_dir = Path.home() / ".lemonclaw" / "media" / "email"
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        for index, part in enumerate(msg.walk(), start=1):
+            if part.get_content_disposition() != "attachment":
+                continue
+            filename = part.get_filename() or f"attachment_{index}"
+            safe_name = re.sub(r"[^\w\s.\-\u4e00-\u9fff]", "_", Path(filename).name).strip() or f"attachment_{index}"
+            payload = part.get_payload(decode=True) or b""
+            file_path = media_dir / f"{message_key}_{index:02d}_{safe_name}"
+            file_path.write_bytes(payload)
+            media_paths.append(str(file_path))
+            markers.append(f"[attachment: {file_path}]")
+            attachments.append(
+                {
+                    "filename": safe_name,
+                    "content_type": part.get_content_type(),
+                    "path": str(file_path),
+                    "size_bytes": len(payload),
+                }
+            )
+
+        return media_paths, markers, attachments
 
     @staticmethod
     def _html_to_text(raw_html: str) -> str:

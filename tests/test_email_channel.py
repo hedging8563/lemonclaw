@@ -39,6 +39,26 @@ def _make_raw_email(
     return msg.as_bytes()
 
 
+def _make_raw_email_with_attachment(
+    from_addr: str = "alice@example.com",
+    subject: str = "Attachment only",
+    filename: str = "notes.pdf",
+) -> bytes:
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<m2@example.com>"
+    msg.set_content("")
+    msg.add_attachment(
+        b"%PDF-1.4 fake",
+        maintype="application",
+        subtype="pdf",
+        filename=filename,
+    )
+    return msg.as_bytes()
+
+
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
@@ -92,6 +112,40 @@ def test_extract_text_body_falls_back_to_html() -> None:
     text = EmailChannel._extract_text_body(msg)
     assert "Hello" in text
     assert "world" in text
+
+
+def test_fetch_new_messages_keeps_attachment_only_email(monkeypatch, tmp_path) -> None:
+    raw = _make_raw_email_with_attachment()
+
+    class FakeIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 456 BODY[] {200})", raw), b")"]
+
+        def store(self, _imap_id: bytes, _op: str, _flags: str):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("lemonclaw.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr("lemonclaw.channels.email.Path.home", lambda: tmp_path)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert "[attachment:" in items[0]["content"]
+    assert items[0]["media"] and items[0]["media"][0].endswith("notes.pdf")
+    assert items[0]["metadata"]["attachments"][0]["filename"] == "notes.pdf"
 
 
 @pytest.mark.asyncio

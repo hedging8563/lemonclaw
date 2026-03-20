@@ -2,7 +2,10 @@
 
 import asyncio
 import re
+from pathlib import Path
 from typing import Any
+
+import httpx
 
 from loguru import logger
 from slack_sdk.socket_mode.websockets import SocketModeClient
@@ -28,6 +31,7 @@ class SlackChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: SlackConfig = config
         self._trigger_runtime = trigger_runtime
+        self._http: httpx.AsyncClient | None = None
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
@@ -42,6 +46,7 @@ class SlackChannel(BaseChannel):
             return
 
         self._running = True
+        self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
         self._web_client = AsyncWebClient(token=self.config.bot_token)
         self._socket_client = SocketModeClient(
@@ -68,6 +73,9 @@ class SlackChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the Slack client."""
         self._running = False
+        if self._http:
+            await self._http.aclose()
+            self._http = None
         if self._socket_client:
             try:
                 await self._socket_client.close()
@@ -132,8 +140,9 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
+        subtype = str(event.get("subtype") or "")
+        # Allow file_share events through; other subtypes remain bot/system noise.
+        if subtype and subtype != "file_share":
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
@@ -174,6 +183,15 @@ class SlackChannel(BaseChannel):
             return
 
         text = self._strip_bot_mention(text)
+        content_parts = [text] if text else []
+        media_paths: list[str] = []
+        for attachment in event.get("files") or []:
+            marker, file_path = await self._download_inbound_file(attachment)
+            if marker:
+                content_parts.append(marker)
+            if file_path:
+                media_paths.append(file_path)
+        content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
@@ -202,7 +220,7 @@ class SlackChannel(BaseChannel):
             trigger = self._trigger_runtime.record_trigger(
                 source="socket.slack",
                 kind=f"{event_type}.{channel_type or 'unknown'}",
-                payload_summary=text[:200],
+                payload_summary=content[:200],
                 session_key=session_key or f"slack:{chat_id}",
                 channel=self.name,
                 chat_id=chat_id,
@@ -214,12 +232,39 @@ class SlackChannel(BaseChannel):
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
-                content=text,
+                content=content,
+                media=media_paths or None,
                 metadata=metadata,
                 session_key=session_key,
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _download_inbound_file(self, attachment: dict[str, Any]) -> tuple[str | None, str | None]:
+        if not isinstance(attachment, dict):
+            return None, None
+        if not self._http:
+            return "[attachment: download failed]", None
+        url = str(attachment.get("url_private_download") or attachment.get("url_private") or "").strip()
+        filename = str(attachment.get("name") or attachment.get("title") or "attachment").strip() or "attachment"
+        if not url:
+            return f"[attachment: {filename}]", None
+        media_dir = Path.home() / ".lemonclaw" / "media" / "slack"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^\w\s.\-\u4e00-\u9fff]", "_", filename).strip() or "attachment"
+        file_id = str(attachment.get("id") or "file")
+        file_path = media_dir / f"{file_id}_{safe_name}"
+        try:
+            response = await self._http.get(
+                url,
+                headers={"Authorization": f"Bearer {self.config.bot_token}"},
+            )
+            response.raise_for_status()
+            file_path.write_bytes(response.content)
+            return f"[attachment: {file_path}]", str(file_path)
+        except Exception as e:
+            logger.warning("Failed to download Slack attachment {}: {}", filename, e)
+            return f"[attachment: {filename} - download failed]", None
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

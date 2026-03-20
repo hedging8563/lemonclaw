@@ -50,6 +50,7 @@ class LemonClawDingTalkHandler(CallbackHandler):
         try:
             # Parse using SDK's ChatbotMessage for robust handling
             chatbot_msg = ChatbotMessage.from_dict(message.data)
+            raw_msg_type = str(getattr(chatbot_msg, "message_type", None) or message.data.get("msgtype") or "").strip().lower()
 
             # Extract text content; fall back to raw dict if SDK object is empty
             content = ""
@@ -57,11 +58,13 @@ class LemonClawDingTalkHandler(CallbackHandler):
                 content = chatbot_msg.text.content.strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
+            if not content:
+                content = self._attachment_marker_from_payload(raw_msg_type, message.data)
 
             if not content:
                 logger.warning(
                     "Received empty or unsupported message type: {}",
-                    chatbot_msg.message_type,
+                    raw_msg_type or chatbot_msg.message_type,
                 )
                 return AckMessage.STATUS_OK, "OK"
 
@@ -99,6 +102,38 @@ class LemonClawDingTalkHandler(CallbackHandler):
             logger.warning("DingTalk handler ACKing error to avoid upstream retry storm; message may require manual review")
             # Return OK to avoid retry loop from DingTalk server
             return AckMessage.STATUS_OK, "Error"
+
+    @staticmethod
+    def _attachment_marker_from_payload(msg_type: str, payload: dict[str, Any]) -> str:
+        raw_content = payload.get("content")
+        content_json: dict[str, Any] = {}
+        if isinstance(raw_content, str):
+            try:
+                parsed = json.loads(raw_content)
+                if isinstance(parsed, dict):
+                    content_json = parsed
+            except json.JSONDecodeError:
+                content_json = {}
+        elif isinstance(raw_content, dict):
+            content_json = raw_content
+
+        if msg_type in {"image", "picture"}:
+            image_id = content_json.get("downloadCode") or payload.get("downloadCode") or content_json.get("mediaId")
+            return f"[image attachment: {image_id}]" if image_id else "[image attachment]"
+        if msg_type == "file":
+            name = (
+                content_json.get("fileName")
+                or content_json.get("name")
+                or payload.get("fileName")
+                or content_json.get("downloadCode")
+                or payload.get("downloadCode")
+            )
+            return f"[attachment: {name}]" if name else "[attachment]"
+        if msg_type in {"audio", "voice"}:
+            return "[voice attachment]"
+        if msg_type == "video":
+            return "[video attachment]"
+        return ""
 
 
 class DingTalkChannel(BaseChannel):

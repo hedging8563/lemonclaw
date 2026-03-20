@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import asyncio
 
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
-from lemonclaw.channels.dingtalk import DingTalkChannel
+from lemonclaw.channels.dingtalk import DingTalkChannel, LemonClawDingTalkHandler
 from lemonclaw.config.schema import DingTalkConfig
 from lemonclaw.triggers import TriggerRuntime
 
@@ -127,3 +128,47 @@ async def test_dingtalk_send_rejects_non_allowlisted_session_webhook(dingtalk_ch
 
     dingtalk_channel._http.post.assert_not_awaited()
     dingtalk_channel._get_access_token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_handler_keeps_file_only_message() -> None:
+    channel = DingTalkChannel(DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"), MessageBus())
+    channel._on_message = AsyncMock()
+
+    class _FakeChatbotMessage:
+        message_type = "file"
+        text = None
+        sender_staff_id = "staff1"
+        sender_id = "staff1"
+        sender_nick = "Alice"
+        message_id = "msg1"
+        session_webhook = "https://example.invalid/webhook"
+        conversation_id = "conv1"
+        conversation_type = "1"
+        is_in_at_list = False
+
+        @classmethod
+        def from_dict(cls, _data):
+            return cls()
+
+    import lemonclaw.channels.dingtalk as dingtalk_module
+
+    old_chatbot = dingtalk_module.ChatbotMessage
+    old_ack = dingtalk_module.AckMessage
+    dingtalk_module.ChatbotMessage = _FakeChatbotMessage
+    dingtalk_module.AckMessage = SimpleNamespace(STATUS_OK="OK")
+    try:
+        handler = LemonClawDingTalkHandler(channel)
+        status, text = await handler.process(
+            SimpleNamespace(data={"msgtype": "file", "content": {"fileName": "roman-history.docx", "downloadCode": "d1"}})
+        )
+    finally:
+        dingtalk_module.ChatbotMessage = old_chatbot
+        dingtalk_module.AckMessage = old_ack
+
+    assert status == "OK"
+    assert text == "OK"
+    await asyncio.sleep(0)
+    channel._on_message.assert_awaited_once()
+    args = channel._on_message.await_args.args
+    assert args[0] == "[attachment: roman-history.docx]"

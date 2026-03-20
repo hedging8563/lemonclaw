@@ -69,3 +69,55 @@ async def test_slack_thread_reply_to_bot_counts_as_group_trigger(tmp_path):
     record = trigger_runtime.read_trigger(trigger_id)
     assert record is not None
     assert record['chat_id'] == 'CH1'
+
+
+@pytest.mark.asyncio
+async def test_slack_file_share_message_downloads_attachment(tmp_path, monkeypatch):
+    bus = MessageBus()
+    config = SlackConfig(enabled=True, bot_token='xoxb-test', app_token='xapp-test')
+    channel = SlackChannel(config, bus)
+    channel._bot_user_id = 'BOT123'
+    channel._web_client = SimpleNamespace(reactions_add=AsyncMock())
+
+    class _FakeResponse:
+        def __init__(self, content: bytes):
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    class _FakeHttp:
+        async def get(self, url, headers=None):
+            assert url == 'https://files.slack.com/files-pri/T1-F1/test.docx'
+            assert headers == {'Authorization': 'Bearer xoxb-test'}
+            return _FakeResponse(b'docx-bytes')
+
+    channel._http = _FakeHttp()
+    channel._handle_message = AsyncMock()
+    monkeypatch.setattr("lemonclaw.channels.slack.Path.home", lambda: tmp_path)
+
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    event = {
+        'type': 'message',
+        'subtype': 'file_share',
+        'user': 'USER1',
+        'channel': 'D1',
+        'channel_type': 'im',
+        'text': '',
+        'ts': '2000.2',
+        'files': [
+            {
+                'id': 'F1',
+                'name': 'test.docx',
+                'url_private_download': 'https://files.slack.com/files-pri/T1-F1/test.docx',
+            }
+        ],
+    }
+    req = SimpleNamespace(type='events_api', envelope_id='env1', payload={'event': event})
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert "[attachment:" in kwargs["content"]
+    assert kwargs["media"] and kwargs["media"][0].endswith("F1_test.docx")

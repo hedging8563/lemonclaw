@@ -166,15 +166,25 @@ export class WhatsAppClient {
     if (message.imageMessage?.caption) {
       return `[Image] ${message.imageMessage.caption}`;
     }
+    if (message.imageMessage) {
+      return '[Image]';
+    }
 
     // Video with caption
     if (message.videoMessage?.caption) {
       return `[Video] ${message.videoMessage.caption}`;
     }
+    if (message.videoMessage) {
+      return '[Video]';
+    }
 
     // Document with caption
     if (message.documentMessage?.caption) {
       return `[Document] ${message.documentMessage.caption}`;
+    }
+    if (message.documentMessage) {
+      const filename = message.documentMessage.fileName || message.documentMessage.title || 'document';
+      return `[Document] ${filename}`;
     }
 
     // Voice/Audio message
