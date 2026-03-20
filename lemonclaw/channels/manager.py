@@ -11,6 +11,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.capabilities import ALL_CHANNEL_NAMES, get_channel_capability
 from lemonclaw.channels.delivery_context import apply_delivery_route, resolve_delivery_session_key
 from lemonclaw.config.schema import Config
 from lemonclaw.triggers import TriggerRuntime
@@ -66,8 +67,9 @@ class ChannelManager:
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
-        for name in ("telegram", "whatsapp", "discord", "feishu", "mochat", "dingtalk", "email", "slack", "qq", "matrix", "wecom"):
+        for name in ALL_CHANNEL_NAMES:
             enabled = bool(getattr(getattr(self.config.channels, name, None), "enabled", False))
+            capability = get_channel_capability(name)
             self._channel_status[name] = {
                 "configured_enabled": enabled,
                 "registered": False,
@@ -76,6 +78,10 @@ class ChannelManager:
                 # Disabled channels stay unavailable instead of looking healthy-by-default.
                 "available": False,
                 "error": "",
+                "transport": capability.transport,
+                "attachment_only_ingress": capability.attachment_only_ingress,
+                "media_delivery": capability.media_delivery,
+                "media_notes": capability.notes,
             }
 
         # Telegram channel

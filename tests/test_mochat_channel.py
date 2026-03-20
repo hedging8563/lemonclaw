@@ -144,3 +144,39 @@ async def test_mochat_dispatch_records_bridge_trigger(tmp_path) -> None:
     assert record["source"] == "bridge.mochat"
     assert record["kind"] == "session.message"
     assert record["chat_id"] == "session1"
+
+
+@pytest.mark.asyncio
+async def test_mochat_downloads_attachment_urls_from_content(tmp_path, monkeypatch) -> None:
+    config = MochatConfig(
+        claw_token="token",
+        allow_from=["*"],
+        reply_delay_mode="off",
+    )
+    channel = MochatChannel(config, MessageBus())
+    channel._handle_message = AsyncMock()
+
+    class _FakeResponse:
+        def __init__(self, content: bytes = b"payload"):
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    channel._http = SimpleNamespace(get=AsyncMock(return_value=_FakeResponse()))
+    monkeypatch.setattr("lemonclaw.channels.mochat.get_data_path", lambda: tmp_path)
+
+    payload = {
+        "messageId": "m3",
+        "author": "user1",
+        "content": {"fileName": "roman-history.docx", "downloadUrl": "https://mochat.example/files/1"},
+        "meta": {},
+        "authorInfo": {"nickname": "Alice"},
+    }
+    event = {"type": "message.add", "payload": payload, "timestamp": "2026-03-17T00:00:00Z"}
+
+    await channel._process_inbound_event("session1", event, "session")
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["media"] and kwargs["media"][0].endswith("roman-history.docx")

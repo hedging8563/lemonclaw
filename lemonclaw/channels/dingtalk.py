@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import mimetypes
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any
 
@@ -89,6 +91,9 @@ class LemonClawDingTalkHandler(CallbackHandler):
                         "sender_staff_id": chatbot_msg.sender_staff_id,
                         "sender_id": chatbot_msg.sender_id,
                         "sender_nick": chatbot_msg.sender_nick,
+                        "msg_type": raw_msg_type,
+                        "robot_code": message.data.get("robotCode"),
+                        "raw_content": message.data.get("content"),
                     },
                 )
             )
@@ -333,13 +338,18 @@ class DingTalkChannel(BaseChannel):
             if is_group and not bool(meta.get("is_in_at_list")):
                 logger.debug("DingTalk group gate ignored non-@ message from {}", sender_id)
                 return
+            content_parts = [str(content)] if str(content).strip() else []
+            media_paths = await self._download_inbound_media(meta)
+            if media_paths and not any("[attachment:" in part or "[image attachment:" in part for part in content_parts):
+                content_parts.extend(f"[attachment: {path}]" for path in media_paths)
+            normalized_content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
             trigger_metadata: dict[str, Any] = {}
             chat_target = str(meta.get("conversation_id") or sender_id)
             if self._trigger_runtime:
                 trigger = self._trigger_runtime.record_trigger(
                     source="stream.dingtalk",
                     kind="chatbot.message.group" if is_group else "chatbot.message.private",
-                    payload_summary=str(content or "")[:200],
+                    payload_summary=normalized_content[:200],
                     session_key=f"{self.name}:{chat_target}",
                     channel=self.name,
                     chat_id=chat_target,
@@ -352,7 +362,8 @@ class DingTalkChannel(BaseChannel):
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_target,
-                content=str(content),
+                content=normalized_content,
+                media=media_paths or None,
                 metadata={
                     **meta,
                     **trigger_metadata,
@@ -369,3 +380,68 @@ class DingTalkChannel(BaseChannel):
             )
         except Exception as e:
             logger.error("Error publishing DingTalk message: {}", e)
+
+    async def _download_inbound_media(self, metadata: dict[str, Any]) -> list[str]:
+        raw_content = metadata.get("raw_content")
+        if isinstance(raw_content, str):
+            try:
+                raw_content = json.loads(raw_content)
+            except json.JSONDecodeError:
+                raw_content = {}
+        if not isinstance(raw_content, dict):
+            raw_content = {}
+
+        msg_type = str(metadata.get("msg_type") or "").strip().lower()
+        download_code = (
+            raw_content.get("downloadCode")
+            or raw_content.get("pictureDownloadCode")
+            or metadata.get("downloadCode")
+            or metadata.get("pictureDownloadCode")
+        )
+        if not download_code:
+            return []
+
+        token = await self._get_access_token()
+        if not token or not self._http:
+            return []
+
+        robot_code = str(metadata.get("robot_code") or self.config.client_id or "").strip()
+        if not robot_code:
+            return []
+
+        try:
+            meta_resp = await self._http.post(
+                "https://api.dingtalk.com/v1.0/robot/messageFiles/download",
+                headers={
+                    "x-acs-dingtalk-access-token": token,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "downloadCode": download_code,
+                    "robotCode": robot_code,
+                },
+            )
+            meta_resp.raise_for_status()
+            download_url = str((meta_resp.json() or {}).get("downloadUrl") or "").strip()
+            if not download_url:
+                return []
+
+            file_resp = await self._http.get(download_url)
+            file_resp.raise_for_status()
+
+            file_name = str(raw_content.get("fileName") or metadata.get("message_id") or "attachment").strip() or "attachment"
+            suffix = Path(file_name).suffix
+            if not suffix:
+                content_type = file_resp.headers.get("content-type", "")
+                suffix = mimetypes.guess_extension(content_type.split(";", 1)[0].strip()) or ""
+                file_name = f"{file_name}{suffix}"
+
+            media_dir = Path.home() / ".lemonclaw" / "media" / "dingtalk"
+            media_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = Path(file_name).name
+            file_path = media_dir / f"{str(metadata.get('message_id') or 'msg')}_{safe_name}"
+            file_path.write_bytes(file_resp.content)
+            return [str(file_path)]
+        except Exception as e:
+            logger.warning("Failed to download DingTalk attachment: {}", e)
+            return []

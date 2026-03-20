@@ -217,6 +217,7 @@ class WhatsAppChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
                 content=content,
+                media=[str(p) for p in data.get("media", []) if isinstance(p, str)] or None,
                 metadata={
                     **trigger_metadata,
                     "message_id": data.get("id"),

@@ -7,6 +7,7 @@ import json
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -50,6 +51,7 @@ class MochatBufferedEntry:
     timestamp: int | None = None
     message_id: str = ""
     group_id: str = ""
+    media_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -115,6 +117,31 @@ def normalize_mochat_content(content: Any) -> str:
         return json.dumps(content, ensure_ascii=False)
     except TypeError:
         return str(content)
+
+
+def _walk_attachment_candidates(value: Any) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    if isinstance(value, dict):
+        possible_url = None
+        for key in ("downloadUrl", "fileUrl", "mediaUrl", "url"):
+            raw = value.get(key)
+            if isinstance(raw, str) and raw.startswith(("http://", "https://")):
+                possible_url = raw.strip()
+                break
+        if possible_url:
+            name = ""
+            for key in ("fileName", "filename", "name", "title"):
+                raw = value.get(key)
+                if isinstance(raw, str) and raw.strip():
+                    name = raw.strip()
+                    break
+            candidates.append({"url": possible_url, "name": name or "attachment"})
+        for nested in value.values():
+            candidates.extend(_walk_attachment_candidates(nested))
+    elif isinstance(value, list):
+        for item in value:
+            candidates.extend(_walk_attachment_candidates(item))
+    return candidates
 
 
 def resolve_mochat_target(raw: str) -> MochatTarget:
@@ -680,6 +707,9 @@ class MochatChannel(BaseChannel):
             return
 
         raw_body = normalize_mochat_content(payload.get("content")) or "[empty message]"
+        media_paths = await self._download_inbound_attachments(payload, message_id or "message")
+        if media_paths and raw_body == "[empty message]":
+            raw_body = "\n".join(f"[attachment: {path}]" for path in media_paths)
         ai = _safe_dict(payload.get("authorInfo"))
         sender_name = _str_field(ai, "nickname", "email")
         sender_username = _str_field(ai, "agentId")
@@ -704,7 +734,7 @@ class MochatChannel(BaseChannel):
         entry = MochatBufferedEntry(
             raw_body=raw_body, author=author, sender_name=sender_name,
             sender_username=sender_username, timestamp=parse_timestamp(event.get("timestamp")),
-            message_id=message_id, group_id=group_id,
+            message_id=message_id, group_id=group_id, media_paths=media_paths,
         )
 
         if use_delay:
@@ -781,6 +811,7 @@ class MochatChannel(BaseChannel):
             trigger_metadata = build_trigger_metadata(trigger)
         await self._handle_message(
             sender_id=last.author, chat_id=target_id, content=body,
+            media=list(dict.fromkeys([path for entry in entries for path in entry.media_paths])) or None,
             metadata={
                 **trigger_metadata,
                 "message_id": last.message_id, "timestamp": last.timestamp,
@@ -790,6 +821,41 @@ class MochatChannel(BaseChannel):
                 "buffered_count": len(entries),
             },
         )
+
+    async def _download_inbound_attachments(self, payload: dict[str, Any], message_id: str) -> list[str]:
+        if not self._http:
+            return []
+        candidates = _walk_attachment_candidates(payload.get("content"))
+        candidates.extend(_walk_attachment_candidates(payload.get("meta")))
+        dedup: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for item in candidates:
+            url = item.get("url", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            dedup.append(item)
+        if not dedup:
+            return []
+
+        media_dir = get_data_path() / "mochat" / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        saved: list[str] = []
+        for idx, item in enumerate(dedup, start=1):
+            url = item["url"]
+            name = Path(item.get("name") or f"attachment_{idx}").name
+            try:
+                headers = {}
+                if url.startswith(self.config.base_url.rstrip("/")):
+                    headers["X-Claw-Token"] = self.config.claw_token
+                response = await self._http.get(url, headers=headers)
+                response.raise_for_status()
+                file_path = media_dir / f"{message_id or 'message'}_{idx:02d}_{name}"
+                file_path.write_bytes(response.content)
+                saved.append(str(file_path))
+            except Exception as e:
+                logger.warning("Mochat attachment download failed ({}): {}", url, e)
+        return saved
 
     async def _cancel_delay_timers(self) -> None:
         for state in self._delay_states.values():

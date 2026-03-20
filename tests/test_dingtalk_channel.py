@@ -172,3 +172,51 @@ async def test_dingtalk_handler_keeps_file_only_message() -> None:
     channel._on_message.assert_awaited_once()
     args = channel._on_message.await_args.args
     assert args[0] == "[attachment: roman-history.docx]"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_on_message_downloads_attachment_media(tmp_path, monkeypatch) -> None:
+    channel = DingTalkChannel(DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"), MessageBus())
+    channel._handle_message = AsyncMock()
+    channel._get_access_token = AsyncMock(return_value="token")
+
+    class _JsonResponse:
+        headers = {"content-type": "application/json"}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"downloadUrl": "https://download.example/file"}
+
+    class _FileResponse:
+        headers = {"content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+        content = b"docx-bytes"
+
+        def raise_for_status(self):
+            return None
+
+    channel._http = SimpleNamespace(
+        post=AsyncMock(return_value=_JsonResponse()),
+        get=AsyncMock(return_value=_FileResponse()),
+    )
+    monkeypatch.setattr("lemonclaw.channels.dingtalk.Path.home", lambda: tmp_path)
+
+    await channel._on_message(
+        "",
+        "staff1",
+        "Alice",
+        metadata={
+            "message_id": "msg-docx",
+            "conversation_id": "staff1",
+            "conversation_type": "1",
+            "msg_type": "file",
+            "robot_code": "robot1",
+            "raw_content": {"downloadCode": "download-1", "fileName": "roman-history.docx"},
+        },
+    )
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["media"] and kwargs["media"][0].endswith("roman-history.docx")
+    assert "[attachment:" in kwargs["content"]

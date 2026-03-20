@@ -4,8 +4,12 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { mkdir, writeFile } from 'fs/promises';
+import { homedir } from 'os';
+import { basename, extname, join } from 'path';
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -26,6 +30,7 @@ export interface InboundMessage {
   isGroup: boolean;
   mentions?: string[];
   quotedParticipant?: string;
+  media?: string[];
 }
 
 export interface WhatsAppAccountSummary {
@@ -130,6 +135,7 @@ export class WhatsAppClient {
 
         const content = this.extractMessageContent(msg);
         if (!content) continue;
+        const media = await this.downloadInboundMedia(msg);
         const context = this.extractContextInfo(msg);
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
@@ -143,6 +149,7 @@ export class WhatsAppClient {
           isGroup,
           mentions: context.mentions,
           quotedParticipant: context.quotedParticipant,
+          media,
         });
       }
     });
@@ -218,6 +225,57 @@ export class WhatsAppClient {
     }
 
     return { mentions: [], quotedParticipant: '' };
+  }
+
+  private async downloadInboundMedia(msg: any): Promise<string[]> {
+    const message = msg.message;
+    if (!message) return [];
+    const media = message.documentMessage || message.imageMessage || message.videoMessage || message.audioMessage;
+    if (!media) return [];
+
+    try {
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+        logger: pino({ level: 'silent' }),
+        reuploadRequest: async (m) => this.sock.updateMediaMessage(m),
+      });
+      const mediaDir = join(homedir(), '.lemonclaw', 'media', 'whatsapp');
+      await mkdir(mediaDir, { recursive: true });
+
+      const kind = message.documentMessage
+        ? 'document'
+        : message.imageMessage
+          ? 'image'
+          : message.videoMessage
+            ? 'video'
+            : 'audio';
+      const explicitName =
+        media.fileName ||
+        media.title ||
+        `${msg.key.id || 'msg'}${this.extensionForMedia(message, media.mimetype || '')}`;
+      const safeName = basename(String(explicitName)).replace(/[^\w.\-\u4e00-\u9fff ]/g, '_');
+      const filePath = join(mediaDir, `${msg.key.id || 'msg'}_${kind}_${safeName}`);
+      await writeFile(filePath, buffer);
+      return [filePath];
+    } catch (error) {
+      console.error('Failed to download WhatsApp media:', error);
+      return [];
+    }
+  }
+
+  private extensionForMedia(message: any, mimeType: string): string {
+    const lower = String(mimeType || '').toLowerCase();
+    if (message.imageMessage) return extname(lower) || '.jpg';
+    if (message.videoMessage) return extname(lower) || '.mp4';
+    if (message.audioMessage) return extname(lower) || '.opus';
+    if (message.documentMessage) {
+      const slash = lower.indexOf('/');
+      if (slash >= 0) {
+        const subtype = lower.slice(slash + 1).split(';', 1)[0].trim();
+        if (subtype) return `.${subtype.replace(/[^\w.+-]/g, '')}`;
+      }
+      return '.bin';
+    }
+    return '.bin';
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
