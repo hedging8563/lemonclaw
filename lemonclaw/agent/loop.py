@@ -218,6 +218,8 @@ class AgentLoop:
             if exc is not None:
                 logger.opt(exception=exc).error("Background task failed [{}]", label)
 
+        task.add_done_callback(_done)
+
     def _empty_tool_call_guidance(
         self,
         tool_name: str,
@@ -237,8 +239,6 @@ class AgentLoop:
         if tool_name == "exec":
             return t("tool_empty_args_exec", lang)
         return t("tool_empty_args_generic", lang, name=tool_name)
-
-        task.add_done_callback(_done)
 
     @staticmethod
     def _clone_session(session: Session, *, messages: list[dict[str, Any]] | None = None, last_consolidated: int | None = None) -> Session:
