@@ -284,6 +284,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [toolStatus, setToolStatus] = useState<ToolStatusMap | null>(null);
   const [channelRuntime, setChannelRuntime] = useState<ChannelRuntimeMap | null>(null);
   const [groupRuntime, setGroupRuntime] = useState<GroupRuntimeMap | null>(null);
+  const [dicloakRuntime, setDicloakRuntime] = useState<any | null>(null);
   const [channelStatus, setChannelStatus] = useState<ChannelStatusMap | null>(null);
   const [governanceData, setGovernanceData] = useState<any | null>(null);
   const [governanceLoading, setGovernanceLoading] = useState(true);
@@ -321,6 +322,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setToolStatus(data.tool_status || null);
       setChannelRuntime(data.channel_runtime || null);
       setGroupRuntime(data.group_runtime || null);
+      setDicloakRuntime(data.dicloak_runtime || null);
       setChannelStatus(data.channel_status || null);
       if (governanceRes) {
         if (!governanceRes.ok) {
@@ -701,6 +703,50 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             ) : null}
           </div>
         ))}
+        {dicloakRuntime && (
+          <div style={{ paddingTop: '16px', marginTop: '16px', borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                {t('tool_status_dicloak_runtime_title')}
+              </div>
+              <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '15px', background: dicloakRuntime.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: dicloakRuntime.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                {dicloakRuntime.enabled ? t('tool_status_enabled') : t('tool_status_disabled')}
+              </span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div>
+                {t('tool_status_dicloak_lease_count')}: <span style={{ color: 'var(--text-primary)' }}>{typeof dicloakRuntime.lease_count === 'number' ? dicloakRuntime.lease_count : 0}</span>
+              </div>
+              {Array.isArray(dicloakRuntime.leases) && dicloakRuntime.leases.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {dicloakRuntime.leases.map((lease: any) => (
+                    <div key={`${lease.session_name}:${lease.profile_id}`} style={{ padding: '8px', background: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                      <div>{t('tool_status_dicloak_lease_session')}: <span style={{ color: 'var(--text-primary)' }}>{lease.session_name || '—'}</span></div>
+                      <div>{t('tool_status_dicloak_lease_profile')}: <span style={{ color: 'var(--text-primary)' }}>{lease.profile_id || '—'}</span></div>
+                      <div>{t('tool_status_dicloak_lease_port')}: <span style={{ color: 'var(--text-primary)' }}>{lease.debug_port ?? '—'}</span></div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div>{t('tool_status_dicloak_no_lease')}</div>
+              )}
+              <div>
+                {t('tool_status_dicloak_last_open')}: <span style={{ color: 'var(--text-primary)' }}>
+                  {dicloakRuntime.last_open?.profile_id
+                    ? `${dicloakRuntime.last_open.ok ? t('common_yes') : t('common_no')} · ${dicloakRuntime.last_open.profile_id}`
+                    : t('channel_runtime_none')}
+                </span>
+              </div>
+              <div>
+                {t('tool_status_dicloak_last_close')}: <span style={{ color: 'var(--text-primary)' }}>
+                  {dicloakRuntime.last_close?.profile_id
+                    ? `${dicloakRuntime.last_close.ok ? t('common_yes') : t('common_no')} · ${dicloakRuntime.last_close.profile_id}`
+                    : t('channel_runtime_none')}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };

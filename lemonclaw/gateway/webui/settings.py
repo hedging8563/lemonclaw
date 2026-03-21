@@ -365,6 +365,20 @@ def _derive_group_runtime(config) -> dict[str, dict[str, object]]:
     return runtime
 
 
+def _derive_dicloak_runtime(agent_loop: Any | None) -> dict[str, object] | None:
+    if agent_loop is None or not hasattr(agent_loop, "tools"):
+        return None
+    browser_tool = agent_loop.tools.get("browser") if hasattr(agent_loop.tools, "get") else None
+    if browser_tool is None or not hasattr(browser_tool, "get_dicloak_runtime_status"):
+        return None
+    try:
+        status = browser_tool.get_dicloak_runtime_status()
+    except Exception as exc:
+        logger.debug("Failed to derive DICloak runtime status: {}", exc)
+        return None
+    return status if isinstance(status, dict) else None
+
+
 def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
     """Ensure Feishu subscription tokens exist before serving settings UI."""
     import fcntl
@@ -525,6 +539,7 @@ def get_settings_routes(
             "settings": _mask_dict(data),
             "channel_runtime": _derive_channel_runtime(config),
             "group_runtime": _derive_group_runtime(config),
+            "dicloak_runtime": _derive_dicloak_runtime(agent_loop),
             "tool_status": {
                 "browser": {"installed": bool(browser_bin), "binary": browser_bin},
                 "coding": {"installed": bool(coding_bin), "binary": coding_bin},

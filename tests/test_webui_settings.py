@@ -187,6 +187,40 @@ def test_settings_exposes_managed_lemondata_provider_bases(monkeypatch, tmp_path
     assert providers['lemondata_gemini']['api_base'] == 'https://staging.example.com'
 
 
+def test_settings_exposes_dicloak_runtime_without_credentials(tmp_path):
+    from types import SimpleNamespace
+
+    class FakeBrowserTool:
+        def get_dicloak_runtime_status(self):
+            return {
+                'enabled': True,
+                'lease_count': 1,
+                'leases': [{'session_name': 'lc-webui-abc', 'profile_id': 'profile-1', 'debug_port': 45010}],
+                'last_open': {'ok': True, 'profile_id': 'profile-1', 'debug_port': 45010},
+                'last_close': {'ok': False, 'profile_id': 'profile-1', 'error': 'close failed'},
+            }
+
+    class FakeTools:
+        def get(self, name):
+            return FakeBrowserTool() if name == 'browser' else None
+
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    fake_agent = SimpleNamespace(tools=FakeTools(), model='gpt-5.4')
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=fake_agent)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+
+    assert resp.status_code == 200
+    runtime = resp.json()['dicloak_runtime']
+    assert runtime['enabled'] is True
+    assert runtime['lease_count'] == 1
+    assert runtime['leases'][0]['profile_id'] == 'profile-1'
+    assert runtime['last_open']['ok'] is True
+    assert runtime['last_close']['ok'] is False
+
+
 def test_save_config_strips_env_injected_lemondata_response_key(monkeypatch, tmp_path):
     config_path = tmp_path / 'config.json'
     save_config(Config(), config_path)

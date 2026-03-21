@@ -52,6 +52,8 @@ class BrowserTool(Tool):
         self._dicloak_api_base_url = (os.environ.get("DICLOAK_API_BASE_URL") or "").rstrip("/")
         self._dicloak_api_key = os.environ.get("DICLOAK_API_KEY", "")
         self._dicloak_leases: dict[str, dict[str, Any]] = {}
+        self._dicloak_last_open: dict[str, Any] | None = None
+        self._dicloak_last_close: dict[str, Any] | None = None
 
 
     @property
@@ -214,6 +216,12 @@ class BrowserTool(Tool):
                 if response.status_code != 200 or payload.get("code") != 0:
                     details = payload.get("data") if isinstance(payload.get("data"), dict) else {}
                     detail_message = str((details or {}).get("message") or "")
+                    self._dicloak_last_open = {
+                        "ok": False,
+                        "profile_id": profile_id,
+                        "session_name": session_name,
+                        "error": detail_message or payload.get("msg") or response.text,
+                    }
                     if detail_message == "BROWSER_NOT_INSTALL_2":
                         return (
                             "Error: DICloak open_profile failed because the selected profile kernel is not installed "
@@ -242,6 +250,12 @@ class BrowserTool(Tool):
                     "debug_port": debug_port,
                     "opened_at": data.get("serial_number"),
                 }
+                self._dicloak_last_open = {
+                    "ok": True,
+                    "profile_id": profile_id,
+                    "session_name": session_name,
+                    "debug_port": debug_port,
+                }
                 return self._truncate(json.dumps({
                     "profile_id": profile_id,
                     "debug_port": debug_port,
@@ -266,11 +280,39 @@ class BrowserTool(Tool):
                 response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/close", headers=headers)
                 payload = response.json()
                 if response.status_code != 200 or payload.get("code") != 0:
+                    self._dicloak_last_close = {
+                        "ok": False,
+                        "profile_id": profile_id,
+                        "session_name": session_name,
+                        "error": payload.get("msg") or response.text,
+                    }
                     return f"Error: DICloak close_profile failed: {payload.get('msg') or response.text}"
                 self._dicloak_leases.pop(session_name, None)
+                self._dicloak_last_close = {
+                    "ok": True,
+                    "profile_id": profile_id,
+                    "session_name": session_name,
+                }
                 return f"DICloak profile closed: {profile_id}"
 
         return "Error: unsupported DICloak command. Supported: list_profiles, open_profile, close_profile."
+
+    def get_dicloak_runtime_status(self) -> dict[str, Any]:
+        leases = [
+            {
+                "session_name": session_name,
+                "profile_id": str(data.get("profile_id") or ""),
+                "debug_port": data.get("debug_port"),
+            }
+            for session_name, data in sorted(self._dicloak_leases.items())
+        ]
+        return {
+            "enabled": self._dicloak_enabled and bool(self._dicloak_api_base_url and self._dicloak_api_key),
+            "lease_count": len(leases),
+            "leases": leases,
+            "last_open": dict(self._dicloak_last_open or {}),
+            "last_close": dict(self._dicloak_last_close or {}),
+        }
 
     async def _run_step(
         self,
