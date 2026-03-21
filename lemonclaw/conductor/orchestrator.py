@@ -25,6 +25,11 @@ from lemonclaw.conductor.types import (
     SubTaskStatus,
     TaskComplexity,
 )
+from lemonclaw.conductor.swarm_templates import (
+    get_swarm_template,
+    infer_role_hint,
+    infer_swarm_template,
+)
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
@@ -172,16 +177,22 @@ class Orchestrator:
             intent=intent,
             phase=OrchestratorPhase.SPLITTING,
         )
+        template = infer_swarm_template(message, intent.required_skills)
+        plan.swarm_template_id = template.id
+        plan.swarm_template_label = template.label
+        plan.swarm_goal = intent.summary or message[:120]
 
+        role_list = ", ".join(role.id for role in template.roles)
         prompt = (
             "Break this task into independent subtasks that can be worked on in parallel "
             "where possible. For each subtask provide:\n"
             '- id: short unique id (e.g. "t1", "t2")\n'
             "- description: what needs to be done\n"
             "- required_skills: list of skill categories\n"
+            f"- role_hint: choose the best fitting role from [{role_list}]\n"
             '- depends_on: list of subtask ids this depends on (empty if independent)\n\n'
             "Respond with ONLY a JSON array, no markdown fences:\n"
-            '[{"id": "t1", "description": "...", "required_skills": ["..."], "depends_on": []}]'
+            '[{"id": "t1", "description": "...", "required_skills": ["..."], "role_hint": "lead", "depends_on": []}]'
         )
 
         try:
@@ -205,6 +216,7 @@ class Orchestrator:
                     id=td["id"],
                     description=td["description"],
                     required_skills=td.get("required_skills", []),
+                    role_hint=td.get("role_hint") or infer_role_hint(template, td["description"], td.get("required_skills", [])),
                     depends_on=td.get("depends_on", []),
                 ))
         except Exception as e:
@@ -213,6 +225,7 @@ class Orchestrator:
                 id="t1",
                 description=message,
                 required_skills=intent.required_skills,
+                role_hint=infer_role_hint(template, message, intent.required_skills),
             )]
 
         logger.info("Orchestrator: split into {} subtasks", len(plan.subtasks))
@@ -228,8 +241,41 @@ class Orchestrator:
         logger.info("Orchestrator: ASSIGNING {} subtasks", len(plan.subtasks))
 
         agents = self._registry.list_agents()
+        template = get_swarm_template(plan.swarm_template_id)
+        if template:
+            for role in template.roles:
+                agent_id = f"swarm-{template.id}-{role.id}"
+                if self._registry.get_agent(agent_id):
+                    continue
+                try:
+                    self._registry.create_agent(
+                        agent_id=agent_id,
+                        role=role.id,
+                        model=self._model or "",
+                        skills=list(role.skills),
+                        system_prompt_override=role.prompt,
+                        config={
+                            "execution_mode": "direct",
+                            "swarm_template_id": template.id,
+                            "swarm_template_label": template.label,
+                            "role_label": role.label,
+                        },
+                    )
+                except ValueError:
+                    pass
+            agents = self._registry.list_agents()
 
         for subtask in plan.subtasks:
+            if template and subtask.role_hint:
+                direct_agent_id = f"swarm-{template.id}-{subtask.role_hint}"
+                if self._registry.get_agent(direct_agent_id):
+                    subtask.assigned_agent_id = direct_agent_id
+                    logger.debug(
+                        "Orchestrator: assigned '{}' → swarm role '{}'",
+                        subtask.id,
+                        direct_agent_id,
+                    )
+                    continue
             agent = select_agent(subtask, agents)
             if agent:
                 subtask.assigned_agent_id = agent.agent_id
@@ -321,6 +367,8 @@ class Orchestrator:
         from lemonclaw.agent.types import AgentStatus
 
         agent_id = subtask.assigned_agent_id or "default"
+        agent_info = self._registry.get_agent(agent_id)
+        execution_mode = str((agent_info.config or {}).get("execution_mode") or "bus") if agent_info else "bus"
         last_error: Exception | None = None
         task_id = str(plan.metadata.get("_ledger_task_id", ""))
 
@@ -336,7 +384,7 @@ class Orchestrator:
 
             try:
                 step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500]) if self._ledger and task_id else None
-                if agent_id != "default" and agent_id in self._bus.registered_agents:
+                if agent_id != "default" and execution_mode == "bus" and agent_id in self._bus.registered_agents:
                     request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
                     fut = self._bus.expect_response(request_id)
 
@@ -360,16 +408,28 @@ class Orchestrator:
                         self._bus.cancel_response(request_id)
                         raise TimeoutError(f"Agent '{agent_id}' did not respond within {self._subtask_timeout}s")
                 else:
+                    handoff = ""
+                    if subtask.depends_on:
+                        dependency_results = []
+                        for dep_id in subtask.depends_on:
+                            dep = next((item for item in plan.subtasks if item.id == dep_id), None)
+                            if dep and dep.result:
+                                dependency_results.append(f"- {dep.description}: {dep.result}")
+                        if dependency_results:
+                            handoff = "\n\nDependency handoff:\n" + "\n".join(dependency_results)
+
+                    role_prompt = agent_info.system_prompt_override if agent_info and agent_info.system_prompt_override else (
+                        "You are a specialist agent. Complete the assigned task thoroughly and concisely. "
+                        "Focus only on this specific task."
+                    )
                     async with self._llm_semaphore:
                         response = await self._provider.chat(
                             messages=[
-                                {"role": "system", "content": (
-                                    "You are a specialist agent. Complete the assigned task "
-                                    "thoroughly and concisely. Focus only on this specific task."
-                                )},
+                                {"role": "system", "content": role_prompt},
                                 {"role": "user", "content": (
                                     f"Context: {plan.original_message}\n\n"
-                                    f"Your specific task: {subtask.description}"
+                                    f"Swarm goal: {plan.swarm_goal or plan.intent.summary or plan.original_message}\n\n"
+                                    f"Your specific task: {subtask.description}{handoff}"
                                 )},
                             ],
                             model=self._model,

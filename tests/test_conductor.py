@@ -1,6 +1,7 @@
 """Tests for Conductor orchestration pipeline (P3 Phase 2)."""
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -214,3 +215,101 @@ class TestOrchestrationPlan:
         runnable = plan.runnable_tasks
         assert len(runnable) == 1
         assert runnable[0].id == "t2"
+
+
+class TestSwarmTemplates:
+    def test_infers_seo_template(self):
+        from lemonclaw.conductor.swarm_templates import infer_swarm_template
+
+        template = infer_swarm_template(
+            "Build an SEO content plan for this keyword cluster and article outline",
+            ["research", "seo", "writing"],
+        )
+        assert template.id == "seo_content_studio"
+
+    def test_falls_back_to_general_template(self):
+        from lemonclaw.conductor.swarm_templates import infer_swarm_template
+
+        template = infer_swarm_template("Help me think through this messy task", ["analysis"])
+        assert template.id == "general_swarm"
+
+
+@pytest.mark.asyncio
+async def test_assign_creates_swarm_role_agents(tmp_path):
+    from lemonclaw.agent.registry import AgentRegistry
+    from lemonclaw.bus.queue import MessageBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
+
+    provider = AsyncMock()
+    bus = MessageBus()
+    registry = AgentRegistry(bus, tmp_path)
+    orch = Orchestrator(provider, bus, registry, model="gpt-5.4")
+
+    plan = OrchestrationPlan(
+        request_id="plan1",
+        original_message="Create an SEO article workflow",
+        intent=IntentAnalysis(complexity=TaskComplexity.MODERATE, summary="SEO workflow"),
+        swarm_template_id="seo_content_studio",
+        swarm_template_label="SEO Content Studio",
+        swarm_goal="Create an SEO article workflow",
+        subtasks=[
+            SubTask(id="t1", description="Research the keyword and competitors", role_hint="researcher"),
+            SubTask(id="t2", description="Draft the article", role_hint="writer"),
+        ],
+    )
+
+    await orch._assign(plan)
+
+    assert plan.subtasks[0].assigned_agent_id == "swarm-seo_content_studio-researcher"
+    assert plan.subtasks[1].assigned_agent_id == "swarm-seo_content_studio-writer"
+    assert registry.get_agent("swarm-seo_content_studio-researcher") is not None
+    assert registry.get_agent("swarm-seo_content_studio-writer") is not None
+
+
+@pytest.mark.asyncio
+async def test_execute_subtask_uses_swarm_role_prompt_and_handoff(tmp_path):
+    from lemonclaw.agent.registry import AgentRegistry
+    from lemonclaw.bus.queue import MessageBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
+    from lemonclaw.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.chat = AsyncMock(return_value=LLMResponse(content="done"))
+    bus = MessageBus()
+    registry = AgentRegistry(bus, tmp_path)
+    registry.create_agent(
+        "swarm-general_swarm-maker",
+        role="maker",
+        model="gpt-5.4",
+        system_prompt_override="You are the maker role.",
+        config={"execution_mode": "direct"},
+    )
+
+    orch = Orchestrator(provider, bus, registry, model="gpt-5.4")
+    plan = OrchestrationPlan(
+        request_id="plan2",
+        original_message="Ship a concrete deliverable",
+        intent=IntentAnalysis(complexity=TaskComplexity.MODERATE, summary="Ship deliverable"),
+        swarm_template_id="general_swarm",
+        swarm_template_label="General Swarm",
+        swarm_goal="Ship a concrete deliverable",
+        subtasks=[
+            SubTask(id="t1", description="Collect requirements", status=SubTaskStatus.COMPLETED, result="requirements ready"),
+            SubTask(
+                id="t2",
+                description="Produce the final artifact",
+                role_hint="maker",
+                assigned_agent_id="swarm-general_swarm-maker",
+                depends_on=["t1"],
+                status=SubTaskStatus.RUNNING,
+            ),
+        ],
+    )
+
+    result = await orch._execute_subtask(plan, plan.subtasks[1])
+
+    assert result == "done"
+    messages = provider.chat.await_args.kwargs["messages"]
+    assert messages[0]["content"] == "You are the maker role."
+    assert "Dependency handoff" in messages[1]["content"]
+    assert "requirements ready" in messages[1]["content"]

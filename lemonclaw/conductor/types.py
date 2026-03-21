@@ -35,6 +35,7 @@ class SubTask:
     description: str
     required_skills: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)  # IDs of prerequisite subtasks
+    role_hint: str | None = None
     assigned_agent_id: str | None = None
     status: SubTaskStatus = SubTaskStatus.PENDING
     result: str | None = None
@@ -60,6 +61,9 @@ class OrchestrationPlan:
     subtasks: list[SubTask] = field(default_factory=list)
     phase: OrchestratorPhase = OrchestratorPhase.IDLE
     merged_result: str | None = None
+    swarm_template_id: str | None = None
+    swarm_template_label: str | None = None
+    swarm_goal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property

@@ -92,6 +92,12 @@ export function ConductorPanel() {
                       <span style={{ ...pillStyle(plan.phase === 'COMPLETED'), cursor: 'default' }}>{plan.phase || 'UNKNOWN'}</span>
                       {plan.complexity ? <span style={{ ...pillStyle(), cursor: 'default' }}>{`lvl:${plan.complexity}`}</span> : null}
                     </div>
+                    {plan.swarm_template_label ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                        <span style={{ ...pillStyle(true), cursor: 'default' }}>{`team: ${plan.swarm_template_label}`}</span>
+                        {plan.swarm_goal ? <span style={{ ...pillStyle(), cursor: 'default' }}>{`goal: ${plan.swarm_goal}`}</span> : null}
+                      </div>
+                    ) : null}
                     <div style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: plan.subtasks?.length ? '10px' : '0' }}>{plan.message}</div>
                     {plan.subtasks?.length ? (
                       <details>
@@ -104,6 +110,7 @@ export function ConductorPanel() {
                               </span>
                               <div style={{ flex: 1, color: subtask.status === 'completed' ? 'var(--text-muted)' : 'var(--text-secondary)', lineHeight: 1.4 }}>
                                 {subtask.assigned_agent ? <span style={{ color: 'var(--teal)', marginRight: '4px' }}>[{subtask.assigned_agent}]</span> : null}
+                                {subtask.role_hint ? <span style={{ color: 'var(--purple)', marginRight: '4px' }}>{`{${subtask.role_hint}}`}</span> : null}
                                 {subtask.description}
                               </div>
                             </div>

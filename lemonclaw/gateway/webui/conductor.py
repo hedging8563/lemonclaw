@@ -66,10 +66,14 @@ def get_conductor_routes(
                     "phase": p.phase.value,
                     "message": p.original_message[:200],
                     "complexity": p.intent.complexity.value,
+                    "swarm_template_id": p.swarm_template_id,
+                    "swarm_template_label": p.swarm_template_label,
+                    "swarm_goal": p.swarm_goal,
                     "subtasks": [
                         {
                             "id": t.id,
                             "description": t.description[:100],
+                            "role_hint": t.role_hint,
                             "status": t.status.value,
                             "assigned_agent": t.assigned_agent_id,
                             "depends_on": t.depends_on,
