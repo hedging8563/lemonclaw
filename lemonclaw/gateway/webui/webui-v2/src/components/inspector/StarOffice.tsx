@@ -14,6 +14,8 @@ function getHueForAgent(id: string) {
 export function StarOffice() {
   const workerAgents = agents.value || [];
   const isConductorBusy = isStreaming.value || plans.value.length > 0;
+  const activePlan = plans.value[0];
+  const activeTemplate = activePlan?.swarm_template_label || '';
   
   let overallStatus = 'idle';
   if (workerAgents.some(a => a.status === 'error')) overallStatus = 'error';
@@ -30,6 +32,25 @@ export function StarOffice() {
   return (
     <div class="star-office">
       <div class={`star-status ${overallStatus.toLowerCase()}`}>{(t as any)(`star_${overallStatus.toLowerCase()}`) || overallStatus}</div>
+      {activeTemplate ? (
+        <div style={{
+          position: 'absolute',
+          top: '36px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: '10px',
+          fontFamily: 'var(--font-ui)',
+          color: 'var(--text-secondary)',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderRadius: '999px',
+          padding: '3px 8px',
+          zIndex: 20,
+          whiteSpace: 'nowrap',
+        }}>
+          {`TEAM · ${activeTemplate}`}
+        </div>
+      ) : null}
       
       {overallStatus === 'executing' && (
         <>
@@ -95,6 +116,9 @@ export function StarOffice() {
                   <div style={{ position: 'absolute', top: '-18px', left: '-10px', fontSize: '8px', color: 'var(--text-primary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', transform: slot.faceRight ? 'none' : 'scaleX(-1)' }}>
                     {agent.id.substring(0,8)}
                   </div>
+                  <div style={{ position: 'absolute', top: '-8px', left: '-10px', fontSize: '7px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', transform: slot.faceRight ? 'none' : 'scaleX(-1)' }}>
+                    {(agent.role || 'worker').toUpperCase()}
+                  </div>
                 </div>
               </div>
             </div>
@@ -115,6 +139,11 @@ export function StarOffice() {
              <div style={{ position: 'absolute', top: '-18px', left: '-16px', fontSize: '8px', color: 'var(--accent)', background: 'rgba(255, 107, 53, 0.1)', border: '1px solid var(--accent)', padding: '0 4px', borderRadius: '2px', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }}>
                ORCHESTRATOR
              </div>
+             {activePlan?.swarm_goal ? (
+               <div style={{ position: 'absolute', top: '-34px', left: '-42px', maxWidth: '120px', fontSize: '7px', color: 'var(--text-secondary)', fontFamily: 'var(--font-ui)', textAlign: 'center', lineHeight: 1.2 }}>
+                 {activePlan.swarm_goal}
+               </div>
+             ) : null}
           </div>
         </div>
 
