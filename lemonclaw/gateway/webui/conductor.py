@@ -89,7 +89,33 @@ def get_conductor_routes(
             ]
         })
 
+    async def api_templates(request: Request) -> JSONResponse:
+        if not _check_auth(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from lemonclaw.conductor.swarm_templates import list_swarm_templates
+
+        templates = list_swarm_templates()
+        return JSONResponse({
+            "templates": [
+                {
+                    "id": template.id,
+                    "label": template.label,
+                    "keywords": list(template.keywords),
+                    "roles": [
+                        {
+                            "id": role.id,
+                            "label": role.label,
+                            "skills": list(role.skills),
+                        }
+                        for role in template.roles
+                    ],
+                }
+                for template in templates
+            ]
+        })
+
     return [
         Route("/api/conductor/agents", api_agents),
         Route("/api/conductor/plans", api_plans),
+        Route("/api/conductor/templates", api_templates),
     ]

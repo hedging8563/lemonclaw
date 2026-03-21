@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { agents, plans, loadConductor } from '../../stores/conductor';
+import { agents, plans, templates, loadConductor } from '../../stores/conductor';
 import { t } from '../../stores/i18n';
 
 const shellStyle = {
@@ -155,6 +155,29 @@ export function ConductorPanel() {
                   </div>
                 );
               })}
+            </div>
+          </details>
+
+          <details style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              templates · {templates.value.length}
+            </summary>
+            <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+              {templates.value.map((template) => (
+                <div key={template.id} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '10px', background: 'var(--bg-secondary)' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <span style={{ ...pillStyle(activePlan?.swarm_template_id === template.id), cursor: 'default' }}>{template.label}</span>
+                    <span style={{ ...pillStyle(), cursor: 'default' }}>{template.id}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {(template.roles || []).map((role: any) => (
+                      <span key={`${template.id}:${role.id}`} style={{ ...pillStyle(), cursor: 'default', fontSize: '12px' }}>
+                        {role.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </details>
         </div>

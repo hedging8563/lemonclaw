@@ -1279,3 +1279,7 @@ def test_conductor_routes_require_valid_cookie(tmp_path):
     resp = client.get('/api/conductor/agents')
     assert resp.status_code == 200
     assert resp.json()['agents'][0]['id'] == 'a1'
+    templates = client.get('/api/conductor/templates')
+    assert templates.status_code == 200
+    payload = templates.json()
+    assert any(item['id'] == 'general_swarm' for item in payload['templates'])
