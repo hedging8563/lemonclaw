@@ -6,6 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from lemonclaw.config.defaults import DEFAULT_MODEL
 from lemonclaw.config.schema import Config
 
 
@@ -93,7 +94,13 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
 
 # Provider fields that _apply_env_overrides auto-populates from API_KEY env var
-_ENV_INJECTED_PROVIDERS = ("lemondata", "lemondataClaude", "lemondataMinimax", "lemondataGemini")
+_ENV_INJECTED_PROVIDERS = (
+    "lemondata",
+    "lemondataResponse",
+    "lemondataClaude",
+    "lemondataMinimax",
+    "lemondataGemini",
+)
 
 
 def _strip_env_injected(data: dict, original: dict) -> None:
@@ -142,8 +149,7 @@ def _apply_env_overrides(config: Config) -> None:
     # DEFAULT_MODEL is a fallback: only apply if config.json didn't set a model
     # (i.e. still has the Pydantic default). This allows users to override via Settings.
     if model := os.environ.get("DEFAULT_MODEL"):
-        _DEFAULT_MODEL = "gpt-5.4"  # must match AgentDefaults.model default
-        if config.agents.defaults.model == _DEFAULT_MODEL:
+        if config.agents.defaults.model == DEFAULT_MODEL:
             config.agents.defaults.model = model
 
     if instance_id := os.environ.get("INSTANCE_ID"):

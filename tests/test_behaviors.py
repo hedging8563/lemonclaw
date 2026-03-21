@@ -355,6 +355,27 @@ class TestRepeatedToolErrors:
     """Agent loop should break on repeated identical tool errors."""
 
     @pytest.mark.asyncio
+    async def test_empty_write_file_args_fail_fast_with_exec_hint(self, make_agent_loop, echo_provider):
+        echo_provider.responses = [
+            LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="call_0", name="write_file", arguments={})],
+                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            ),
+            LLMResponse(content="done", usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}),
+        ]
+
+        loop, _bus = make_agent_loop(max_iterations=10)
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="test")
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "write_file" in response.content
+        assert "exec" in response.content.lower()
+        assert echo_provider._call_count == 1
+
+    @pytest.mark.asyncio
     async def test_breaks_on_repeated_errors(self, make_agent_loop, echo_provider):
         """LLM keeps calling read_file({}) → should break after 3 failures."""
         # Script: LLM returns read_file({}) tool call every time
@@ -380,7 +401,7 @@ class TestRepeatedToolErrors:
         response = await loop._process_message(msg)
         assert response is not None
         # Should have broken early, not reached 40 iterations
-        assert "failed repeatedly" in response.content.lower() or "error" in response.content.lower()
+        assert "required arguments" in response.content.lower() or "provide complete parameters" in response.content.lower()
 
 
 
@@ -409,7 +430,7 @@ class TestRepeatedToolErrors:
         msg = InboundMessage(channel='test', sender_id='u1', chat_id='c1', content='test')
         response = await loop._process_message(msg)
         assert response is not None
-        assert 'failed repeatedly' in response.content.lower() or 'error' in response.content.lower()
+        assert "required arguments" in response.content.lower() or "provide complete parameters" in response.content.lower()
 
 # ── 2e. Gateway /api/chat Endpoint ──
 

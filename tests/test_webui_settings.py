@@ -1,7 +1,7 @@
 from starlette.testclient import TestClient
 
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
-from lemonclaw.config.loader import save_config
+from lemonclaw.config.loader import load_config, save_config
 from lemonclaw.config.schema import Config, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
@@ -185,6 +185,23 @@ def test_settings_exposes_managed_lemondata_provider_bases(monkeypatch, tmp_path
     assert providers['lemondata_claude']['api_base'] == 'https://staging.example.com'
     assert providers['lemondata_minimax']['api_base'] == 'https://staging.example.com'
     assert providers['lemondata_gemini']['api_base'] == 'https://staging.example.com'
+
+
+def test_save_config_strips_env_injected_lemondata_response_key(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    monkeypatch.setenv('API_KEY', 'sk-platform')
+    monkeypatch.setenv('API_BASE_URL', 'https://staging.example.com')
+
+    cfg = load_config(config_path)
+    assert cfg.providers.lemondata_response.api_key == 'sk-platform'
+
+    save_config(cfg, config_path)
+    saved = config_path.read_text(encoding='utf-8')
+
+    assert 'lemondataResponse' in saved
+    assert '"apiKey": ""' in saved
 
 
 def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, tmp_path):

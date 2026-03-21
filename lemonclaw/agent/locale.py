@@ -19,6 +19,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Tool '{name}' failed repeatedly. Please try a different approach.",
         "zh": "工具 '{name}' 反复失败，请换个方式试试。",
     },
+    "tool_empty_args_write_file": {
+        "en": "Tool 'write_file' was called without the required path/content. Please provide complete arguments, or use exec as a fallback to write the file.",
+        "zh": "工具 'write_file' 调用时缺少必要的 path/content。请提供完整参数，或改用 exec 作为写文件兜底方案。",
+    },
+    "tool_empty_args_exec": {
+        "en": "Tool 'exec' was called without the required command. Please provide a complete command before retrying.",
+        "zh": "工具 'exec' 调用时缺少必要的 command。请补全命令后再重试。",
+    },
+    "tool_empty_args_generic": {
+        "en": "Tool '{name}' was called without the required arguments. Please provide complete parameters before retrying.",
+        "zh": "工具 '{name}' 调用时缺少必要参数。请补全参数后再重试。",
+    },
     "max_iterations": {
         "en": "Reached max tool call iterations ({n}). Try breaking the task into smaller steps.",
         "zh": "已达到最大工具调用次数（{n}），请尝试将任务拆分为更小的步骤。",

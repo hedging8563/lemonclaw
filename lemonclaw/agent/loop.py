@@ -218,6 +218,26 @@ class AgentLoop:
             if exc is not None:
                 logger.opt(exception=exc).error("Background task failed [{}]", label)
 
+    def _empty_tool_call_guidance(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+        result: Any,
+        lang: str,
+    ) -> str | None:
+        """Return a fail-fast guidance message for empty invalid tool calls."""
+        if arguments:
+            return None
+        if not isinstance(arguments, dict):
+            return None
+        if not isinstance(result, str) or not result.startswith("Error: Invalid parameters for tool"):
+            return None
+        if tool_name == "write_file":
+            return t("tool_empty_args_write_file", lang)
+        if tool_name == "exec":
+            return t("tool_empty_args_exec", lang)
+        return t("tool_empty_args_generic", lang, name=tool_name)
+
         task.add_done_callback(_done)
 
     @staticmethod
@@ -790,6 +810,13 @@ class AgentLoop:
                             if isinstance(result, Exception):
                                 result = f"Error executing {tc.name}: {result}"
 
+                            empty_call_guidance = self._empty_tool_call_guidance(
+                                tc.name,
+                                tc.arguments,
+                                result,
+                                _lang,
+                            )
+
                             if on_progress:
                                 result_preview = str(result)[:500] if result else ""
                                 is_error = isinstance(result, str) and result.startswith("Error")
@@ -800,7 +827,13 @@ class AgentLoop:
                             if isinstance(result, str) and result.startswith("Error"):
                                 err_key = f"{tc.name}:{result[:80]}"
                                 _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
-                                if _consecutive_errors[err_key] >= max_consecutive_errors:
+                                if empty_call_guidance:
+                                    logger.warning(
+                                        "Tool {} called with empty arguments; failing fast instead of retrying",
+                                        tc.name,
+                                    )
+                                    final_content = empty_call_guidance
+                                elif _consecutive_errors[err_key] >= max_consecutive_errors:
                                     logger.warning("Tool {} failed {} times with same error, breaking loop",
                                                    tc.name, max_consecutive_errors)
                                     final_content = t("tool_repeated_fail", _lang, name=tc.name)
@@ -839,6 +872,13 @@ class AgentLoop:
                                 context=tool_ctx,
                             )
 
+                            empty_call_guidance = self._empty_tool_call_guidance(
+                                tool_call.name,
+                                tool_call.arguments,
+                                result,
+                                _lang,
+                            )
+
                             if on_progress:
                                 result_preview = str(result)[:500] if result else ""
                                 is_error = isinstance(result, str) and result.startswith("Error")
@@ -851,7 +891,13 @@ class AgentLoop:
                             if isinstance(result, str) and result.startswith("Error"):
                                 err_key = f"{tool_call.name}:{result[:80]}"
                                 _consecutive_errors[err_key] = _consecutive_errors.get(err_key, 0) + 1
-                                if _consecutive_errors[err_key] >= max_consecutive_errors:
+                                if empty_call_guidance:
+                                    logger.warning(
+                                        "Tool {} called with empty arguments; failing fast instead of retrying",
+                                        tool_call.name,
+                                    )
+                                    final_content = empty_call_guidance
+                                elif _consecutive_errors[err_key] >= max_consecutive_errors:
                                     logger.warning("Tool {} failed {} times with same error, breaking loop",
                                                    tool_call.name, max_consecutive_errors)
                                     final_content = t("tool_repeated_fail", _lang, name=tool_call.name)
