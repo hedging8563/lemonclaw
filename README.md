@@ -153,6 +153,25 @@ Knowledge lifecycle states currently surfaced in WebUI:
 - `ingested` — chunks/facts are available for retrieval
 - `error` — the last ingest failed and needs review or retry
 
+## Browser Modes
+
+LemonClaw currently has one unified browser tool surface, but two runtime paths behind it:
+
+- `agent-browser` is the default path for normal browsing, snapshots, clicks, forms, and screenshots
+- `DICloak` is the optional enhanced path for leased profiles, persistent login state, and higher-friction browsing
+
+Current bot guidance:
+
+- use normal `browser open/snapshot/click/fill/...` commands for ordinary web tasks
+- use DICloak only when the task explicitly needs a profile or persistent login state
+- the expected DICloak flow is:
+  - `dicloak list_profiles`
+  - `dicloak open_profile <profile_id>`
+  - normal browser commands in the same session
+  - `dicloak close_profile`
+
+When DICloak is unavailable, explicit DICloak commands fail closed. Ordinary browser tasks still continue to use `agent-browser`.
+
 ## Architecture
 
 ```text

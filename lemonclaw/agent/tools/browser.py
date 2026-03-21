@@ -73,12 +73,15 @@ class BrowserTool(Tool):
             f"Browser automation via agent-browser CLI ({available}). "
             "Use for interacting with websites: navigating pages, filling forms, "
             "clicking buttons, taking screenshots, extracting data, or any browser task. "
+            "Normal browser commands always use agent-browser by default. "
             "Pass the full agent-browser command string (without the 'agent-browser' prefix). "
             "Examples: 'open https://example.com', 'snapshot -i', 'click @e1', "
             "'fill @e2 \"text\"', 'screenshot', 'close'. "
             "Always snapshot after navigation to get fresh element refs (@e1, @e2...)."
-            " When DICloak is enabled, explicit profile lifecycle commands are available: "
+            " When DICloak is enabled, only explicit profile lifecycle commands use DICloak: "
             "'dicloak list_profiles', 'dicloak open_profile <profile_id>', 'dicloak close_profile [profile_id]'."
+            " Use DICloak only when the task explicitly needs a leased profile or persistent login state. "
+            "Recommended flow: list_profiles -> open_profile -> normal browser open/snapshot/click/fill commands in the same session -> close_profile."
             f"{domains}{workspace}"
         )
 
@@ -93,8 +96,11 @@ class BrowserTool(Tool):
                         "agent-browser command (without the 'agent-browser' prefix). "
                         "Examples: 'open https://example.com', 'snapshot -i', "
                         "'click @e1', 'fill @e2 \"text\"', 'screenshot', 'close'. "
+                        "Use these normal commands for ordinary browsing. "
+                        "Only use DICloak when the task explicitly needs a profile or persistent login state. "
                         "DICloak commands: 'dicloak list_profiles', 'dicloak open_profile <profile_id>', "
-                        "'dicloak close_profile [profile_id]'."
+                        "'dicloak close_profile [profile_id]'. After opening a profile, continue with normal "
+                        "browser commands in the same session, then close the profile."
                     ),
                 },
             },
