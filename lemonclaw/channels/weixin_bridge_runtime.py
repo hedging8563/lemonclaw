@@ -8,6 +8,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -19,6 +20,7 @@ from lemonclaw.config.schema import WeixinConfig
 
 _BRIDGE_STATE_FILE = "weixin-bridge-state.json"
 _BRIDGE_LOG_FILE = "logs/weixin-bridge.log"
+_BRIDGE_PREPARE_LOCK = threading.Lock()
 
 
 class WeixinBridgeError(RuntimeError):
@@ -60,31 +62,32 @@ def get_bridge_dir() -> Path:
 
 
 def ensure_bridge_ready() -> Path:
-    bridge_dir = get_bridge_dir()
-    source = _bridge_source_dir()
-    built_entry = bridge_dir / "dist" / "weixin" / "index.js"
-    if built_entry.exists():
-        built_mtime = built_entry.stat().st_mtime
-        source_files = [p for p in source.rglob("*") if p.is_file()]
-        if source_files and max(p.stat().st_mtime for p in source_files) <= built_mtime:
-            return bridge_dir
+    with _BRIDGE_PREPARE_LOCK:
+        bridge_dir = get_bridge_dir()
+        source = _bridge_source_dir()
+        built_entry = bridge_dir / "dist" / "weixin" / "index.js"
+        if built_entry.exists():
+            built_mtime = built_entry.stat().st_mtime
+            source_files = [p for p in source.rglob("*") if p.is_file()]
+            if source_files and max(p.stat().st_mtime for p in source_files) <= built_mtime:
+                return bridge_dir
 
-    if not shutil.which("npm"):
-        raise WeixinBridgeError("npm not found. Please install Node.js >= 20.")
+        if not shutil.which("npm"):
+            raise WeixinBridgeError("npm not found. Please install Node.js >= 20.")
 
-    bridge_dir.parent.mkdir(parents=True, exist_ok=True)
-    if bridge_dir.exists():
-        shutil.rmtree(bridge_dir)
-    shutil.copytree(source, bridge_dir, ignore=shutil.ignore_patterns("node_modules", "dist"))
+        bridge_dir.parent.mkdir(parents=True, exist_ok=True)
+        if bridge_dir.exists():
+            shutil.rmtree(bridge_dir)
+        shutil.copytree(source, bridge_dir, ignore=shutil.ignore_patterns("node_modules", "dist"))
 
-    try:
-        subprocess.run(["npm", "install"], cwd=bridge_dir, check=True, capture_output=True, text=True)
-        subprocess.run(["npm", "run", "build"], cwd=bridge_dir, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or str(exc)).strip()
-        raise WeixinBridgeError(f"Failed to build Weixin bridge: {detail[:400]}") from exc
+        try:
+            subprocess.run(["npm", "install"], cwd=bridge_dir, check=True, capture_output=True, text=True)
+            subprocess.run(["npm", "run", "build"], cwd=bridge_dir, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            raise WeixinBridgeError(f"Failed to build Weixin bridge: {detail[:400]}") from exc
 
-    return bridge_dir
+        return bridge_dir
 
 
 def _parse_bridge_endpoint(bridge_url: str) -> tuple[str, int]:
