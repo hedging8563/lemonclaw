@@ -34,14 +34,11 @@ def get_weixin_pairing_routes(
         if auth_error:
             return auth_error
 
-        from lemonclaw.config.loader import load_config, save_config
+        from lemonclaw.config.loader import load_config
 
         config = load_config(config_path)
         try:
             state = await asyncio.to_thread(get_weixin_pairing_state, config.channels.weixin, start_if_needed=False, wait_timeout=5.0)
-            if (state.get("status") == "connected" or state.get("accounts")) and not config.channels.weixin.enabled:
-                config.channels.weixin.enabled = True
-                save_config(config, config_path)
             if state.get("status") == "connected" or state.get("accounts"):
                 await _ensure_runtime_channel(config)
             return JSONResponse(state)
