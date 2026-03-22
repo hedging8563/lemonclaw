@@ -116,9 +116,9 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
     "weixin": ChannelCapability(
         name="weixin",
         transport="bridge",
-        attachment_only_ingress="marker",
-        media_delivery="marker_only",
-        notes="Bridge handles QR login and text replies; inbound media currently lands as markers until media download/send is added.",
+        attachment_only_ingress="full",
+        media_delivery="mixed",
+        notes="Bridge handles QR login, text replies, and best-effort media download/upload with local paths for common media types.",
     ),
     "wecom": ChannelCapability(
         name="wecom",

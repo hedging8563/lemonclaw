@@ -41,14 +41,51 @@ async def test_weixin_bridge_event_passes_session_and_context_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_weixin_send_uses_account_and_context_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: dict[str, str | None] = {}
+async def test_weixin_bridge_event_passes_media_paths() -> None:
+    channel = WeixinChannel(WeixinConfig(enabled=True, allow_from=["*"]), MessageBus())
+    channel._handle_message = AsyncMock()
 
-    def fake_send(config: WeixinConfig, *, account_id: str, to: str, text: str, context_token: str | None = None) -> dict[str, object]:
+    await channel._handle_bridge_event(
+        {
+            "type": "message",
+            "accountId": "bot-1",
+            "senderId": "wx-user-9",
+            "peerId": "wx-user-9",
+            "chatId": "bot-1|wx-user-9",
+            "content": "[image]",
+            "contextToken": "ctx-123",
+            "messageId": 43,
+            "timestamp": 1710000001,
+            "metadata": {
+                "itemTypes": ["image"],
+                "hasMedia": True,
+                "mediaPaths": ["/tmp/weixin-image.jpg"],
+            },
+        }
+    )
+
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["media"] == ["/tmp/weixin-image.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_weixin_send_uses_account_context_and_media_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: dict[str, object] = {}
+
+    def fake_send(
+        config: WeixinConfig,
+        *,
+        account_id: str,
+        to: str,
+        text: str,
+        context_token: str | None = None,
+        media_paths: list[str] | None = None,
+    ) -> dict[str, object]:
         sent["account_id"] = account_id
         sent["to"] = to
         sent["text"] = text
         sent["context_token"] = context_token
+        sent["media_paths"] = media_paths
         return {"ok": True, "messageId": "m-1"}
 
     monkeypatch.setattr("lemonclaw.channels.weixin.send_weixin_text", fake_send)
@@ -64,6 +101,7 @@ async def test_weixin_send_uses_account_and_context_from_metadata(monkeypatch: p
                 "peer_id": "wx-user-9",
                 "context_token": "ctx-123",
             },
+            media=["/tmp/weixin-image.jpg"],
         )
     )
 
@@ -72,4 +110,5 @@ async def test_weixin_send_uses_account_and_context_from_metadata(monkeypatch: p
         "to": "wx-user-9",
         "text": "收到",
         "context_token": "ctx-123",
+        "media_paths": ["/tmp/weixin-image.jpg"],
     }

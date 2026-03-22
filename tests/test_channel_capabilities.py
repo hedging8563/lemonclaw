@@ -19,5 +19,5 @@ def test_selected_channel_capabilities_match_current_runtime_contract() -> None:
     assert get_channel_capability("whatsapp").media_delivery == "local_paths"
     assert get_channel_capability("dingtalk").attachment_only_ingress == "full"
     assert get_channel_capability("mochat").attachment_only_ingress == "best_effort"
-    assert get_channel_capability("weixin").media_delivery == "marker_only"
+    assert get_channel_capability("weixin").media_delivery == "mixed"
     assert get_channel_capability("wecom").media_delivery == "mixed"

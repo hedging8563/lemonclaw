@@ -224,6 +224,7 @@ class WeixinConfig(Base):
 
     enabled: bool = False
     base_url: str = "https://ilinkai.weixin.qq.com"
+    cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
     bridge_url: str = "http://127.0.0.1:3002"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)

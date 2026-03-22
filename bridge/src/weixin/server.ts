@@ -4,6 +4,7 @@ import { dirname } from 'path';
 
 import {
   DEFAULT_WEIXIN_BASE_URL,
+  DEFAULT_WEIXIN_CDN_BASE_URL,
   listWeixinAccounts,
   normalizeWeixinAccountId,
   removeWeixinAccount,
@@ -95,6 +96,7 @@ export class WeixinBridgeServer {
   constructor(
     private readonly port: number,
     private readonly baseUrl: string,
+    private readonly cdnBaseUrl: string,
     private readonly token?: string,
   ) {
     this.persistState();
@@ -152,6 +154,7 @@ export class WeixinBridgeServer {
             accountId,
             token: result.botToken,
             baseUrl: result.baseUrl || this.baseUrl,
+            cdnBaseUrl: this.cdnBaseUrl || DEFAULT_WEIXIN_CDN_BASE_URL,
             userId: result.userId,
             lastError: '',
           });
@@ -275,8 +278,11 @@ export class WeixinBridgeServer {
         const accountId = String(body.accountId || '').trim();
         const to = String(body.to || '').trim();
         const text = String(body.text || '');
-        if (!accountId || !to || !text.trim()) {
-          this.json(response, 400, { error: 'accountId, to, text are required' });
+        const mediaPaths = Array.isArray(body.mediaPaths)
+          ? body.mediaPaths.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          : [];
+        if (!accountId || !to || (!text.trim() && mediaPaths.length === 0)) {
+          this.json(response, 400, { error: 'accountId, to, and text or mediaPaths are required' });
           return;
         }
         const result = await this.monitorHub.sendText({
@@ -284,6 +290,7 @@ export class WeixinBridgeServer {
           to,
           text,
           contextToken: typeof body.contextToken === 'string' ? body.contextToken : undefined,
+          mediaPaths,
         });
         this.json(response, 200, { ok: true, ...result });
         return;

@@ -16,13 +16,37 @@ export interface TextItem {
 }
 
 export interface VoiceItem {
+  media?: CDNMedia;
   text?: string;
+}
+
+export interface CDNMedia {
+  encrypt_query_param?: string;
+  aes_key?: string;
+  encrypt_type?: number;
+}
+
+export interface ImageItem {
+  media?: CDNMedia;
+  aeskey?: string;
+}
+
+export interface FileItem {
+  media?: CDNMedia;
+  file_name?: string;
+}
+
+export interface VideoItem {
+  media?: CDNMedia;
 }
 
 export interface MessageItem {
   type?: number;
   text_item?: TextItem;
+  image_item?: ImageItem;
   voice_item?: VoiceItem;
+  file_item?: FileItem;
+  video_item?: VideoItem;
 }
 
 export interface WeixinMessage {
@@ -54,6 +78,18 @@ export interface GetUpdatesResp {
 export interface SendMessageReq {
   msg?: WeixinMessage;
 }
+
+export interface GetUploadUrlResp {
+  upload_param?: string;
+  thumb_upload_param?: string;
+}
+
+export const UploadMediaType = {
+  IMAGE: 1,
+  VIDEO: 2,
+  FILE: 3,
+  VOICE: 4,
+} as const;
 
 export const MessageItemType = {
   NONE: 0,
@@ -194,6 +230,44 @@ export async function sendMessage(params: {
     'ilink/bot/sendmessage',
     {
       ...params.body,
+      base_info: { channel_version: 'lemonclaw-weixin-bridge' },
+    },
+    params.token,
+    params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
+  );
+}
+
+export async function getUploadUrl(params: {
+  baseUrl: string;
+  token?: string;
+  filekey?: string;
+  mediaType?: number;
+  toUserId?: string;
+  rawsize?: number;
+  rawfilemd5?: string;
+  filesize?: number;
+  thumbRawsize?: number;
+  thumbRawfilemd5?: string;
+  thumbFilesize?: number;
+  noNeedThumb?: boolean;
+  aeskey?: string;
+  timeoutMs?: number;
+}): Promise<GetUploadUrlResp> {
+  return apiPost<GetUploadUrlResp>(
+    params.baseUrl,
+    'ilink/bot/getuploadurl',
+    {
+      filekey: params.filekey,
+      media_type: params.mediaType,
+      to_user_id: params.toUserId,
+      rawsize: params.rawsize,
+      rawfilemd5: params.rawfilemd5,
+      filesize: params.filesize,
+      thumb_rawsize: params.thumbRawsize,
+      thumb_rawfilemd5: params.thumbRawfilemd5,
+      thumb_filesize: params.thumbFilesize,
+      no_need_thumb: params.noNeedThumb,
+      aeskey: params.aeskey,
       base_info: { channel_version: 'lemonclaw-weixin-bridge' },
     },
     params.token,

@@ -2,11 +2,13 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { dirname, join } from 'path';
 
 export const DEFAULT_WEIXIN_BASE_URL = 'https://ilinkai.weixin.qq.com';
+export const DEFAULT_WEIXIN_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c';
 
 export interface WeixinAccountRecord {
   accountId: string;
   token?: string;
   baseUrl?: string;
+  cdnBaseUrl?: string;
   userId?: string;
   syncBuf?: string;
   lastInboundAt?: number;
@@ -20,6 +22,12 @@ function accountsDir(): string {
 
 function ensureAccountsDir(): string {
   const dir = accountsDir();
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function mediaDir(): string {
+  const dir = process.env.WEIXIN_MEDIA_DIR || join(ensureAccountsDir(), '..', 'weixin-media');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -44,6 +52,7 @@ export function saveWeixinAccount(accountId: string, update: Partial<WeixinAccou
     ...update,
     accountId: normalized,
     baseUrl: (update.baseUrl || existing.baseUrl || DEFAULT_WEIXIN_BASE_URL).trim(),
+    cdnBaseUrl: (update.cdnBaseUrl || existing.cdnBaseUrl || DEFAULT_WEIXIN_CDN_BASE_URL).trim(),
     savedAt: new Date().toISOString(),
   };
   writeFileSync(accountFile(normalized), JSON.stringify(next, null, 2));

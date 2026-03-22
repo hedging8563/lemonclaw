@@ -99,6 +99,7 @@ class WeixinChannel(BaseChannel):
                 to=peer_id,
                 text=msg.content or "",
                 context_token=context_token,
+                media_paths=list(msg.media or []),
             )
         except Exception as exc:
             logger.error("Error sending Weixin message: {}", exc)
@@ -133,6 +134,7 @@ class WeixinChannel(BaseChannel):
             sender_id=peer_id,
             chat_id=chat_id,
             content=content,
+            media=list(((event.get("metadata") or {}) if isinstance(event.get("metadata"), dict) else {}).get("mediaPaths") or []),
             metadata={
                 **trigger_metadata,
                 "account_id": account_id,

@@ -33,6 +33,10 @@ def get_weixin_accounts_dir() -> Path:
     return get_data_dir() / "weixin-accounts"
 
 
+def get_weixin_media_dir() -> Path:
+    return get_data_dir() / "weixin-media"
+
+
 def get_bridge_log_path() -> Path:
     return get_data_dir() / _BRIDGE_LOG_FILE
 
@@ -107,7 +111,9 @@ def build_bridge_env(config: WeixinConfig) -> dict[str, str]:
     env["WEIXIN_BRIDGE_PORT"] = str(port)
     env["WEIXIN_BRIDGE_STATE_FILE"] = str(get_bridge_state_path())
     env["WEIXIN_ACCOUNTS_DIR"] = str(get_weixin_accounts_dir())
+    env["WEIXIN_MEDIA_DIR"] = str(get_weixin_media_dir())
     env["WEIXIN_BASE_URL"] = config.base_url or "https://ilinkai.weixin.qq.com"
+    env["WEIXIN_CDN_BASE_URL"] = config.cdn_base_url or "https://novac2c.cdn.weixin.qq.com/c2c"
     if config.bridge_token:
         env["WEIXIN_BRIDGE_TOKEN"] = config.bridge_token
     return env
@@ -272,6 +278,7 @@ def send_weixin_text(
     to: str,
     text: str,
     context_token: str | None = None,
+    media_paths: list[str] | None = None,
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "accountId": account_id,
@@ -280,6 +287,8 @@ def send_weixin_text(
     }
     if context_token:
         body["contextToken"] = context_token
+    if media_paths:
+        body["mediaPaths"] = list(media_paths)
     return _bridge_request(config, "/send", method="POST", body=body, timeout=20.0)
 
 
