@@ -37,6 +37,10 @@ def get_weixin_media_dir() -> Path:
     return get_data_dir() / "weixin-media"
 
 
+def get_weixin_event_queue_path() -> Path:
+    return get_data_dir() / "weixin-event-queue.json"
+
+
 def get_bridge_log_path() -> Path:
     return get_data_dir() / _BRIDGE_LOG_FILE
 
@@ -112,6 +116,7 @@ def build_bridge_env(config: WeixinConfig) -> dict[str, str]:
     env["WEIXIN_BRIDGE_STATE_FILE"] = str(get_bridge_state_path())
     env["WEIXIN_ACCOUNTS_DIR"] = str(get_weixin_accounts_dir())
     env["WEIXIN_MEDIA_DIR"] = str(get_weixin_media_dir())
+    env["WEIXIN_EVENT_QUEUE_FILE"] = str(get_weixin_event_queue_path())
     env["WEIXIN_BASE_URL"] = config.base_url or "https://ilinkai.weixin.qq.com"
     env["WEIXIN_CDN_BASE_URL"] = config.cdn_base_url or "https://novac2c.cdn.weixin.qq.com/c2c"
     if config.bridge_token:
@@ -258,12 +263,14 @@ def poll_weixin_updates(
     config: WeixinConfig,
     *,
     cursor: int = 0,
+    ack_cursor: int = 0,
     limit: int = 50,
     wait_timeout: float = 25.0,
 ) -> dict[str, object]:
     params = urlencode(
         {
             "cursor": max(0, int(cursor)),
+            "ackCursor": max(0, int(ack_cursor)),
             "limit": max(1, min(int(limit), 200)),
             "waitMs": int(max(wait_timeout, 0.1) * 1000),
         }

@@ -6,6 +6,7 @@ import { aesEcbPaddedSize } from './aes-ecb.js';
 import { getUploadUrl, UploadMediaType } from './api.js';
 import { uploadBufferToCdn } from './cdn-upload.js';
 import { getMimeFromFilename } from './mime.js';
+import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
 export interface UploadedFileInfo {
   filekey: string;
@@ -23,6 +24,10 @@ async function uploadMediaToCdn(params: {
   cdnBaseUrl: string;
   mediaType: number;
 }): Promise<UploadedFileInfo> {
+  const fileStat = await fs.stat(params.filePath);
+  if (fileStat.size > WEIXIN_MEDIA_MAX_BYTES) {
+    throw new Error(`Weixin media too large: ${fileStat.size} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
+  }
   const plaintext = await fs.readFile(params.filePath);
   const rawsize = plaintext.length;
   const rawfilemd5 = crypto.createHash('md5').update(plaintext).digest('hex');

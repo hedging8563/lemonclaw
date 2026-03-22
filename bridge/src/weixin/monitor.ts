@@ -20,6 +20,7 @@ import {
   saveWeixinAccount,
   type WeixinAccountRecord,
 } from './accounts.js';
+import { PersistentWeixinEventQueue } from './event-queue.js';
 import { extractInboundMediaPaths, sendWeixinMediaFiles } from './media.js';
 
 export interface WeixinBridgeEvent {
@@ -131,24 +132,19 @@ function contextTokenKey(accountId: string, peerId: string): string {
 export class WeixinMonitorHub {
   private readonly monitors = new Map<string, AbortController>();
   private readonly contextTokens = new Map<string, string>();
-  private readonly events: WeixinBridgeEvent[] = [];
   private readonly waiters = new Set<() => void>();
-  private nextEventId = 1;
+  private readonly eventQueue = new PersistentWeixinEventQueue();
 
   constructor(private readonly onAccountStatus?: (_account: WeixinAccountRecord | null, _error?: string | null) => void) {}
 
   private emitEvent(event: Omit<WeixinBridgeEvent, 'id'>): void {
-    const next: WeixinBridgeEvent = { ...event, id: this.nextEventId++ };
-    this.events.push(next);
-    if (this.events.length > 500) {
-      this.events.splice(0, this.events.length - 500);
-    }
+    this.eventQueue.enqueue(event);
     for (const wake of this.waiters) wake();
     this.waiters.clear();
   }
 
   private async waitForEvents(cursor: number, waitMs: number): Promise<void> {
-    if (this.events.some((event) => event.id > cursor)) return;
+    if (this.eventQueue.lastId() > cursor) return;
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
         this.waiters.delete(wake);
@@ -261,9 +257,13 @@ export class WeixinMonitorHub {
 
   async getUpdatesAfter(cursor: number, limit = 50, waitMs = 25_000): Promise<{ events: WeixinBridgeEvent[]; nextCursor: number }> {
     await this.waitForEvents(cursor, waitMs);
-    const events = this.events.filter((event) => event.id > cursor).slice(0, Math.max(1, Math.min(limit, 200)));
+    const events = this.eventQueue.listAfter(cursor, Math.max(1, Math.min(limit, 200)));
     const nextCursor = events.length > 0 ? events[events.length - 1].id : cursor;
     return { events, nextCursor };
+  }
+
+  ackThrough(cursor: number): void {
+    this.eventQueue.ackThrough(cursor);
   }
 
   async sendText(params: {

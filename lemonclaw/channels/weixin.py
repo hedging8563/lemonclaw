@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -16,6 +18,7 @@ from lemonclaw.channels.weixin_bridge_runtime import (
     poll_weixin_updates,
     send_weixin_text,
 )
+from lemonclaw.config.loader import get_data_dir
 from lemonclaw.config.schema import WeixinConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
@@ -37,7 +40,26 @@ class WeixinChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: WeixinConfig = config
         self._trigger_runtime = trigger_runtime
-        self._cursor = 0
+        self._cursor = self._load_cursor()
+
+    @staticmethod
+    def _cursor_state_path() -> Path:
+        return get_data_dir() / "weixin-consumer-cursor.json"
+
+    def _load_cursor(self) -> int:
+        path = self._cursor_state_path()
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            return 0
+        return max(0, int(data.get("cursor") or 0))
+
+    def _save_cursor(self, cursor: int) -> None:
+        path = self._cursor_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"cursor": max(0, int(cursor))}))
+        tmp.replace(path)
 
     async def start(self) -> None:
         self._running = True
@@ -53,16 +75,21 @@ class WeixinChannel(BaseChannel):
                     poll_weixin_updates,
                     self.config,
                     cursor=self._cursor,
+                    ack_cursor=self._cursor,
                     limit=50,
                     wait_timeout=25.0,
                 )
                 next_cursor = payload.get("nextCursor")
+                candidate_cursor = self._cursor
                 if isinstance(next_cursor, int) and next_cursor >= self._cursor:
-                    self._cursor = next_cursor
+                    candidate_cursor = next_cursor
 
                 for event in payload.get("events") or []:
                     if isinstance(event, dict):
                         await self._handle_bridge_event(event)
+                if candidate_cursor != self._cursor:
+                    self._cursor = candidate_cursor
+                    self._save_cursor(self._cursor)
             except asyncio.CancelledError:
                 break
             except WeixinBridgeError as exc:
@@ -89,7 +116,7 @@ class WeixinChannel(BaseChannel):
             return
 
         if msg.media:
-            logger.warning("Weixin media sending is not wired yet; {} file(s) dropped", len(msg.media))
+            logger.info("Weixin media send via bridge: {} file(s)", len(msg.media))
 
         try:
             await asyncio.to_thread(

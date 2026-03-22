@@ -20,6 +20,7 @@ import {
   uploadFileToWeixin,
   uploadVideoToWeixin,
 } from './upload.js';
+import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
 function ensureAccountMediaDir(accountId: string): string {
   const dir = path.join(mediaDir(), accountId);
@@ -33,6 +34,9 @@ function saveMediaBuffer(params: {
   ext: string;
   prefix: string;
 }): string {
+  if (params.buf.length > WEIXIN_MEDIA_MAX_BYTES) {
+    throw new Error(`Weixin media too large: ${params.buf.length} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
+  }
   const dir = ensureAccountMediaDir(params.accountId);
   const file = path.join(dir, `${params.prefix}-${randomUUID()}${params.ext}`);
   writeFileSync(file, params.buf);

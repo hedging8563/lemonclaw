@@ -102,3 +102,9 @@ export function stateFilePath(): string {
   mkdirSync(dirname(file), { recursive: true });
   return file;
 }
+
+export function eventQueueFilePath(): string {
+  const file = process.env.WEIXIN_EVENT_QUEUE_FILE || join(process.env.HOME || '/tmp', '.lemonclaw', 'weixin-event-queue.json');
+  mkdirSync(dirname(file), { recursive: true });
+  return file;
+}

@@ -239,8 +239,12 @@ export class WeixinBridgeServer {
 
       if (request.method === 'GET' && url.pathname === '/updates') {
         const cursor = Number(url.searchParams.get('cursor') || '0');
+        const ackCursor = Number(url.searchParams.get('ackCursor') || '0');
         const limit = Number(url.searchParams.get('limit') || '50');
         const waitMs = Number(url.searchParams.get('waitMs') || '25000');
+        if (Number.isFinite(ackCursor) && ackCursor > 0) {
+          this.monitorHub.ackThrough(ackCursor);
+        }
         const payload = await this.monitorHub.getUpdatesAfter(Number.isFinite(cursor) ? cursor : 0, limit, waitMs);
         this.json(response, 200, {
           ...payload,

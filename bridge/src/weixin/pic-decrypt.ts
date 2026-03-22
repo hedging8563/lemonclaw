@@ -1,5 +1,6 @@
 import { decryptAesEcb } from './aes-ecb.js';
 import { buildCdnDownloadUrl } from './cdn-url.js';
+import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
 async function fetchCdnBytes(url: string): Promise<{ buf: Buffer; contentType: string | null }> {
   const response = await fetch(url);
@@ -7,8 +8,35 @@ async function fetchCdnBytes(url: string): Promise<{ buf: Buffer; contentType: s
     const body = await response.text().catch(() => '');
     throw new Error(`CDN download ${response.status} ${response.statusText}${body ? `: ${body}` : ''}`);
   }
+  const declaredLength = Number(response.headers.get('content-length') || '0');
+  if (Number.isFinite(declaredLength) && declaredLength > WEIXIN_MEDIA_MAX_BYTES) {
+    throw new Error(`CDN media too large: ${declaredLength} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const fallback = Buffer.from(await response.arrayBuffer());
+    if (fallback.length > WEIXIN_MEDIA_MAX_BYTES) {
+      throw new Error(`CDN media too large: ${fallback.length} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
+    }
+    return {
+      buf: fallback,
+      contentType: response.headers.get('content-type'),
+    };
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = Buffer.from(value);
+    total += chunk.length;
+    if (total > WEIXIN_MEDIA_MAX_BYTES) {
+      throw new Error(`CDN media too large: ${total} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
+    }
+    chunks.push(chunk);
+  }
   return {
-    buf: Buffer.from(await response.arrayBuffer()),
+    buf: Buffer.concat(chunks, total),
     contentType: response.headers.get('content-type'),
   };
 }
