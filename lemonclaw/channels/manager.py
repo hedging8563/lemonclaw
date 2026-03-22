@@ -281,6 +281,10 @@ class ChannelManager:
             return existing
 
         self.channels[name] = channel
+        if self._channel_pairing_enabled(name):
+            from lemonclaw.utils.helpers import get_data_path
+
+            channel.enable_auto_pairing(get_data_path())
         self._channel_status.setdefault(name, {}).update(
             {
                 "configured_enabled": True,

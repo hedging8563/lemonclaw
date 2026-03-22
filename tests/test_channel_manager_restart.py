@@ -13,6 +13,7 @@ class _FakeChannel:
         self._running = False
         self.start_calls = 0
         self.stop_calls = 0
+        self.auto_pairing_enabled = False
         self._stop_event = asyncio.Event()
 
     @property
@@ -33,6 +34,9 @@ class _FakeChannel:
 
     async def send(self, msg) -> None:
         return None
+
+    def enable_auto_pairing(self, data_dir) -> None:
+        self.auto_pairing_enabled = True
 
 
 @pytest.mark.asyncio
@@ -112,3 +116,16 @@ def test_channel_manager_disabled_channels_start_unavailable():
     assert status["telegram"]["available"] is False
     assert status["telegram"]["attachment_only_ingress"] == "full"
     assert status["telegram"]["media_delivery"] == "local_paths"
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_ensure_channel_enables_auto_pairing() -> None:
+    config = Config()
+    config.channels.auto_pairing = True
+    manager = ChannelManager(config, MessageBus())
+    fake = _FakeChannel()
+
+    await manager.ensure_channel("weixin", fake)
+
+    assert fake.auto_pairing_enabled is True
+    await fake.stop()
