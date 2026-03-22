@@ -112,3 +112,28 @@ async def test_weixin_send_uses_account_context_and_media_from_metadata(monkeypa
         "context_token": "ctx-123",
         "media_paths": ["/tmp/weixin-image.jpg"],
     }
+
+
+@pytest.mark.asyncio
+async def test_weixin_send_re_raises_bridge_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_send(*args, **kwargs):
+        raise RuntimeError("bridge send failed")
+
+    monkeypatch.setattr("lemonclaw.channels.weixin.send_weixin_text", fake_send)
+
+    channel = WeixinChannel(WeixinConfig(enabled=True, allow_from=["*"]), MessageBus())
+
+    with pytest.raises(RuntimeError, match="bridge send failed"):
+        await channel.send(
+            OutboundMessage(
+                channel="weixin",
+                chat_id="bot-1|wx-user-9",
+                content="收到",
+                metadata={
+                    "account_id": "bot-1",
+                    "peer_id": "wx-user-9",
+                    "context_token": "ctx-123",
+                },
+                media=["/tmp/weixin-image.jpg"],
+            )
+        )

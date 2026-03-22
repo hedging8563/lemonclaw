@@ -217,15 +217,13 @@ export async function sendWeixinMediaFiles(params: {
   cdnBaseUrl: string;
 }): Promise<{ messageIds: string[] }> {
   const messageIds: string[] = [];
-  // Weixin appears to silently drop the follow-up attachment when we send
-  // a text caption first and then the media item in the same reply turn.
-  // Prioritize attachment delivery over caption text.
-  let caption = '';
+  let caption = params.text.trim();
   for (const filePath of params.mediaPaths) {
     const mime = getOutboundMediaMime(filePath);
     if (mime.startsWith('audio/')) {
       let item: MessageItem;
       try {
+        console.info(`[weixin] uploading voice attachment ${path.basename(filePath)} -> ${params.to}`);
         const uploaded = await uploadVoiceToWeixin({
           filePath,
           toUserId: params.to,
@@ -265,6 +263,7 @@ export async function sendWeixinMediaFiles(params: {
           uploaded.fileSize,
         );
       }
+      console.info(`[weixin] sending voice/file attachment ${path.basename(filePath)} -> ${params.to}`);
       const messageId = await sendSingleItem({
         baseUrl: params.baseUrl,
         token: params.token,
@@ -279,6 +278,7 @@ export async function sendWeixinMediaFiles(params: {
     }
 
     if (mime.startsWith('image/')) {
+      console.info(`[weixin] uploading image attachment ${path.basename(filePath)} -> ${params.to}`);
       const uploaded = await uploadFileToWeixin({
         filePath,
         toUserId: params.to,
@@ -286,6 +286,7 @@ export async function sendWeixinMediaFiles(params: {
         token: params.token,
         cdnBaseUrl: params.cdnBaseUrl,
       });
+      console.info(`[weixin] sending image attachment ${path.basename(filePath)} -> ${params.to}`);
       const messageId = await sendSingleItem({
         baseUrl: params.baseUrl,
         token: params.token,
@@ -309,6 +310,7 @@ export async function sendWeixinMediaFiles(params: {
     }
 
     if (mime.startsWith('video/')) {
+      console.info(`[weixin] uploading video attachment ${path.basename(filePath)} -> ${params.to}`);
       const uploaded = await uploadVideoToWeixin({
         filePath,
         toUserId: params.to,
@@ -316,6 +318,7 @@ export async function sendWeixinMediaFiles(params: {
         token: params.token,
         cdnBaseUrl: params.cdnBaseUrl,
       });
+      console.info(`[weixin] sending video attachment ${path.basename(filePath)} -> ${params.to}`);
       const messageId = await sendSingleItem({
         baseUrl: params.baseUrl,
         token: params.token,
@@ -338,6 +341,7 @@ export async function sendWeixinMediaFiles(params: {
       continue;
     }
 
+    console.info(`[weixin] uploading file attachment ${path.basename(filePath)} -> ${params.to}`);
     const uploaded = await uploadFileAttachmentToWeixin({
       filePath,
       toUserId: params.to,
@@ -345,6 +349,7 @@ export async function sendWeixinMediaFiles(params: {
       token: params.token,
       cdnBaseUrl: params.cdnBaseUrl,
     });
+    console.info(`[weixin] sending file attachment ${path.basename(filePath)} -> ${params.to}`);
     const messageId = await sendSingleItem({
       baseUrl: params.baseUrl,
       token: params.token,

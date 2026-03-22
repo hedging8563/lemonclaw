@@ -44,6 +44,9 @@ async function uploadMediaToCdn(params: {
   mediaType: number;
 }): Promise<UploadedFileInfo> {
   const fileStat = await fs.stat(params.filePath);
+  if (fileStat.size <= 0) {
+    throw new Error(`Weixin media cannot be empty: ${params.filePath}`);
+  }
   if (fileStat.size > WEIXIN_MEDIA_MAX_BYTES) {
     throw new Error(`Weixin media too large: ${fileStat.size} bytes exceeds ${WEIXIN_MEDIA_MAX_BYTES}`);
   }

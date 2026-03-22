@@ -130,6 +130,7 @@ class WeixinChannel(BaseChannel):
             )
         except Exception as exc:
             logger.error("Error sending Weixin message: {}", exc)
+            raise
 
     async def _handle_bridge_event(self, event: dict[str, Any]) -> None:
         if event.get("type") != "message":
