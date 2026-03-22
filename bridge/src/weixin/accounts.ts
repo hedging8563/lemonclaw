@@ -11,6 +11,7 @@ export interface WeixinAccountRecord {
   cdnBaseUrl?: string;
   userId?: string;
   syncBuf?: string;
+  contextTokens?: Record<string, string>;
   lastInboundAt?: number;
   lastError?: string;
   savedAt?: string;
@@ -66,6 +67,29 @@ export function loadWeixinAccount(accountId: string): WeixinAccountRecord | null
   } catch {
     return null;
   }
+}
+
+export function saveWeixinContextToken(accountId: string, peerId: string, contextToken: string): WeixinAccountRecord {
+  const normalizedPeerId = String(peerId || '').trim();
+  if (!normalizedPeerId) {
+    return saveWeixinAccount(accountId, {});
+  }
+
+  const existing = loadWeixinAccount(accountId) || { accountId: normalizeWeixinAccountId(accountId) };
+  return saveWeixinAccount(accountId, {
+    contextTokens: {
+      ...(existing.contextTokens || {}),
+      [normalizedPeerId]: String(contextToken || ''),
+    },
+  });
+}
+
+export function loadWeixinContextToken(accountId: string, peerId: string): string | undefined {
+  const normalizedPeerId = String(peerId || '').trim();
+  if (!normalizedPeerId) return undefined;
+  const account = loadWeixinAccount(accountId);
+  const token = account?.contextTokens?.[normalizedPeerId];
+  return typeof token === 'string' && token.trim().length > 0 ? token : undefined;
 }
 
 export function listWeixinAccounts(): WeixinAccountRecord[] {

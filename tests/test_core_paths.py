@@ -90,6 +90,48 @@ class TestAutoPairing:
         assert pairing.owner_notify_target == 'alice'
         assert pairing.get_pending_notify_target('bob') == 'bob'
 
+    @pytest.mark.asyncio
+    async def test_pairing_mode_does_not_log_empty_allow_from_warning(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                return None
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'weixin'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('weixin', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+
+        ch = _Channel()
+        with patch('lemonclaw.channels.base.logger.warning') as warning:
+            allowed = await ch._run_pairing_flow(
+                sender_id='wx-user-1',
+                notify_target='chat-1',
+                content='hello',
+                display_name='wx-user-1',
+                policy='pairing',
+            )
+
+        assert allowed is True
+        warning.assert_not_called()
+
 
 # ── 2. Session Manager LRU ──────────────────────────────────────────────
 

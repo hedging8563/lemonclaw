@@ -38,6 +38,8 @@ export interface ImageItem {
 export interface FileItem {
   media?: CDNMedia;
   file_name?: string;
+  md5?: string;
+  len?: string;
 }
 
 export interface VideoItem {

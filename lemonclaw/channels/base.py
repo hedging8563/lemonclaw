@@ -66,7 +66,7 @@ class BaseChannel(ABC):
         """
         pass
     
-    def is_allowed(self, sender_id: str) -> bool:
+    def is_allowed(self, sender_id: str, *, warn_on_empty: bool = True) -> bool:
         """
         Check if a sender is allowed to use this bot.
 
@@ -83,6 +83,8 @@ class BaseChannel(ABC):
 
         # Deny-by-default: empty allow_from means no one is allowed
         if not allow_list:
+            if not warn_on_empty:
+                return False
             logger.warning(
                 "Channel {} has empty allow_from — all messages denied. "
                 "Configure allow_from in config to grant access.",
@@ -183,7 +185,8 @@ class BaseChannel(ABC):
                 ))
             return False
 
-        if self.is_allowed(sender_id):
+        warn_on_empty_allowlist = effective_policy == "allowlist" or not self._pairing
+        if self.is_allowed(sender_id, warn_on_empty=warn_on_empty_allowlist):
             return True
 
         if not self._pairing:

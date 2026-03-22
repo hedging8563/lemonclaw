@@ -14,9 +14,11 @@ import {
 import {
   DEFAULT_WEIXIN_BASE_URL,
   DEFAULT_WEIXIN_CDN_BASE_URL,
+  loadWeixinContextToken,
   listWeixinAccounts,
   loadWeixinAccount,
   normalizeWeixinAccountId,
+  saveWeixinContextToken,
   saveWeixinAccount,
   type WeixinAccountRecord,
 } from './accounts.js';
@@ -214,6 +216,7 @@ export class WeixinMonitorHub {
       if (!event) continue;
       if (message.context_token && event.peerId) {
         this.contextTokens.set(contextTokenKey(accountId, event.peerId), message.context_token);
+        saveWeixinContextToken(accountId, event.peerId, message.context_token);
       }
       this.emitEvent(event);
     }
@@ -278,7 +281,9 @@ export class WeixinMonitorHub {
     if (!account?.token) {
       throw new Error('微信账号未连接或 token 不存在。');
     }
-    const contextToken = params.contextToken || this.contextTokens.get(contextTokenKey(accountId, params.to));
+    const contextToken = params.contextToken
+      || this.contextTokens.get(contextTokenKey(accountId, params.to))
+      || loadWeixinContextToken(accountId, params.to);
     if (!contextToken) {
       throw new Error('缺少微信 context token，当前只能回复最近互动过的会话。');
     }

@@ -22,6 +22,10 @@ _BRIDGE_STATE_FILE = "weixin-bridge-state.json"
 _BRIDGE_LOG_FILE = "logs/weixin-bridge.log"
 _BRIDGE_PREPARE_LOCK = threading.Lock()
 _BRIDGE_PROCESS_LOCK = threading.Lock()
+_WEIXIN_SEND_TIMEOUT_SECONDS = 20.0
+_WEIXIN_MEDIA_TIMEOUT_HEADROOM_SECONDS = 30.0
+_WEIXIN_MEDIA_TIMEOUT_MAX_SECONDS = 15 * 60.0
+_WEIXIN_MEDIA_MIN_UPLOAD_BYTES_PER_SECOND = 20 * 1024
 
 
 class WeixinBridgeError(RuntimeError):
@@ -126,6 +130,26 @@ def build_bridge_env(config: WeixinConfig) -> dict[str, str]:
     if config.bridge_token:
         env["WEIXIN_BRIDGE_TOKEN"] = config.bridge_token
     return env
+
+
+def estimate_weixin_send_timeout(media_paths: list[str] | None = None) -> float:
+    total_bytes = 0
+    for raw_path in media_paths or []:
+        try:
+            total_bytes += max(0, Path(raw_path).stat().st_size)
+        except OSError:
+            continue
+
+    if total_bytes <= 0:
+        return _WEIXIN_SEND_TIMEOUT_SECONDS
+
+    estimated = _WEIXIN_MEDIA_TIMEOUT_HEADROOM_SECONDS + (
+        total_bytes / _WEIXIN_MEDIA_MIN_UPLOAD_BYTES_PER_SECOND
+    )
+    return max(
+        _WEIXIN_SEND_TIMEOUT_SECONDS,
+        min(_WEIXIN_MEDIA_TIMEOUT_MAX_SECONDS, estimated),
+    )
 
 
 def _bridge_request(
@@ -322,7 +346,13 @@ def send_weixin_text(
         body["contextToken"] = context_token
     if media_paths:
         body["mediaPaths"] = list(media_paths)
-    return _bridge_request(config, "/send", method="POST", body=body, timeout=20.0)
+    return _bridge_request(
+        config,
+        "/send",
+        method="POST",
+        body=body,
+        timeout=estimate_weixin_send_timeout(media_paths),
+    )
 
 
 def get_weixin_pairing_state(

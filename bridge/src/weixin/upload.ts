@@ -8,12 +8,31 @@ import { uploadBufferToCdn } from './cdn-upload.js';
 import { getMimeFromFilename } from './mime.js';
 import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
+const CDN_UPLOAD_TIMEOUT_FLOOR_MS = 20_000;
+const CDN_UPLOAD_TIMEOUT_HEADROOM_MS = 30_000;
+const CDN_UPLOAD_TIMEOUT_MAX_MS = 15 * 60_000;
+const CDN_UPLOAD_MIN_BYTES_PER_SECOND = 20 * 1024;
+
 export interface UploadedFileInfo {
   filekey: string;
   downloadEncryptedQueryParam: string;
   aeskey: string;
   fileSize: number;
   fileSizeCiphertext: number;
+}
+
+export function estimateCdnUploadTimeoutMs(fileSizeBytes: number): number {
+  const safeBytes = Number.isFinite(fileSizeBytes) ? Math.max(0, fileSizeBytes) : 0;
+  if (safeBytes <= 0) {
+    return CDN_UPLOAD_TIMEOUT_FLOOR_MS;
+  }
+
+  const estimatedMs = CDN_UPLOAD_TIMEOUT_HEADROOM_MS
+    + Math.ceil((safeBytes / CDN_UPLOAD_MIN_BYTES_PER_SECOND) * 1000);
+  return Math.max(
+    CDN_UPLOAD_TIMEOUT_FLOOR_MS,
+    Math.min(CDN_UPLOAD_TIMEOUT_MAX_MS, estimatedMs),
+  );
 }
 
 async function uploadMediaToCdn(params: {
@@ -32,6 +51,7 @@ async function uploadMediaToCdn(params: {
   const rawsize = plaintext.length;
   const rawfilemd5 = crypto.createHash('md5').update(plaintext).digest('hex');
   const filesize = aesEcbPaddedSize(rawsize);
+  const uploadTimeoutMs = estimateCdnUploadTimeoutMs(rawsize);
   const filekey = crypto.randomBytes(16).toString('hex');
   const aeskey = crypto.randomBytes(16);
 
@@ -58,6 +78,7 @@ async function uploadMediaToCdn(params: {
     filekey,
     cdnBaseUrl: params.cdnBaseUrl,
     aeskey,
+    timeoutMs: uploadTimeoutMs,
   });
 
   return {

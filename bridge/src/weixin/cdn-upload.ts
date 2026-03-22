@@ -9,6 +9,7 @@ export async function uploadBufferToCdn(params: {
   filekey: string;
   cdnBaseUrl: string;
   aeskey: Buffer;
+  timeoutMs?: number;
 }): Promise<{ downloadParam: string }> {
   const ciphertext = encryptAesEcb(params.buf, params.aeskey);
   const cdnUrl = buildCdnUploadUrl({
@@ -19,11 +20,15 @@ export async function uploadBufferToCdn(params: {
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutMs = Math.max(1_000, Math.floor(params.timeoutMs ?? 60_000));
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(cdnUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: new Uint8Array(ciphertext),
+        signal: controller.signal,
       });
       if (response.status >= 400 && response.status < 500) {
         const errMsg = response.headers.get('x-error-message') ?? (await response.text());
@@ -39,10 +44,14 @@ export async function uploadBufferToCdn(params: {
       }
       return { downloadParam };
     } catch (error) {
-      lastError = error;
+      lastError = error instanceof Error && error.name === 'AbortError'
+        ? new Error(`CDN upload timed out after ${timeoutMs}ms`)
+        : error;
       if (error instanceof Error && error.message.includes('client error')) {
         throw error;
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
