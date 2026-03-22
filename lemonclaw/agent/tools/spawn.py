@@ -74,7 +74,10 @@ class SpawnTool(Tool):
     ) -> str:
         """Spawn a subagent to execute the given task."""
         if not (_default_channel and _default_chat_id and _session_key):
-            return "Error: spawn requires explicit channel/chat_id/session_key context"
+            return (
+                "Error: spawn only works inside an active conversation with delivery context. "
+                "Run it from a real chat thread, or provide channel, chat_id, and session_key together."
+            )
         origin_channel = _default_channel
         origin_chat_id = _default_chat_id
         session_key = _session_key

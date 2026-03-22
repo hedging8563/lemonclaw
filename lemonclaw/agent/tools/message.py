@@ -112,7 +112,10 @@ class MessageTool(Tool):
         message_id = message_id or effective_default_message_id
 
         if not channel or not chat_id:
-            return "Error: No target channel/chat specified"
+            return (
+                "Error: message needs an active conversation target. "
+                "Use it inside a live chat session, or provide both channel and chat_id."
+            )
 
         callback = _outbound_sink or self._send_callback
 
@@ -163,7 +166,7 @@ class MessageTool(Tool):
                 }
 
             if not callback:
-                return "Error: Message sending not configured"
+                return "Error: message delivery is not configured in this runtime"
 
             await callback(msg)
             if same_target and isinstance(_message_turn_state, dict):

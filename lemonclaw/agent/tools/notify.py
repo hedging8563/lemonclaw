@@ -170,7 +170,14 @@ class NotifyTool(Tool):
             out_chat = chat_id or _default_chat_id or self._default_chat_id
             callback = _outbound_sink or self._send_callback
             if not out_channel or not out_chat:
-                return {"ok": False, "summary": "Missing channel/chat target", "raw": {"channel": out_channel, "chat_id": out_chat}}
+                return {
+                    "ok": False,
+                    "summary": (
+                        "notify needs a real channel target. "
+                        "Use it inside an active conversation, or provide both channel and chat_id."
+                    ),
+                    "raw": {"channel": out_channel, "chat_id": out_chat},
+                }
             if _outbox_enabled and _task_id and _task_ledger and _step_id:
                 event = _task_ledger.enqueue_outbox(
                     task_id=_task_id,
@@ -197,14 +204,18 @@ class NotifyTool(Tool):
                     },
                 }
             if not callback:
-                return {"ok": False, "summary": "Notification channel callback not configured", "raw": {"channel": out_channel}}
+                return {
+                    "ok": False,
+                    "summary": "Notification delivery is not configured in this runtime",
+                    "raw": {"channel": out_channel},
+                }
             msg = OutboundMessage(channel=out_channel, chat_id=out_chat, content=content, metadata={"title": title or ""})
             await callback(msg)
             return {"ok": True, "summary": f"Notification sent to {out_channel}:{out_chat}", "raw": {"target_type": "channel", "channel": out_channel, "chat_id": out_chat}}
 
         if target_type == "webhook":
             if not webhook_url:
-                return {"ok": False, "summary": "Missing webhook_url", "raw": {}}
+                return {"ok": False, "summary": "notify webhook target_type requires webhook_url", "raw": {}}
             parsed = urlparse(webhook_url)
             host = (parsed.hostname or "").lower()
             try:
@@ -247,7 +258,7 @@ class NotifyTool(Tool):
             to_email = str(email or "").strip()
             callback = _outbound_sink or self._send_callback
             if not to_email:
-                return {"ok": False, "summary": "Missing email target", "raw": {}}
+                return {"ok": False, "summary": "notify email target_type requires email", "raw": {}}
             if _outbox_enabled and _task_id and _task_ledger and _step_id:
                 event = _task_ledger.enqueue_outbox(
                     task_id=_task_id,
@@ -268,7 +279,11 @@ class NotifyTool(Tool):
                     },
                 }
             if not callback:
-                return {"ok": False, "summary": "Notification channel callback not configured", "raw": {"email": to_email}}
+                return {
+                    "ok": False,
+                    "summary": "Notification delivery is not configured in this runtime",
+                    "raw": {"email": to_email},
+                }
             msg = OutboundMessage(channel="email", chat_id=to_email, content=content, metadata={"subject": title or ""})
             await callback(msg)
             return {"ok": True, "summary": f"Email notification sent to {to_email}", "raw": {"target_type": "email", "email": to_email}}

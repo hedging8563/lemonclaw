@@ -39,6 +39,15 @@ def test_notify_resolves_capability():
 
 
 @pytest.mark.asyncio
+async def test_notify_channel_missing_context_returns_actionable_error():
+    tool = NotifyTool()
+    result = await tool.execute(target_type="channel", content="hello")
+    assert result["ok"] is False
+    assert "active conversation" in result["summary"]
+    assert "channel and chat_id" in result["summary"]
+
+
+@pytest.mark.asyncio
 async def test_notify_email_uses_email_channel_callback():
     sent: list[OutboundMessage] = []
 

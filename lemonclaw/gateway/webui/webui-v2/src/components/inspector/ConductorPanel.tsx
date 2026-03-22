@@ -53,7 +53,8 @@ export function ConductorPanel() {
   const conductorBusy = agents.value.some((agent) => agent.status === 'busy');
   const busyAgents = agents.value.filter((agent) => agent.status === 'busy').length;
   const errorAgents = agents.value.filter((agent) => agent.status === 'error').length;
-  const summaryMessage = plans.value[0]?.message || t('no_plans');
+  const activePlan = plans.value[0] ?? null;
+  const summaryMessage = activePlan?.message || t('no_plans');
 
   return (
     <div style={shellStyle}>

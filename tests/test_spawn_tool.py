@@ -53,7 +53,7 @@ async def test_spawn_recomputes_session_key_from_per_call_context_when_key_missi
         _default_chat_id="target",
     )
 
-    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert "spawn only works inside an active conversation" in result
     assert calls == []
 
 
@@ -99,7 +99,7 @@ async def test_spawn_falls_back_to_instance_context_when_no_overrides() -> None:
 
     result = await tool.execute(task="do work")
 
-    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert "spawn only works inside an active conversation" in result
     assert calls == []
 
 
@@ -116,5 +116,5 @@ async def test_spawn_ignores_partial_per_call_override_to_avoid_mixed_context() 
 
     result = await tool.execute(task="do work", _default_channel="fresh")
 
-    assert result == "Error: spawn requires explicit channel/chat_id/session_key context"
+    assert "spawn only works inside an active conversation" in result
     assert calls == []

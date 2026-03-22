@@ -96,7 +96,7 @@ async def test_cron_tool_fails_closed_without_full_context(tmp_path) -> None:
         _default_chat_id="target",
     )
 
-    assert result == "Error: cron add requires explicit channel/chat_id/session_key context"
+    assert "cron add needs an active conversation target" in result
     assert service.list_jobs() == []
 
 

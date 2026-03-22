@@ -99,7 +99,10 @@ class CronTool(Tool):
             if _IN_CRON_CONTEXT.get():
                 return "Error: cannot schedule new jobs from within a cron job (prevents recursive loops)"
             if not (_default_channel and _default_chat_id and _session_key):
-                return "Error: cron add requires explicit channel/chat_id/session_key context"
+                return (
+                    "Error: cron add needs an active conversation target. "
+                    "Create the reminder from a real chat thread, or provide channel, chat_id, and session_key together."
+                )
             return self._add_job(
                 message,
                 every_seconds,
@@ -132,7 +135,10 @@ class CronTool(Tool):
         if not message:
             return "Error: message is required for add"
         if not channel or not chat_id:
-            return "Error: no session context (channel/chat_id)"
+            return (
+                "Error: cron add needs a real delivery target. "
+                "Use it inside an active conversation, or provide both channel and chat_id."
+            )
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:

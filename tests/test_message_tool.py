@@ -9,7 +9,8 @@ from lemonclaw.ledger.runtime import TaskLedger
 async def test_message_tool_returns_error_when_no_target_context() -> None:
     tool = MessageTool()
     result = await tool.execute(content="test")
-    assert result == "Error: No target channel/chat specified"
+    assert "active conversation target" in result
+    assert "channel and chat_id" in result
 
 
 @pytest.mark.asyncio
