@@ -20,7 +20,6 @@ import {
   uploadFileAttachmentToWeixin,
   uploadFileToWeixin,
   uploadVideoToWeixin,
-  uploadVoiceToWeixin,
 } from './upload.js';
 import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
@@ -47,23 +46,6 @@ function saveMediaBuffer(params: {
 
 function encodeAesKeyHexToBase64(aesKeyHex: string): string {
   return Buffer.from(aesKeyHex, 'hex').toString('base64');
-}
-
-function voiceEncodeTypeForPath(filePath: string): number | undefined {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.wav':
-      return 1;
-    case '.ogg':
-      return 8;
-    case '.mp3':
-      return 7;
-    case '.sil':
-    case '.silk':
-      return 6;
-    default:
-      return undefined;
-  }
 }
 
 async function downloadMediaItem(params: {
@@ -199,7 +181,7 @@ function buildFileMessageItem(
       len: String(fileSize),
       media: {
         encrypt_query_param: downloadEncryptedQueryParam,
-        aes_key: Buffer.from(aeskeyHex, 'hex').toString('base64'),
+        aes_key: Buffer.from(aeskeyHex).toString('base64'),
         encrypt_type: 1,
       },
     },
@@ -221,49 +203,24 @@ export async function sendWeixinMediaFiles(params: {
   for (const filePath of params.mediaPaths) {
     const mime = getOutboundMediaMime(filePath);
     if (mime.startsWith('audio/')) {
-      let item: MessageItem;
-      try {
-        console.info(`[weixin] uploading voice attachment ${path.basename(filePath)} -> ${params.to}`);
-        const uploaded = await uploadVoiceToWeixin({
-          filePath,
-          toUserId: params.to,
-          baseUrl: params.baseUrl,
-          token: params.token,
-          cdnBaseUrl: params.cdnBaseUrl,
-        });
-        item = {
-          type: MessageItemType.VOICE,
-          voice_item: {
-            media: {
-              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: Buffer.from(uploaded.aeskey, 'hex').toString('base64'),
-              encrypt_type: 1,
-            },
-            encode_type: voiceEncodeTypeForPath(filePath),
-            sample_rate: path.extname(filePath).toLowerCase() === '.wav' ? 24000 : undefined,
-            bits_per_sample: path.extname(filePath).toLowerCase() === '.wav' ? 16 : undefined,
-          },
-        };
-      } catch (error) {
-        console.warn(
-          `[weixin] voice upload failed for ${path.basename(filePath)}, falling back to file attachment:`,
-          error instanceof Error ? error.message : error,
-        );
-        const uploaded = await uploadFileAttachmentToWeixin({
-          filePath,
-          toUserId: params.to,
-          baseUrl: params.baseUrl,
-          token: params.token,
-          cdnBaseUrl: params.cdnBaseUrl,
-        });
-        item = buildFileMessageItem(
-          filePath,
-          uploaded.downloadEncryptedQueryParam,
-          uploaded.aeskey,
-          uploaded.fileSize,
-        );
-      }
-      console.info(`[weixin] sending voice/file attachment ${path.basename(filePath)} -> ${params.to}`);
+      // Official openclaw-weixin does not implement outbound voice_item sending.
+      // Route outbound audio through the file attachment path so the client
+      // reliably renders a downloadable asset instead of an empty voice bubble.
+      console.info(`[weixin] uploading audio as file attachment ${path.basename(filePath)} -> ${params.to}`);
+      const uploaded = await uploadFileAttachmentToWeixin({
+        filePath,
+        toUserId: params.to,
+        baseUrl: params.baseUrl,
+        token: params.token,
+        cdnBaseUrl: params.cdnBaseUrl,
+      });
+      const item = buildFileMessageItem(
+        filePath,
+        uploaded.downloadEncryptedQueryParam,
+        uploaded.aeskey,
+        uploaded.fileSize,
+      );
+      console.info(`[weixin] sending audio/file attachment ${path.basename(filePath)} -> ${params.to}`);
       const messageId = await sendSingleItem({
         baseUrl: params.baseUrl,
         token: params.token,
@@ -298,9 +255,10 @@ export async function sendWeixinMediaFiles(params: {
           image_item: {
             media: {
               encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: Buffer.from(uploaded.aeskey, 'hex').toString('base64'),
+              aes_key: Buffer.from(uploaded.aeskey).toString('base64'),
               encrypt_type: 1,
             },
+            mid_size: uploaded.fileSizeCiphertext,
           },
         },
       });
@@ -330,9 +288,10 @@ export async function sendWeixinMediaFiles(params: {
           video_item: {
             media: {
               encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: Buffer.from(uploaded.aeskey, 'hex').toString('base64'),
+              aes_key: Buffer.from(uploaded.aeskey).toString('base64'),
               encrypt_type: 1,
             },
+            video_size: uploaded.fileSizeCiphertext,
           },
         },
       });

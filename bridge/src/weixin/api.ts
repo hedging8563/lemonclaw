@@ -33,6 +33,11 @@ export interface CDNMedia {
 export interface ImageItem {
   media?: CDNMedia;
   aeskey?: string;
+  mid_size?: number;
+  thumb_size?: number;
+  thumb_height?: number;
+  thumb_width?: number;
+  hd_size?: number;
 }
 
 export interface FileItem {
@@ -44,6 +49,13 @@ export interface FileItem {
 
 export interface VideoItem {
   media?: CDNMedia;
+  video_size?: number;
+  play_length?: number;
+  video_md5?: string;
+  thumb_media?: CDNMedia;
+  thumb_size?: number;
+  thumb_height?: number;
+  thumb_width?: number;
 }
 
 export interface MessageItem {
