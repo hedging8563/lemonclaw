@@ -89,6 +89,16 @@ export async function uploadVideoToWeixin(params: {
   return uploadMediaToCdn({ ...params, mediaType: UploadMediaType.VIDEO });
 }
 
+export async function uploadVoiceToWeixin(params: {
+  filePath: string;
+  toUserId: string;
+  baseUrl: string;
+  token?: string;
+  cdnBaseUrl: string;
+}): Promise<UploadedFileInfo> {
+  return uploadMediaToCdn({ ...params, mediaType: UploadMediaType.VOICE });
+}
+
 export async function uploadFileAttachmentToWeixin(params: {
   filePath: string;
   toUserId: string;

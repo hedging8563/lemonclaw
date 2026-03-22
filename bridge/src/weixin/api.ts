@@ -17,6 +17,10 @@ export interface TextItem {
 
 export interface VoiceItem {
   media?: CDNMedia;
+  encode_type?: number;
+  bits_per_sample?: number;
+  sample_rate?: number;
+  playtime?: number;
   text?: string;
 }
 

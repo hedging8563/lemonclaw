@@ -68,6 +68,7 @@ def get_weixin_pairing_routes(
                 config.channels.weixin,
                 start_if_needed=True,
                 force=bool(body.get("force")),
+                account_id=str(body.get("accountId") or "").strip() or None,
                 wait_timeout=20.0,
             )
             return JSONResponse(state)

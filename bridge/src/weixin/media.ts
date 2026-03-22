@@ -20,6 +20,7 @@ import {
   uploadFileAttachmentToWeixin,
   uploadFileToWeixin,
   uploadVideoToWeixin,
+  uploadVoiceToWeixin,
 } from './upload.js';
 import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
@@ -46,6 +47,23 @@ function saveMediaBuffer(params: {
 
 function encodeAesKeyHexToBase64(aesKeyHex: string): string {
   return Buffer.from(aesKeyHex, 'hex').toString('base64');
+}
+
+function voiceEncodeTypeForPath(filePath: string): number | undefined {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.wav':
+      return 1;
+    case '.ogg':
+      return 8;
+    case '.mp3':
+      return 7;
+    case '.sil':
+    case '.silk':
+      return 6;
+    default:
+      return undefined;
+  }
 }
 
 async function downloadMediaItem(params: {
@@ -182,6 +200,39 @@ export async function sendWeixinMediaFiles(params: {
   let caption = params.text;
   for (const filePath of params.mediaPaths) {
     const mime = getOutboundMediaMime(filePath);
+    if (mime.startsWith('audio/')) {
+      const uploaded = await uploadVoiceToWeixin({
+        filePath,
+        toUserId: params.to,
+        baseUrl: params.baseUrl,
+        token: params.token,
+        cdnBaseUrl: params.cdnBaseUrl,
+      });
+      const messageId = await sendSingleItem({
+        baseUrl: params.baseUrl,
+        token: params.token,
+        to: params.to,
+        contextToken: params.contextToken,
+        text: caption,
+        item: {
+          type: MessageItemType.VOICE,
+          voice_item: {
+            media: {
+              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+              aes_key: Buffer.from(uploaded.aeskey, 'hex').toString('base64'),
+              encrypt_type: 1,
+            },
+            encode_type: voiceEncodeTypeForPath(filePath),
+            sample_rate: path.extname(filePath).toLowerCase() === '.wav' ? 24000 : undefined,
+            bits_per_sample: path.extname(filePath).toLowerCase() === '.wav' ? 16 : undefined,
+          },
+        },
+      });
+      messageIds.push(messageId);
+      caption = '';
+      continue;
+    }
+
     if (mime.startsWith('image/')) {
       const uploaded = await uploadFileToWeixin({
         filePath,

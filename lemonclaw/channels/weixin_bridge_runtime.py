@@ -304,6 +304,7 @@ def get_weixin_pairing_state(
     *,
     start_if_needed: bool = False,
     force: bool = False,
+    account_id: str | None = None,
     wait_timeout: float = 10.0,
 ) -> dict[str, object]:
     bridge_url = config.bridge_url or "http://127.0.0.1:3002"
@@ -317,5 +318,8 @@ def get_weixin_pairing_state(
         return {**read_bridge_state(), "running": False}
 
     if start_if_needed:
-        return _bridge_request(config, "/login/start", method="POST", body={"force": force}, timeout=wait_timeout)
+        body: dict[str, object] = {"force": force}
+        if account_id:
+            body["accountId"] = account_id
+        return _bridge_request(config, "/login/start", method="POST", body=body, timeout=wait_timeout)
     return _bridge_request(config, "/state", timeout=wait_timeout)
