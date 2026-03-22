@@ -21,6 +21,7 @@ from lemonclaw.config.schema import WeixinConfig
 _BRIDGE_STATE_FILE = "weixin-bridge-state.json"
 _BRIDGE_LOG_FILE = "logs/weixin-bridge.log"
 _BRIDGE_PREPARE_LOCK = threading.Lock()
+_BRIDGE_PROCESS_LOCK = threading.Lock()
 
 
 class WeixinBridgeError(RuntimeError):
@@ -195,6 +196,20 @@ def read_bridge_state() -> dict[str, object]:
     return data
 
 
+def _state_pid() -> int | None:
+    state = read_bridge_state()
+    pid = state.get("pid")
+    return pid if isinstance(pid, int) and pid > 0 else None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def stop_bridge_process(timeout: float = 5.0) -> bool:
     state = read_bridge_state()
     pid = state.get("pid")
@@ -235,7 +250,12 @@ def stop_bridge_process(timeout: float = 5.0) -> bool:
 
 def disconnect_weixin(config: WeixinConfig, account_id: str | None = None) -> dict[str, object]:
     if is_bridge_reachable(config.bridge_url):
-        return _bridge_request(config, "/disconnect", method="POST", body={"accountId": account_id})
+        result = _bridge_request(config, "/disconnect", method="POST", body={"accountId": account_id})
+        remaining = result.get("accounts")
+        if not isinstance(remaining, list) or len(remaining) == 0:
+            stop_bridge_process()
+            result["running"] = False
+        return result
     return {"status": "disconnected", "qr": None, "account": None, "accounts": [], "running": False}
 
 
@@ -245,19 +265,22 @@ def ensure_weixin_bridge_running(
     wait_timeout: float = 10.0,
 ) -> dict[str, object]:
     bridge_url = config.bridge_url or "http://127.0.0.1:3002"
-    running = is_bridge_reachable(bridge_url)
+    with _BRIDGE_PROCESS_LOCK:
+        running = is_bridge_reachable(bridge_url)
+        if not running:
+            pid = _state_pid()
+            if pid and _pid_is_alive(pid):
+                stop_bridge_process()
+            start_bridge_process(config)
+            deadline = time.time() + max(wait_timeout, 1.0)
+            while time.time() < deadline:
+                if is_bridge_reachable(bridge_url):
+                    running = True
+                    break
+                time.sleep(0.4)
 
-    if not running:
-        start_bridge_process(config)
-        deadline = time.time() + max(wait_timeout, 1.0)
-        while time.time() < deadline:
-            if is_bridge_reachable(bridge_url):
-                running = True
-                break
-            time.sleep(0.4)
-
-    if not running:
-        raise WeixinBridgeError("Weixin bridge did not become reachable in time.")
+        if not running:
+            raise WeixinBridgeError("Weixin bridge did not become reachable in time.")
 
     return _bridge_request(config, "/state", timeout=wait_timeout)
 
