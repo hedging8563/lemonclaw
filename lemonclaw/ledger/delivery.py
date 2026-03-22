@@ -92,6 +92,7 @@ async def deliver_outbox_event(
         return {
             "effect_type": effect_type,
             "delivered_via": "message_bus",
+            "delivery_state": "accepted",
             "channel": channel,
             "chat_id": chat_id,
             "media_count": len(list(payload.get("media") or [])),

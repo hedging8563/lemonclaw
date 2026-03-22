@@ -34,6 +34,25 @@ async def test_deliver_outbox_event_publishes_outbound_message():
 
 
 @pytest.mark.asyncio
+async def test_deliver_outbox_event_marks_message_bus_delivery_as_accepted():
+    async def _publish(_msg: OutboundMessage) -> None:
+        return None
+
+    result = await deliver_outbox_event(
+        {
+            "effect_type": "outbound_message",
+            "target": "weixin:bot|peer",
+            "payload": {"content": "hello"},
+        },
+        publish_outbound=_publish,
+        notify_config=SimpleNamespace(timeout=15, allow_webhook_domains=[]),
+    )
+
+    assert result["delivered_via"] == "message_bus"
+    assert result["delivery_state"] == "accepted"
+
+
+@pytest.mark.asyncio
 async def test_deliver_outbox_event_webhook_dns_failure_is_retryable(monkeypatch: pytest.MonkeyPatch):
     async def _publish(_msg: OutboundMessage) -> None:
         raise AssertionError("should not publish outbound for webhook effect")

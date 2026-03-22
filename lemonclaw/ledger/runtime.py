@@ -845,7 +845,7 @@ class TaskLedgerSharedMixin:
         result: dict[str, Any] | None = None,
         source: str = "dispatcher",
     ) -> dict[str, Any] | None:
-        """Mark a claimed outbox event as delivered."""
+        """Mark a claimed outbox event as accepted by the target delivery adapter."""
         self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
@@ -856,12 +856,13 @@ class TaskLedgerSharedMixin:
         if result is not None:
             metadata["delivery_result"] = result
             metadata["last_delivery_result"] = result
+        delivery_state = str((result or {}).get("delivery_state") or "delivered")
         metadata["terminal"] = True
-        metadata["terminal_reason"] = "delivered"
+        metadata["terminal_reason"] = delivery_state
         metadata["terminal_source"] = source
         self._append_outbox_history(
             metadata,
-            action="delivered",
+            action=delivery_state,
             status="sent",
             at_ms=now,
             result=result,
@@ -2207,7 +2208,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         result: dict[str, Any] | None = None,
         source: str = "dispatcher",
     ) -> dict[str, Any] | None:
-        """Mark a claimed outbox event as delivered."""
+        """Mark a claimed outbox event as accepted by the target delivery adapter."""
         self._require_valid_outbox_id(event_id)
         current = self.read_outbox_event(event_id)
         if not current:
@@ -2218,12 +2219,13 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         if result is not None:
             metadata["delivery_result"] = result
             metadata["last_delivery_result"] = result
+        delivery_state = str((result or {}).get("delivery_state") or "delivered")
         metadata["terminal"] = True
-        metadata["terminal_reason"] = "delivered"
+        metadata["terminal_reason"] = delivery_state
         metadata["terminal_source"] = source
         self._append_outbox_history(
             metadata,
-            action="delivered",
+            action=delivery_state,
             status="sent",
             at_ms=now,
             result=result,
