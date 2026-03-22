@@ -37,6 +37,7 @@ ALL_CHANNEL_NAMES: tuple[str, ...] = (
     "slack",
     "qq",
     "matrix",
+    "weixin",
     "wecom",
 )
 
@@ -111,6 +112,13 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         attachment_only_ingress="full",
         media_delivery="local_paths",
         notes="Handles media events directly and decrypts/downloads supported attachments.",
+    ),
+    "weixin": ChannelCapability(
+        name="weixin",
+        transport="bridge",
+        attachment_only_ingress="marker",
+        media_delivery="marker_only",
+        notes="Bridge handles QR login and text replies; inbound media currently lands as markers until media download/send is added.",
     ),
     "wecom": ChannelCapability(
         name="wecom",

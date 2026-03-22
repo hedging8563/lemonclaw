@@ -219,6 +219,16 @@ class WeComConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed UserId list
 
 
+class WeixinConfig(Base):
+    """Weixin channel bridge configuration."""
+
+    enabled: bool = False
+    base_url: str = "https://ilinkai.weixin.qq.com"
+    bridge_url: str = "http://127.0.0.1:3002"
+    bridge_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -235,6 +245,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    weixin: WeixinConfig = Field(default_factory=WeixinConfig)
     wecom: WeComConfig = Field(default_factory=WeComConfig)
 
 

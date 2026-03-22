@@ -223,6 +223,22 @@ class ChannelManager:
                 self._channel_status["matrix"].update({"available": False, "error": str(e)})
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Weixin channel
+        if self.config.channels.weixin.enabled:
+            try:
+                from lemonclaw.channels.weixin import WeixinChannel
+
+                self.channels["weixin"] = WeixinChannel(
+                    self.config.channels.weixin,
+                    self.bus,
+                    trigger_runtime=self.trigger_runtime,
+                )
+                self._channel_status["weixin"].update({"registered": True, "available": True})
+                logger.info("Weixin channel enabled")
+            except ImportError as e:
+                self._channel_status["weixin"].update({"available": False, "error": str(e)})
+                logger.warning("Weixin channel not available: {}", e)
+
         # WeCom channel
         if self.config.channels.wecom.enabled:
             try:
@@ -252,6 +268,33 @@ class ChannelManager:
         task = asyncio.create_task(self._start_channel(name, channel))
         self._channel_tasks[name] = task
         return task
+
+    async def ensure_channel(self, name: str, channel: BaseChannel) -> BaseChannel:
+        """Register and start a channel at runtime if it is not already active."""
+
+        existing = self.channels.get(name)
+        if existing is not None:
+            task = self._channel_tasks.get(name)
+            if task is None or task.done():
+                self._spawn_channel_task(name, existing)
+                await asyncio.sleep(0)
+            return existing
+
+        self.channels[name] = channel
+        self._channel_status.setdefault(name, {}).update(
+            {
+                "configured_enabled": True,
+                "registered": True,
+                "running": False,
+                "available": True,
+                "error": "",
+            }
+        )
+        if self._dispatch_task is None or self._dispatch_task.done():
+            self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
+        self._spawn_channel_task(name, channel)
+        await asyncio.sleep(0)
+        return channel
 
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""

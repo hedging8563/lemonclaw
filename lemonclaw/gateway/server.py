@@ -310,6 +310,12 @@ def create_app(
             agent_loop=runtime.agent_loop,
             channel_manager=runtime.channel_manager,
         ))
+        from lemonclaw.gateway.weixin_pairing import get_weixin_pairing_routes
+        routes.extend(get_weixin_pairing_routes(
+            auth_token=auth_token,
+            config_path=runtime.config_path,
+            runtime=runtime,
+        ))
 
     # Static assets for WebUI v2 (JS/CSS bundles)
     _static_dir = Path(__file__).parent / "webui" / "static" / "assets"
