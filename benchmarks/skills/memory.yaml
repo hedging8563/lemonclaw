@@ -1,0 +1,22 @@
+skill: memory
+cases:
+  - name: preference-memory
+    message: I prefer dark mode and compact layouts.
+    prompt_must_contain:
+      - Long-term Memory
+      - memory/MEMORY.md
+  - name: project-memory
+    message: Remember that this project uses FastAPI and Pytest.
+    prompt_must_contain:
+      - memory/HISTORY.md
+  - name: recall-history
+    message: What did we decide about the API shape last week?
+    prompt_must_contain:
+      - Long-term facts
+  - name: negative-hello
+    message: Hello there, thanks for the help.
+    forbidden_skills:
+      - content-writer
+      - frontend-design
+      - lemondata-api
+      - skill-creator

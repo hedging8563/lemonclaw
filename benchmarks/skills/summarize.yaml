@@ -1,0 +1,17 @@
+skill: summarize
+cases:
+  - name: url-summary
+    message: Summarize this article https://example.com.
+    prompt_must_contain:
+      - Fast CLI to summarize URLs, local files, and YouTube links.
+  - name: youtube-transcript
+    message: Summarize this YouTube video and keep it short.
+    prompt_must_contain:
+      - Best-effort transcript (URLs only)
+  - name: pdf-summary
+    message: Summarize this PDF file for me.
+    prompt_must_contain:
+      - Optional config file
+  - name: negative-spreadsheet
+    message: Open a spreadsheet and edit cells.
+    expect_triggered: false

@@ -1,0 +1,23 @@
+skill: skill-creator
+cases:
+  - name: new-skill
+    message: create skill for rotating PDFs with bundled scripts.
+    prompt_must_contain:
+      - Anatomy of a Skill
+  - name: package-skill
+    message: make skill for distribution and update the metadata.
+    prompt_must_contain:
+      - Skill Creation Process
+  - name: reference-layout
+    message: skill模板里包含 scripts、references、assets。
+    prompt_must_contain:
+      - Progressive Disclosure Design Principle
+  - name: trigger-chinese
+    message: 帮我写一个skill模板，适合做网页自动化。
+    prompt_must_contain:
+      - Skill Naming
+  - name: negative-blog-post
+    message: Write a blog post about model routing.
+    expect_triggered: false
+    forbidden_skills:
+      - skill-creator

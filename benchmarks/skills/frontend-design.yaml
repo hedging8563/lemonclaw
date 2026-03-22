@@ -1,0 +1,21 @@
+skill: frontend-design
+cases:
+  - name: landing-page
+    message: Design a landing page for a new AI project manager.
+    prompt_must_contain:
+      - BOLD aesthetic direction
+  - name: dashboard
+    message: Create a dashboard for monitoring shipments and alerts.
+    prompt_must_contain:
+      - Aesthetics Guidelines
+  - name: react-component
+    message: 帮我做一个react组件，用来展示定价卡片。
+    prompt_must_contain:
+      - Typography
+  - name: chinese-poster
+    message: 帮我做海报，宣传读书会活动。
+    prompt_must_contain:
+      - Backgrounds & Visual Details
+  - name: negative-weather
+    message: What's the weather in Shanghai today?
+    expect_triggered: false

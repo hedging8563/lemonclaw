@@ -1,0 +1,17 @@
+skill: xlsx
+cases:
+  - name: analyze-csv
+    message: Analyze this CSV and create a spreadsheet summary.
+    prompt_must_contain:
+      - Excel / Spreadsheet Guide
+  - name: formulas
+    message: Build an Excel model with formulas and formatting.
+    prompt_must_contain:
+      - openpyxl
+  - name: chinese-table
+    message: 帮我整理一下表格，做成 Excel。
+    prompt_must_contain:
+      - Formula Verification Checklist
+  - name: negative-json
+    message: Write a JSON config file.
+    expect_triggered: false

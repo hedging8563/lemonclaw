@@ -1,7 +1,7 @@
 ---
 name: cron
 description: Schedule reminders and recurring tasks.
-triggers: "提醒我,定时,闹钟,每天,每周,每小时,remind me,schedule,every day,every hour,crontab,定期"
+triggers: "提醒我,定时,闹钟,每天,每周,每小时,日程,日历提醒,reminder,remind me,schedule,every day,every hour,crontab,定期,recurring task,calendar reminder"
 ---
 
 # Cron

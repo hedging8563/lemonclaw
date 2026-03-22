@@ -386,3 +386,12 @@ After testing the skill, users may request improvements. Often this happens righ
 2. Notice struggles or inefficiencies
 3. Identify how SKILL.md or bundled resources should be updated
 4. Implement changes and test again
+
+For LemonClaw's own built-in or workspace skills, prefer benchmark-driven iteration:
+
+1. Add or update `benchmarks/skills/<skill>.yaml` with 3-5 deterministic trigger/prompt cases
+2. Run `lemonclaw skill-eval <benchmark-or-dir> --builtin-skills-dir <repo>/lemonclaw/skills`
+3. If the skill still misses cases, run `lemonclaw skill-tune <benchmark> --builtin-skills-dir <repo>/lemonclaw/skills --iterations 3`
+4. Keep only score-improving `SKILL.md` edits; let the loop discard non-improving candidates automatically
+
+When using this workflow, prefer minimal frontmatter fixes first. Only change the body when the benchmark explicitly checks prompt content or the behavior gap is not fixable through description/triggers alone.

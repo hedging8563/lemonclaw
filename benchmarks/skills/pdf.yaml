@@ -1,0 +1,17 @@
+skill: pdf
+cases:
+  - name: merge-pdfs
+    message: Merge these two PDFs into one file.
+    prompt_must_contain:
+      - PDF Processing Guide
+  - name: ocr-scanned
+    message: OCR this scanned PDF and extract the text.
+    prompt_must_contain:
+      - OCR Scanned PDFs
+  - name: create-pdf
+    message: Create a PDF report from these bullet points.
+    prompt_must_contain:
+      - reportlab
+  - name: negative-image
+    message: Rotate this JPG image.
+    expect_triggered: false

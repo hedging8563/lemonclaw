@@ -1,0 +1,13 @@
+skill: browser
+cases:
+  - name: open-website
+    message: Open a website and tell me the page title.
+  - name: fill-form
+    message: Please fill out a form on this website with a name and email.
+  - name: click-button
+    message: Click a button on the page after it loads.
+  - name: screenshot-page
+    message: Take a screenshot of the page once it opens.
+  - name: negative-docx
+    message: Edit a Word document and keep the formatting intact.
+    expect_triggered: false

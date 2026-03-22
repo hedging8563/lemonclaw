@@ -1,0 +1,17 @@
+skill: docx
+cases:
+  - name: create-word-doc
+    message: Create a Word document with a title, table, and footer.
+    prompt_must_contain:
+      - python-docx
+  - name: edit-docx
+    message: Edit this .docx file and keep the heading styles intact.
+    prompt_must_contain:
+      - Word Document (.docx) Guide
+  - name: chinese-word-doc
+    message: 帮我写一个Word文档，放一个标题和结论。
+    prompt_must_contain:
+      - docx-js Critical Rules
+  - name: negative-note
+    message: Turn this note into a todo list.
+    expect_triggered: false

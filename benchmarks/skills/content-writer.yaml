@@ -1,0 +1,13 @@
+skill: content-writer
+cases:
+  - name: linkedin-post
+    message: Draft a LinkedIn post announcing our v2 launch.
+  - name: technical-doc
+    message: Write a technical doc for our auth webhook flow.
+  - name: research-report
+    message: Write a research report on API proxy adoption among startups.
+  - name: chinese-copy
+    message: 帮我写一条朋友圈文案，宣传我们新产品上线。
+  - name: negative-weather
+    message: What's the weather in Shanghai today?
+    expect_triggered: false

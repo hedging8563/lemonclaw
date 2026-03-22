@@ -1,0 +1,13 @@
+skill: skill-installer
+cases:
+  - name: install-from-skills-sh
+    message: Install a skill from skills.sh.
+  - name: install-from-github
+    message: Add a skill from a GitHub repo URL.
+  - name: update-skill
+    message: Update an installed skill to the latest version.
+  - name: remove-skill
+    message: Remove a skill I no longer need.
+  - name: negative-mcp
+    message: Create an MCP server for a new API.
+    expect_triggered: false

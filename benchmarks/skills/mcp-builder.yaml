@@ -1,0 +1,13 @@
+skill: mcp-builder
+cases:
+  - name: python-fastmcp
+    message: Build an MCP server in Python with FastMCP.
+  - name: typescript-sdk
+    message: Build an MCP SDK server in TypeScript.
+  - name: api-tooling
+    message: Create an MCP server that wraps an external API with tools.
+  - name: model-context-protocol
+    message: I need a Model Context Protocol server with clear tool names.
+  - name: negative-skill-installer
+    message: Install a skill from a GitHub repo.
+    expect_triggered: false

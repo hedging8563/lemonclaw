@@ -1,0 +1,13 @@
+skill: github
+cases:
+  - name: pr-checks
+    message: Use gh pr checks on the pull request and report the status.
+  - name: issue-review
+    message: Open a GitHub issue for the regression and link the repo.
+  - name: workflow-runs
+    message: Check the latest gh run results for this repository.
+  - name: api-query
+    message: Use gh api to fetch repository metadata.
+  - name: negative-browser
+    message: Open a website in the browser and inspect the page.
+    expect_triggered: false

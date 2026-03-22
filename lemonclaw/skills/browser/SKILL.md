@@ -2,7 +2,7 @@
 name: browser
 description: Browser automation for AI agents. Use when the user needs to interact with websites, fill forms, click buttons, take screenshots, extract data, test web apps, or automate any browser task. Triggers on "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data", "test this web app", "login to a site", or any browser interaction request.
 metadata: {"lemonclaw":{"emoji":"🌐","os":["darwin","linux"],"requires":{"bins":["agent-browser"]}}}
-triggers: "打开网页,浏览器,截图,网页截图,填表,爬取,scrape,screenshot,open website,browse,自动化测试"
+triggers: "打开网页,浏览器,截图,网页截图,填表,填表单,fill out a form,点击按钮,click a button,爬取,scrape,screenshot,open website,open a website,browse,自动化测试,取屏幕截图,take a screenshot,抓取数据,scrape data,登录网站,login to a site,测试网页,test web app"
 ---
 
 # Browser Automation (agent-browser)

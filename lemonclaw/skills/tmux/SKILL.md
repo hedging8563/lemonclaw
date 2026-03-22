@@ -2,7 +2,7 @@
 name: tmux
 description: Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.
 metadata: {"lemonclaw":{"emoji":"🧵","os":["darwin","linux"],"requires":{"bins":["tmux"]}}}
-triggers: "tmux,终端会话,terminal session,分屏,多窗口终端"
+triggers: "tmux,终端会话,terminal session,分屏,split pane,attach,session,pane,多窗口终端,interactive tty"
 ---
 
 # tmux Skill

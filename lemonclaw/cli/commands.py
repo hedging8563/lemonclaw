@@ -1,6 +1,7 @@
 """CLI commands for lemonclaw."""
 
 import asyncio
+import json
 import os
 import signal
 from pathlib import Path
@@ -218,6 +219,238 @@ def onboard():
 
 
 
+
+
+@app.command("skill-eval")
+def skill_eval(
+    benchmark: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        help="Benchmark YAML/JSON file or directory describing deterministic skill eval cases.",
+    ),
+    workspace: Path | None = typer.Option(
+        None,
+        "--workspace",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace to evaluate against. Defaults to an isolated temporary workspace.",
+    ),
+    builtin_skills_dir: Path | None = typer.Option(
+        None,
+        "--builtin-skills-dir",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Override builtin skills directory to test source-tree edits directly.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Print the full benchmark report as JSON.",
+    ),
+):
+    """Run trigger and prompt checks for a skill benchmark."""
+    import tempfile
+
+    from lemonclaw.agent.skill_eval import (
+        SkillBenchmarkError,
+        evaluate_skill_benchmark,
+        evaluate_skill_benchmark_suite,
+        load_skill_benchmark,
+    )
+    from lemonclaw.utils.helpers import get_workspace_path, sync_workspace_templates
+
+    bench = None
+    if benchmark.is_file():
+        try:
+            bench = load_skill_benchmark(benchmark)
+        except (OSError, SkillBenchmarkError) as exc:
+            console.print(f"[red]Skill benchmark error:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
+    def _render_report(report) -> None:
+        if json_output:
+            sys.stdout.write(json.dumps(report.to_dict(), ensure_ascii=False) + "\n")
+            return
+
+        if hasattr(report, "benchmark_reports"):
+            status = "[green]PASS[/green]" if report.passed else "[red]FAIL[/red]"
+            console.print(f"{status} benchmark suite {report.score}/{report.max_score}")
+            console.print(f"Root: {report.root}")
+            console.print()
+            for item in report.benchmark_reports:
+                item_status = "[green]PASS[/green]" if item.passed else "[red]FAIL[/red]"
+                console.print(
+                    f"{item_status} {item.skill} ({item.score}/{item.max_score}) "
+                    f"[dim]{item.benchmark_path}[/dim]"
+                )
+                for case in item.case_reports:
+                    if case.passed:
+                        continue
+                    matched = ", ".join(case.triggered_skills) if case.triggered_skills else "-"
+                    console.print(f"  [red]case[/red] {case.name} matched={matched}")
+                    for failure in case.failures:
+                        console.print(f"  - {failure}")
+            return
+
+        status = "[green]PASS[/green]" if report.passed else "[red]FAIL[/red]"
+        console.print(f"{status} [bold]{report.skill}[/bold] benchmark {report.score}/{report.max_score}")
+        console.print(f"Benchmark: {report.benchmark_path}")
+        console.print(f"Workspace: {report.workspace}")
+        console.print(f"Builtins:  {report.builtin_skills_dir}")
+        console.print()
+        for case in report.case_reports:
+            case_status = "[green]PASS[/green]" if case.passed else "[red]FAIL[/red]"
+            matched = ", ".join(case.triggered_skills) if case.triggered_skills else "-"
+            console.print(f"{case_status} {case.name} ({case.score}/{case.max_score})")
+            console.print(f"  matched: {matched}")
+            for failure in case.failures:
+                console.print(f"  - {failure}")
+
+    def _run(eval_workspace: Path) -> None:
+        try:
+            if benchmark.is_dir():
+                report = evaluate_skill_benchmark_suite(
+                    benchmark,
+                    workspace=eval_workspace,
+                    builtin_skills_dir=builtin_skills_dir,
+                )
+            else:
+                report = evaluate_skill_benchmark(
+                    bench,
+                    workspace=eval_workspace,
+                    builtin_skills_dir=builtin_skills_dir,
+                )
+        except SkillBenchmarkError as exc:
+            console.print(f"[red]Skill benchmark error:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
+        _render_report(report)
+        if not report.passed:
+            raise typer.Exit(1)
+
+    if workspace is not None:
+        _run(get_workspace_path(str(workspace)))
+        return
+
+    with tempfile.TemporaryDirectory(prefix="lemonclaw-skill-eval-") as tmpdir:
+        eval_workspace = get_workspace_path(tmpdir)
+        sync_workspace_templates(eval_workspace, silent=True)
+        _run(eval_workspace)
+
+
+@app.command("skill-tune")
+def skill_tune(
+    benchmark: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Benchmark YAML/JSON file for the target skill.",
+    ),
+    workspace: Path | None = typer.Option(
+        None,
+        "--workspace",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace to evaluate against. Defaults to an isolated temporary workspace.",
+    ),
+    builtin_skills_dir: Path | None = typer.Option(
+        None,
+        "--builtin-skills-dir",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Override builtin skills directory to tune source-tree skills directly.",
+    ),
+    skill_file: Path | None = typer.Option(
+        None,
+        "--skill-file",
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+        help="Override the SKILL.md file to tune. Defaults to the benchmark's matching skill file.",
+    ),
+    iterations: int = typer.Option(3, "--iterations", min=1, help="Maximum tuning iterations."),
+    model: str | None = typer.Option(None, "--model", help="Override the model used for tuning."),
+    temperature: float = typer.Option(0.2, "--temperature", min=0.0, max=1.0),
+    json_output: bool = typer.Option(False, "--json", help="Print the tuning report as JSON."),
+):
+    """Run an automatic keep/discard SKILL.md tuning loop against one benchmark."""
+    import tempfile
+
+    from lemonclaw.agent.skill_eval import SkillBenchmarkError, load_skill_benchmark
+    from lemonclaw.agent.skill_tune import SkillTuneError, run_skill_tuning_loop
+    from lemonclaw.agent.skills import BUILTIN_SKILLS_DIR
+    from lemonclaw.config.loader import load_config
+    from lemonclaw.utils.helpers import get_workspace_path, sync_workspace_templates
+
+    try:
+        bench = load_skill_benchmark(benchmark)
+    except (OSError, SkillBenchmarkError) as exc:
+        console.print(f"[red]Skill benchmark error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    resolved_builtin_dir = (builtin_skills_dir or BUILTIN_SKILLS_DIR).resolve()
+    resolved_skill_file = skill_file or (resolved_builtin_dir / bench.skill / "SKILL.md")
+
+    config = load_config()
+    provider = _make_provider(config, model or config.agents.defaults.model)
+
+    async def _run_async(eval_workspace: Path):
+        return await run_skill_tuning_loop(
+            skill_path=resolved_skill_file,
+            benchmark_path=benchmark,
+            workspace=eval_workspace,
+            provider=provider,
+            builtin_skills_dir=resolved_builtin_dir,
+            iterations=iterations,
+            model=model or config.agents.defaults.model,
+            temperature=temperature,
+        )
+
+    def _render_report(report) -> None:
+        if json_output:
+            sys.stdout.write(json.dumps(report.to_dict(), ensure_ascii=False) + "\n")
+            return
+
+        status = "[green]IMPROVED[/green]" if report.improved else "[yellow]UNCHANGED[/yellow]"
+        console.print(
+            f"{status} [bold]{report.skill}[/bold] "
+            f"{report.baseline_score}/{report.baseline_max_score} -> {report.best_score}/{report.best_max_score}"
+        )
+        console.print(f"Skill:     {report.skill_path}")
+        console.print(f"Benchmark: {report.benchmark_path}")
+        for item in report.iterations:
+            label = "[green]keep[/green]" if item.kept else "[dim]discard[/dim]"
+            console.print(
+                f"{label} iter {item.iteration}: "
+                f"{item.candidate_score}/{item.candidate_max_score} ({item.reason})"
+            )
+
+    def _run(eval_workspace: Path) -> None:
+        try:
+            report = asyncio.run(_run_async(eval_workspace))
+        except (SkillTuneError, SkillBenchmarkError) as exc:
+            console.print(f"[red]Skill tuning error:[/red] {exc}")
+            raise typer.Exit(1) from exc
+
+        _render_report(report)
+
+    if workspace is not None:
+        _run(get_workspace_path(str(workspace)))
+        return
+
+    with tempfile.TemporaryDirectory(prefix="lemonclaw-skill-tune-") as tmpdir:
+        eval_workspace = get_workspace_path(tmpdir)
+        sync_workspace_templates(eval_workspace, silent=True)
+        _run(eval_workspace)
 
 
 def _make_provider(config: Config, model: str | None = None):

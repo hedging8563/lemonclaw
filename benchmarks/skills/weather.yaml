@@ -1,0 +1,17 @@
+skill: weather
+cases:
+  - name: current-weather
+    message: What's the weather in San Francisco today?
+    prompt_must_contain:
+      - Two free services, no API keys needed.
+  - name: forecast
+    message: Give me a forecast for London tomorrow and tell me if I need an umbrella.
+    prompt_must_contain:
+      - wttr.in (primary)
+  - name: json-fallback
+    message: I need a programmatic weather check for Tokyo.
+    prompt_must_contain:
+      - Open-Meteo (fallback, JSON)
+  - name: negative-reminder
+    message: Remind me to stretch every 20 minutes.
+    expect_triggered: false
