@@ -21,6 +21,16 @@ def get_data_dir() -> Path:
     return get_data_path()
 
 
+def _has_explicit_model_in_file(data: dict) -> bool:
+    agents = data.get("agents")
+    if not isinstance(agents, dict):
+        return False
+    defaults = agents.get("defaults")
+    if not isinstance(defaults, dict):
+        return False
+    return "model" in defaults
+
+
 def load_config(config_path: Path | None = None) -> Config:
     """Load configuration from file, then overlay environment variables.
 
@@ -44,6 +54,7 @@ def load_config(config_path: Path | None = None) -> Config:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+            explicit_model_in_file = _has_explicit_model_in_file(data)
             data = _migrate_config(data)
             config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError) as e:
@@ -55,10 +66,12 @@ def load_config(config_path: Path | None = None) -> Config:
             except OSError:
                 pass
             config = Config()
+            explicit_model_in_file = False
     else:
         config = Config()
+        explicit_model_in_file = False
 
-    _apply_env_overrides(config)
+    _apply_env_overrides(config, explicit_model_in_file=explicit_model_in_file)
     return config
 
 
@@ -123,7 +136,7 @@ def _strip_env_injected(data: dict, original: dict) -> None:
             providers[name].pop("api_key", None)
 
 
-def _apply_env_overrides(config: Config) -> None:
+def _apply_env_overrides(config: Config, *, explicit_model_in_file: bool = False) -> None:
     """Overlay environment variables onto loaded config.
 
     K8s scenario: Orchestrator sets these env vars on the Deployment.
@@ -149,7 +162,7 @@ def _apply_env_overrides(config: Config) -> None:
     # DEFAULT_MODEL is a fallback: only apply if config.json didn't set a model
     # (i.e. still has the Pydantic default). This allows users to override via Settings.
     if model := os.environ.get("DEFAULT_MODEL"):
-        if config.agents.defaults.model == DEFAULT_MODEL:
+        if not explicit_model_in_file and config.agents.defaults.model == DEFAULT_MODEL:
             config.agents.defaults.model = model
 
     if instance_id := os.environ.get("INSTANCE_ID"):

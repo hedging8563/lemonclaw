@@ -238,6 +238,19 @@ def test_save_config_strips_env_injected_lemondata_response_key(monkeypatch, tmp
     assert '"apiKey": ""' in saved
 
 
+def test_load_config_preserves_explicit_default_model_when_env_default_model_is_set(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.agents.defaults.model = 'gpt-5.4'
+    save_config(cfg, config_path)
+
+    monkeypatch.setenv('DEFAULT_MODEL', 'claude-sonnet-4-6')
+
+    loaded = load_config(config_path)
+
+    assert loaded.agents.defaults.model == 'gpt-5.4'
+
+
 def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, tmp_path):
     import json
 
@@ -261,6 +274,34 @@ def test_settings_exposes_effective_telegram_pairing_runtime_state(monkeypatch, 
     resp = client.get('/api/settings')
     assert resp.status_code == 200
     runtime = resp.json()['channel_runtime']['telegram']
+    assert runtime['effective_dm_policy'] == 'pairing'
+    assert runtime['source'] == 'auto_pairing'
+    assert runtime['approved_count'] == 1
+
+
+def test_settings_exposes_effective_weixin_pairing_runtime_state(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.weixin.enabled = True
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'weixin.json').write_text(json.dumps({
+        'owner': 'wx-owner',
+        'owner_notify_target': 'bot-1|wx-owner',
+        'approved': ['wx-owner'],
+        'pending': {},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    runtime = resp.json()['channel_runtime']['weixin']
     assert runtime['effective_dm_policy'] == 'pairing'
     assert runtime['source'] == 'auto_pairing'
     assert runtime['approved_count'] == 1

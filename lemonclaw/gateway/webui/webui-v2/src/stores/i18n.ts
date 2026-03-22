@@ -1063,7 +1063,7 @@ const DICT = {
     soul_desc: '在这里写机器人的角色、语气和规则。保存后会在下一条消息生效。',
     btn_cancel: '取消',
     btn_save: '保存',
-    btn_save_apply: '保存并重启',
+    btn_save_apply: '保存并应用',
     unsaved_changes: '个未保存的更改',
     loading: '加载中...',
     login_action: '登录',
