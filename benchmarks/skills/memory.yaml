@@ -1,20 +1,27 @@
 skill: memory
+expected_always_loaded: true
 cases:
   - name: preference-memory
     message: I prefer dark mode and compact layouts.
+    expect_triggered: false
     prompt_must_contain:
       - Long-term Memory
       - memory/MEMORY.md
+    prompt_must_match_regex:
+      - "### Skill: memory"
   - name: project-memory
     message: Remember that this project uses FastAPI and Pytest.
+    expect_triggered: false
     prompt_must_contain:
       - memory/HISTORY.md
   - name: recall-history
     message: What did we decide about the API shape last week?
+    expect_triggered: false
     prompt_must_contain:
       - Long-term facts
   - name: negative-hello
     message: Hello there, thanks for the help.
+    expect_triggered: false
     forbidden_skills:
       - content-writer
       - frontend-design

@@ -288,6 +288,7 @@ The script:
 
 - Creates the skill directory at the specified path
 - Generates a SKILL.md template with proper frontmatter and TODO placeholders
+- Generates a `benchmarks/skills/<skill>.yaml` draft when a sibling benchmark directory can be inferred, unless `--no-benchmark` is set
 - Optionally creates resource directories based on `--resources`
 - Optionally adds example files when `--examples` is set
 
@@ -394,4 +395,4 @@ For LemonClaw's own built-in or workspace skills, prefer benchmark-driven iterat
 3. If the skill still misses cases, run `lemonclaw skill-tune <benchmark> --builtin-skills-dir <repo>/lemonclaw/skills --iterations 3`
 4. Keep only score-improving `SKILL.md` edits; let the loop discard non-improving candidates automatically
 
-When using this workflow, prefer minimal frontmatter fixes first. Only change the body when the benchmark explicitly checks prompt content or the behavior gap is not fixable through description/triggers alone.
+When using this workflow, prefer minimal frontmatter fixes first. Only change the body when the benchmark explicitly checks prompt content or the behavior gap is not fixable through description/triggers alone. The generated benchmark draft already contains commented examples for advanced fields, so do not front-load them unless simple positive/negative cases are insufficient.

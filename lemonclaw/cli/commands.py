@@ -378,8 +378,22 @@ def skill_tune(
         help="Override the SKILL.md file to tune. Defaults to the benchmark's matching skill file.",
     ),
     iterations: int = typer.Option(3, "--iterations", min=1, help="Maximum tuning iterations."),
+    patience: int | None = typer.Option(
+        2,
+        "--patience",
+        min=1,
+        help="Stop after this many consecutive non-improving candidates.",
+    ),
     model: str | None = typer.Option(None, "--model", help="Override the model used for tuning."),
     temperature: float = typer.Option(0.2, "--temperature", min=0.0, max=1.0),
+    report_out: Path | None = typer.Option(
+        None,
+        "--report-out",
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+        help="Optional JSON file path for writing the tuning report after each iteration.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Print the tuning report as JSON."),
 ):
     """Run an automatic keep/discard SKILL.md tuning loop against one benchmark."""
@@ -411,8 +425,10 @@ def skill_tune(
             provider=provider,
             builtin_skills_dir=resolved_builtin_dir,
             iterations=iterations,
+            patience=patience,
             model=model or config.agents.defaults.model,
             temperature=temperature,
+            report_out=report_out,
         )
 
     def _render_report(report) -> None:
@@ -425,6 +441,7 @@ def skill_tune(
             f"{status} [bold]{report.skill}[/bold] "
             f"{report.baseline_score}/{report.baseline_max_score} -> {report.best_score}/{report.best_max_score}"
         )
+        console.print(f"Stopped:   {report.stopped_reason}")
         console.print(f"Skill:     {report.skill_path}")
         console.print(f"Benchmark: {report.benchmark_path}")
         for item in report.iterations:

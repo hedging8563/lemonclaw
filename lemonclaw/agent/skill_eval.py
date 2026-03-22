@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -23,11 +24,16 @@ class SkillBenchmarkCase:
     name: str
     message: str
     mode: str | None = None
+    weight: int = 1
     expect_triggered: bool = True
+    expected_always_loaded: bool | None = None
     required_skills: list[str] = field(default_factory=list)
     forbidden_skills: list[str] = field(default_factory=list)
+    conflict_skills: list[str] = field(default_factory=list)
     prompt_must_contain: list[str] = field(default_factory=list)
     prompt_must_not_contain: list[str] = field(default_factory=list)
+    prompt_must_match_regex: list[str] = field(default_factory=list)
+    prompt_must_not_match_regex: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -38,6 +44,8 @@ class SkillBenchmark:
     cases: list[SkillBenchmarkCase]
     mode: str = "chat"
     ignore_requirements: bool = True
+    expected_always_loaded: bool | None = None
+    conflict_skills: list[str] = field(default_factory=list)
     disabled_skills: list[str] = field(default_factory=list)
     session_prompt_override: str = ""
     path: Path | None = None
@@ -149,6 +157,22 @@ def _coerce_bool(value: Any, *, label: str, default: bool) -> bool:
     return value
 
 
+def _coerce_optional_bool(value: Any, *, label: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise SkillBenchmarkError(f"{label} must be a boolean")
+    return value
+
+
+def _coerce_positive_int(value: Any, *, label: str, default: int = 1) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or value < 1:
+        raise SkillBenchmarkError(f"{label} must be an integer >= 1")
+    return value
+
+
 def load_skill_benchmark(path: Path) -> SkillBenchmark:
     """Load a skill benchmark from YAML or JSON."""
 
@@ -162,6 +186,11 @@ def load_skill_benchmark(path: Path) -> SkillBenchmark:
         label="ignore_requirements",
         default=True,
     )
+    expected_always_loaded = _coerce_optional_bool(
+        data.get("expected_always_loaded"),
+        label="expected_always_loaded",
+    )
+    conflict_skills = _coerce_string_list(data.get("conflict_skills"), label="conflict_skills")
     disabled_skills = _coerce_string_list(data.get("disabled_skills"), label="disabled_skills")
     session_prompt_override = str(data.get("session_prompt_override") or "")
 
@@ -181,10 +210,15 @@ def load_skill_benchmark(path: Path) -> SkillBenchmark:
                 name=case_name,
                 message=_coerce_string(case_data.get("message"), label=f"cases[{idx}].message"),
                 mode=(str(case_data.get("mode")).strip() if case_data.get("mode") else None),
+                weight=_coerce_positive_int(case_data.get("weight"), label=f"cases[{idx}].weight"),
                 expect_triggered=_coerce_bool(
                     case_data.get("expect_triggered"),
                     label=f"cases[{idx}].expect_triggered",
                     default=True,
+                ),
+                expected_always_loaded=_coerce_optional_bool(
+                    case_data.get("expected_always_loaded"),
+                    label=f"cases[{idx}].expected_always_loaded",
                 ),
                 required_skills=_coerce_string_list(
                     case_data.get("required_skills"),
@@ -194,6 +228,10 @@ def load_skill_benchmark(path: Path) -> SkillBenchmark:
                     case_data.get("forbidden_skills"),
                     label=f"cases[{idx}].forbidden_skills",
                 ),
+                conflict_skills=_coerce_string_list(
+                    case_data.get("conflict_skills"),
+                    label=f"cases[{idx}].conflict_skills",
+                ),
                 prompt_must_contain=_coerce_string_list(
                     case_data.get("prompt_must_contain"),
                     label=f"cases[{idx}].prompt_must_contain",
@@ -201,6 +239,14 @@ def load_skill_benchmark(path: Path) -> SkillBenchmark:
                 prompt_must_not_contain=_coerce_string_list(
                     case_data.get("prompt_must_not_contain"),
                     label=f"cases[{idx}].prompt_must_not_contain",
+                ),
+                prompt_must_match_regex=_coerce_string_list(
+                    case_data.get("prompt_must_match_regex"),
+                    label=f"cases[{idx}].prompt_must_match_regex",
+                ),
+                prompt_must_not_match_regex=_coerce_string_list(
+                    case_data.get("prompt_must_not_match_regex"),
+                    label=f"cases[{idx}].prompt_must_not_match_regex",
                 ),
             )
         )
@@ -210,6 +256,8 @@ def load_skill_benchmark(path: Path) -> SkillBenchmark:
         cases=cases,
         mode=mode,
         ignore_requirements=ignore_requirements,
+        expected_always_loaded=expected_always_loaded,
+        conflict_skills=conflict_skills,
         disabled_skills=disabled_skills,
         session_prompt_override=session_prompt_override,
         path=path,
@@ -282,15 +330,25 @@ def evaluate_skill_benchmark(
             case_max_score = 0
             failures: list[str] = []
 
-            def check(condition: bool, failure: str) -> None:
+            def check(condition: bool, failure: str, *, weight: int = case.weight) -> None:
                 nonlocal case_score, case_max_score
-                case_max_score += 1
+                case_max_score += weight
                 if condition:
-                    case_score += 1
+                    case_score += weight
                 else:
                     failures.append(failure)
 
-            target_triggered = benchmark.skill in triggered_skills or benchmark.skill in always_skill_names
+            target_triggered = benchmark.skill in triggered_skills
+            expected_loaded = (
+                case.expected_always_loaded
+                if case.expected_always_loaded is not None
+                else (
+                    benchmark.expected_always_loaded
+                    if benchmark.expected_always_loaded is not None
+                    else benchmark.skill in always_skill_names
+                )
+            )
+            target_loaded = target_marker in system_prompt
             check(
                 target_triggered == case.expect_triggered,
                 (
@@ -300,10 +358,10 @@ def evaluate_skill_benchmark(
                 ),
             )
             check(
-                (target_marker in system_prompt) == case.expect_triggered,
+                target_loaded == (case.expect_triggered or expected_loaded),
                 (
                     f"expected prompt "
-                    f"{'to include' if case.expect_triggered else 'not to include'} "
+                    f"{'to include' if (case.expect_triggered or expected_loaded) else 'not to include'} "
                     f"the injected section for '{benchmark.skill}'"
                 ),
             )
@@ -318,6 +376,13 @@ def evaluate_skill_benchmark(
                     skill_name not in triggered_skills,
                     f"expected skill '{skill_name}' not to trigger; matched={triggered_skills}",
                 )
+            combined_conflicts = [*benchmark.conflict_skills, *case.conflict_skills]
+            if target_triggered:
+                for skill_name in combined_conflicts:
+                    check(
+                        skill_name not in triggered_skills,
+                        f"expected conflict skill '{skill_name}' not to co-trigger; matched={triggered_skills}",
+                    )
             for snippet in case.prompt_must_contain:
                 check(
                     snippet in system_prompt,
@@ -327,6 +392,24 @@ def evaluate_skill_benchmark(
                 check(
                     snippet not in system_prompt,
                     f"expected prompt not to contain snippet: {snippet!r}",
+                )
+            for pattern in case.prompt_must_match_regex:
+                try:
+                    matched = re.search(pattern, system_prompt, re.MULTILINE) is not None
+                except re.error as exc:
+                    raise SkillBenchmarkError(f"invalid regex {pattern!r}: {exc}") from exc
+                check(
+                    matched,
+                    f"expected prompt to match regex: {pattern!r}",
+                )
+            for pattern in case.prompt_must_not_match_regex:
+                try:
+                    matched = re.search(pattern, system_prompt, re.MULTILINE) is not None
+                except re.error as exc:
+                    raise SkillBenchmarkError(f"invalid regex {pattern!r}: {exc}") from exc
+                check(
+                    not matched,
+                    f"expected prompt not to match regex: {pattern!r}",
                 )
 
             total_score += case_score

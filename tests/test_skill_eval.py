@@ -15,15 +15,24 @@ runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _write_skill(root, name: str, *, description: str, triggers: str, body: str) -> None:
+def _write_skill(
+    root,
+    name: str,
+    *,
+    description: str,
+    triggers: str,
+    body: str,
+    always: bool = False,
+) -> None:
     skill_dir = root / name
     skill_dir.mkdir(parents=True)
+    always_line = "always: true\n" if always else ""
     (skill_dir / "SKILL.md").write_text(
         f"""---
 name: {name}
 description: {description}
 triggers: "{triggers}"
----
+{always_line}---
 
 # {name}
 
@@ -112,6 +121,84 @@ cases:
     assert report.passed is False
     assert report.case_reports[0].passed is False
     assert "This snippet does not exist." in report.case_reports[0].failures[0]
+
+
+def test_evaluate_skill_benchmark_supports_weights_regex_and_conflicts(tmp_path) -> None:
+    builtin_dir = tmp_path / "builtin-skills"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    _write_skill(
+        builtin_dir,
+        "alpha-skill",
+        description="Alpha skill.",
+        triggers="hello",
+        body="Alpha instructions.",
+    )
+    _write_skill(
+        builtin_dir,
+        "beta-skill",
+        description="Beta skill.",
+        triggers="hello",
+        body="Beta instructions.",
+    )
+
+    benchmark_path = tmp_path / "alpha.yaml"
+    benchmark_path.write_text(
+        """skill: alpha-skill
+conflict_skills:
+  - beta-skill
+cases:
+  - name: weighted-conflict
+    message: hello there
+    weight: 3
+    prompt_must_match_regex:
+      - "### Skill: alpha-skill"
+""",
+        encoding="utf-8",
+    )
+
+    bench = load_skill_benchmark(benchmark_path)
+    report = evaluate_skill_benchmark(bench, workspace=workspace, builtin_skills_dir=builtin_dir)
+
+    assert report.passed is False
+    assert report.case_reports[0].max_score == 12
+    assert any("conflict skill 'beta-skill'" in item for item in report.case_reports[0].failures)
+
+
+def test_evaluate_skill_benchmark_supports_expected_always_loaded(tmp_path) -> None:
+    builtin_dir = tmp_path / "builtin-skills"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    _write_skill(
+        builtin_dir,
+        "memory-skill",
+        description="Always-loaded memory skill.",
+        triggers="remember",
+        body="Use persistent memory.",
+        always=True,
+    )
+
+    benchmark_path = tmp_path / "memory.yaml"
+    benchmark_path.write_text(
+        """skill: memory-skill
+expected_always_loaded: true
+cases:
+  - name: ambient-memory
+    message: hello there
+    expect_triggered: false
+    prompt_must_contain:
+      - "### Skill: memory-skill"
+""",
+        encoding="utf-8",
+    )
+
+    bench = load_skill_benchmark(benchmark_path)
+    report = evaluate_skill_benchmark(bench, workspace=workspace, builtin_skills_dir=builtin_dir)
+
+    assert report.passed is True
+    assert report.case_reports[0].triggered_skills == []
 
 
 def test_skill_eval_command_outputs_json_report(tmp_path) -> None:

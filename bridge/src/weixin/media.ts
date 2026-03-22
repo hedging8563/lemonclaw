@@ -14,6 +14,7 @@ import {
 import { mediaDir } from './accounts.js';
 import { getExtensionFromContentTypeOrUrl, getMimeFromFilename } from './mime.js';
 import { downloadAndDecryptBuffer, downloadPlainCdnBuffer } from './pic-decrypt.js';
+import { silkToWav } from './silk-transcode.js';
 import {
   getOutboundMediaMime,
   uploadFileAttachmentToWeixin,
@@ -78,6 +79,10 @@ async function downloadMediaItem(params: {
 
   if (item.type === MessageItemType.VOICE && item.voice_item?.media?.encrypt_query_param && item.voice_item.media.aes_key) {
     const result = await downloadAndDecryptBuffer(item.voice_item.media.encrypt_query_param, item.voice_item.media.aes_key, cdnBaseUrl);
+    const wav = await silkToWav(result.buf);
+    if (wav) {
+      return saveMediaBuffer({ accountId, buf: wav, ext: '.wav', prefix: 'voice' });
+    }
     return saveMediaBuffer({ accountId, buf: result.buf, ext: '.silk', prefix: 'voice' });
   }
 

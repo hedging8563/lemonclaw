@@ -91,6 +91,7 @@ def test_run_skill_tuning_loop_keeps_improvement(tmp_path) -> None:
     assert report.improved is True
     assert report.best_score > report.baseline_score
     assert report.iterations[0].kept is True
+    assert report.stopped_reason == "perfect_score"
     assert "linkedin post" in skill_path.read_text(encoding="utf-8")
 
 
@@ -122,6 +123,43 @@ def test_run_skill_tuning_loop_discards_non_improving_candidate(tmp_path) -> Non
 
     assert report.improved is False
     assert report.iterations[0].kept is False
+    assert report.stopped_reason == "iteration_limit"
+    assert skill_path.read_text(encoding="utf-8") == original
+
+
+def test_run_skill_tuning_loop_writes_report_and_honors_patience(tmp_path) -> None:
+    builtin_dir = tmp_path / "builtin-skills"
+    skill_path = builtin_dir / "content-writer" / "SKILL.md"
+    original = _write_skill(skill_path, triggers="write article,blog post")
+
+    benchmark_path = tmp_path / "content-writer.yaml"
+    _write_benchmark(benchmark_path)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sync_workspace_templates(workspace, silent=True)
+
+    worse_text = _write_skill(skill_path.with_name("candidate.SKILL.md"), triggers="write article")
+    report_path = tmp_path / "report.json"
+    provider = StaticProvider([worse_text, worse_text])
+
+    report = asyncio.run(
+        run_skill_tuning_loop(
+            skill_path=skill_path,
+            benchmark_path=benchmark_path,
+            workspace=workspace,
+            provider=provider,
+            builtin_skills_dir=builtin_dir,
+            iterations=3,
+            patience=1,
+            report_out=report_path,
+        )
+    )
+
+    assert report.stopped_reason == "patience_exhausted"
+    assert report_path.exists()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["stopped_reason"] == "patience_exhausted"
     assert skill_path.read_text(encoding="utf-8") == original
 
 
@@ -154,3 +192,4 @@ def test_skill_tune_command_outputs_json_report(tmp_path, monkeypatch) -> None:
     payload = json.loads(result.stdout)
     assert payload["improved"] is True
     assert payload["best_score"] > payload["baseline_score"]
+    assert payload["stopped_reason"] == "perfect_score"

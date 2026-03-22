@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,7 @@ class SkillTuneReport:
     best_score: int
     best_max_score: int
     improved: bool
+    stopped_reason: str
     iterations: list[SkillTuneIteration] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +68,7 @@ class SkillTuneReport:
             "best_score": self.best_score,
             "best_max_score": self.best_max_score,
             "improved": self.improved,
+            "stopped_reason": self.stopped_reason,
             "iterations": [item.to_dict() for item in self.iterations],
         }
 
@@ -135,14 +138,18 @@ async def run_skill_tuning_loop(
     provider: LLMProvider,
     builtin_skills_dir: Path,
     iterations: int = 3,
+    patience: int | None = None,
     model: str | None = None,
     temperature: float = 0.2,
     max_tokens: int = 8192,
+    report_out: Path | None = None,
 ) -> SkillTuneReport:
     """Iteratively edit a skill file and keep only score-improving candidates."""
 
     if iterations < 1:
         raise SkillTuneError("iterations must be >= 1")
+    if patience is not None and patience < 1:
+        raise SkillTuneError("patience must be >= 1 when provided")
     if not skill_path.exists():
         raise SkillTuneError(f"skill file not found: {skill_path}")
     if not benchmark_path.exists():
@@ -160,21 +167,35 @@ async def run_skill_tuning_loop(
     best_text = original_text
     best_report = baseline
     history: list[SkillTuneIteration] = []
+    consecutive_non_improvements = 0
 
-    if baseline.score >= baseline.max_score:
+    def _build_report(*, stopped_reason: str) -> SkillTuneReport:
         return SkillTuneReport(
             skill=benchmark.skill,
             skill_path=str(skill_path),
             benchmark_path=str(benchmark_path),
             baseline_score=baseline.score,
             baseline_max_score=baseline.max_score,
-            best_score=baseline.score,
-            best_max_score=baseline.max_score,
-            improved=False,
+            best_score=best_report.score,
+            best_max_score=best_report.max_score,
+            improved=best_report.score > baseline.score,
+            stopped_reason=stopped_reason,
             iterations=history,
         )
 
+    def _write_report(report: SkillTuneReport) -> None:
+        if report_out is None:
+            return
+        report_out.parent.mkdir(parents=True, exist_ok=True)
+        report_out.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if baseline.score >= baseline.max_score:
+        report = _build_report(stopped_reason="already_perfect")
+        _write_report(report)
+        return report
+
     benchmark_text = benchmark_path.read_text(encoding="utf-8")
+    stopped_reason = "iteration_limit"
 
     try:
         for idx in range(1, iterations + 1):
@@ -206,6 +227,7 @@ async def run_skill_tuning_loop(
             if candidate_report.score > best_report.score:
                 best_text = candidate_text
                 best_report = candidate_report
+                consecutive_non_improvements = 0
                 history.append(
                     SkillTuneIteration(
                         iteration=idx,
@@ -216,10 +238,13 @@ async def run_skill_tuning_loop(
                         report=candidate_report,
                     )
                 )
+                _write_report(_build_report(stopped_reason="running"))
                 if best_report.score >= best_report.max_score:
+                    stopped_reason = "perfect_score"
                     break
             else:
                 skill_path.write_text(best_text, encoding="utf-8")
+                consecutive_non_improvements += 1
                 history.append(
                     SkillTuneIteration(
                         iteration=idx,
@@ -230,20 +255,16 @@ async def run_skill_tuning_loop(
                         report=candidate_report,
                     )
                 )
+                _write_report(_build_report(stopped_reason="running"))
+                if patience is not None and consecutive_non_improvements >= patience:
+                    stopped_reason = "patience_exhausted"
+                    break
 
         skill_path.write_text(best_text, encoding="utf-8")
     except Exception:
         skill_path.write_text(best_text, encoding="utf-8")
         raise
 
-    return SkillTuneReport(
-        skill=benchmark.skill,
-        skill_path=str(skill_path),
-        benchmark_path=str(benchmark_path),
-        baseline_score=baseline.score,
-        baseline_max_score=baseline.max_score,
-        best_score=best_report.score,
-        best_max_score=best_report.max_score,
-        improved=best_report.score > baseline.score,
-        iterations=history,
-    )
+    report = _build_report(stopped_reason=stopped_reason)
+    _write_report(report)
+    return report
