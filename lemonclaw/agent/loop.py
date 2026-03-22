@@ -73,6 +73,37 @@ if TYPE_CHECKING:
     from lemonclaw.cron.service import CronService
 
 
+_BUILTIN_TOOL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "analyze_image": ("path",),
+    "browser": ("command",),
+    "coding": ("task",),
+    "create_agent": ("agent_id", "role"),
+    "cron": ("action",),
+    "db": ("connection_profile", "query"),
+    "edit_file": ("path", "old_text", "new_text"),
+    "exec": ("command",),
+    "get_agent_status": ("agent_id",),
+    "git": ("action",),
+    "glob": ("pattern",),
+    "grep": ("pattern",),
+    "http_request": ("method", "url"),
+    "k8s": ("action",),
+    "list_agents": (),
+    "list_dir": ("path",),
+    "message": ("content",),
+    "notify": ("target_type", "content"),
+    "read_attachment": ("path",),
+    "read_file": ("path",),
+    "search_knowledge": ("query",),
+    "send_to_agent": ("agent_id", "message"),
+    "spawn": ("task",),
+    "task_checkpoint": ("stage", "summary"),
+    "web_fetch": ("url",),
+    "web_search": ("query",),
+    "write_file": ("path", "content"),
+}
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -228,17 +259,46 @@ class AgentLoop:
         lang: str,
     ) -> str | None:
         """Return a fail-fast guidance message for empty invalid tool calls."""
-        if arguments:
-            return None
-        if not isinstance(arguments, dict):
+        if arguments is not None and not isinstance(arguments, dict):
             return None
         if not isinstance(result, str) or not result.startswith("Error: Invalid parameters for tool"):
+            return None
+        missing_fields = self._missing_required_fields_for_tool(tool_name, arguments, result)
+        if not missing_fields:
             return None
         if tool_name == "write_file":
             return t("tool_empty_args_write_file", lang)
         if tool_name == "exec":
             return t("tool_empty_args_exec", lang)
-        return t("tool_empty_args_generic", lang, name=tool_name)
+        if tool_name == "coding":
+            return t("tool_empty_args_coding", lang)
+        if tool_name == "browser":
+            return t("tool_empty_args_browser", lang)
+        return t("tool_empty_args_required", lang, name=tool_name, fields=", ".join(missing_fields))
+
+    def _missing_required_fields_for_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+        result: str,
+    ) -> list[str]:
+        missing = [match.strip() for match in re.findall(r"missing required ([^;\n]+)", result)]
+        if missing:
+            return missing
+
+        if arguments not in (None, {}):
+            return []
+
+        tool = self.tools.get(tool_name)
+        if tool is not None and isinstance(tool.parameters, dict):
+            required = tool.parameters.get("required", [])
+            if isinstance(required, list) and required:
+                return [str(field) for field in required]
+
+        fallback = _BUILTIN_TOOL_REQUIRED_FIELDS.get(tool_name)
+        if fallback:
+            return [str(field) for field in fallback]
+        return []
 
     @staticmethod
     def _clone_session(session: Session, *, messages: list[dict[str, Any]] | None = None, last_consolidated: int | None = None) -> Session:

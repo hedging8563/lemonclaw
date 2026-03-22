@@ -27,6 +27,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Tool 'exec' was called without the required command. Please provide a complete command before retrying.",
         "zh": "工具 'exec' 调用时缺少必要的 command。请补全命令后再重试。",
     },
+    "tool_empty_args_coding": {
+        "en": "Tool 'coding' was called without the required task. Please restate the concrete coding task before retrying, including the target files or desired outcome when possible. If the change is small, prefer direct tools such as exec/write_file instead.",
+        "zh": "工具 'coding' 调用时缺少必要的 task。请先补全具体编码任务后再重试，最好带上目标文件或期望结果。如果只是小改动，优先直接使用 exec 或 write_file。",
+    },
+    "tool_empty_args_browser": {
+        "en": "Tool 'browser' was called without the required command. Please provide a full browser command such as 'open https://example.com' or 'snapshot -i' before retrying.",
+        "zh": "工具 'browser' 调用时缺少必要的 command。请先提供完整浏览器命令后再重试，例如 'open https://example.com' 或 'snapshot -i'。",
+    },
+    "tool_empty_args_required": {
+        "en": "Tool '{name}' is missing required parameter(s): {fields}. Please provide complete parameters before retrying.",
+        "zh": "工具 '{name}' 缺少必要参数：{fields}。请补全参数后再重试。",
+    },
     "tool_empty_args_generic": {
         "en": "Tool '{name}' was called without the required arguments. Please provide complete parameters before retrying.",
         "zh": "工具 '{name}' 调用时缺少必要参数。请补全参数后再重试。",

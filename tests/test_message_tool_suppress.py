@@ -117,6 +117,108 @@ class TestMessageToolSuppressLogic:
         assert result is not None  # not suppressed
         assert result.channel == "feishu"
 
+
+class TestEmptyToolCallGuidance:
+    def test_coding_empty_dict_gets_specific_guidance(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        guidance = loop._empty_tool_call_guidance(
+            "coding",
+            {},
+            "Error: Invalid parameters for tool 'coding': missing required task",
+            "en",
+        )
+        assert guidance is not None
+        assert "required task" in guidance
+        assert "exec/write_file" in guidance
+
+    def test_coding_none_arguments_also_fail_fast(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        guidance = loop._empty_tool_call_guidance(
+            "coding",
+            None,
+            "Error: Invalid parameters for tool 'coding': missing required task",
+            "zh",
+        )
+        assert guidance is not None
+        assert "缺少必要的 task" in guidance
+
+    def test_browser_empty_arguments_get_specific_guidance(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        guidance = loop._empty_tool_call_guidance(
+            "browser",
+            {},
+            "Error: Invalid parameters for tool 'browser': missing required command",
+            "en",
+        )
+        assert guidance is not None
+        assert "required command" in guidance
+        assert "snapshot -i" in guidance
+
+    def test_nonempty_arguments_with_non_missing_required_error_do_not_trigger_guidance(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        guidance = loop._empty_tool_call_guidance(
+            "coding",
+            {"task": "finish module"},
+            "Error: Invalid parameters for tool 'coding': task must be at least 10 chars",
+            "en",
+        )
+        assert guidance is None
+
+    @pytest.mark.parametrize(
+        ("tool_name", "missing_fields"),
+        [
+            ("analyze_image", ("path",)),
+            ("browser", ("command",)),
+            ("coding", ("task",)),
+            ("create_agent", ("agent_id", "role")),
+            ("cron", ("action",)),
+            ("db", ("connection_profile", "query")),
+            ("edit_file", ("path", "old_text", "new_text")),
+            ("exec", ("command",)),
+            ("get_agent_status", ("agent_id",)),
+            ("git", ("action",)),
+            ("glob", ("pattern",)),
+            ("grep", ("pattern",)),
+            ("http_request", ("method", "url")),
+            ("k8s", ("action",)),
+            ("list_dir", ("path",)),
+            ("message", ("content",)),
+            ("notify", ("target_type", "content")),
+            ("read_attachment", ("path",)),
+            ("read_file", ("path",)),
+            ("search_knowledge", ("query",)),
+            ("send_to_agent", ("agent_id", "message")),
+            ("spawn", ("task",)),
+            ("task_checkpoint", ("stage", "summary")),
+            ("web_fetch", ("url",)),
+            ("web_search", ("query",)),
+            ("write_file", ("path", "content")),
+        ],
+    )
+    def test_all_builtin_tools_with_required_fields_fail_fast(self, tmp_path: Path, tool_name: str, missing_fields: tuple[str, ...]) -> None:
+        loop = _make_loop(tmp_path)
+        missing_msg = "; ".join(f"missing required {field}" for field in missing_fields)
+        guidance = loop._empty_tool_call_guidance(
+            tool_name,
+            None,
+            f"Error: Invalid parameters for tool '{tool_name}': {missing_msg}",
+            "en",
+        )
+        assert guidance is not None, tool_name
+        if tool_name not in {"write_file", "exec", "coding", "browser"}:
+            for field in missing_fields:
+                assert field in guidance
+
+    def test_list_agents_without_required_fields_does_not_trigger_guidance(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        guidance = loop._empty_tool_call_guidance(
+            "list_agents",
+            None,
+            "Error: Invalid parameters for tool 'list_agents': parameter should be object",
+            "en",
+        )
+        assert guidance is None
+
     @pytest.mark.asyncio
     async def test_tool_call_preamble_is_not_reused_as_final_reply(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
