@@ -27,7 +27,7 @@ from lemonclaw.gateway.webui.auth import (
 )
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
-from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, runtime_policy_active
+from lemonclaw.providers.catalog import MODEL_CATALOG, get_model_runtime_meta, resolve_model_id, runtime_policy_active
 from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 
@@ -518,8 +518,9 @@ def get_webui_routes(
         model = body.get("model")
         provider_switch_new_session = False
         if model:
+            model = resolve_model_id(str(model)) or str(model)
             session = session_manager.get_or_create(session_key)
-            current_model = session.metadata.get("current_model") or getattr(agent_loop, "model", "")
+            current_model = resolve_model_id(session.metadata.get("current_model") or getattr(agent_loop, "model", "")) or session.metadata.get("current_model") or getattr(agent_loop, "model", "")
             target_session = session
             if session.messages and current_model and provider_family_for_model(current_model) != provider_family_for_model(model):
                 provider_switch_new_session = True
@@ -721,7 +722,8 @@ def get_webui_routes(
             logger.debug("Failed to read current model from config")
         if not current:
             current = agent_loop.model if hasattr(agent_loop, "model") else ""
-        resp = _json({"models": models, "current": current, "currentMeta": get_model_runtime_meta(current, scene="chat") if current else None, "runtimePolicyActive": runtime_policy_active()})
+        resolved_current = resolve_model_id(current) or current
+        resp = _json({"models": models, "current": resolved_current, "currentMeta": get_model_runtime_meta(resolved_current, scene="chat") if resolved_current else None, "runtimePolicyActive": runtime_policy_active()})
         _maybe_refresh_cookie(request, resp)
         return resp
 

@@ -19,6 +19,7 @@ class ModelEntry:
     hidden: bool = False
     source: str = "builtin"
     profile: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 _BUILTIN_MODEL_CATALOG: list[ModelEntry] = [
@@ -58,6 +59,7 @@ _RUNTIME_DEFAULTS: dict[str, str] = {
 _RUNTIME_SCENE_PROFILES: dict[str, str] = {}
 _RUNTIME_PROFILES: dict[str, list[str]] = {}
 _RUNTIME_MODEL_PROFILE_OVERRIDES: dict[str, str] = {}
+_RUNTIME_ALIAS_MAP: dict[str, str] = {}
 _RUNTIME_POLICY_ACTIVE = False
 _RUNTIME_POLICY_PATH = Path(os.environ.get('LEMONCLAW_RUNTIME_MODEL_POLICY_PATH', str(Path.home() / '.lemonclaw' / 'runtime-model-policy.json')))
 
@@ -85,6 +87,7 @@ def _reset_to_builtin() -> None:
     _RUNTIME_SCENE_PROFILES.clear()
     _RUNTIME_PROFILES.clear()
     _RUNTIME_MODEL_PROFILE_OVERRIDES.clear()
+    _RUNTIME_ALIAS_MAP.clear()
     globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
     globals()['_RUNTIME_POLICY_ACTIVE'] = False
 
@@ -100,11 +103,51 @@ def _dedupe(seq: list[str]) -> list[str]:
     return out
 
 
+def _normalize_model_key(model_id: str | None) -> str:
+    return str(model_id or '').strip().lower()
+
+
+def _normalize_aliases(raw_aliases: Any, model_id: str) -> tuple[str, ...]:
+    if not isinstance(raw_aliases, list):
+        return ()
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for raw_alias in raw_aliases:
+        alias = str(raw_alias or '').strip()
+        alias_key = _normalize_model_key(alias)
+        if not alias or alias == model_id or not alias_key or alias_key in seen:
+            continue
+        seen.add(alias_key)
+        aliases.append(alias)
+    return tuple(aliases)
+
+
+def resolve_model_id(model_id: str | None) -> str | None:
+    normalized = str(model_id or '').strip()
+    if not normalized:
+        return None
+
+    if normalized in MODEL_MAP:
+        return normalized
+
+    normalized_key = _normalize_model_key(normalized)
+    alias_hit = _RUNTIME_ALIAS_MAP.get(normalized_key)
+    if alias_hit:
+        return alias_hit
+
+    for canonical_id in MODEL_MAP:
+        if _normalize_model_key(canonical_id) == normalized_key:
+            return canonical_id
+
+    return normalized
+
+
 def get_runtime_default_model(scene: str = 'chat') -> str:
     return _RUNTIME_DEFAULTS.get(scene, _RUNTIME_DEFAULTS['chat'])
 
 
 def get_fallback_chain(model_id: str, scene: str = 'chat') -> list[str]:
+    model_id = resolve_model_id(model_id) or model_id
     profile_name = _RUNTIME_MODEL_PROFILE_OVERRIDES.get(model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
     if profile_name and profile_name in _RUNTIME_PROFILES:
         return _dedupe([model_id, *_RUNTIME_PROFILES[profile_name]])
@@ -168,6 +211,7 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
     }
 
     built_entries: list[ModelEntry] = []
+    runtime_alias_map: dict[str, str] = {}
     for raw in runtime_rows:
         model_id = str(raw.get('id') or '').strip()
         profile_name = model_overrides.get(model_id) or scene_profiles.get('chat')
@@ -176,6 +220,9 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
         if model_id in chain:
             idx = chain.index(model_id)
             fallback = chain[idx + 1] if idx + 1 < len(chain) else None
+        aliases = _normalize_aliases(raw.get('aliases'), model_id)
+        for alias in aliases:
+            runtime_alias_map[_normalize_model_key(alias)] = model_id
         built_entries.append(ModelEntry(
             id=model_id,
             label=str(raw.get('label') or model_id),
@@ -185,6 +232,7 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
             hidden=not bool(raw.get('visible', True)),
             source='runtime-policy',
             profile=profile_name,
+            aliases=aliases,
         ))
 
     MODEL_CATALOG[:] = built_entries
@@ -205,6 +253,8 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
     _RUNTIME_PROFILES.update(profiles)
     _RUNTIME_MODEL_PROFILE_OVERRIDES.clear()
     _RUNTIME_MODEL_PROFILE_OVERRIDES.update(model_overrides)
+    _RUNTIME_ALIAS_MAP.clear()
+    _RUNTIME_ALIAS_MAP.update(runtime_alias_map)
     globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
     globals()['_RUNTIME_POLICY_ACTIVE'] = True
 
@@ -231,21 +281,23 @@ def runtime_policy_active() -> bool:
 
 
 def get_model_source(model_id: str) -> str:
-    entry = MODEL_MAP.get(model_id)
+    entry = MODEL_MAP.get(resolve_model_id(model_id) or model_id)
     return entry.source if entry else ('runtime-policy' if runtime_policy_active() else 'builtin')
 
 
 def get_model_profile(model_id: str, scene: str = 'chat') -> str | None:
-    entry = MODEL_MAP.get(model_id)
+    resolved_model_id = resolve_model_id(model_id) or model_id
+    entry = MODEL_MAP.get(resolved_model_id)
     if entry and entry.profile:
         return entry.profile
-    return _RUNTIME_MODEL_PROFILE_OVERRIDES.get(model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
+    return _RUNTIME_MODEL_PROFILE_OVERRIDES.get(resolved_model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
 
 
 def get_model_runtime_meta(model_id: str, scene: str = 'chat') -> dict[str, str | bool | None]:
+    resolved_model_id = resolve_model_id(model_id) or model_id
     return {
-        'source': get_model_source(model_id),
-        'profile': get_model_profile(model_id, scene),
+        'source': get_model_source(resolved_model_id),
+        'profile': get_model_profile(resolved_model_id, scene),
         'runtimePolicyActive': runtime_policy_active(),
     }
 
@@ -273,8 +325,13 @@ def fuzzy_match(query: str) -> ModelEntry | None:
         return None
     visible = [m for m in MODEL_CATALOG if not m.hidden]
     for m in visible:
-        if m.id == q:
+        if _normalize_model_key(m.id) == q:
             return m
+    runtime_alias_hit = _RUNTIME_ALIAS_MAP.get(q)
+    if runtime_alias_hit:
+        entry = MODEL_MAP.get(runtime_alias_hit)
+        if entry and not entry.hidden:
+            return entry
     from lemonclaw.providers.aliases import resolve_alias
     alias_hit = resolve_alias(q)
     if alias_hit:
@@ -295,6 +352,7 @@ def fuzzy_match(query: str) -> ModelEntry | None:
 
 
 def format_model_list(current_model: str | None = None) -> str:
+    resolved_current = resolve_model_id(current_model) if current_model else None
     lines: list[str] = []
     grouped: dict[str, list[ModelEntry]] = {}
     for m in MODEL_CATALOG:
@@ -305,8 +363,9 @@ def format_model_list(current_model: str | None = None) -> str:
         label = TIER_LABELS.get(tier, tier.title())
         lines.append(f"\n**{label}**")
         for m in grouped[tier]:
-            marker = ' ← current' if current_model and m.id == current_model else ''
-            lines.append(f"  `{m.id}` — {m.description}{marker}")
+            marker = ' ← current' if resolved_current and m.id == resolved_current else ''
+            alias_hint = f" (legacy: {', '.join(m.aliases)})" if m.aliases else ''
+            lines.append(f"  `{m.id}` — {m.description}{alias_hint}{marker}")
     header = 'Available models (use `/model <name>` to switch):\n'
     footer = '\n\n**Aliases** (use `/model <alias>` to switch):'
     from lemonclaw.providers.aliases import list_aliases

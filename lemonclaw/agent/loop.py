@@ -46,7 +46,7 @@ from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 from lemonclaw.providers.base import LLMProvider
-from lemonclaw.providers.catalog import format_model_list, fuzzy_match
+from lemonclaw.providers.catalog import format_model_list, fuzzy_match, resolve_model_id
 from lemonclaw.providers.registry import provider_family_for_model
 from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
@@ -221,11 +221,11 @@ class AgentLoop:
         self._register_default_tools()
 
     def _provider_for_model(self, model: str | None) -> LLMProvider:
-        effective_model = model or self.model
+        effective_model = resolve_model_id(model) or model or self.model
         if not effective_model or not self._provider_factory:
             return self.provider
 
-        current_model = getattr(self.provider, "default_model", None) or self.model
+        current_model = resolve_model_id(getattr(self.provider, "default_model", None) or self.model) or getattr(self.provider, "default_model", None) or self.model
         if provider_family_for_model(str(current_model or "")) == provider_family_for_model(effective_model):
             return self.provider
 
@@ -235,6 +235,15 @@ class AgentLoop:
             logger.exception("Failed to resolve provider for model {}", effective_model)
             return self.provider
         return resolved or self.provider
+
+    def _normalize_session_model(self, session: Session) -> str | None:
+        current_model = str(session.metadata.get("current_model") or "").strip()
+        if not current_model:
+            return None
+        resolved_model = resolve_model_id(current_model) or current_model
+        if resolved_model != current_model:
+            session.metadata["current_model"] = resolved_model
+        return resolved_model
 
     def _track_background_task(self, task: asyncio.Task, *, bucket: set[asyncio.Task], label: str) -> None:
         """Keep a strong ref for background tasks and log failures consistently."""
@@ -758,7 +767,7 @@ class AgentLoop:
     ) -> tuple[str | None, list[str], list[dict], TurnUsage]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_usage)."""
         _lang = lang
-        effective_model = session_model or self.model
+        effective_model = resolve_model_id(session_model or self.model) or session_model or self.model
         active_provider = self._provider_for_model(effective_model)
         messages = initial_messages
         iteration = 0
@@ -1172,7 +1181,7 @@ class AgentLoop:
                 logger.exception("Error processing message for session {}", msg.session_key)
                 # Procedural memory: reflect on failure to learn from it
                 try:
-                    active_model = self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model
+                    active_model = resolve_model_id(self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model) or self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model
                     active_provider = self._provider_for_model(active_model)
                     await self.context.memory.procedural.reflect(
                         active_provider,
@@ -1244,7 +1253,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = session_key or msg.session_key
             session = self.sessions.get_or_create(key)
-            session_model = session.metadata.get("current_model")
+            session_model = self._normalize_session_model(session)
             active_provider = self._provider_for_model(session_model or self.model)
             self.context.memory.set_provider(active_provider)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), session_key=key)
@@ -1305,7 +1314,7 @@ class AgentLoop:
             })
 
         session = self.sessions.get_or_create(key)
-        session_model = session.metadata.get("current_model")
+        session_model = self._normalize_session_model(session)
         active_provider = self._provider_for_model(session_model or self.model)
         self.context.memory.set_provider(active_provider)
 
@@ -1546,10 +1555,11 @@ class AgentLoop:
         return bool(session and session.messages)
 
     def _requires_new_session_for_model_switch(self, session: Session, target_model: str) -> bool:
-        current_model = session.metadata.get("current_model") or self.model
+        current_model = self._normalize_session_model(session) or self.model
         if not current_model or not self._session_has_messages(session):
             return False
-        return provider_family_for_model(current_model) != provider_family_for_model(target_model)
+        resolved_target = resolve_model_id(target_model) or target_model
+        return provider_family_for_model(current_model) != provider_family_for_model(resolved_target)
 
     def _reset_session_context(self, session: Session) -> None:
         session.messages = []
@@ -1560,7 +1570,10 @@ class AgentLoop:
         arg = msg.content.strip()[6:].strip()  # strip "/model" prefix
 
         if not arg:
-            current = session.metadata.get("current_model") or self.model
+            current = self._normalize_session_model(session) or self.model
+            if current and session.metadata.get("current_model") != current:
+                session.metadata["current_model"] = current
+                self.sessions.save(session)
             return self._command_reply(msg, format_model_list(current), kind="model_list", extra_meta={"_command": "model_list", "_current_model": current})
 
         match = fuzzy_match(arg)

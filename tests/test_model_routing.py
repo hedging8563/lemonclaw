@@ -16,6 +16,7 @@ from lemonclaw.providers.catalog import (
     MODEL_MAP,
     TIER_ORDER,
     ModelEntry,
+    apply_runtime_model_policy,
     format_model_list,
     fuzzy_match,
 )
@@ -101,6 +102,22 @@ class TestFuzzyMatch:
         # Should match one of the opus models (shortest id wins)
         assert "opus" in m.id
 
+    def test_runtime_alias_match(self):
+        apply_runtime_model_policy({
+            'defaults': {'chat': 'minimax-m2.7'},
+            'catalog': [
+                {'id': 'minimax-m2.7', 'label': 'MiniMax M2.7', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'upgraded', 'capabilities': ['chat'], 'aliases': ['minimax-m2.5']},
+            ],
+            'profiles': {'economy_chat': ['minimax-m2.7']},
+            'sceneProfiles': {'chat': 'economy_chat'},
+            'modelProfileOverrides': {},
+        })
+        try:
+            m = fuzzy_match("minimax-m2.5")
+            assert m is not None and m.id == "minimax-m2.7"
+        finally:
+            apply_runtime_model_policy(None)
+
 
 # ── format_model_list ────────────────────────────────────────────────
 
@@ -127,6 +144,23 @@ class TestFormatModelList:
         from lemonclaw.providers.catalog import format_model_runtime_badge
         badge = format_model_runtime_badge("claude-sonnet-4-6")
         assert 'builtin' in badge or 'runtime-policy' in badge
+
+    def test_runtime_aliases_are_listed_as_legacy_hints(self):
+        apply_runtime_model_policy({
+            'defaults': {'chat': 'minimax-m2.7'},
+            'catalog': [
+                {'id': 'minimax-m2.7', 'label': 'MiniMax M2.7', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'upgraded', 'capabilities': ['chat'], 'aliases': ['minimax-m2.5']},
+            ],
+            'profiles': {'economy_chat': ['minimax-m2.7']},
+            'sceneProfiles': {'chat': 'economy_chat'},
+            'modelProfileOverrides': {},
+        })
+        try:
+            output = format_model_list("minimax-m2.5")
+            assert "legacy: minimax-m2.5" in output
+            assert "← current" in output
+        finally:
+            apply_runtime_model_policy(None)
 
 
 # ── Fallback chain (litellm_provider) ────────────────────────────────
