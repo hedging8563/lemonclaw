@@ -186,7 +186,11 @@ class BrowserTool(Tool):
         if not stripped.lower().startswith("dicloak"):
             return None
         if not self._dicloak_enabled or not self._dicloak_api_base_url or not self._dicloak_api_key:
-            return "Error: DICloak backend is not enabled for this instance."
+            return (
+                "Error: DICloak backend is not enabled for this instance. "
+                "Ask the user to open the hosted dashboard for this instance, enable DICloak in instance settings, "
+                "and fill the DICloak email/username, login password, and local API key before retrying."
+            )
 
         parts = stripped.split()
         if len(parts) < 2:
