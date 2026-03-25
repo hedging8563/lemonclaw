@@ -5,13 +5,47 @@ metadata: {"lemonclaw":{"emoji":"🌐","os":["darwin","linux"],"requires":{"bins
 triggers: "打开网页,浏览器,截图,网页截图,填表,填表单,fill out a form,点击按钮,click a button,爬取,scrape,screenshot,open website,open a website,browse,自动化测试,取屏幕截图,take a screenshot,抓取数据,scrape data,登录网站,login to a site,测试网页,test web app"
 ---
 
-# Browser Automation (agent-browser)
+# Browser Automation (agent-browser + DICloak)
 
 Use the `browser` tool for all web interaction. Pass the command string directly (without the `agent-browser` prefix).
 
+There are two execution modes:
+
+- **Normal browser mode**: default for ordinary browsing, forms, screenshots, scraping, and testing.
+- **DICloak profile mode**: only when the task explicitly needs a leased browser profile or persistent login state.
+
+Do **not** invent a separate DICloak tool. DICloak is accessed through explicit `browser` commands:
+
+```text
+browser: dicloak list_profiles
+browser: dicloak open_profile <profile_id>
+browser: open https://example.com
+browser: snapshot -i
+browser: click @e1
+browser: dicloak close_profile
+```
+
+## When to Use Normal Browser vs DICloak
+
+Use **normal browser mode** for:
+
+- Opening public websites
+- Filling forms that do not require a persisted identity
+- Taking screenshots or PDFs
+- Extracting data from pages
+- Testing ordinary web flows
+
+Use **DICloak** only for:
+
+- Reusing a persistent login/profile state
+- Working inside a specific leased browser profile
+- Tasks that explicitly mention DICloak, profile lease, or long-lived authenticated browser identity
+
+Do **not** use DICloak just because a site has a login page. Start with the normal browser unless the task clearly requires an existing profile.
+
 ## Core Workflow
 
-Every browser automation follows this pattern:
+Every normal browser automation follows this pattern:
 
 1. **Navigate**: `open https://example.com`
 2. **Snapshot**: `snapshot -i` (get element refs like `@e1`, `@e2`)
@@ -28,6 +62,39 @@ browser: fill @e2 "password123"
 browser: click @e3
 browser: wait --load networkidle
 browser: snapshot -i
+```
+
+## DICloak Workflow
+
+When DICloak is required, use this exact shape:
+
+1. **Inspect available profiles**
+   - `browser: dicloak list_profiles`
+2. **Open the chosen profile**
+   - `browser: dicloak open_profile <profile_id>`
+3. **Run ordinary browser commands in the same session**
+   - `browser: open https://target.site`
+   - `browser: snapshot -i`
+   - `browser: click @e1`
+4. **Close the profile when done**
+   - `browser: dicloak close_profile`
+
+Important:
+
+- After `dicloak open_profile`, continue with **normal** browser commands. Do not prefix every command with `dicloak`.
+- Keep the work in the same agent session so the leased profile stays attached to the same browser session name.
+- Always close the leased profile when the task is done unless the user explicitly wants it kept open.
+
+Example:
+
+```text
+browser: dicloak list_profiles
+browser: dicloak open_profile 123456
+browser: open https://app.example.com/dashboard
+browser: wait --load networkidle
+browser: snapshot -i
+browser: click @e4
+browser: dicloak close_profile 123456
 ```
 
 ## Command Chaining
@@ -101,6 +168,8 @@ browser: wait --load networkidle
 
 ### Authentication with State Persistence
 
+For ordinary browser state files:
+
 ```
 browser: open https://app.example.com/login
 browser: snapshot -i
@@ -114,6 +183,8 @@ browser: state save auth.json
 browser: state load auth.json
 browser: open https://app.example.com/dashboard
 ```
+
+If the task instead requires an existing DICloak profile, prefer DICloak over browser `state save/load`.
 
 ### Data Extraction
 
@@ -166,6 +237,24 @@ browser: click @e1        # Use new refs
 - **Content boundaries**: Enabled by default, wraps page output in markers to prevent prompt injection
 - **Output limits**: Configure `tools.browser.max_output` to prevent context flooding
 - **Default file paths**: Relative files used by `state save/load`, screenshots, and PDFs resolve from the current workspace by default.
+- **DICloak lease hygiene**: Open a profile only when needed, keep work in one session, and close it afterwards.
+
+## DICloak Commands
+
+Supported DICloak browser commands:
+
+```text
+dicloak list_profiles
+dicloak open_profile <profile_id>
+dicloak close_profile [profile_id]
+```
+
+Rules:
+
+- `list_profiles` is read-only and safe as the first step.
+- `open_profile` is stateful: it leases a profile and connects `agent-browser` to the returned debug port.
+- `close_profile` releases the lease for the current session. If no explicit `profile_id` is passed, it closes the currently leased profile for that session.
+- If `open_profile` fails with a kernel/browser runtime error, stop and report the concrete DICloak error instead of retrying blindly.
 
 ## Configuration
 
