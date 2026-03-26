@@ -8,6 +8,7 @@ Run: pytest tests/test_behaviors.py -v
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -1152,6 +1153,41 @@ class TestWebUIRoutes:
             assert data['currentMeta']['profile'] == 'standard_chat'
         finally:
             apply_runtime_model_policy(None)
+
+    @pytest.mark.asyncio
+    async def test_models_archives_old_webui_default_when_provider_family_drifts(self, make_agent_loop, monkeypatch, tmp_path: Path):
+        from starlette.testclient import TestClient
+
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop(model='gpt-5.4')
+        fake_config_path = tmp_path / 'config.json'
+        fake_config_path.write_text(json.dumps({
+            'agents': {
+                'defaults': {
+                    'model': 'gpt-5.4',
+                },
+            },
+        }), encoding='utf-8')
+        monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+        existing = loop.sessions.get_or_create('webui:default')
+        existing.messages.append({'role': 'user', 'content': 'hello'})
+        existing.metadata['current_model'] = 'claude-sonnet-4-6'
+        loop.sessions.save(existing)
+
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.get('/api/models')
+        assert resp.status_code == 200
+
+        fresh_default = loop.sessions.get_or_create('webui:default')
+        assert fresh_default.messages == []
+        assert fresh_default.metadata.get('current_model') == 'gpt-5.4'
+
+        archived = [item for item in loop.sessions.list_sessions() if item['key'].startswith('webui:default:')]
+        assert len(archived) == 1
 
     @pytest.mark.asyncio
     async def test_chat_stream_returns_sse(self, make_agent_loop):

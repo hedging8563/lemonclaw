@@ -344,6 +344,48 @@ def get_webui_routes(
         session.metadata["title"] = _extract_session_title(first_message)
         session_manager.save(session)
 
+    def _configured_default_model() -> str:
+        current = getattr(agent_loop, "model", "")
+        try:
+            from lemonclaw.config.loader import get_config_path
+            cfg_path = get_config_path()
+            if cfg_path.exists():
+                import json as _json_mod
+                with open(cfg_path, encoding="utf-8") as f:
+                    raw = _json_mod.load(f)
+                configured = raw.get("agents", {}).get("defaults", {}).get("model", "")
+                if configured:
+                    current = configured
+        except Exception:
+            logger.debug("Failed to read configured default model from config.json")
+        return resolve_model_id(str(current or "")) or str(current or "")
+
+    def _ensure_webui_default_session_alignment() -> None:
+        default_model = _configured_default_model()
+        if not default_model:
+            return
+
+        default_key = "webui:default"
+        session = session_manager._load(default_key)
+        if session is None:
+            fresh = session_manager.get_or_create(default_key)
+            if fresh.metadata.get("current_model") != default_model:
+                fresh.metadata["current_model"] = default_model
+                session_manager.save(fresh)
+            return
+
+        current_model = resolve_model_id(session.metadata.get("current_model") or getattr(agent_loop, "model", "")) or session.metadata.get("current_model") or getattr(agent_loop, "model", "")
+        if session.messages and current_model and provider_family_for_model(current_model) != provider_family_for_model(default_model):
+            if session_manager.archive_session(default_key):
+                fresh = session_manager.get_or_create(default_key)
+                fresh.metadata["current_model"] = default_model
+                session_manager.save(fresh)
+            return
+
+        if not session.messages and session.metadata.get("current_model") != default_model:
+            session.metadata["current_model"] = default_model
+            session_manager.save(session)
+
     # ── POST /api/chat/stream — SSE streaming ────────────────────────────
 
     # 7.1: Temp directory for uploaded files
@@ -636,6 +678,7 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
+        _ensure_webui_default_session_alignment()
         sessions = session_manager.list_sessions()
         # Filter to webui sessions only (model already included from list_sessions)
         webui_sessions = [s for s in sessions if s.get("key", "").startswith("webui:")]
@@ -702,6 +745,7 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
+        _ensure_webui_default_session_alignment()
         models = [
             {"id": m.id, "label": m.label, "tier": m.tier, "description": m.description, **get_model_runtime_meta(m.id, scene="chat")}
             for m in MODEL_CATALOG
