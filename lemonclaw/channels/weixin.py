@@ -148,7 +148,12 @@ class WeixinChannel(BaseChannel):
                 source="bridge.weixin",
                 kind="message.dm",
                 payload_summary=content[:200],
-                session_key=build_channel_session_key(self.name, peer_id, account_id=account_id),
+                session_key=build_channel_session_key(
+                    self.name,
+                    peer_id,
+                    account_id=account_id,
+                    preserve_empty_account_slot=True,
+                ),
                 channel=self.name,
                 chat_id=chat_id,
                 metadata={
@@ -173,5 +178,10 @@ class WeixinChannel(BaseChannel):
                 "timestamp": event.get("timestamp"),
                 "item_types": ((event.get("metadata") or {}) if isinstance(event.get("metadata"), dict) else {}).get("itemTypes") or [],
             },
-            session_key=build_channel_session_key(self.name, peer_id, account_id=account_id),
+            session_key=build_channel_session_key(
+                self.name,
+                peer_id,
+                account_id=account_id,
+                preserve_empty_account_slot=True,
+            ),
         )

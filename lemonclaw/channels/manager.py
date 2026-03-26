@@ -20,6 +20,20 @@ if TYPE_CHECKING:
     from lemonclaw.bus.activity import ActivityBus
 
 
+_CHANNEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "telegram": ("token",),
+    "discord": ("token",),
+    "whatsapp": ("bridge_url",),
+    "feishu": ("app_id", "app_secret"),
+    "dingtalk": ("client_id", "client_secret"),
+    "slack": ("bot_token", "app_token"),
+    "qq": ("app_id", "secret"),
+    "matrix": ("access_token", "user_id"),
+    "mochat": ("claw_token",),
+    "weixin": ("bridge_token",),
+}
+
+
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
@@ -74,37 +88,13 @@ class ChannelManager:
             missing = [field for field in fields if not getattr(cfg, field, None)]
             return ", ".join(missing)
 
-        if channel_name == "telegram":
-            missing = _missing("token")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "discord":
-            missing = _missing("token")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "feishu":
-            missing = _missing("app_id", "app_secret")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "dingtalk":
-            missing = _missing("client_id", "client_secret")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "slack":
-            missing = _missing("bot_token", "app_token")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "qq":
-            missing = _missing("app_id", "secret")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "matrix":
-            missing = _missing("access_token", "user_id")
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "mochat":
-            missing = _missing("claw_token")
+        if channel_name in _CHANNEL_REQUIRED_FIELDS:
+            missing = _missing(*_CHANNEL_REQUIRED_FIELDS[channel_name])
             return f"missing config: {missing}" if missing else ""
         if channel_name == "wecom":
             missing = _missing("corp_id", "secret", "token", "encoding_aes_key")
             if not getattr(cfg, "agent_id", 0):
                 missing = f"{missing}, agent_id" if missing else "agent_id"
-            return f"missing config: {missing}" if missing else ""
-        if channel_name == "weixin":
-            missing = _missing("bridge_token")
             return f"missing config: {missing}" if missing else ""
         if channel_name == "email":
             missing = _missing("consent_granted", "imap_host", "imap_username", "imap_password")
@@ -159,16 +149,19 @@ class ChannelManager:
                     logger.warning("Telegram channel not available: {}", e)
         # WhatsApp channel
         if self.config.channels.whatsapp.enabled:
-            try:
-                from lemonclaw.channels.whatsapp import WhatsAppChannel
-                self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["whatsapp"].update({"registered": True, "available": True})
-                logger.info("WhatsApp channel enabled")
-            except ImportError as e:
-                self._channel_status["whatsapp"].update({"available": False, "error": str(e)})
-                logger.warning("WhatsApp channel not available: {}", e)
+            if self._channel_status["whatsapp"]["error"]:
+                logger.warning("WhatsApp channel not available: {}", self._channel_status["whatsapp"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.whatsapp import WhatsAppChannel
+                    self.channels["whatsapp"] = WhatsAppChannel(
+                        self.config.channels.whatsapp, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["whatsapp"].update({"registered": True, "available": True})
+                    logger.info("WhatsApp channel enabled")
+                except ImportError as e:
+                    self._channel_status["whatsapp"].update({"available": False, "error": str(e)})
+                    logger.warning("WhatsApp channel not available: {}", e)
 
         # Discord channel
         if self.config.channels.discord.enabled:

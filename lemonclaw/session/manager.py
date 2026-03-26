@@ -223,6 +223,21 @@ class SessionManager:
             self._evict_cache()
         return session
 
+    def get(self, key: str) -> Session | None:
+        if key in self._cache:
+            self._touch_cache(key)
+            return self._cache[key]
+
+        session = self._load(key)
+        if session is None:
+            return None
+
+        self._cache[key] = session
+        self._touch_cache(key)
+        if len(self._cache) > self._MAX_CACHED_SESSIONS:
+            self._evict_cache()
+        return session
+
     def _load(self, key: str) -> Session | None:
         path = self._get_session_path(key)
         if not path.exists():

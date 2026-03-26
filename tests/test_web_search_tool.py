@@ -3,13 +3,25 @@ from lemonclaw.agent.tools.web import WebSearchTool
 
 
 class _FakeProvider:
-    def __init__(self, name: str, results: list[SearchResult] | None = None, error: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        results: list[SearchResult] | None = None,
+        error: str | None = None,
+        warning: str | None = None,
+    ) -> None:
         self.name = name
         self._results = results or []
         self._error = error
+        self._warning = warning
 
     async def search(self, query: str, count: int) -> SearchResponse:
-        return SearchResponse(provider=self.name, results=self._results[:count], error=self._error)
+        return SearchResponse(
+            provider=self.name,
+            results=self._results[:count],
+            error=self._error,
+            warning=self._warning,
+        )
 
 
 async def test_web_search_tool_includes_source_attribution() -> None:
@@ -46,3 +58,15 @@ async def test_web_search_tool_reports_provider_chain_errors() -> None:
     assert "Search error:" in result
     assert "brave: quota exceeded" in result
     assert "duckduckgo: network down" in result
+
+
+async def test_web_search_tool_surfaces_provider_warnings_when_no_results() -> None:
+    tool = WebSearchTool(providers=[
+        _FakeProvider("duckduckgo", warning="parser found no result markup"),
+    ])
+
+    result = await tool.execute("broken html")
+
+    assert "No results for: broken html" in result
+    assert "Warnings:" in result
+    assert "duckduckgo: parser found no result markup" in result

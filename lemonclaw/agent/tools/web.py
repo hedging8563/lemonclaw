@@ -134,6 +134,7 @@ class WebSearchTool(Tool):
         n = min(max(count or self.max_results, 1), 10)
         providers = self._providers or self._default_providers()
         failures: list[str] = []
+        warnings: list[str] = []
 
         for provider in providers:
             result = await provider.search(query, n)
@@ -141,9 +142,17 @@ class WebSearchTool(Tool):
                 return self._format_results(query, result)
             if result.error:
                 failures.append(f"{provider.name}: {result.error}")
+            elif result.warning:
+                warnings.append(f"{provider.name}: {result.warning}")
 
         if failures:
             return f"Search error: {'; '.join(failures)}"
+        if warnings:
+            return (
+                f"No results for: {query}\n"
+                f"Warnings: {'; '.join(warnings)}\n"
+                f"Provider chain: {', '.join(provider.name for provider in providers) or 'none'}"
+            )
         provider_names = ", ".join(provider.name for provider in providers) or "none"
         return f"No results for: {query}\nProvider chain: {provider_names}"
 

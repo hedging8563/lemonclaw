@@ -8,6 +8,7 @@ def build_channel_session_key(
     account_id: str | None = None,
     thread_id: str | int | None = None,
     topic_id: str | int | None = None,
+    preserve_empty_account_slot: bool = False,
 ) -> str:
     """Build a stable session key with optional account/thread/topic dimensions.
 
@@ -21,11 +22,14 @@ def build_channel_session_key(
     """
 
     parts: list[str] = [str(channel)]
-    if account_id:
+    if preserve_empty_account_slot:
+        if account_id is not None:
+            parts.append(str(account_id))
+    elif account_id:
         parts.append(str(account_id))
     parts.append(str(chat_id))
-    if thread_id is not None and str(thread_id):
+    if thread_id is not None and thread_id != "":
         parts.append(str(thread_id))
-    elif topic_id is not None and str(topic_id):
+    elif topic_id is not None and topic_id != "":
         parts.append(str(topic_id))
     return ":".join(parts)

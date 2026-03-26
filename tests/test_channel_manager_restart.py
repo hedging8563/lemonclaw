@@ -134,6 +134,21 @@ def test_channel_manager_enabled_but_incomplete_channel_is_blocked():
     assert "missing config: token" in status["telegram"]["error"]
 
 
+def test_channel_manager_enabled_but_incomplete_whatsapp_is_blocked():
+    config = Config()
+    config.channels.whatsapp.enabled = True
+    config.channels.whatsapp.bridge_url = ""
+
+    manager = ChannelManager(config, MessageBus())
+    status = manager.get_channel_status()
+
+    assert "whatsapp" not in manager.channels
+    assert status["whatsapp"]["configured_enabled"] is True
+    assert status["whatsapp"]["configured_complete"] is False
+    assert status["whatsapp"]["available"] is False
+    assert "missing config: bridge_url" in status["whatsapp"]["error"]
+
+
 @pytest.mark.asyncio
 async def test_channel_manager_ensure_channel_enables_auto_pairing() -> None:
     config = Config()

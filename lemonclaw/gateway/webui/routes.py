@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from starlette.requests import Request
@@ -344,7 +344,16 @@ def get_webui_routes(
         session.metadata["title"] = _extract_session_title(first_message)
         session_manager.save(session)
 
+    _DEFAULT_MODEL_CACHE_TTL_S = 5.0
+    _DEFAULT_SESSION_ALIGNMENT_TTL_S = 5.0
+    _default_model_cache: dict[str, Any] = {"value": "", "expires_at": 0.0}
+    _default_session_alignment_cache: dict[str, float] = {"expires_at": 0.0}
+
     def _configured_default_model() -> str:
+        now = time.monotonic()
+        if now < float(_default_model_cache["expires_at"]):
+            return str(_default_model_cache["value"] or "")
+
         current = getattr(agent_loop, "model", "")
         try:
             from lemonclaw.config.loader import get_config_path
@@ -358,15 +367,29 @@ def get_webui_routes(
                     current = configured
         except Exception:
             logger.debug("Failed to read configured default model from config.json")
-        return resolve_model_id(str(current or "")) or str(current or "")
+        resolved = resolve_model_id(str(current or "")) or str(current or "")
+        _default_model_cache["value"] = resolved
+        _default_model_cache["expires_at"] = now + _DEFAULT_MODEL_CACHE_TTL_S
+        return resolved
+
+    def _resolve_session_current_model(session) -> str:
+        configured = str(session.metadata.get("current_model") or "")
+        runtime_default = str(getattr(agent_loop, "model", "") or "")
+        resolved = resolve_model_id(configured or runtime_default)
+        return resolved or configured or runtime_default
 
     def _ensure_webui_default_session_alignment() -> None:
+        now = time.monotonic()
+        if now < float(_default_session_alignment_cache["expires_at"]):
+            return
+        _default_session_alignment_cache["expires_at"] = now + _DEFAULT_SESSION_ALIGNMENT_TTL_S
+
         default_model = _configured_default_model()
         if not default_model:
             return
 
         default_key = "webui:default"
-        session = session_manager._load(default_key)
+        session = session_manager.get(default_key)
         if session is None:
             fresh = session_manager.get_or_create(default_key)
             if fresh.metadata.get("current_model") != default_model:
@@ -374,7 +397,7 @@ def get_webui_routes(
                 session_manager.save(fresh)
             return
 
-        current_model = resolve_model_id(session.metadata.get("current_model") or getattr(agent_loop, "model", "")) or session.metadata.get("current_model") or getattr(agent_loop, "model", "")
+        current_model = _resolve_session_current_model(session)
         if session.messages and current_model and provider_family_for_model(current_model) != provider_family_for_model(default_model):
             if session_manager.archive_session(default_key):
                 fresh = session_manager.get_or_create(default_key)
@@ -420,7 +443,7 @@ def get_webui_routes(
             return True
         if not session_manager:
             return False
-        session = session_manager._load(session_key)
+        session = session_manager.get(session_key)
         if not session:
             return False
         for msg in session.messages:
@@ -782,7 +805,7 @@ def get_webui_routes(
         if not key.startswith("webui:"):
             return _json({"error": "Forbidden"}, 403)
 
-        session = session_manager._load(key)
+        session = session_manager.get(key)
         if not session:
             resp = _json({"messages": []})
             _maybe_refresh_cookie(request, resp)
@@ -806,7 +829,7 @@ def get_webui_routes(
         if not key.startswith("webui:"):
             return _json({"error": "Forbidden"}, 403)
 
-        session = session_manager._load(key)
+        session = session_manager.get(key)
         if not session:
             return _json({"error": "Session not found"}, 404)
 
@@ -884,7 +907,7 @@ def get_webui_routes(
         last_version = -1
         try:
             while True:
-                session = session_manager._load(session_key)
+                session = session_manager.get(session_key)
                 current_version = session.version if session else -1
                 if current_version != last_version:
                     visible = _visible_ui_messages(session, session_key=session_key) if session else []
@@ -1564,7 +1587,7 @@ def get_webui_routes(
         if session_key and usage_tracker:
             if not session_key.startswith("webui:"):
                 session_key = f"webui:{session_key}"
-            session = session_manager._load(session_key)
+            session = session_manager.get(session_key)
             if session:
                 data["session_usage"] = usage_tracker.get_session_summary(session.metadata)
 

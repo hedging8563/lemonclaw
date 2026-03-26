@@ -31,6 +31,16 @@ class SearchResponse:
     provider: str
     results: list[SearchResult]
     error: str | None = None
+    warning: str | None = None
+
+
+def _looks_like_ddg_no_results(body: str) -> bool:
+    lower = body.lower()
+    return (
+        "no results found" in lower
+        or "no results." in lower
+        or "did not match any documents" in lower
+    )
 
 
 class SearchProvider(Protocol):
@@ -100,6 +110,10 @@ class DuckDuckGoSearchProvider:
                 if len(results) >= count:
                     break
 
-            return SearchResponse(provider=self.name, results=results)
+            warning = None
+            if not results and not _looks_like_ddg_no_results(response.text):
+                warning = "DuckDuckGo HTML returned 200 but parser found no results; result markup may have changed."
+
+            return SearchResponse(provider=self.name, results=results, warning=warning)
         except Exception as exc:
             return SearchResponse(provider=self.name, results=[], error=str(exc))
