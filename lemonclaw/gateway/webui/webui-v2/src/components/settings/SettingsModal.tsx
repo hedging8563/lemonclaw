@@ -16,7 +16,7 @@ type DraftData = Record<string, any>;
 type ToolStatusMap = Record<string, { installed: boolean; binary?: string }>;
 type ChannelRuntimeMap = Record<string, { effective_dm_policy?: string; source?: string; owner?: string | null; approved_count?: number; pending_count?: number; approved_preview?: string[]; raw_dm_policy?: string | null; raw_allow_from_count?: number }>;
 type GroupRuntimeMap = Record<string, { effective_group_policy?: string; effective_group_require_mention?: boolean; group_allow_from_count?: number }>;
-type ChannelStatusMap = Record<string, { configured_enabled?: boolean; registered?: boolean; running?: boolean; available?: boolean; error?: string }>;
+type ChannelStatusMap = Record<string, { configured_enabled?: boolean; configured_complete?: boolean; registered?: boolean; running?: boolean; available?: boolean; error?: string }>;
 
 const MOBILE_BREAKPOINT = 768;
 const TABS = [
@@ -817,6 +817,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const renderChannelHealthNotice = (channelKey: string) => {
     const status = channelStatus?.[channelKey];
     if (!status || !status.configured_enabled) return null;
+    if (status.configured_complete === false) {
+      const detail = status.error ? ` · ${status.error}` : '';
+      return renderNotice(`${t('channel_health_incomplete')}${detail}`, 'warning');
+    }
     if (status.available === false) {
       const detail = status.error ? ` · ${status.error}` : '';
       return renderNotice(`${t('channel_health_unavailable')}${detail}`, 'warning');
