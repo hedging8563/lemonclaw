@@ -12,6 +12,12 @@ from urllib.parse import urlparse
 import httpx
 
 from lemonclaw.agent.tools.base import Tool
+from lemonclaw.agent.tools.search_providers import (
+    BraveSearchProvider,
+    DuckDuckGoSearchProvider,
+    SearchProvider,
+    SearchResponse,
+)
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -96,7 +102,7 @@ def _validate_url(url: str) -> tuple[bool, str, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web through pluggable search providers."""
     
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -109,9 +115,15 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
     
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+        providers: list[SearchProvider] | None = None,
+    ):
         self._init_api_key = api_key
         self.max_results = max_results
+        self._providers = providers
 
     @property
     def api_key(self) -> str:
@@ -120,76 +132,36 @@ class WebSearchTool(Tool):
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         n = min(max(count or self.max_results, 1), 10)
+        providers = self._providers or self._default_providers()
+        failures: list[str] = []
 
-        # Brave Search (preferred, requires API key)
+        for provider in providers:
+            result = await provider.search(query, n)
+            if result.results:
+                return self._format_results(query, result)
+            if result.error:
+                failures.append(f"{provider.name}: {result.error}")
+
+        if failures:
+            return f"Search error: {'; '.join(failures)}"
+        provider_names = ", ".join(provider.name for provider in providers) or "none"
+        return f"No results for: {query}\nProvider chain: {provider_names}"
+
+    def _default_providers(self) -> list[SearchProvider]:
+        providers: list[SearchProvider] = []
         if self.api_key:
-            return await self._brave_search(query, n)
+            providers.append(BraveSearchProvider(self.api_key))
+        providers.append(DuckDuckGoSearchProvider())
+        return providers
 
-        # Fallback: DuckDuckGo HTML scraping (no API key needed)
-        return await self._ddg_search(query, n)
-
-    async def _brave_search(self, query: str, n: int) -> str:
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-
-            results = r.json().get("web", {}).get("results", [])
-            if not results:
-                return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def _ddg_search(self, query: str, n: int) -> str:
-        """DuckDuckGo HTML search fallback (no API key required)."""
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, max_redirects=3) as client:
-                r = await client.get(
-                    "https://html.duckduckgo.com/html/",
-                    params={"q": query},
-                    headers={"User-Agent": USER_AGENT},
-                    timeout=10.0,
-                )
-                r.raise_for_status()
-
-            # Parse results from HTML
-            results = []
-            for m in re.finditer(
-                r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>'
-                r'[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)</a>',
-                r.text,
-            ):
-                url = m.group(1)
-                title = _strip_tags(m.group(2))
-                snippet = _strip_tags(m.group(3))
-                if title and url:
-                    results.append({"title": title, "url": url, "description": snippet})
-                if len(results) >= n:
-                    break
-
-            if not results:
-                return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item['title']}\n   {item['url']}")
-                if item.get("description"):
-                    lines.append(f"   {item['description']}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Search error: {e}"
+    @staticmethod
+    def _format_results(query: str, response: SearchResponse) -> str:
+        lines = [f"Results for: {query}", f"Provider: {response.provider}", ""]
+        for i, item in enumerate(response.results, 1):
+            lines.append(f"{i}. {item.title}\n   {item.url}")
+            if item.description:
+                lines.append(f"   {item.description}")
+        return "\n".join(lines)
 
 
 class WebFetchTool(Tool):
