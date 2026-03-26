@@ -90,3 +90,16 @@ async def test_lemondata_response_provider_skips_on_chunk_when_tool_calls_presen
     assert response.content == "I will first check the file."
     assert response.tool_calls[0].name == "read_file"
     on_chunk.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lemondata_response_provider_surfaces_balance_topup_guidance() -> None:
+    provider = LemonDataResponsesProvider(api_key="sk-test", api_base="https://api.lemondata.cc/v1", default_model="gpt-5.4")
+    provider._client.responses.create = AsyncMock(side_effect=Exception("Insufficient organization balance"))
+
+    response = await provider.chat(
+        messages=[{"role": "user", "content": "hello"}],
+    )
+
+    assert response.finish_reason == "error"
+    assert response.content == "API balance insufficient. Please top up at https://lemondata.cc/dashboard/billing or switch to a cheaper model."

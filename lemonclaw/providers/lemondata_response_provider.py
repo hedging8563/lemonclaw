@@ -8,6 +8,7 @@ import json_repair
 from openai import AsyncOpenAI
 
 from lemonclaw.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from lemonclaw.providers.litellm_provider import _is_balance_error, _sanitize_error
 from lemonclaw.providers.openai_codex_provider import _convert_messages, _convert_tools
 
 
@@ -67,7 +68,12 @@ class LemonDataResponsesProvider(LLMProvider):
                 await on_chunk(parsed.content, first=True)
             return parsed
         except Exception as exc:
-            return LLMResponse(content=f"Error: {exc}", finish_reason="error")
+            if _is_balance_error(exc):
+                return LLMResponse(
+                    content="API balance insufficient. Please top up at https://lemondata.cc/dashboard/billing or switch to a cheaper model.",
+                    finish_reason="error",
+                )
+            return LLMResponse(content=f"Error: {_sanitize_error(exc)}", finish_reason="error")
 
     def get_default_model(self) -> str:
         return self.default_model
