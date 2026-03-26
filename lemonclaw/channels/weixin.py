@@ -12,6 +12,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.channels.weixin_bridge_runtime import (
     WeixinBridgeError,
     ensure_weixin_bridge_running,
@@ -147,7 +148,7 @@ class WeixinChannel(BaseChannel):
                 source="bridge.weixin",
                 kind="message.dm",
                 payload_summary=content[:200],
-                session_key=f"{self.name}:{account_id}:{peer_id}",
+                session_key=build_channel_session_key(self.name, peer_id, account_id=account_id),
                 channel=self.name,
                 chat_id=chat_id,
                 metadata={
@@ -172,5 +173,5 @@ class WeixinChannel(BaseChannel):
                 "timestamp": event.get("timestamp"),
                 "item_types": ((event.get("metadata") or {}) if isinstance(event.get("metadata"), dict) else {}).get("itemTypes") or [],
             },
-            session_key=f"{self.name}:{account_id}:{peer_id}",
+            session_key=build_channel_session_key(self.name, peer_id, account_id=account_id),
         )

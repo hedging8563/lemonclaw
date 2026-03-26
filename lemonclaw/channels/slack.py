@@ -18,6 +18,7 @@ from slackify_markdown import slackify_markdown
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.config.schema import SlackConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
@@ -208,7 +209,7 @@ class SlackChannel(BaseChannel):
             logger.debug("Slack reactions_add failed: {}", e)
 
         # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        session_key = build_channel_session_key("slack", chat_id, thread_id=thread_ts) if thread_ts and channel_type != "im" else None
         metadata = {
             "slack": {
                 "event": event,
@@ -221,7 +222,7 @@ class SlackChannel(BaseChannel):
                 source="socket.slack",
                 kind=f"{event_type}.{channel_type or 'unknown'}",
                 payload_summary=content[:200],
-                session_key=session_key or f"slack:{chat_id}",
+                session_key=session_key or build_channel_session_key("slack", chat_id),
                 channel=self.name,
                 chat_id=chat_id,
                 metadata={"ts": event.get("ts"), "thread_ts": thread_ts},

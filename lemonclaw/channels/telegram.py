@@ -28,6 +28,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.channels.utils import split_message as _split_message_impl
 from lemonclaw.config.schema import TelegramConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
@@ -690,7 +691,7 @@ class TelegramChannel(BaseChannel):
 
         thread_id = getattr(message, "message_thread_id", None) if is_group else None
         str_chat_id = str(message.chat_id)
-        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
+        session_key = build_channel_session_key("telegram", str_chat_id, thread_id=thread_id) if thread_id else None
         metadata = {
             "message_id": message.message_id,
             "is_group": is_group,
@@ -768,7 +769,7 @@ class TelegramChannel(BaseChannel):
 
             is_group = query.message.chat.type != "private"
             thread_id = getattr(query.message, "message_thread_id", None) if is_group else None
-            session_key = f"telegram:{chat_id}:{thread_id}" if thread_id else None
+            session_key = build_channel_session_key("telegram", chat_id, thread_id=thread_id) if thread_id else None
 
             metadata = {
                 "user_id": update.effective_user.id,
@@ -983,7 +984,7 @@ class TelegramChannel(BaseChannel):
         str_chat_id = str(chat_id)
 
         # Forum topic support: build topic-scoped session key and metadata
-        session_key = f"telegram:{str_chat_id}:{thread_id}" if thread_id else None
+        session_key = build_channel_session_key("telegram", str_chat_id, thread_id=thread_id) if thread_id else None
         base_metadata = {
             "message_id": message.message_id,
             "is_group": is_group,
@@ -995,7 +996,7 @@ class TelegramChannel(BaseChannel):
                 source="poll.telegram",
                 kind=trigger_kind,
                 payload_summary=content[:200],
-                session_key=session_key or f"telegram:{str_chat_id}",
+                session_key=session_key or build_channel_session_key("telegram", str_chat_id),
                 channel=self.name,
                 chat_id=str_chat_id,
                 metadata={

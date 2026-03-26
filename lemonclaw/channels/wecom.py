@@ -27,6 +27,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.config.schema import WeComConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
@@ -371,7 +372,7 @@ class WeComChannel(BaseChannel):
                     source="webhook.wecom",
                     kind=f"wecom.event.{normalized_event}",
                     payload_summary=f"[event] {event_type or 'event'}",
-                    session_key=f"wecom:{from_user}",
+                    session_key=build_channel_session_key("wecom", from_user),
                     channel="wecom",
                     chat_id=from_user,
                     status="completed",
@@ -397,7 +398,7 @@ class WeComChannel(BaseChannel):
                 source="webhook.wecom",
                 kind=f"wecom.{msg_type or 'message'}",
                 payload_summary=content[:500] if content else f"[{msg_type}]",
-                session_key=f"wecom:{from_user}",
+                session_key=build_channel_session_key("wecom", from_user),
                 channel="wecom",
                 chat_id=from_user,
                 metadata={
