@@ -13,6 +13,7 @@ from typing import Literal
 AttachmentIngress = Literal["full", "best_effort", "marker", "drop"]
 MediaDelivery = Literal["local_paths", "mixed", "marker_only", "none"]
 ChannelTransport = Literal["native", "bridge"]
+DeliveryMode = Literal["streaming", "pseudo_streaming", "final_only", "kickoff_progress_final"]
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class ChannelCapability:
     transport: ChannelTransport
     attachment_only_ingress: AttachmentIngress
     media_delivery: MediaDelivery
+    delivery_mode: DeliveryMode
     notes: str = ""
 
 
@@ -48,6 +50,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Downloads photo/audio/document media and forwards local paths.",
     ),
     "whatsapp": ChannelCapability(
@@ -55,6 +58,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="bridge",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Bridge downloads inbound image/video/document/audio before forwarding.",
     ),
     "discord": ChannelCapability(
@@ -62,6 +66,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Downloads inbound attachments from Discord CDN and forwards local paths.",
     ),
     "feishu": ChannelCapability(
@@ -69,6 +74,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Downloads image/audio/file/media attachments and keeps attachment-only messages.",
     ),
     "mochat": ChannelCapability(
@@ -76,6 +82,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="bridge",
         attachment_only_ingress="best_effort",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Downloads attachment URLs when present in content/meta payloads; payload shape is bridge-dependent.",
     ),
     "dingtalk": ChannelCapability(
@@ -83,6 +90,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Uses robot messageFiles download flow to fetch inbound file/image payloads.",
     ),
     "email": ChannelCapability(
@@ -90,6 +98,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Extracts MIME attachments from inbound email and forwards local paths.",
     ),
     "slack": ChannelCapability(
@@ -97,6 +106,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Preserves file_share events and downloads Slack attachments with bot auth.",
     ),
     "qq": ChannelCapability(
@@ -104,6 +114,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Downloads botpy attachments and keeps attachment-only QQ messages on the main runtime path.",
     ),
     "matrix": ChannelCapability(
@@ -111,6 +122,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
+        delivery_mode="final_only",
         notes="Handles media events directly and decrypts/downloads supported attachments.",
     ),
     "weixin": ChannelCapability(
@@ -118,6 +130,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="bridge",
         attachment_only_ingress="full",
         media_delivery="mixed",
+        delivery_mode="final_only",
         notes="Bridge handles QR login, text replies, and best-effort media download/upload with local paths for common media types.",
     ),
     "wecom": ChannelCapability(
@@ -125,6 +138,7 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="best_effort",
         media_delivery="mixed",
+        delivery_mode="final_only",
         notes="Downloads image media; voice/video/link/location remain marker/text-first.",
     ),
 }

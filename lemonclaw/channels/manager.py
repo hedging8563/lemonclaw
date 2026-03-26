@@ -133,6 +133,7 @@ class ChannelManager:
                 "transport": capability.transport,
                 "attachment_only_ingress": capability.attachment_only_ingress,
                 "media_delivery": capability.media_delivery,
+                "delivery_mode": capability.delivery_mode,
                 "media_notes": capability.notes,
             }
 
@@ -511,6 +512,18 @@ class ChannelManager:
         meta = msg.metadata or {}
         return bool(meta.get("_thinking"))
 
+    def _channel_allows_progress_delivery(self, channel_name: str, *, tool_hint: bool = False) -> bool:
+        if channel_name == "webui":
+            if tool_hint:
+                return bool(self.config.channels.send_tool_hints)
+            return bool(self.config.channels.send_progress)
+
+        try:
+            capability = get_channel_capability(channel_name)
+        except KeyError:
+            return False
+        return capability.delivery_mode != "final_only"
+
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
@@ -555,11 +568,10 @@ class ChannelManager:
                     # Never leak internal reasoning or raw transport chunks to end-user channels.
                     if self._is_internal_message(msg):
                         continue
-                    if msg.channel != "webui":
-                        continue
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                    if not self._channel_allows_progress_delivery(
+                        msg.channel,
+                        tool_hint=bool(msg.metadata.get("_tool_hint")),
+                    ):
                         continue
 
                 channel = self.channels.get(msg.channel)

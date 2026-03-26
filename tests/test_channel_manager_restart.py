@@ -117,6 +117,7 @@ def test_channel_manager_disabled_channels_start_unavailable():
     assert status["telegram"]["available"] is False
     assert status["telegram"]["attachment_only_ingress"] == "full"
     assert status["telegram"]["media_delivery"] == "local_paths"
+    assert status["telegram"]["delivery_mode"] == "final_only"
 
 
 def test_channel_manager_enabled_but_incomplete_channel_is_blocked():
