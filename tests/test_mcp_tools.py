@@ -485,3 +485,67 @@ async def test_probe_http_endpoint_uses_stream_without_reading_body(monkeypatch:
     assert result is None
     assert ('stream', 'GET', 'https://example.com/mcp') in events
     assert 'body_read' not in events
+
+
+@pytest.mark.asyncio
+async def test_mcp_wrapper_normalizes_allof_object_schema() -> None:
+    from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
+
+    class Session:
+        async def call_tool(self, name, arguments=None):
+            return SimpleNamespace(content=[])
+
+    async def _noop():
+        return None
+
+    schema = {
+        "allOf": [
+            {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+            {"type": "object", "properties": {"recursive": {"type": "boolean"}}, "additionalProperties": False},
+        ]
+    }
+    wrapper = MCPToolWrapper(
+        _MCPBinding(session=Session(), reconnect=_noop),
+        "filesystem",
+        SimpleNamespace(name="inspect", description="Inspect", inputSchema=schema),
+        tool_timeout=1,
+    )
+
+    assert wrapper.parameters["type"] == "object"
+    assert "path" in wrapper.parameters["properties"]
+    assert wrapper.parameters["additionalProperties"] is False
+    assert wrapper.validate_params({"path": "/tmp", "recursive": True}) == []
+    assert wrapper.validate_params({"path": "/tmp", "extra": "x"})
+
+
+@pytest.mark.asyncio
+async def test_mcp_wrapper_accepts_nullable_oneof_string_schema() -> None:
+    from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
+
+    class Session:
+        async def call_tool(self, name, arguments=None):
+            return SimpleNamespace(content=[])
+
+    async def _noop():
+        return None
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "cursor": {
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": ["null"]},
+                ]
+            }
+        },
+    }
+    wrapper = MCPToolWrapper(
+        _MCPBinding(session=Session(), reconnect=_noop),
+        "demo",
+        SimpleNamespace(name="paginate", description="Paginate", inputSchema=schema),
+        tool_timeout=1,
+    )
+
+    assert wrapper.validate_params({"cursor": "abc"}) == []
+    assert wrapper.validate_params({"cursor": None}) == []

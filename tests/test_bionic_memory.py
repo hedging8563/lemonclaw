@@ -476,6 +476,39 @@ async def test_context_builder_resolve_retrieval_context_includes_knowledge_hits
     assert meta["knowledge_hits"][0]["title"] == "Deploy Notes"
     assert meta["knowledge_hits"][0]["source"] == "manual://deploy-notes"
     assert "knowledge" in meta["hit_sources"]
+    assert meta["structured"]["retrieval_objects"]
+
+
+@pytest.mark.asyncio
+async def test_context_builder_resolve_retrieval_context_fails_soft_per_layer(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    ctx.memory.entities.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    await ctx.memory.procedural.add_rule("python 部署", "需要 venv", "先创建 venv", "部署踩坑")
+    ctx.memory.set_provider(AsyncMock())
+
+    async def _broken_hybrid(*args, **kwargs):
+        raise RuntimeError("hybrid down")
+
+    def _broken_knowledge(*args, **kwargs):
+        raise RuntimeError("knowledge down")
+
+    ctx.memory.trigger.hybrid_match_with_trace = _broken_hybrid  # type: ignore[method-assign]
+    ctx.knowledge.search = _broken_knowledge  # type: ignore[method-assign]
+
+    memory_ctx, rules_ctx, meta = await ctx.resolve_retrieval_context("python 部署到服务器")
+
+    assert "Python 3.13" in memory_ctx
+    assert "需要 venv" in rules_ctx
+    assert "hybrid_retrieval_error:RuntimeError" in meta["fallbacks"]
+    assert "knowledge_search_error:RuntimeError" in meta["fallbacks"]
+    assert meta["structured"]["fact_slots"][0]["name"] == "tech"
+    assert meta["structured"]["retrieval_objects"][0]["kind"] == "entity_card"
 
 
 # ── Core Promotion / Demotion ────────────────────────────────────────────────

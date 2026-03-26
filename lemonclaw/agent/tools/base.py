@@ -60,10 +60,47 @@ class Tool(ABC):
         return self._validate(params, {**schema, "type": "object"}, "")
 
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
-        t, label = schema.get("type"), path or "parameter"
+        label = path or "parameter"
+
+        if "const" in schema and val != schema["const"]:
+            return [f"{label} must equal {schema['const']!r}"]
+
+        if "allOf" in schema:
+            errors = []
+            for branch in schema.get("allOf", []):
+                errors.extend(self._validate(val, branch, path))
+            return errors
+
+        for combiner in ("anyOf", "oneOf"):
+            if combiner in schema:
+                branch_errors: list[list[str]] = []
+                matches = 0
+                for branch in schema.get(combiner, []):
+                    candidate_errors = self._validate(val, branch, path)
+                    branch_errors.append(candidate_errors)
+                    if not candidate_errors:
+                        matches += 1
+                if combiner == "anyOf" and matches >= 1:
+                    return []
+                if combiner == "oneOf" and matches == 1:
+                    return []
+                if branch_errors:
+                    return branch_errors[0]
+                return [f"{label} did not match {combiner} schema"]
+
+        t = schema.get("type")
+        if isinstance(t, list):
+            if val is None and "null" in t:
+                return []
+            non_null = [item for item in t if item != "null"]
+            if len(non_null) == 1:
+                t = non_null[0]
+            else:
+                return [f"{label} should be one of {t}"]
+
         if t in self._TYPE_MAP and not isinstance(val, self._TYPE_MAP[t]):
             return [f"{label} should be {t}"]
-        
+
         errors = []
         if "enum" in schema and val not in schema["enum"]:
             errors.append(f"{label} must be one of {schema['enum']}")
@@ -85,6 +122,12 @@ class Tool(ABC):
             for k, v in val.items():
                 if k in props:
                     errors.extend(self._validate(v, props[k], path + '.' + k if path else k))
+                else:
+                    additional = schema.get("additionalProperties", True)
+                    if additional is False:
+                        errors.append(f"unexpected parameter {path + '.' + k if path else k}")
+                    elif isinstance(additional, dict):
+                        errors.extend(self._validate(v, additional, path + '.' + k if path else k))
         if t == "array" and "items" in schema:
             for i, item in enumerate(val):
                 errors.extend(self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"))

@@ -174,6 +174,61 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             return {}
         return parse_soul_markdown(soul_path.read_text(encoding="utf-8"))
 
+    def _session_summary_snippet(self) -> str:
+        today = self.memory.today.read().strip()
+        if not today:
+            return ""
+        lines = [line.strip() for line in today.splitlines() if line.strip() and not line.startswith("#")]
+        return "\n".join(lines[:3])[:240]
+
+    @staticmethod
+    def _build_structured_retrieval_objects(
+        *,
+        cards: list[Any],
+        rules: list[dict[str, Any]],
+        knowledge_hits: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        fact_slots = [
+            {
+                "name": str(card.name or ""),
+                "type": str(card.meta.get("type", "") or ""),
+                "summary": str(card.body or "").strip()[:160],
+            }
+            for card in cards
+        ]
+        retrieval_objects = [
+            {
+                "kind": "entity_card",
+                "id": str(card.name or ""),
+                "title": str(card.name or ""),
+                "source": "memory.entities",
+            }
+            for card in cards
+        ]
+        retrieval_objects.extend(
+            {
+                "kind": "procedural_rule",
+                "id": str(rule.get("header") or rule.get("trigger") or ""),
+                "title": str(rule.get("trigger") or ""),
+                "source": str(rule.get("source") or "memory.rules"),
+            }
+            for rule in rules
+        )
+        retrieval_objects.extend(
+            {
+                "kind": "knowledge_hit",
+                "id": str(item.get("doc_id") or ""),
+                "title": str(item.get("title") or item.get("doc_id") or ""),
+                "source": str(item.get("source") or ""),
+            }
+            for item in knowledge_hits
+        )
+        return {
+            "session_summary": "",
+            "fact_slots": fact_slots,
+            "retrieval_objects": retrieval_objects,
+        }
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -261,11 +316,20 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         from lemonclaw.memory.trigger import MemoryTrigger
 
         started = time.perf_counter()
-        keyword_rules = self.memory.procedural.match_rules(current_message, max_rules=max_rules)
+        retrieval_fallbacks: list[str] = []
+        try:
+            keyword_rules = self.memory.procedural.match_rules(current_message, max_rules=max_rules)
+        except Exception as exc:
+            keyword_rules = []
+            retrieval_fallbacks.append(f"procedural_rules_error:{type(exc).__name__}")
         provider = self.memory._provider
 
         if provider is None:
-            cards = self.memory.trigger.match(current_message, max_cards=max_cards)
+            try:
+                cards = self.memory.trigger.match(current_message, max_cards=max_cards)
+            except Exception as exc:
+                cards = []
+                retrieval_fallbacks.append(f"memory_trigger_error:{type(exc).__name__}")
             rules, rule_sources = MemoryTrigger.merge_rule_matches(
                 preferred_rules=keyword_rules,
                 preferred_source="keyword",
@@ -273,20 +337,43 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             )
             trace = {
                 "strategy": "keyword",
-                "fallbacks": ["provider_unbound"],
+                "fallbacks": ["provider_unbound", *retrieval_fallbacks],
                 "card_sources": {card.name: "keyword" for card in cards},
                 "rule_sources": rule_sources,
             }
         else:
-            cards, rules, trace = await self.memory.trigger.hybrid_match_with_trace(
-                current_message,
-                provider,
-                max_cards=max_cards,
-                max_rules=max_rules,
-                keyword_rules=keyword_rules,
-            )
+            try:
+                cards, rules, trace = await self.memory.trigger.hybrid_match_with_trace(
+                    current_message,
+                    provider,
+                    max_cards=max_cards,
+                    max_rules=max_rules,
+                    keyword_rules=keyword_rules,
+                )
+            except Exception as exc:
+                retrieval_fallbacks.append(f"hybrid_retrieval_error:{type(exc).__name__}")
+                try:
+                    cards = self.memory.trigger.match(current_message, max_cards=max_cards)
+                except Exception as nested_exc:
+                    cards = []
+                    retrieval_fallbacks.append(f"memory_trigger_error:{type(nested_exc).__name__}")
+                rules, rule_sources = MemoryTrigger.merge_rule_matches(
+                    preferred_rules=keyword_rules,
+                    preferred_source="keyword",
+                    max_rules=max_rules,
+                )
+                trace = {
+                    "strategy": "keyword",
+                    "fallbacks": retrieval_fallbacks,
+                    "card_sources": {card.name: "keyword" for card in cards},
+                    "rule_sources": rule_sources,
+                }
 
-        knowledge_hits = self.knowledge.search(current_message, limit=3)
+        try:
+            knowledge_hits = self.knowledge.search(current_message, limit=3)
+        except Exception as exc:
+            knowledge_hits = []
+            retrieval_fallbacks.append(f"knowledge_search_error:{type(exc).__name__}")
         knowledge_ctx = KnowledgeStore.format_for_context(knowledge_hits)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -305,8 +392,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         meta = {
             "strategy": str(trace.get("strategy") or "keyword"),
             "latency_ms": elapsed_ms,
-            "fallback_count": len(trace.get("fallbacks") or []),
-            "fallbacks": list(trace.get("fallbacks") or []),
+            "fallback_count": len({*list(trace.get("fallbacks") or []), *retrieval_fallbacks}),
+            "fallbacks": list(dict.fromkeys([*list(trace.get("fallbacks") or []), *retrieval_fallbacks])),
             "card_count": len(cards),
             "rule_count": len(rules),
             "card_hits": [
@@ -347,6 +434,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "card_sources": dict(trace.get("card_sources") or {}),
             "rule_sources": dict(trace.get("rule_sources") or {}),
         }
+        meta["structured"] = self._build_structured_retrieval_objects(
+            cards=cards,
+            rules=rules,
+            knowledge_hits=knowledge_hits,
+        )
+        meta["structured"]["session_summary"] = self._session_summary_snippet()
         if knowledge_hits and "knowledge" not in meta["hit_sources"]:
             meta["hit_sources"] = sorted([*meta["hit_sources"], "knowledge"])
         return memory_ctx, rules_ctx, meta

@@ -13,6 +13,119 @@ from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.registry import ToolRegistry
 
 
+def _merge_object_schema_branches(branches: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[str]]:
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    warnings: list[str] = []
+    additional_properties: bool | dict[str, Any] = True
+
+    for branch in branches:
+        branch_type = branch.get("type")
+        if branch_type not in (None, "object"):
+            return None, ["allOf contains a non-object branch"]
+        branch_props = branch.get("properties", {})
+        if isinstance(branch_props, dict):
+            properties.update(branch_props)
+        required.extend(str(item) for item in branch.get("required", []) if item)
+        branch_additional = branch.get("additionalProperties", True)
+        if branch_additional is False:
+            additional_properties = False
+        elif isinstance(branch_additional, dict) and additional_properties is True:
+            additional_properties = branch_additional
+        elif isinstance(branch_additional, dict) and isinstance(additional_properties, dict):
+            warnings.append("allOf merged multiple additionalProperties schemas; keeping the first one")
+
+    normalized: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+    }
+    if required:
+        normalized["required"] = sorted(dict.fromkeys(required))
+    if additional_properties is not True:
+        normalized["additionalProperties"] = additional_properties
+    return normalized, warnings
+
+
+def _normalize_mcp_schema(
+    schema: Any,
+    *,
+    path: str = "input",
+    require_object: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
+    warnings: list[str] = []
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}, [f"{path} schema was not an object; falling back to empty object schema"]
+
+    normalized = dict(schema)
+    for combiner in ("oneOf", "anyOf"):
+        if isinstance(normalized.get(combiner), list):
+            branches = []
+            for index, branch in enumerate(normalized[combiner]):
+                next_branch, branch_warnings = _normalize_mcp_schema(
+                    branch,
+                    path=f"{path}.{combiner}[{index}]",
+                    require_object=False,
+                )
+                branches.append(next_branch)
+                warnings.extend(branch_warnings)
+            normalized[combiner] = branches
+
+    if isinstance(normalized.get("allOf"), list):
+        branches = []
+        for index, branch in enumerate(normalized["allOf"]):
+            next_branch, branch_warnings = _normalize_mcp_schema(
+                branch,
+                path=f"{path}.allOf[{index}]",
+                require_object=False,
+            )
+            branches.append(next_branch)
+            warnings.extend(branch_warnings)
+        merged, merge_warnings = _merge_object_schema_branches(branches)
+        if merged is not None:
+            normalized = {**normalized, **merged}
+            normalized.pop("allOf", None)
+            warnings.extend(merge_warnings)
+        else:
+            normalized["allOf"] = branches
+            warnings.extend(merge_warnings)
+
+    branch_type = normalized.get("type")
+    if branch_type is None and ("properties" in normalized or "required" in normalized):
+        normalized["type"] = "object"
+
+    if isinstance(branch_type, list) and "null" in branch_type:
+        normalized["type"] = branch_type
+
+    if isinstance(normalized.get("properties"), dict):
+        normalized["properties"] = {
+            key: _normalize_mcp_schema(value, path=f"{path}.properties.{key}", require_object=False)[0]
+            for key, value in normalized["properties"].items()
+        }
+
+    if isinstance(normalized.get("items"), dict):
+        normalized["items"] = _normalize_mcp_schema(
+            normalized["items"],
+            path=f"{path}.items",
+            require_object=False,
+        )[0]
+
+    if isinstance(normalized.get("additionalProperties"), dict):
+        normalized["additionalProperties"] = _normalize_mcp_schema(
+            normalized["additionalProperties"],
+            path=f"{path}.additionalProperties",
+            require_object=False,
+        )[0]
+
+    if require_object and normalized.get("type") != "object":
+        return {"type": "object", "properties": {}}, [
+            *warnings,
+            f"{path} schema is not an object schema; falling back to empty object schema",
+        ]
+    if normalized.get("type") == "object":
+        normalized.setdefault("properties", {})
+    return normalized, warnings
+
+
 @dataclass
 class _MCPBinding:
     session: Any
@@ -28,7 +141,14 @@ class MCPToolWrapper(Tool):
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
-        self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
+        self._parameters, warnings = _normalize_mcp_schema(
+            tool_def.inputSchema or {"type": "object", "properties": {}},
+            require_object=True,
+        )
+        self._schema_warnings = warnings
+        if warnings:
+            suffix = "; ".join(sorted(dict.fromkeys(warnings)))
+            self._description = f"{self._description}\n\nSchema compatibility notes: {suffix}"
         self._tool_timeout = tool_timeout
 
     @property
