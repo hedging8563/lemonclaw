@@ -515,7 +515,14 @@ class ChannelManager:
             capability = get_channel_capability(channel_name)
         except KeyError:
             return False
-        return capability.delivery_mode != "final_only"
+
+        if capability.delivery_mode == "final_only":
+            return False
+        if capability.delivery_mode == "kickoff_progress_final":
+            return not tool_hint
+        if capability.delivery_mode in ("streaming", "pseudo_streaming"):
+            return True
+        return False
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""

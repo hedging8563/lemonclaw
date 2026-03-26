@@ -98,6 +98,52 @@ async def test_manager_suppresses_progress_delivery_to_im_channels() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manager_allows_kickoff_progress_delivery_for_matrix() -> None:
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    fake_channel = SimpleNamespace(send=AsyncMock())
+    manager.channels["matrix"] = fake_channel
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:example.com",
+            content="working...",
+            metadata={"_progress": True},
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    fake_channel.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_manager_still_suppresses_tool_hints_for_kickoff_progress_channels() -> None:
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    fake_channel = SimpleNamespace(send=AsyncMock())
+    manager.channels["matrix"] = fake_channel
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:example.com",
+            content='{"name":"web_search"}',
+            metadata={"_progress": True, "_tool_hint": True},
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    fake_channel.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_manager_applies_delivery_route_before_send() -> None:
     bus = MessageBus()
     manager = ChannelManager(Config(), bus)

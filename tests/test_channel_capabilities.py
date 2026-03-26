@@ -23,3 +23,4 @@ def test_selected_channel_capabilities_match_current_runtime_contract() -> None:
     assert get_channel_capability("wecom").media_delivery == "mixed"
     assert get_channel_capability("telegram").delivery_mode == "final_only"
     assert get_channel_capability("weixin").delivery_mode == "final_only"
+    assert get_channel_capability("matrix").delivery_mode == "kickoff_progress_final"

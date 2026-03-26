@@ -122,8 +122,8 @@ CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
         transport="native",
         attachment_only_ingress="full",
         media_delivery="local_paths",
-        delivery_mode="final_only",
-        notes="Handles media events directly and decrypts/downloads supported attachments.",
+        delivery_mode="kickoff_progress_final",
+        notes="Handles media events directly, decrypts/downloads supported attachments, and can surface kickoff/progress/final text updates without raw chunks.",
     ),
     "weixin": ChannelCapability(
         name="weixin",
