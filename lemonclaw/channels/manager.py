@@ -65,19 +65,71 @@ class ChannelManager:
         channel_cfg = getattr(self.config.channels, channel_name, None)
         return getattr(channel_cfg, "dm_policy", None) == "pairing"
 
+    def _channel_config_error(self, channel_name: str) -> str:
+        cfg = getattr(self.config.channels, channel_name, None)
+        if cfg is None:
+            return "missing channel config"
+
+        def _missing(*fields: str) -> str:
+            missing = [field for field in fields if not getattr(cfg, field, None)]
+            return ", ".join(missing)
+
+        if channel_name == "telegram":
+            missing = _missing("token")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "discord":
+            missing = _missing("token")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "feishu":
+            missing = _missing("app_id", "app_secret")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "dingtalk":
+            missing = _missing("client_id", "client_secret")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "slack":
+            missing = _missing("bot_token", "app_token")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "qq":
+            missing = _missing("app_id", "secret")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "matrix":
+            missing = _missing("access_token", "user_id")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "mochat":
+            missing = _missing("claw_token")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "wecom":
+            missing = _missing("corp_id", "secret", "token", "encoding_aes_key")
+            if not getattr(cfg, "agent_id", 0):
+                missing = f"{missing}, agent_id" if missing else "agent_id"
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "weixin":
+            missing = _missing("bridge_token")
+            return f"missing config: {missing}" if missing else ""
+        if channel_name == "email":
+            missing = _missing("consent_granted", "imap_host", "imap_username", "imap_password")
+            if getattr(cfg, "auto_reply_enabled", True):
+                extra = _missing("smtp_host", "smtp_username", "smtp_password", "from_address")
+                if extra:
+                    missing = f"{missing}, {extra}" if missing else extra
+            return f"missing config: {missing}" if missing else ""
+        return ""
+
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
         for name in ALL_CHANNEL_NAMES:
             enabled = bool(getattr(getattr(self.config.channels, name, None), "enabled", False))
+            config_error = self._channel_config_error(name) if enabled else ""
             capability = get_channel_capability(name)
             self._channel_status[name] = {
                 "configured_enabled": enabled,
+                "configured_complete": not bool(config_error),
                 "registered": False,
                 "running": False,
                 # `available` means a configured runtime is actually importable/usable.
                 # Disabled channels stay unavailable instead of looking healthy-by-default.
                 "available": False,
-                "error": "",
+                "error": config_error,
                 "transport": capability.transport,
                 "attachment_only_ingress": capability.attachment_only_ingress,
                 "media_delivery": capability.media_delivery,
@@ -86,22 +138,24 @@ class ChannelManager:
 
         # Telegram channel
         if self.config.channels.telegram.enabled:
-            try:
-                from lemonclaw.channels.telegram import TelegramChannel
-                self.channels["telegram"] = TelegramChannel(
-                    self.config.channels.telegram,
-                    self.bus,
-                    api_key=self.config.lemondata.api_key,
-                    api_base=self.config.lemondata.api_base_url,
-                    activity_bus=self.activity_bus,
-                    trigger_runtime=self.trigger_runtime,
-                )
-                self._channel_status["telegram"].update({"registered": True, "available": True})
-                logger.info("Telegram channel enabled")
-            except ImportError as e:
-                self._channel_status["telegram"].update({"available": False, "error": str(e)})
-                logger.warning("Telegram channel not available: {}", e)
-
+            if self._channel_status["telegram"]["error"]:
+                logger.warning("Telegram channel not available: {}", self._channel_status["telegram"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.telegram import TelegramChannel
+                    self.channels["telegram"] = TelegramChannel(
+                        self.config.channels.telegram,
+                        self.bus,
+                        api_key=self.config.lemondata.api_key,
+                        api_base=self.config.lemondata.api_base_url,
+                        activity_bus=self.activity_bus,
+                        trigger_runtime=self.trigger_runtime,
+                    )
+                    self._channel_status["telegram"].update({"registered": True, "available": True})
+                    logger.info("Telegram channel enabled")
+                except ImportError as e:
+                    self._channel_status["telegram"].update({"available": False, "error": str(e)})
+                    logger.warning("Telegram channel not available: {}", e)
         # WhatsApp channel
         if self.config.channels.whatsapp.enabled:
             try:
@@ -117,140 +171,170 @@ class ChannelManager:
 
         # Discord channel
         if self.config.channels.discord.enabled:
-            try:
-                from lemonclaw.channels.discord import DiscordChannel
-                self.channels["discord"] = DiscordChannel(
-                    self.config.channels.discord, self.bus
-                )
-                self._channel_status["discord"].update({"registered": True, "available": True})
-                logger.info("Discord channel enabled")
-            except ImportError as e:
-                self._channel_status["discord"].update({"available": False, "error": str(e)})
-                logger.warning("Discord channel not available: {}", e)
+            if self._channel_status["discord"]["error"]:
+                logger.warning("Discord channel not available: {}", self._channel_status["discord"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.discord import DiscordChannel
+                    self.channels["discord"] = DiscordChannel(
+                        self.config.channels.discord, self.bus
+                    )
+                    self._channel_status["discord"].update({"registered": True, "available": True})
+                    logger.info("Discord channel enabled")
+                except ImportError as e:
+                    self._channel_status["discord"].update({"available": False, "error": str(e)})
+                    logger.warning("Discord channel not available: {}", e)
 
         # Feishu channel
         if self.config.channels.feishu.enabled:
-            try:
-                from lemonclaw.channels.feishu import FeishuChannel
-                self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["feishu"].update({"registered": True, "available": True})
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                self._channel_status["feishu"].update({"available": False, "error": str(e)})
-                logger.warning("Feishu channel not available: {}", e)
+            if self._channel_status["feishu"]["error"]:
+                logger.warning("Feishu channel not available: {}", self._channel_status["feishu"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.feishu import FeishuChannel
+                    self.channels["feishu"] = FeishuChannel(
+                        self.config.channels.feishu, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["feishu"].update({"registered": True, "available": True})
+                    logger.info("Feishu channel enabled")
+                except ImportError as e:
+                    self._channel_status["feishu"].update({"available": False, "error": str(e)})
+                    logger.warning("Feishu channel not available: {}", e)
 
         # Mochat channel
         if self.config.channels.mochat.enabled:
-            try:
-                from lemonclaw.channels.mochat import MochatChannel
+            if self._channel_status["mochat"]["error"]:
+                logger.warning("Mochat channel not available: {}", self._channel_status["mochat"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.mochat import MochatChannel
 
-                self.channels["mochat"] = MochatChannel(
-                    self.config.channels.mochat, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["mochat"].update({"registered": True, "available": True})
-                logger.info("Mochat channel enabled")
-            except ImportError as e:
-                self._channel_status["mochat"].update({"available": False, "error": str(e)})
-                logger.warning("Mochat channel not available: {}", e)
+                    self.channels["mochat"] = MochatChannel(
+                        self.config.channels.mochat, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["mochat"].update({"registered": True, "available": True})
+                    logger.info("Mochat channel enabled")
+                except ImportError as e:
+                    self._channel_status["mochat"].update({"available": False, "error": str(e)})
+                    logger.warning("Mochat channel not available: {}", e)
 
         # DingTalk channel
         if self.config.channels.dingtalk.enabled:
-            try:
-                from lemonclaw.channels.dingtalk import DingTalkChannel
-                self.channels["dingtalk"] = DingTalkChannel(
-                    self.config.channels.dingtalk, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["dingtalk"].update({"registered": True, "available": True})
-                logger.info("DingTalk channel enabled")
-            except ImportError as e:
-                self._channel_status["dingtalk"].update({"available": False, "error": str(e)})
-                logger.warning("DingTalk channel not available: {}", e)
+            if self._channel_status["dingtalk"]["error"]:
+                logger.warning("DingTalk channel not available: {}", self._channel_status["dingtalk"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.dingtalk import DingTalkChannel
+                    self.channels["dingtalk"] = DingTalkChannel(
+                        self.config.channels.dingtalk, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["dingtalk"].update({"registered": True, "available": True})
+                    logger.info("DingTalk channel enabled")
+                except ImportError as e:
+                    self._channel_status["dingtalk"].update({"available": False, "error": str(e)})
+                    logger.warning("DingTalk channel not available: {}", e)
 
         # Email channel
         if self.config.channels.email.enabled:
-            try:
-                from lemonclaw.channels.email import EmailChannel
-                self.channels["email"] = EmailChannel(
-                    self.config.channels.email, self.bus
-                )
-                self._channel_status["email"].update({"registered": True, "available": True})
-                logger.info("Email channel enabled")
-            except ImportError as e:
-                self._channel_status["email"].update({"available": False, "error": str(e)})
-                logger.warning("Email channel not available: {}", e)
+            if self._channel_status["email"]["error"]:
+                logger.warning("Email channel not available: {}", self._channel_status["email"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.email import EmailChannel
+                    self.channels["email"] = EmailChannel(
+                        self.config.channels.email, self.bus
+                    )
+                    self._channel_status["email"].update({"registered": True, "available": True})
+                    logger.info("Email channel enabled")
+                except ImportError as e:
+                    self._channel_status["email"].update({"available": False, "error": str(e)})
+                    logger.warning("Email channel not available: {}", e)
 
         # Slack channel
         if self.config.channels.slack.enabled:
-            try:
-                from lemonclaw.channels.slack import SlackChannel
-                self.channels["slack"] = SlackChannel(
-                    self.config.channels.slack, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["slack"].update({"registered": True, "available": True})
-                logger.info("Slack channel enabled")
-            except ImportError as e:
-                self._channel_status["slack"].update({"available": False, "error": str(e)})
-                logger.warning("Slack channel not available: {}", e)
+            if self._channel_status["slack"]["error"]:
+                logger.warning("Slack channel not available: {}", self._channel_status["slack"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.slack import SlackChannel
+                    self.channels["slack"] = SlackChannel(
+                        self.config.channels.slack, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["slack"].update({"registered": True, "available": True})
+                    logger.info("Slack channel enabled")
+                except ImportError as e:
+                    self._channel_status["slack"].update({"available": False, "error": str(e)})
+                    logger.warning("Slack channel not available: {}", e)
 
         # QQ channel
         if self.config.channels.qq.enabled:
-            try:
-                from lemonclaw.channels.qq import QQChannel
-                self.channels["qq"] = QQChannel(
-                    self.config.channels.qq,
-                    self.bus,
-                )
-                self._channel_status["qq"].update({"registered": True, "available": True})
-                logger.info("QQ channel enabled")
-            except ImportError as e:
-                self._channel_status["qq"].update({"available": False, "error": str(e)})
-                logger.warning("QQ channel not available: {}", e)
+            if self._channel_status["qq"]["error"]:
+                logger.warning("QQ channel not available: {}", self._channel_status["qq"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.qq import QQChannel
+                    self.channels["qq"] = QQChannel(
+                        self.config.channels.qq,
+                        self.bus,
+                    )
+                    self._channel_status["qq"].update({"registered": True, "available": True})
+                    logger.info("QQ channel enabled")
+                except ImportError as e:
+                    self._channel_status["qq"].update({"available": False, "error": str(e)})
+                    logger.warning("QQ channel not available: {}", e)
 
         # Matrix channel
         if self.config.channels.matrix.enabled:
-            try:
-                from lemonclaw.channels.matrix import MatrixChannel
-                self.channels["matrix"] = MatrixChannel(
-                    self.config.channels.matrix,
-                    self.bus,
-                    trigger_runtime=self.trigger_runtime,
-                )
-                self._channel_status["matrix"].update({"registered": True, "available": True})
-                logger.info("Matrix channel enabled")
-            except ImportError as e:
-                self._channel_status["matrix"].update({"available": False, "error": str(e)})
-                logger.warning("Matrix channel not available: {}", e)
+            if self._channel_status["matrix"]["error"]:
+                logger.warning("Matrix channel not available: {}", self._channel_status["matrix"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.matrix import MatrixChannel
+                    self.channels["matrix"] = MatrixChannel(
+                        self.config.channels.matrix,
+                        self.bus,
+                        trigger_runtime=self.trigger_runtime,
+                    )
+                    self._channel_status["matrix"].update({"registered": True, "available": True})
+                    logger.info("Matrix channel enabled")
+                except ImportError as e:
+                    self._channel_status["matrix"].update({"available": False, "error": str(e)})
+                    logger.warning("Matrix channel not available: {}", e)
 
         # Weixin channel
         if self.config.channels.weixin.enabled:
-            try:
-                from lemonclaw.channels.weixin import WeixinChannel
+            if self._channel_status["weixin"]["error"]:
+                logger.warning("Weixin channel not available: {}", self._channel_status["weixin"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.weixin import WeixinChannel
 
-                self.channels["weixin"] = WeixinChannel(
-                    self.config.channels.weixin,
-                    self.bus,
-                    trigger_runtime=self.trigger_runtime,
-                )
-                self._channel_status["weixin"].update({"registered": True, "available": True})
-                logger.info("Weixin channel enabled")
-            except ImportError as e:
-                self._channel_status["weixin"].update({"available": False, "error": str(e)})
-                logger.warning("Weixin channel not available: {}", e)
+                    self.channels["weixin"] = WeixinChannel(
+                        self.config.channels.weixin,
+                        self.bus,
+                        trigger_runtime=self.trigger_runtime,
+                    )
+                    self._channel_status["weixin"].update({"registered": True, "available": True})
+                    logger.info("Weixin channel enabled")
+                except ImportError as e:
+                    self._channel_status["weixin"].update({"available": False, "error": str(e)})
+                    logger.warning("Weixin channel not available: {}", e)
 
         # WeCom channel
         if self.config.channels.wecom.enabled:
-            try:
-                from lemonclaw.channels.wecom import WeComChannel
-                self.channels["wecom"] = WeComChannel(
-                    self.config.channels.wecom, self.bus, trigger_runtime=self.trigger_runtime
-                )
-                self._channel_status["wecom"].update({"registered": True, "available": True})
-                logger.info("WeCom channel enabled")
-            except ImportError as e:
-                self._channel_status["wecom"].update({"available": False, "error": str(e)})
-                logger.warning("WeCom channel not available: {}", e)
+            if self._channel_status["wecom"]["error"]:
+                logger.warning("WeCom channel not available: {}", self._channel_status["wecom"]["error"])
+            else:
+                try:
+                    from lemonclaw.channels.wecom import WeComChannel
+                    self.channels["wecom"] = WeComChannel(
+                        self.config.channels.wecom, self.bus, trigger_runtime=self.trigger_runtime
+                    )
+                    self._channel_status["wecom"].update({"registered": True, "available": True})
+                    logger.info("WeCom channel enabled")
+                except ImportError as e:
+                    self._channel_status["wecom"].update({"available": False, "error": str(e)})
+                    logger.warning("WeCom channel not available: {}", e)
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

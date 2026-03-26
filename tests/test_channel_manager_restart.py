@@ -113,9 +113,24 @@ def test_channel_manager_disabled_channels_start_unavailable():
     status = manager.get_channel_status()
 
     assert status["telegram"]["configured_enabled"] is False
+    assert status["telegram"]["configured_complete"] is True
     assert status["telegram"]["available"] is False
     assert status["telegram"]["attachment_only_ingress"] == "full"
     assert status["telegram"]["media_delivery"] == "local_paths"
+
+
+def test_channel_manager_enabled_but_incomplete_channel_is_blocked():
+    config = Config()
+    config.channels.telegram.enabled = True
+
+    manager = ChannelManager(config, MessageBus())
+    status = manager.get_channel_status()
+
+    assert "telegram" not in manager.channels
+    assert status["telegram"]["configured_enabled"] is True
+    assert status["telegram"]["configured_complete"] is False
+    assert status["telegram"]["available"] is False
+    assert "missing config: token" in status["telegram"]["error"]
 
 
 @pytest.mark.asyncio
