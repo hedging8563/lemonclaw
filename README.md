@@ -8,7 +8,7 @@
   </p>
 </div>
 
-LemonClaw is a hard fork of [nanobot](https://github.com/HKUDS/nanobot) (MIT), rebuilt into a lightweight AI agent runtime with native MCP support, local tools, WebUI, and 11 IM channels. It ships well for dedicated self-hosted machines and K8s-style single-tenant deployments.
+LemonClaw is a hard fork of [nanobot](https://github.com/HKUDS/nanobot) (MIT), rebuilt into a lightweight AI agent runtime with native MCP support, local tools, WebUI, and 12 IM channels. It ships well for dedicated self-hosted machines and K8s-style single-tenant deployments.
 
 ## Quick Start
 
@@ -101,7 +101,7 @@ The `init` wizard will create these service definitions for you.
 
 ## Supported Channels
 
-Telegram, Discord, WhatsApp, Feishu, Slack, DingTalk, Email, QQ, Matrix, Mochat, WeCom (企业微信)
+Telegram, Discord, WhatsApp, Feishu, Slack, DingTalk, Email, QQ, Matrix, Mochat, WeCom (企业微信), Weixin (微信)
 
 ## Current Product Surface
 
@@ -126,6 +126,12 @@ This split is intentional:
 - task recovery is operational state
 
 LemonClaw now also repairs legacy WebUI task/tool-prelude history on startup so older sessions gradually stop showing duplicated draft text from tool runs.
+
+Hosted control-plane surfaces now also expose the most important runtime-adjacent actions without turning Dashboard/Admin back into the main work surface:
+
+- instance cards can show DICloak runtime status and Weixin connection state
+- hosted Dashboard instance cards support Weixin QR connect and an "other channels" docs entry
+- `/admin/claw` includes a unified debug drawer for instance summary, runtime state, Weixin/DICloak, and raw container logs
 
 Recent runtime fixes worth knowing:
 
@@ -171,6 +177,15 @@ Current bot guidance:
   - `dicloak close_profile`
 
 When DICloak is unavailable, explicit DICloak commands fail closed. Ordinary browser tasks still continue to use `agent-browser`.
+The current browser skill also tells the agent to direct the user back to hosted instance settings when DICloak is not enabled/configured.
+
+## Single-Instance Swarm
+
+LemonClaw now treats **single-instance swarm** as the next collaboration layer ahead of peer teams:
+
+- conductor can attach swarm templates and role hints to subtasks
+- WebUI surfaces can show active team / goal / role hints
+- the current direction is still one instance = one work studio, with leader + specialist workers sharing the same session / ledger / recovery / knowledge substrate
 
 ## Architecture
 
