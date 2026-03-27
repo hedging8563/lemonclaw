@@ -26,6 +26,7 @@ from lemonclaw.agent.tools.grep import GrepTool
 from lemonclaw.agent.tools.http_request import HTTPRequestTool
 from lemonclaw.agent.tools.k8s import K8sTool
 from lemonclaw.agent.tools.knowledge import KnowledgeSearchTool
+from lemonclaw.agent.tools.lemondata_nonchat import LemonDataNonChatTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.shell import ExecTool
@@ -60,6 +61,7 @@ def _all_builtin_tools(tmp_path: Path):
         HTTPRequestTool(),
         K8sTool(),
         KnowledgeSearchTool(workspace=str(tmp_path)),
+        LemonDataNonChatTool(),
         ListAgentsTool(registry=registry),
         ListDirTool(workspace=tmp_path),
         MessageTool(send_callback=bus),
@@ -86,7 +88,7 @@ def test_builtin_required_fields_map_matches_all_tool_schemas(tmp_path: Path) ->
     tools = _all_builtin_tools(tmp_path)
 
     tool_names = {tool.name for tool in tools}
-    assert len(tool_names) == 27
+    assert len(tool_names) == 28
     assert tool_names == set(_BUILTIN_TOOL_REQUIRED_FIELDS.keys())
 
     for tool in tools:
