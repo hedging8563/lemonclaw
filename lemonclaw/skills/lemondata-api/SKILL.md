@@ -9,6 +9,37 @@ triggers: 画图,生成图片,做视频,配音,音乐,3D,TTS,去背景,放大图
 
 300+ AI models through a unified API. Agent-First design — errors tell you exactly how to self-correct.
 
+## Source of Truth Rules
+
+### Chat vs non-chat are different
+
+- For **chat / responses** requests, you may try a reasonable model guess first and then recover from structured errors.
+- For **non-chat** requests — especially **image, video, music, 3D, TTS, STT, embeddings, and rerank** — you MUST treat `GET /v1/models` as the source of truth before recommending or calling a model.
+
+### Never trust memorized non-chat model availability
+
+- Do **not** recommend a non-chat model just because it appears in this skill file, your memory, or an older session.
+- Do **not** assume a cheaper model is available.
+- Before suggesting alternatives or switching models for a non-chat task, first fetch:
+  - `GET /v1/models?category=<category>`
+  - and, when needed, `GET /v1/models/<model>`
+- Only recommend or call models that are currently returned by LemonData as available.
+
+### When a non-chat model fails
+
+If a non-chat request returns:
+- `model_disabled`
+- `model_not_found`
+- `all_channels_failed`
+- `model_unavailable`
+
+you must:
+1. Re-read `GET /v1/models?category=<same-category>`
+2. Re-pick from currently available models only
+3. Explain the switch using the live API result
+
+Do **not** free-associate a replacement model name.
+
 ## Authentication
 
 **CRITICAL: You MUST use the `$API_KEY` environment variable. NEVER fabricate, guess, or hardcode an API key.**
@@ -27,16 +58,23 @@ Base URL: `https://api.lemondata.cc`
 
 ## Agent-First Error Recovery
 
-Do NOT search for docs before making an API call. Just try it. If it fails, the error response tells you what to do.
+Do NOT search for docs before making an API call. For **chat / responses**, just try it. For **non-chat**, read `/v1/models` first so you don't recommend disabled or hidden models.
 
 ```
 Workflow:
-  1. Try the API call with your best guess
-  2. If 400 model_not_found → read error.did_you_mean and error.suggestions → retry
-  3. If 402 insufficient_balance → read error.balance_usd → switch to cheaper model
-  4. If 429 rate_limit → read error.retry_after → wait and retry
-  5. If 503 all_channels_failed → read error.alternatives → switch model or wait
-  6. If 200 → check X-LemonData-Hint header for optimization tips
+  Chat / Responses:
+    1. Try the API call with your best guess
+    2. If 400 model_not_found → read error.did_you_mean and error.suggestions → retry
+    3. If 402 insufficient_balance → read error.balance_usd → switch to cheaper model
+    4. If 429 rate_limit → read error.retry_after → wait and retry
+    5. If 503 all_channels_failed → read error.alternatives → switch model or wait
+    6. If 200 → check X-LemonData-Hint header for optimization tips
+
+  Non-chat:
+    1. GET /v1/models?category=<category>
+    2. Pick only a currently available model from that response
+    3. Submit the request
+    4. If it fails with model_disabled/model_not_found/model_unavailable → re-read /v1/models and choose again
 ```
 
 ### Error Fields
@@ -90,7 +128,9 @@ curl -s "https://api.lemondata.cc/v1/models?category=image" -H "Authorization: B
 curl -s "https://api.lemondata.cc/v1/models?tag=coding" -H "Authorization: Bearer $API_KEY"
 ```
 
-Or just guess the model name — if wrong, `error.did_you_mean` will correct you.
+For **chat** you may still guess first.
+
+For **non-chat**, do **not** guess first. Read the category list and pick from the live response.
 
 ## Image Generation
 
@@ -127,12 +167,14 @@ Response: `data[0].url` or `data[0].b64_json`.
 
 `POST /v1/videos/generations`
 
-| Model | Best For | ~Cost |
-|-------|----------|-------|
-| `veo3.1` | Highest quality | $0.28 |
-| `sora-2` | OpenAI, balanced | $0.07 |
-| `kling-v2.6-pro` | Motion control | $0.49 |
-| `hailuo-2.3` | Budget friendly | $0.03 |
+Before choosing a video model, you must first run:
+
+```bash
+curl -s "https://api.lemondata.cc/v1/models?category=video" \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Then pick from the live response. Do **not** rely on the examples below as availability truth.
 
 ```bash
 curl -s https://api.lemondata.cc/v1/videos/generations \
@@ -253,7 +295,8 @@ done
 - "embedding", "嵌入", "向量" → Embeddings
 - "rerank", "重排" → Rerank
 - "remove background", "upscale", "去背景", "放大" → Image Tools
-- Inform users of approximate cost before generating
+- For non-chat generation, quote cost only after confirming the model is currently available via `/v1/models`
 - For async tasks (video/music/3D), tell the user it may take 30s-5min, then poll every 10s
 - After getting the result, send the media URL with a brief caption
 - On error, read the structured error fields and self-correct — do NOT dump raw API responses to the user
+- If a non-chat model is disabled, hidden, or unavailable, explicitly say that LemonData rejected it and re-pick only from the live category list
