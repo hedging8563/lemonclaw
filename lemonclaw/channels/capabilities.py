@@ -29,6 +29,7 @@ class ChannelCapability:
 
 
 ALL_CHANNEL_NAMES: tuple[str, ...] = (
+    "agentbridge",
     "telegram",
     "whatsapp",
     "discord",
@@ -45,6 +46,14 @@ ALL_CHANNEL_NAMES: tuple[str, ...] = (
 
 
 CHANNEL_CAPABILITIES: dict[str, ChannelCapability] = {
+    "agentbridge": ChannelCapability(
+        name="agentbridge",
+        transport="bridge",
+        attachment_only_ingress="full",
+        media_delivery="mixed",
+        delivery_mode="streaming",
+        notes="HTTP/SSE bridge for coding agents using gateway bearer auth and thread-scoped sessions.",
+    ),
     "telegram": ChannelCapability(
         name="telegram",
         transport="native",

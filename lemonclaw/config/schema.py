@@ -230,6 +230,15 @@ class WeixinConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
 
 
+class AgentBridgeConfig(Base):
+    """AgentBridge runtime channel configuration."""
+
+    enabled: bool = True
+    upload_ttl_seconds: int = 60 * 60
+    max_upload_bytes: int = 20 * 1024 * 1024
+    event_buffer_size: int = 100
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -248,6 +257,7 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     weixin: WeixinConfig = Field(default_factory=WeixinConfig)
     wecom: WeComConfig = Field(default_factory=WeComConfig)
+    agentbridge: AgentBridgeConfig = Field(default_factory=AgentBridgeConfig)
 
 
 class AgentDefaults(Base):

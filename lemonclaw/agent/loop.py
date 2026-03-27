@@ -1068,6 +1068,31 @@ class AgentLoop:
             metadata=msg.metadata or {},
         ))
 
+    async def stop_session(
+        self,
+        session_key: str,
+        *,
+        channel: str,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Public helper for cooperative stop outside the inbound bus loop."""
+
+        msg = InboundMessage(
+            channel=channel,
+            sender_id="operator",
+            chat_id=chat_id,
+            content="/stop",
+            metadata=dict(metadata or {}),
+            session_key_override=session_key,
+        )
+        await self._handle_stop(msg)
+        tasks = self._active_tasks.get(session_key, [])
+        return {
+            "session_key": session_key,
+            "running": sum(1 for task in tasks if not task.done()),
+        }
+
     def _evict_idle_session_locks(self) -> None:
         """Remove oldest idle session locks when over the LRU limit."""
         evicted = 0

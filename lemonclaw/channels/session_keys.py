@@ -33,3 +33,17 @@ def build_channel_session_key(
     elif topic_id is not None and topic_id != "":
         parts.append(str(topic_id))
     return ":".join(parts)
+
+
+def build_agentbridge_session_key(
+    *,
+    client_id: str,
+    thread_id: str,
+    workspace_id: str = "default",
+) -> str:
+    """Build the canonical AgentBridge session key."""
+
+    return build_channel_session_key(
+        "agentbridge",
+        f"{client_id}:{workspace_id}:{thread_id}",
+    )

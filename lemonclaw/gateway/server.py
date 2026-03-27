@@ -84,8 +84,9 @@ def _build_usage_handler(
         # Optional: per-session detail
         session_key = request.query_params.get("session")
         if session_key and runtime.session_manager:
-            # Security: force api: prefix to prevent cross-channel session enumeration
-            if not session_key.startswith("api:"):
+            # Legacy behavior prefixes anonymous session hints with api:.
+            # Explicitly-scoped sessions such as agentbridge:* are preserved.
+            if not session_key.startswith(("api:", "agentbridge:", "webui:", "cron:")):
                 session_key = f"api:{session_key}"
             # Use _load to avoid creating empty sessions from arbitrary query params
             session = runtime.session_manager._load(session_key)
@@ -291,6 +292,17 @@ def create_app(
             session_manager=runtime.session_manager,
             auth_token=auth_token,
         ))
+
+    # AgentBridge runtime routes (HTTP/SSE, token-protected)
+    if runtime.agent_loop and runtime.session_manager and runtime.channel_manager:
+        from lemonclaw.gateway.agentbridge import get_agentbridge_routes
+
+        routes.extend(
+            get_agentbridge_routes(
+                auth_token=auth_token,
+                runtime=runtime,
+            )
+        )
 
     # Conductor panel routes (REST)
     from lemonclaw.gateway.webui.conductor import get_conductor_routes
