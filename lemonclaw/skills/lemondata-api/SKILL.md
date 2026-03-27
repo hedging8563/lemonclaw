@@ -40,6 +40,15 @@ you must:
 
 Do **not** free-associate a replacement model name.
 
+## Preferred Runtime Helper
+
+Inside LemonClaw runtime, prefer the native `lemondata_nonchat` tool for non-chat calls.
+
+- `action=discover` → fetches fresh live models from `/v1/models?category=...`
+- `action=request` → refuses the request unless the requested model appears in that fresh discovery result
+
+Do **not** use `exec` + raw `curl` for LemonData non-chat generation endpoints unless you are explicitly debugging the helper itself.
+
 ## Authentication
 
 **CRITICAL: You MUST use the `$API_KEY` environment variable. NEVER fabricate, guess, or hardcode an API key.**
@@ -130,7 +139,7 @@ curl -s "https://api.lemondata.cc/v1/models?tag=coding" -H "Authorization: Beare
 
 For **chat** you may still guess first.
 
-For **non-chat**, do **not** guess first. Read the category list and pick from the live response.
+For **non-chat**, do **not** guess first. Use the `lemondata_nonchat` tool, or at minimum read the category list and pick from the live response.
 
 ## Image Generation
 
@@ -167,20 +176,15 @@ Response: `data[0].url` or `data[0].b64_json`.
 
 `POST /v1/videos/generations`
 
-Before choosing a video model, you must first run:
+Before choosing a video model, you must first run fresh discovery:
 
-```bash
-curl -s "https://api.lemondata.cc/v1/models?category=video" \
-  -H "Authorization: Bearer $API_KEY"
-```
+- Preferred: `lemondata_nonchat(action="discover", category="video")`
+- Fallback: `GET /v1/models?category=video`
 
 Then pick from the live response. Do **not** rely on the examples below as availability truth.
 
 ```bash
-curl -s https://api.lemondata.cc/v1/videos/generations \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"sora-2","prompt":"A golden retriever running on the beach"}'
+Use the `lemondata_nonchat` tool for this call instead of raw curl.
 ```
 
 Returns `{"id":"task_xxx","status":"pending"}`. Poll:
@@ -295,7 +299,8 @@ done
 - "embedding", "嵌入", "向量" → Embeddings
 - "rerank", "重排" → Rerank
 - "remove background", "upscale", "去背景", "放大" → Image Tools
-- For non-chat generation, quote cost only after confirming the model is currently available via `/v1/models`
+- For non-chat generation, quote cost only after confirming the model is currently available via fresh discovery
+- In LemonClaw runtime, prefer `lemondata_nonchat` over raw `curl` for all non-chat generation requests
 - For async tasks (video/music/3D), tell the user it may take 30s-5min, then poll every 10s
 - After getting the result, send the media URL with a brief caption
 - On error, read the structured error fields and self-correct — do NOT dump raw API responses to the user

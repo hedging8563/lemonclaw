@@ -35,6 +35,7 @@ from lemonclaw.agent.tools.git_tool import GitTool
 from lemonclaw.agent.tools.http_request import HTTPRequestTool
 from lemonclaw.agent.tools.k8s import K8sTool
 from lemonclaw.agent.tools.knowledge import KnowledgeSearchTool
+from lemonclaw.agent.tools.lemondata_nonchat import LemonDataNonChatTool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.task_checkpoint import TaskCheckpointTool
@@ -88,6 +89,7 @@ _BUILTIN_TOOL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "grep": ("pattern",),
     "http_request": ("method", "url"),
     "k8s": ("action",),
+    "lemondata_nonchat": ("action", "category"),
     "list_agents": (),
     "list_dir": ("path",),
     "message": ("content",),
@@ -472,6 +474,7 @@ class AgentLoop:
         self.tools.register(GitTool(working_dir=str(self.workspace)))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        self.tools.register(LemonDataNonChatTool())
         self.tools.register(KnowledgeSearchTool(workspace=str(self.workspace)))
         if hasattr(self, "db_config") and self.db_config and self.db_config.enabled:
             self.tools.register(DBTool(

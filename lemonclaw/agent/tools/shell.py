@@ -11,6 +11,11 @@ from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
 
+_LEMONDATA_NONCHAT_ENDPOINT_PATTERN = re.compile(
+    r"/v1/(?:images/generations|images/edits|images/variations|videos/generations|music/generations|3d/generations|audio/speech|audio/transcriptions|embeddings|rerank)(?!/)",
+    re.IGNORECASE,
+)
+
 
 class ExecTool(Tool):
     """Tool to execute shell commands via /bin/sh -c."""
@@ -184,6 +189,12 @@ class ExecTool(Tool):
         """Safety guard: deny dangerous patterns; full-power mode does not sandbox paths."""
         lower = command.strip().lower()
 
+        if self._is_blocked_lemondata_nonchat_command(command):
+            return (
+                "Error: Direct exec calls to LemonData non-chat generation endpoints are blocked. "
+                "Use the 'lemondata_nonchat' tool, which performs a fresh /v1/models discovery before the request."
+            )
+
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
@@ -192,3 +203,18 @@ class ExecTool(Tool):
             return "Error: Command blocked by safety guard (not in allowlist)"
 
         return None
+
+    @staticmethod
+    def _is_blocked_lemondata_nonchat_command(command: str) -> bool:
+        normalized = str(command or "")
+        if "curl" not in normalized:
+            return False
+        if not _LEMONDATA_NONCHAT_ENDPOINT_PATTERN.search(normalized):
+            return False
+        if "api.lemondata.cc" in normalized:
+            return True
+        if "$API_BASE_URL" in normalized or "${API_BASE_URL" in normalized:
+            return True
+        if "Authorization: Bearer $API_KEY" in normalized or "authorization: bearer $api_key" in normalized.lower():
+            return True
+        return False
