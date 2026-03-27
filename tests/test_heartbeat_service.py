@@ -115,3 +115,46 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     )
 
     assert await service.trigger_now() is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_skips_default_template_without_active_tasks(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        "# Heartbeat Tasks\n\n"
+        "This file is checked every 30 minutes by your LemonClaw agent.\n\n"
+        "## Active Tasks\n\n"
+        "<!-- Add your periodic tasks below this line -->\n\n"
+        "## Completed\n\n"
+        "<!-- Move completed tasks here -->\n",
+        encoding="utf-8",
+    )
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "should not run"},
+                )
+            ],
+        )
+    ])
+
+    called = False
+
+    async def _on_execute(tasks: str) -> str:
+        nonlocal called
+        called = True
+        return tasks
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    assert await service.trigger_now() is None
+    assert called is False

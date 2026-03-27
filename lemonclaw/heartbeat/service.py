@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -82,6 +83,57 @@ class HeartbeatService:
                 return None
         return None
 
+    @staticmethod
+    def _extract_active_tasks(content: str) -> str:
+        """Return only actionable task lines from HEARTBEAT.md.
+
+        Rules:
+        - Prefer lines under `## Active Tasks`
+        - Ignore headings, blank lines, and HTML comments
+        - If the file has no section markers, fall back to non-heading content
+        """
+        if not content:
+            return ""
+
+        lines = content.splitlines()
+        active_lines: list[str] = []
+        fallback_lines: list[str] = []
+        in_active = False
+        saw_section = any(re.match(r"^##\s+", line.strip()) for line in lines)
+        in_comment = False
+
+        def _is_task_line(line: str) -> bool:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                return False
+            if stripped.startswith("<!--") or stripped.endswith("-->"):
+                return False
+            return True
+
+        for raw_line in lines:
+            stripped = raw_line.strip()
+
+            if stripped.startswith("<!--"):
+                in_comment = not stripped.endswith("-->")
+                continue
+            if in_comment:
+                if stripped.endswith("-->"):
+                    in_comment = False
+                continue
+
+            if re.match(r"^##\s+", stripped):
+                saw_section = True
+                in_active = stripped.lower() == "## active tasks"
+                continue
+
+            if _is_task_line(raw_line):
+                if in_active:
+                    active_lines.append(stripped)
+                elif not saw_section:
+                    fallback_lines.append(stripped)
+
+        return "\n".join(active_lines if active_lines else fallback_lines).strip()
+
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
@@ -140,14 +192,15 @@ class HeartbeatService:
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
         content = self._read_heartbeat_file()
-        if not content:
+        task_content = self._extract_active_tasks(content or "")
+        if not task_content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
 
         logger.info("Heartbeat: checking for tasks...")
 
         try:
-            action, tasks = await self._decide(content)
+            action, tasks = await self._decide(task_content)
 
             if action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
@@ -165,9 +218,10 @@ class HeartbeatService:
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
         content = self._read_heartbeat_file()
-        if not content:
+        task_content = self._extract_active_tasks(content or "")
+        if not task_content:
             return None
-        action, tasks = await self._decide(content)
+        action, tasks = await self._decide(task_content)
         if action != "run" or not self.on_execute:
             return None
         return await self.on_execute(tasks)
