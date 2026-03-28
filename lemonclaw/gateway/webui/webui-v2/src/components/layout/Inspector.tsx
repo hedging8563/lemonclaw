@@ -3,6 +3,7 @@ import { t } from '../../stores/i18n';
 import { showInspector, selectedInspectorBlock } from '../../stores/ui';
 import { ConductorPanel } from '../inspector/ConductorPanel';
 import { MemoryPanel } from '../inspector/MemoryPanel';
+import { StarOffice } from '../inspector/StarOffice';
 import { TaskRecoveryPanel } from '../inspector/TaskRecoveryPanel';
 import { YesterdayMemo } from '../inspector/YesterdayMemo';
 
@@ -87,6 +88,7 @@ export function Inspector() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <YesterdayMemo />
               <TaskRecoveryPanel />
+              <StarOffice />
               <ConductorPanel />
               <MemoryPanel />
             </div>

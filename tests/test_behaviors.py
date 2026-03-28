@@ -1319,3 +1319,63 @@ def test_conductor_routes_require_valid_cookie(tmp_path):
     assert templates.status_code == 200
     payload = templates.json()
     assert any(item['id'] == 'general_swarm' for item in payload['templates'])
+
+
+def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
+    from starlette.testclient import TestClient
+
+    from lemonclaw.conductor.types import (
+        IntentAnalysis,
+        OrchestrationPlan,
+        OrchestratorPhase,
+        SubTask,
+        SubTaskStatus,
+        TaskComplexity,
+    )
+    from lemonclaw.gateway.server import create_app
+
+    plan = OrchestrationPlan(
+        request_id='plan-1',
+        original_message='Ship the campaign package',
+        intent=IntentAnalysis(
+            complexity=TaskComplexity.COMPLEX,
+            summary='Ship campaign package',
+        ),
+        phase=OrchestratorPhase.MONITORING,
+        swarm_template_id='marketing_campaign_room',
+        swarm_template_label='Marketing Campaign Room',
+        swarm_goal='Ship a campaign package',
+        subtasks=[
+            SubTask(
+                id='t1',
+                description='Audit the current funnel and summarize the risks',
+                role_hint='strategist',
+                assigned_agent_id='swarm-marketing_campaign_room-strategist',
+                status=SubTaskStatus.COMPLETED,
+                result='Top risk: unclear value proposition on hero section.',
+            ),
+            SubTask(
+                id='t2',
+                description='Draft the landing page copy package',
+                role_hint='copywriter',
+                assigned_agent_id='swarm-marketing_campaign_room-copywriter',
+                depends_on=['t1'],
+                status=SubTaskStatus.PENDING,
+            ),
+        ],
+    )
+    orchestrator = type('OrchestratorStub', (), {'active_plans': [plan]})()
+    app = create_app(auth_token=None, orchestrator=orchestrator, registry=None)
+    client = TestClient(app)
+
+    resp = client.get('/api/conductor/plans')
+    assert resp.status_code == 200
+    payload = resp.json()
+    current = payload['plans'][0]
+    assert current['swarm_template_id'] == 'marketing_campaign_room'
+    assert current['team_roles'][0]['id'] == 'lead'
+    assert current['subtasks'][0]['role_label'] == 'Strategist'
+    assert current['subtasks'][0]['state_bucket'] == 'completed'
+    assert current['subtasks'][0]['result_preview'].startswith('Top risk:')
+    assert current['subtasks'][1]['state_bucket'] == 'ready'
+    assert current['subtasks'][1]['dependency_descriptions'] == ['Audit the current funnel and summarize the risks']
