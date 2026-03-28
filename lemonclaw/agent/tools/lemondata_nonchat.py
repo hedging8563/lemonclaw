@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 import httpx
 
 from lemonclaw.agent.tools.base import Tool
 
-_SUPPORTED_CATEGORIES = ("image", "video", "music", "3d", "tts", "stt", "embedding", "rerank")
+_SUPPORTED_CATEGORIES = ("image", "video", "music", "3d", "tts", "stt", "embedding", "rerank", "translation")
 _DEFAULT_ENDPOINTS = {
     "image": "/v1/images/generations",
     "video": "/v1/videos/generations",
@@ -20,6 +21,7 @@ _DEFAULT_ENDPOINTS = {
     "stt": "/v1/audio/transcriptions",
     "embedding": "/v1/embeddings",
     "rerank": "/v1/rerank",
+    "translation": "/v1/translations",
 }
 _ALLOWED_ENDPOINTS = {
     "image": {"/v1/images/generations", "/v1/images/edits", "/v1/images/variations"},
@@ -30,11 +32,18 @@ _ALLOWED_ENDPOINTS = {
     "stt": {"/v1/audio/transcriptions"},
     "embedding": {"/v1/embeddings"},
     "rerank": {"/v1/rerank"},
+    "translation": {"/v1/translations"},
 }
+_SCENE_CACHE_TTL_SECONDS = 30 * 60
+_RETRYABLE_ERROR_CODES = {"all_channels_failed", "upstream_error", "rate_limit_exceeded", "model_unavailable"}
 
 
 class LemonDataNonChatTool(Tool):
     """Fresh-discovery wrapper for LemonData non-chat endpoints."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._scene_discovery_cache: dict[str, dict[str, Any]] = {}
 
     @property
     def name(self) -> str:
@@ -44,9 +53,10 @@ class LemonDataNonChatTool(Tool):
     def description(self) -> str:
         return (
             "Discover currently available LemonData non-chat models and perform guarded non-chat requests. "
-            "For image, video, music, 3d, tts, stt, embedding, and rerank, this tool always fetches "
-            "a fresh /v1/models?category=... list before making the request. If fresh discovery fails or "
-            "the requested model is not currently available, it refuses the call."
+            "For image, video, music, 3d, tts, stt, embedding, rerank, and translation, this tool can discover "
+            "recommended models from /v1/models?category=...&recommended_for=... and, when model is omitted, "
+            "it automatically picks from the top ready models. It only falls back to another model on transient "
+            "retryable failures."
         )
 
     @property
@@ -66,7 +76,12 @@ class LemonDataNonChatTool(Tool):
                 },
                 "model": {
                     "type": "string",
-                    "description": "Requested model id (required for action=request)",
+                    "description": "Requested model id. Optional for action=request; if omitted, the tool discovers and tries the top recommended ready models.",
+                },
+                "recommended_for": {
+                    "type": "string",
+                    "enum": list(_SUPPORTED_CATEGORIES),
+                    "description": "Optional recommendation scene. Defaults to category.",
                 },
                 "endpoint": {
                     "type": "string",
@@ -99,6 +114,7 @@ class LemonDataNonChatTool(Tool):
         action: str,
         category: str,
         model: str | None = None,
+        recommended_for: str | None = None,
         endpoint: str | None = None,
         payload: dict[str, Any] | None = None,
         limit: int | None = None,
@@ -113,7 +129,15 @@ class LemonDataNonChatTool(Tool):
                 "supported_categories": list(_SUPPORTED_CATEGORIES),
             }, ensure_ascii=False)
 
-        discovery = await self._discover(category, limit=limit or 12)
+        scene = str(recommended_for or category).strip().lower()
+        if scene not in _SUPPORTED_CATEGORIES:
+            return json.dumps({
+                "ok": False,
+                "error": f"Unsupported recommended_for '{scene}'.",
+                "supported_recommended_for": list(_SUPPORTED_CATEGORIES),
+            }, ensure_ascii=False)
+
+        discovery = await self._discover(category, recommended_for=scene, limit=limit or 12)
         if str(action or "") == "discover":
             return json.dumps(discovery, ensure_ascii=False)
 
@@ -126,24 +150,6 @@ class LemonDataNonChatTool(Tool):
             }, ensure_ascii=False)
 
         requested_model = str(model or "").strip()
-        if not requested_model:
-            return json.dumps({
-                "ok": False,
-                "error": "model is required for action=request",
-                "category": category,
-                "available_models": discovery["models"],
-            }, ensure_ascii=False)
-
-        available_models = {str(item["id"]) for item in discovery["models"]}
-        if requested_model not in available_models:
-            return json.dumps({
-                "ok": False,
-                "error": f"Requested model '{requested_model}' is not currently available in category '{category}'.",
-                "category": category,
-                "requested_model": requested_model,
-                "available_models": discovery["models"],
-            }, ensure_ascii=False)
-
         resolved_endpoint = str(endpoint or _DEFAULT_ENDPOINTS[category]).strip()
         if resolved_endpoint not in _ALLOWED_ENDPOINTS[category]:
             return json.dumps({
@@ -153,19 +159,113 @@ class LemonDataNonChatTool(Tool):
                 "allowed_endpoints": sorted(_ALLOWED_ENDPOINTS[category]),
             }, ensure_ascii=False)
 
-        request_payload = dict(payload or {})
-        request_payload["model"] = requested_model
+        available_models = {str(item["id"]) for item in discovery["models"]}
+        if requested_model:
+            if requested_model not in available_models:
+                return json.dumps({
+                    "ok": False,
+                    "error": f"Requested model '{requested_model}' is not currently available in category '{category}'.",
+                    "category": category,
+                    "requested_model": requested_model,
+                    "available_models": discovery["models"],
+                }, ensure_ascii=False)
+            attempt_chain = [requested_model]
+        else:
+            attempt_chain = [
+                str(item["id"])
+                for item in discovery["models"]
+                if item.get("status") == "ready"
+            ][:3]
+            if not attempt_chain:
+                return json.dumps({
+                    "ok": False,
+                    "error": f"No ready recommended models are currently available for category '{category}'.",
+                    "category": category,
+                    "discovery": discovery,
+                }, ensure_ascii=False)
 
-        request_result = await self._request(resolved_endpoint, request_payload)
-        request_result["discovery"] = {
-            "category": category,
-            "model_count": discovery["model_count"],
-            "requested_model_verified": True,
+        auto_selected = not requested_model
+        attempted_models: list[str] = []
+        fallback_reason: str | None = None
+        recommendation_context = {
+            "scene": scene,
+            "snapshot_at": discovery.get("snapshot_at"),
         }
-        return json.dumps(request_result, ensure_ascii=False)
+        refreshed_after_failure = False
 
-    async def _discover(self, category: str, *, limit: int) -> dict[str, Any]:
-        response = await self._fetch_json(f"/v1/models?category={category}")
+        while attempt_chain:
+            selected_model = attempt_chain.pop(0)
+            attempted_models.append(selected_model)
+            request_payload = dict(payload or {})
+            request_payload["model"] = selected_model
+            validation_error = self._validate_payload(category, request_payload)
+            if validation_error:
+                return json.dumps({
+                    "ok": False,
+                    "error": validation_error,
+                    "category": category,
+                    "selected_model": selected_model,
+                }, ensure_ascii=False)
+
+            request_result = await self._request(resolved_endpoint, request_payload)
+            request_result["discovery"] = {
+                "category": category,
+                "model_count": discovery["model_count"],
+                "requested_model_verified": selected_model in available_models,
+                "recommended_for": scene,
+            }
+            request_result["selected_model"] = selected_model
+            request_result["attempted_models"] = attempted_models
+            request_result["recommendation_context"] = {
+                **recommendation_context,
+                "selected_rank": next(
+                    (item.get("preferred_rank") for item in discovery["models"] if item.get("id") == selected_model),
+                    None,
+                ),
+                "success_rate_24h": next(
+                    (item.get("success_rate_24h") for item in discovery["models"] if item.get("id") == selected_model),
+                    None,
+                ),
+            }
+
+            if request_result["ok"] or not auto_selected or not self._should_retry_with_next_model(request_result):
+                if fallback_reason:
+                    request_result["fallback_reason"] = fallback_reason
+                return json.dumps(request_result, ensure_ascii=False)
+
+            fallback_reason = request_result.get("error_code") or request_result.get("error") or "retryable_error"
+            if not refreshed_after_failure:
+                self._invalidate_scene_cache(scene)
+                refreshed = await self._discover(category, recommended_for=scene, limit=limit or 12, force_refresh=True)
+                if refreshed.get("ok"):
+                    discovery = refreshed
+                    available_models = {str(item["id"]) for item in discovery["models"]}
+                    refreshed_candidates = [
+                        str(item["id"])
+                        for item in discovery["models"]
+                        if item.get("status") == "ready" and str(item.get("id")) not in attempted_models
+                    ][:3]
+                    attempt_chain = refreshed_candidates
+                    recommendation_context["snapshot_at"] = discovery.get("snapshot_at")
+                refreshed_after_failure = True
+
+        return json.dumps({
+            "ok": False,
+            "error": "All recommended models failed for this request.",
+            "category": category,
+            "attempted_models": attempted_models,
+            "fallback_reason": fallback_reason,
+            "recommendation_context": recommendation_context,
+        }, ensure_ascii=False)
+
+    async def _discover(self, category: str, *, recommended_for: str, limit: int, force_refresh: bool = False) -> dict[str, Any]:
+        cache_key = f"{category}:{recommended_for}"
+        if not force_refresh:
+            cached = self._get_cached_discovery(cache_key)
+            if cached is not None:
+                return cached
+
+        response = await self._fetch_json(f"/v1/models?category={category}&recommended_for={recommended_for}")
         if not response["ok"]:
             return {
                 "ok": False,
@@ -182,18 +282,44 @@ class LemonDataNonChatTool(Tool):
                 if not model_id:
                     continue
                 lemondata_meta = item.get("lemondata") if isinstance(item.get("lemondata"), dict) else {}
+                preference = {}
+                if isinstance(lemondata_meta, dict):
+                    agent_preferences = lemondata_meta.get("agent_preferences")
+                    if isinstance(agent_preferences, dict):
+                        preference = agent_preferences.get(recommended_for) if isinstance(agent_preferences.get(recommended_for), dict) else {}
                 models.append({
                     "id": model_id,
                     "category": str((lemondata_meta or {}).get("category") or category),
-                    "tags": list((lemondata_meta or {}).get("tags") or []),
+                    "tags": list((lemondata_meta or {}).get("capabilities") or []),
                     "pricing_unit": (lemondata_meta or {}).get("pricing_unit"),
+                    "preferred_rank": preference.get("preferred_rank"),
+                    "success_rate_24h": preference.get("success_rate_24h"),
+                    "sample_count_24h": preference.get("sample_count_24h", 0),
+                    "status": preference.get("status", "insufficient_samples"),
+                    "updated_at": preference.get("updated_at"),
                 })
-        return {
+        result = {
             "ok": True,
             "category": category,
+            "recommended_for": recommended_for,
             "model_count": len(models),
             "models": models,
+            "snapshot_at": None,
         }
+        snapshot_at = None
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            lemondata_meta = item.get("lemondata") if isinstance(item.get("lemondata"), dict) else {}
+            agent_preferences = lemondata_meta.get("agent_preferences") if isinstance(lemondata_meta, dict) else {}
+            if isinstance(agent_preferences, dict):
+                preference = agent_preferences.get(recommended_for)
+                if isinstance(preference, dict) and preference.get("updated_at"):
+                    snapshot_at = preference.get("updated_at")
+                    break
+        result["snapshot_at"] = snapshot_at
+        self._set_cached_discovery(cache_key, result)
+        return result
 
     async def _request(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._fetch_json(endpoint, method="POST", body=payload)
@@ -203,12 +329,54 @@ class LemonDataNonChatTool(Tool):
                 "endpoint": endpoint,
                 "response": response["body"],
             }
+        error_body = response["body"] if isinstance(response["body"], dict) else {}
+        error_payload = error_body.get("error") if isinstance(error_body.get("error"), dict) else {}
         return {
             "ok": False,
             "endpoint": endpoint,
             "error": response["error"],
             "response": response["body"],
+            "error_code": error_payload.get("code"),
+            "retryable": bool(error_payload.get("retryable")),
         }
+
+    @staticmethod
+    def _validate_payload(category: str, payload: dict[str, Any]) -> str | None:
+        if category == "translation":
+            if not str(payload.get("text") or "").strip():
+                return "payload.text is required for translation requests"
+            if not str(payload.get("target_language") or "").strip():
+                return "payload.target_language is required for translation requests"
+        return None
+
+    @staticmethod
+    def _should_retry_with_next_model(request_result: dict[str, Any]) -> bool:
+        error_code = str(request_result.get("error_code") or "").strip().lower()
+        if error_code in _RETRYABLE_ERROR_CODES:
+            return True
+        if error_code in {"invalid_request", "insufficient_balance"}:
+            return False
+        return bool(request_result.get("retryable"))
+
+    def _get_cached_discovery(self, cache_key: str) -> dict[str, Any] | None:
+        entry = self._scene_discovery_cache.get(cache_key)
+        if not entry:
+            return None
+        if time.time() - float(entry.get("created_at", 0)) > _SCENE_CACHE_TTL_SECONDS:
+            self._scene_discovery_cache.pop(cache_key, None)
+            return None
+        return dict(entry.get("value") or {})
+
+    def _set_cached_discovery(self, cache_key: str, value: dict[str, Any]) -> None:
+        self._scene_discovery_cache[cache_key] = {
+            "created_at": time.time(),
+            "value": dict(value),
+        }
+
+    def _invalidate_scene_cache(self, scene: str) -> None:
+        keys = [key for key in self._scene_discovery_cache if key.endswith(f":{scene}")]
+        for key in keys:
+            self._scene_discovery_cache.pop(key, None)
 
     async def _fetch_json(
         self,
