@@ -1,4 +1,4 @@
-import { agents, plans } from '../../stores/conductor';
+import { agents, plans, templates } from '../../stores/conductor';
 import { isStreaming } from '../../stores/chat';
 import { t } from '../../stores/i18n';
 import '../../styles/star-office.css';
@@ -11,12 +11,68 @@ function getHueForAgent(id: string) {
   return Math.abs(hash % 360);
 }
 
+function shortId(id: string | null | undefined) {
+  if (!id) return 'unassigned';
+  return id.length > 12 ? `${id.slice(0, 10)}...` : id;
+}
+
+function statusTone(status: string) {
+  if (status === 'completed') return 'success';
+  if (status === 'running' || status === 'busy') return 'accent';
+  if (status === 'failed' || status === 'error' || status === 'blocked') return 'error';
+  return 'muted';
+}
+
 export function StarOffice() {
   const workerAgents = agents.value || [];
   const isConductorBusy = isStreaming.value || plans.value.length > 0;
   const activePlan = plans.value[0];
   const activeTemplate = activePlan?.swarm_template_label || '';
-  
+  const activeTemplateData = templates.value.find((template) => template.id === activePlan?.swarm_template_id) || null;
+  const subtasks = activePlan?.subtasks || [];
+  const completedSubtaskIds = new Set(subtasks.filter((task) => task.status === 'completed').map((task) => task.id));
+  const runningSubtasks = subtasks.filter((task) => task.status === 'running');
+  const blockedSubtasks = subtasks.filter(
+    (task) => {
+      const deps = task.depends_on || [];
+      return task.status === 'pending' && deps.length > 0 && deps.some((dep) => !completedSubtaskIds.has(dep));
+    },
+  );
+  const readySubtasks = subtasks.filter(
+    (task) => {
+      const deps = task.depends_on || [];
+      return task.status === 'pending' && deps.every((dep) => completedSubtaskIds.has(dep));
+    },
+  );
+  const handoffSubtasks = subtasks.filter((task) => (task.depends_on || []).length > 0);
+  const completedCount = subtasks.filter((task) => task.status === 'completed').length;
+  const busyAgents = workerAgents.filter((agent) => agent.status === 'busy').length;
+  const errorAgents = workerAgents.filter((agent) => agent.status === 'error').length;
+  const laneTemplates = (activeTemplateData?.roles?.length ? activeTemplateData.roles : [])
+    .map((role) => ({
+      id: role.id,
+      label: role.label,
+      tasks: subtasks.filter((task) => task.role_hint === role.id || (role.id === 'lead' && task.role_hint == null)),
+      agent: workerAgents.find((agent) => agent.role === role.id) || null,
+    }))
+    .filter((lane) => lane.tasks.length > 0 || lane.agent);
+  const derivedRoleLanes = laneTemplates.length
+    ? laneTemplates
+    : Array.from(
+        new Map(
+          subtasks
+            .map((task) => task.role_hint || 'unassigned')
+            .filter(Boolean)
+            .map((roleId) => [roleId, roleId]),
+        ).values(),
+      ).map((roleId) => ({
+        id: roleId,
+        label: roleId === 'unassigned' ? 'Unassigned' : roleId.replace(/_/g, ' '),
+        tasks: subtasks.filter((task) => (task.role_hint || 'unassigned') === roleId),
+        agent: workerAgents.find((agent) => agent.role === roleId) || null,
+      }));
+  const roleLanes = derivedRoleLanes.slice(0, 4);
+
   let overallStatus = 'idle';
   if (workerAgents.some(a => a.status === 'error')) overallStatus = 'error';
   else if (isConductorBusy) overallStatus = 'executing';
@@ -51,6 +107,94 @@ export function StarOffice() {
           {`TEAM · ${activeTemplate}`}
         </div>
       ) : null}
+
+      <div class="star-hud star-hud-top-left">
+        <div class="star-hud-kicker">current team</div>
+        <div class="star-hud-title">{activeTemplate || 'Single-instance swarm'}</div>
+        <div class="star-hud-body">
+          {activePlan?.swarm_goal ? activePlan.swarm_goal : activePlan?.message || 'Idle and ready for the next swarm task.'}
+        </div>
+        <div class="star-hud-pills">
+          <span class="star-hud-pill accent">{`tasks ${subtasks.length}`}</span>
+          <span class="star-hud-pill muted">{`ready ${readySubtasks.length}`}</span>
+          <span class="star-hud-pill error">{`blocked ${blockedSubtasks.length}`}</span>
+        </div>
+      </div>
+
+      <div class="star-hud star-hud-top-right">
+        <div class="star-hud-kicker">status</div>
+        <div class="star-hud-metric-row">
+          <span class="star-hud-metric">
+            <strong>{busyAgents}</strong>
+            <span>busy agents</span>
+          </span>
+          <span class="star-hud-metric">
+            <strong>{runningSubtasks.length}</strong>
+            <span>running lanes</span>
+          </span>
+          <span class="star-hud-metric">
+            <strong>{errorAgents}</strong>
+            <span>errors</span>
+          </span>
+        </div>
+        <div class="star-hud-body">
+          {completedCount
+            ? `${completedCount} completed, ${handoffSubtasks.length} with handoff deps`
+            : 'No completed lanes yet.'}
+        </div>
+      </div>
+
+      <div class="star-hud star-hud-bottom-left">
+        <div class="star-hud-kicker">role roster</div>
+        <div class="star-hud-lanes">
+          {roleLanes.length ? roleLanes.map((lane) => {
+            const laneActiveTask = lane.tasks.find((task) => task.status !== 'completed') || lane.tasks[0];
+            const laneTone = laneActiveTask ? statusTone(laneActiveTask.status) : (lane.agent ? statusTone(lane.agent.status) : 'muted');
+            return (
+              <div class={`star-hud-lane ${laneTone}`}>
+                <div class="star-hud-lane-head">
+                  <span>{lane.label}</span>
+                  <span class={`star-hud-pill ${laneTone}`}>{lane.agent ? shortId(lane.agent.id) : 'standby'}</span>
+                </div>
+                <div class="star-hud-lane-task">
+                  {laneActiveTask ? laneActiveTask.description : 'Awaiting assignment'}
+                </div>
+              </div>
+            );
+          }) : (
+            <div class="star-hud-empty">No lanes assigned yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div class="star-hud star-hud-bottom-right">
+        <div class="star-hud-kicker">handoff</div>
+        <div class="star-hud-lanes">
+          {handoffSubtasks.length ? handoffSubtasks.slice(0, 4).map((task) => {
+            const deps = (task.depends_on || []).map((depId) => subtasks.find((item) => item.id === depId)).filter(Boolean);
+            const taskTone = statusTone(task.status);
+            return (
+              <div class={`star-hud-lane ${taskTone}`}>
+                <div class="star-hud-lane-head">
+                  <span>{task.description}</span>
+                  <span class={`star-hud-pill ${taskTone}`}>{task.status}</span>
+                </div>
+                <div class="star-hud-handoff">
+                  {deps.length ? deps.map((dep) => (
+                    <span class="star-hud-pill muted" key={dep?.id}>
+                      {`${dep?.id}${dep?.status === 'completed' ? '✓' : ''}`}
+                    </span>
+                  )) : (
+                    <span class="star-hud-pill muted">no deps</span>
+                  )}
+                </div>
+              </div>
+            );
+          }) : (
+            <div class="star-hud-empty">No dependency handoffs yet.</div>
+          )}
+        </div>
+      </div>
       
       {overallStatus === 'executing' && (
         <>
