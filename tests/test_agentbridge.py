@@ -91,3 +91,19 @@ class TestAgentBridgeRoutes:
         assert usage.status_code == 200
         payload = usage.json()
         assert payload["session"]["key"] == "agentbridge:codex:default:usage-demo"
+
+    def test_usage_does_not_preserve_webui_prefix_under_bearer_auth(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        session = loop.sessions.get_or_create("webui:hidden")
+        session.messages.append({"role": "user", "content": "hello"})
+        loop.sessions.save(session)
+
+        usage = client.get(
+            "/api/usage",
+            headers={"Authorization": "Bearer secret-token"},
+            params={"session": "webui:hidden"},
+        )
+        assert usage.status_code == 200
+        payload = usage.json()
+        assert payload["session"]["key"] == "api:webui:hidden"
+        assert payload["session"]["error"] == "not found"

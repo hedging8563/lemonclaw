@@ -85,8 +85,8 @@ def _build_usage_handler(
         session_key = request.query_params.get("session")
         if session_key and runtime.session_manager:
             # Legacy behavior prefixes anonymous session hints with api:.
-            # Explicitly-scoped sessions such as agentbridge:* are preserved.
-            if not session_key.startswith(("api:", "agentbridge:", "webui:", "cron:")):
+            # Explicitly-scoped agentbridge sessions are preserved.
+            if not session_key.startswith(("api:", "agentbridge:")):
                 session_key = f"api:{session_key}"
             # Use _load to avoid creating empty sessions from arbitrary query params
             session = runtime.session_manager._load(session_key)
