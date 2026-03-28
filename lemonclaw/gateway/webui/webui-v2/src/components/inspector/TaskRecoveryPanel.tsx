@@ -520,6 +520,7 @@ function renderTaskDetailBody(
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
   const recovery = task.metadata?.recovery || {};
+  const runtimeCorrection = task.metadata?.runtime_correction || null;
   const retrieval = detail.summary?.retrieval || task.retrieval || task.metadata?.retrieval || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
@@ -549,6 +550,29 @@ function renderTaskDetailBody(
           <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
           <div style={summaryDetailStyle}>{workflowInstruction(task)}</div>
         </div>
+        {runtimeCorrection && (
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>{t('task_runtime_correction_title')}</div>
+            <div style={{ display: 'grid', gap: '4px', fontSize: '13px', lineHeight: '1.45', color: 'var(--text-secondary)' }}>
+              <div>
+                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_runtime_correction_kind')}:</span>{' '}
+                {humanizeCode(runtimeCorrection.kind)}
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_runtime_correction_interrupted_task_count')}:</span>{' '}
+                {runtimeCorrection.interrupted_task_count != null ? runtimeCorrection.interrupted_task_count : '—'}
+              </div>
+              <div style={{ display: 'grid', gap: '4px' }}>
+                <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  {t('task_runtime_correction_message_preview')}
+                </div>
+                <div style={{ color: 'var(--text-secondary)', wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxHeight: '96px', overflow: 'auto' }}>
+                  {runtimeCorrection.message_preview || '—'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       {linkedFocus && (
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
