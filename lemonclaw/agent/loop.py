@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import re
+import time
 import uuid
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
@@ -215,6 +216,8 @@ class AgentLoop:
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._consolidation_epochs: dict[str, int] = {}  # session_key -> supersede generation
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._active_task_ids: dict[str, set[str]] = {}  # session_key -> active ledger task_ids
+        self._session_cancel_reasons: dict[str, str] = {}  # session_key -> cooperative cancel reason
         self._resume_tasks: dict[str, asyncio.Task] = {}  # task_id -> background resume task
         self._stop_events: dict[str, asyncio.Event] = {}  # session_key -> cooperative stop signal
         self._session_locks: dict[str, asyncio.Lock] = {}  # per-session processing locks
@@ -620,9 +623,243 @@ class AgentLoop:
             delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
         )
 
+    def _prepare_dispatch_metadata(self, msg: InboundMessage) -> dict[str, Any]:
+        """Ensure tracked dispatch metadata exists before task orchestration decisions."""
+        metadata = dict(msg.metadata or {})
+        metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
+        metadata.setdefault("_mode", self._infer_mode(msg))
+        metadata.setdefault("_agent_id", self.agent_id)
+        msg.metadata = metadata
+        return metadata
+
+    def _session_has_running_work(
+        self,
+        session_key: str,
+        *,
+        exclude_task: asyncio.Task | None = None,
+    ) -> bool:
+        return any(
+            task is not exclude_task and not task.done()
+            for task in self._active_tasks.get(session_key, [])
+        )
+
+    @staticmethod
+    def _is_command_message(content: str) -> bool:
+        stripped = content.strip()
+        return bool(stripped.startswith("/") and not stripped[1:2].isspace())
+
+    @staticmethod
+    def _classify_runtime_correction(content: str) -> str:
+        stripped = content.strip()
+        lowered = stripped.lower()
+        if not stripped:
+            return "correction"
+
+        interrupt_prefixes = (
+            "stop",
+            "cancel",
+            "abort",
+            "halt",
+            "暂停",
+            "停止",
+            "取消",
+            "先停",
+        )
+        if any(lowered.startswith(prefix) for prefix in interrupt_prefixes):
+            return "interrupt"
+
+        continue_prefixes = ("continue", "go on", "carry on", "继续", "接着")
+        if any(lowered.startswith(prefix) for prefix in continue_prefixes):
+            return "continue"
+
+        constraint_markers = (
+            "不要",
+            "别",
+            "先别",
+            "只",
+            "仅",
+            "限制",
+            "不要发",
+            "不要提交",
+            "不要推",
+            "dry-run",
+            "dry run",
+            "don't",
+            "do not",
+            "only ",
+            "without ",
+            "skip ",
+            "limit ",
+        )
+        if any(marker in lowered or marker in stripped for marker in constraint_markers):
+            return "constraint_patch"
+
+        correction_markers = (
+            "改成",
+            "改用",
+            "换成",
+            "换用",
+            "改一下",
+            "instead",
+            "switch to",
+            "change to",
+            "replace with",
+            "update to",
+        )
+        if any(marker in lowered or marker in stripped for marker in correction_markers):
+            return "correction"
+
+        return "correction"
+
+    def _list_interruptible_session_tasks(
+        self,
+        session_key: str,
+        *,
+        exclude_task_id: str = "",
+    ) -> list[dict[str, Any]]:
+        active_ids = set(self._active_task_ids.get(session_key) or ())
+        if active_ids:
+            active_ids.discard(exclude_task_id)
+            return [task for task_id in active_ids if (task := self.ledger.read_task(task_id))]
+
+        active_statuses = {"pending", "running", "verifying", "waiting"}
+        tasks = self.ledger.list_tasks(limit=20, session_key=session_key)
+        visible: list[dict[str, Any]] = []
+        for task in tasks:
+            task_id = str(task.get("task_id") or "")
+            if not task_id or task_id == exclude_task_id:
+                continue
+            if str(task.get("status") or "") not in active_statuses:
+                continue
+            visible.append(task)
+        return visible
+
+    async def _cancel_session_work(
+        self,
+        session_key: str,
+        *,
+        exclude_task: asyncio.Task | None = None,
+    ) -> int:
+        """Cancel active tasks and subagents for a session without emitting UI copy."""
+        stop_event = self._stop_events.get(session_key)
+        if stop_event:
+            stop_event.set()
+
+        tasks = list(self._active_tasks.get(session_key, []))
+        cancel_targets = [tk for tk in tasks if tk is not exclude_task]
+        kept = [tk for tk in tasks if tk is exclude_task]
+        if session_key in self._active_tasks:
+            if kept:
+                self._active_tasks[session_key] = kept
+            else:
+                self._active_tasks.pop(session_key, None)
+
+        cancelled = sum(1 for tk in cancel_targets if not tk.done() and tk.cancel())
+        for tk in cancel_targets:
+            try:
+                await tk
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Task ended with error during cancellation for session {}", session_key)
+        sub_cancelled = await self.subagents.cancel_by_session(session_key)
+        return cancelled + sub_cancelled
+
+    def _annotate_runtime_correction(
+        self,
+        *,
+        interrupted_tasks: list[dict[str, Any]],
+        replacement_task_id: str,
+        msg: InboundMessage,
+        kind: str,
+    ) -> None:
+        if not interrupted_tasks:
+            return
+
+        preview = msg.content.strip()[:200]
+        reason = f"user follow-up interrupted active task ({kind})"
+        for task in interrupted_tasks:
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            metadata = dict(task.get("metadata") or {})
+            details = {
+                "kind": kind,
+                "message_preview": preview,
+                "replacement_task_id": replacement_task_id,
+                "session_key": msg.session_key,
+            }
+            recovery = {
+                "source": "session_user_correction",
+                "reason": reason[:500],
+                "requested_at_ms": int(time.time() * 1000),
+                "action": "user_correction_interrupt",
+                "manual_review_required": False,
+                "correction_kind": kind,
+                "replacement_task_id": replacement_task_id,
+            }
+            metadata["recovery"] = recovery
+            self.ledger.append_recovery_history(
+                metadata,
+                source="session_user_correction",
+                action="user_correction_interrupt",
+                reason=reason,
+                details=details,
+            )
+            self.ledger.update_task(task_id, metadata=metadata)
+
+    async def _interrupt_active_session_for_correction(
+        self,
+        msg: InboundMessage,
+        *,
+        current_task: asyncio.Task | None = None,
+    ) -> bool:
+        """Turn an in-flight user follow-up into a lightweight correction interrupt."""
+        if msg.channel in {"internal", "system"}:
+            return False
+
+        metadata = self._prepare_dispatch_metadata(msg)
+        if bool(metadata.get("_resume_internal")):
+            return False
+        if self._is_command_message(msg.content):
+            return False
+        if not self._session_has_running_work(msg.session_key, exclude_task=current_task):
+            return False
+
+        interrupted_tasks = self._list_interruptible_session_tasks(
+            msg.session_key,
+            exclude_task_id=str(metadata.get("_task_id") or ""),
+        )
+        kind = self._classify_runtime_correction(msg.content)
+        self._session_cancel_reasons[msg.session_key] = "user_correction_interrupt"
+        await self._cancel_session_work(msg.session_key, exclude_task=current_task)
+        self._session_cancel_reasons.pop(msg.session_key, None)
+        self._annotate_runtime_correction(
+            interrupted_tasks=interrupted_tasks,
+            replacement_task_id=str(metadata.get("_task_id") or ""),
+            msg=msg,
+            kind=kind,
+        )
+        metadata["_runtime_correction"] = {
+            "kind": kind,
+            "message_preview": msg.content.strip()[:200],
+            "supersedes_task_ids": [
+                str(task.get("task_id") or "") for task in interrupted_tasks if task.get("task_id")
+            ],
+            "interrupted_task_count": len(interrupted_tasks),
+            "at_ms": int(time.time() * 1000),
+        }
+        msg.metadata = metadata
+        return True
+
+    async def _dispatch_entry(self, msg: InboundMessage) -> None:
+        current_task = asyncio.current_task()
+        await self._interrupt_active_session_for_correction(msg, current_task=current_task)
+        await self._dispatch(msg)
+
     def _spawn_dispatch_task(self, msg: InboundMessage) -> asyncio.Task:
         """Spawn a tracked dispatch task so /stop and recovery share the same path."""
-        task = asyncio.create_task(self._dispatch(msg))
+        task = asyncio.create_task(self._dispatch_entry(msg))
         self._active_tasks.setdefault(msg.session_key, []).append(task)
 
         def _on_task_done(t: asyncio.Task, key: str = msg.session_key) -> None:
@@ -1045,22 +1282,7 @@ class AgentLoop:
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
-        # Signal cooperative stop first (graceful)
-        stop_event = self._stop_events.get(msg.session_key)
-        if stop_event:
-            stop_event.set()
-
-        tasks = self._active_tasks.pop(msg.session_key, [])
-        cancelled = sum(1 for tk in tasks if not tk.done() and tk.cancel())
-        for tk in tasks:
-            try:
-                await tk
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.debug("Task ended with error during stop for session {}", msg.session_key)
-        sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
-        total = cancelled + sub_cancelled
+        total = await self._cancel_session_work(msg.session_key)
         lang = session_lang(self.sessions._load(msg.session_key))
         content = t("stop_tasks", lang, n=total) if total else t("stop_none", lang)
         await self.bus.publish_outbound(OutboundMessage(
@@ -1117,14 +1339,14 @@ class AgentLoop:
         """Process a message under a per-session lock."""
         is_internal = msg.channel == "internal"
         request_id = (msg.metadata or {}).get("_request_id") if is_internal else None
-        metadata = dict(msg.metadata or {})
-        metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
-        metadata.setdefault("_mode", self._infer_mode(msg))
-        metadata.setdefault("_agent_id", self.agent_id)
-        msg.metadata = metadata
+        metadata = self._prepare_dispatch_metadata(msg)
         task_metadata = self._task_trigger_metadata(metadata)
+        runtime_correction = metadata.get("_runtime_correction")
+        if isinstance(runtime_correction, dict) and runtime_correction:
+            task_metadata = {**task_metadata, "runtime_correction": dict(runtime_correction)}
+        task_id = str(metadata["_task_id"])
         self.ledger.ensure_task(
-            task_id=str(metadata["_task_id"]),
+            task_id=task_id,
             session_key=msg.session_key,
             agent_id=self.agent_id,
             mode=str(metadata["_mode"]),
@@ -1134,7 +1356,8 @@ class AgentLoop:
             resume_context=self._build_task_resume_context(msg),
             metadata=task_metadata or None,
         )
-        self._link_trigger_task(metadata, str(metadata["_task_id"]), msg.session_key)
+        self._link_trigger_task(metadata, task_id, msg.session_key)
+        self._active_task_ids.setdefault(msg.session_key, set()).add(task_id)
 
         # Per-session lock: different sessions can run concurrently
         if msg.session_key not in self._session_locks:
@@ -1204,6 +1427,8 @@ class AgentLoop:
                 )
                 if request_id:
                     self.bus.resolve_response(request_id, "[cancelled]")
+                if self._session_cancel_reasons.get(msg.session_key) == "user_correction_interrupt":
+                    return None
                 raise
             except Exception as exc:
                 logger.exception("Error processing message for session {}", msg.session_key)
@@ -1240,6 +1465,11 @@ class AgentLoop:
                         content=t("error", lang),
                     ))
             finally:
+                active_ids = self._active_task_ids.get(msg.session_key)
+                if active_ids:
+                    active_ids.discard(task_id)
+                    if not active_ids:
+                        self._active_task_ids.pop(msg.session_key, None)
                 self._stop_events.pop(msg.session_key, None)
 
     @staticmethod

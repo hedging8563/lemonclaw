@@ -115,6 +115,62 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["retrieval"]["latency_ms"] == 9
 
 
+def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_old",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="draft answer",
+        status="abandoned",
+        current_stage="cancelled",
+    )
+    old_metadata = dict((ledger.read_task("task_old") or {}).get("metadata") or {})
+    ledger.append_recovery_history(
+        old_metadata,
+        source="agent_loop",
+        action="user_correction_interrupt",
+        reason="follow-up replaced the in-flight task",
+        details={"superseded_by_task_id": "task_new"},
+    )
+    ledger.update_task("task_old", metadata=old_metadata)
+
+    ledger.ensure_task(
+        task_id="task_new",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="actually, correct that",
+        metadata={
+            "runtime_correction": {
+                "kind": "user_follow_up",
+                "message_preview": "actually, correct that",
+                "supersedes_task_ids": ["task_old"],
+                "interrupted_task_count": 1,
+            }
+        },
+    )
+
+    client = TestClient(app)
+
+    old_resp = client.get("/api/tasks/task_old")
+    assert old_resp.status_code == 200
+    old_data = old_resp.json()
+    assert old_data["task"]["metadata"]["recovery_history"][-1]["action"] == "user_correction_interrupt"
+
+    new_resp = client.get("/api/tasks/task_new")
+    assert new_resp.status_code == 200
+    new_data = new_resp.json()
+    runtime_correction = new_data["task"]["metadata"]["runtime_correction"]
+    assert runtime_correction["kind"] == "user_follow_up"
+    assert runtime_correction["message_preview"] == "actually, correct that"
+    assert runtime_correction["supersedes_task_ids"] == ["task_old"]
+    assert runtime_correction["interrupted_task_count"] == 1
+
+
 def test_info_api_includes_channel_status_snapshot(tmp_path):
     channel_manager = SimpleNamespace(
         get_channel_status=lambda: {

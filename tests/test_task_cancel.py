@@ -249,6 +249,68 @@ class TestSteeringLoop:
         await loop._dispatch(msg)
         assert "test:c1" not in loop._stop_events
 
+    @pytest.mark.asyncio
+    async def test_non_command_follow_up_interrupts_active_task_and_marks_correction(self, make_agent_loop):
+        """A new non-command turn should preempt running work in the same session."""
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = make_agent_loop()
+
+        first_started = asyncio.Event()
+        first_cancelled = asyncio.Event()
+        second_started = asyncio.Event()
+
+        async def fake_process(msg, **kwargs):
+            if msg.content == "draft answer":
+                first_started.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    first_cancelled.set()
+                    raise
+            if msg.content == "actually, correct that":
+                second_started.set()
+                return OutboundMessage(channel="test", chat_id="c1", content="updated answer")
+            raise AssertionError(f"unexpected content: {msg.content!r}")
+
+        loop._process_message = fake_process
+
+        first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
+        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="actually, correct that")
+
+        first_task = loop._spawn_dispatch_task(first_msg)
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        second_task = loop._spawn_dispatch_task(second_msg)
+
+        await asyncio.wait_for(first_cancelled.wait(), timeout=1.0)
+        await asyncio.wait_for(second_started.wait(), timeout=1.0)
+
+        outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert outbound.content == "updated answer"
+
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1.0)
+
+        first_task_id = str(first_msg.metadata["_task_id"])
+        second_task_id = str(second_msg.metadata["_task_id"])
+
+        old_task = loop.ledger.read_task(first_task_id)
+        new_task = loop.ledger.read_task(second_task_id)
+
+        assert old_task is not None
+        assert old_task["session_key"] == "test:c1"
+        assert old_task["status"] in {"abandoned", "cancelled"}
+        assert old_task["current_stage"] in {"cancelled", "abandoned"}
+        assert old_task["metadata"]["recovery_history"][-1]["action"] == "user_correction_interrupt"
+
+        assert new_task is not None
+        assert new_task["session_key"] == "test:c1"
+        runtime_correction = new_task["metadata"]["runtime_correction"]
+        assert runtime_correction["kind"]
+        assert runtime_correction["message_preview"]
+        assert first_task_id in runtime_correction["supersedes_task_ids"]
+        assert runtime_correction["interrupted_task_count"] == 1
+
 
 class TestSubagentCancellation:
     @pytest.mark.asyncio
