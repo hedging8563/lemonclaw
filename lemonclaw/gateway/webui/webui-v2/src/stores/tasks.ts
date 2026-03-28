@@ -168,6 +168,104 @@ export interface TaskDetail {
   candidate?: Record<string, any> | null;
 }
 
+export interface TaskOperatorSummary {
+  tone: TaskDisplayState['tone'];
+  titleKey: string;
+  bodyKey: string;
+  actionKey?: string | null;
+}
+
+function getTaskStateKey(task: TaskRecord) {
+  return String(task.display_state?.key || task.status || '').trim().toLowerCase();
+}
+
+export function summarizeTaskOperatorState(task: TaskRecord, detail?: TaskDetail | null): TaskOperatorSummary {
+  const stateKey = getTaskStateKey(task);
+  const candidate = detail?.candidate || null;
+  const summary = detail?.summary || null;
+  const outboxActiveCount = Number(summary?.outbox_active_count || 0);
+  const isResumeLive = ['resume_requested', 'resume_queued', 'resume_running'].includes(stateKey);
+
+  if (stateKey === 'resume_dispatch_failed') {
+    return {
+      tone: 'warning',
+      titleKey: 'task_operator_summary_dispatch_failed_title',
+      bodyKey: 'task_operator_summary_dispatch_failed_body',
+      actionKey: 'task_action_retry_resume_dispatch',
+    };
+  }
+
+  if (stateKey === 'resume_manual_only' || task.queue?.manual_review_required) {
+    return {
+      tone: 'warning',
+      titleKey: 'task_operator_summary_manual_help_title',
+      bodyKey: 'task_operator_summary_manual_help_body',
+      actionKey: 'task_action_queue_manual_resume',
+    };
+  }
+
+  if (candidate?.safe_to_execute && !isResumeLive) {
+    return {
+      tone: 'accent',
+      titleKey: 'task_operator_summary_continue_ready_title',
+      bodyKey: 'task_operator_summary_continue_ready_body',
+      actionKey: 'task_action_run_safe_resume',
+    };
+  }
+
+  if (stateKey === 'verifying' || stateKey === 'waiting') {
+    return {
+      tone: 'muted',
+      titleKey: 'task_operator_summary_checking_title',
+      bodyKey: 'task_operator_summary_checking_body',
+      actionKey: candidate?.recommended_action === 'recheck' ? 'task_action_recheck' : null,
+    };
+  }
+
+  if (stateKey === 'waiting_outbox' || outboxActiveCount > 0) {
+    return {
+      tone: 'warning',
+      titleKey: 'task_operator_summary_delivery_title',
+      bodyKey: 'task_operator_summary_delivery_body',
+      actionKey: candidate?.recommended_action === 'retry_outbox' ? 'task_action_retry_outbox' : null,
+    };
+  }
+
+  if (task.status === 'running' || stateKey === 'running') {
+    return {
+      tone: 'accent',
+      titleKey: 'task_operator_summary_running_title',
+      bodyKey: 'task_operator_summary_running_body',
+      actionKey: null,
+    };
+  }
+
+  if (stateKey === 'completed') {
+    return {
+      tone: 'success',
+      titleKey: 'task_operator_summary_completed_title',
+      bodyKey: 'task_operator_summary_completed_body',
+      actionKey: null,
+    };
+  }
+
+  if (stateKey === 'abandoned' || task.status === 'abandoned') {
+    return {
+      tone: 'muted',
+      titleKey: 'task_operator_summary_superseded_title',
+      bodyKey: 'task_operator_summary_superseded_body',
+      actionKey: null,
+    };
+  }
+
+  return {
+    tone: task.display_state?.tone || 'muted',
+    titleKey: 'task_operator_summary_attention_title',
+    bodyKey: 'task_operator_summary_attention_body',
+    actionKey: candidate?.recommended_action ? `task_action_${candidate.recommended_action}` : null,
+  };
+}
+
 export const sessionTasks = signal<TaskRecord[]>([]);
 export const recoverySummary = signal<Record<string, number> | null>(null);
 export const recoveryTasks = signal<TaskRecord[]>([]);

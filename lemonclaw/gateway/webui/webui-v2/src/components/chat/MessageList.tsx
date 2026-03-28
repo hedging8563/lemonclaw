@@ -15,7 +15,7 @@ import 'highlight.js/styles/github-dark.css';
 import { marked } from 'marked';
 import { activeSessionKey } from '../../stores/sessions';
 import { inputText, isLoadingHistory, isLoadingMore, isStreaming, loadHistory, loadMoreHistory, hasMoreHistory, messages } from '../../stores/chat';
-import { sessionTasks, taskActionBusy, taskDetails, triggerSafeResume, triggerManualResume, triggerTaskRecheck } from '../../stores/tasks';
+import { sessionTasks, summarizeTaskOperatorState, taskActionBusy, taskDetails, triggerSafeResume, triggerManualResume, triggerTaskRecheck } from '../../stores/tasks';
 import type { UIBlock } from '../../models/messages';
 import { t } from '../../stores/i18n';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -114,6 +114,18 @@ function MsgActions({ msg }: { msg: any }) {
       {msg.role === 'user' && <button onClick={handleEdit} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font-display)' }} onMouseEnter={e => e.currentTarget.style.color='var(--accent)'} onMouseLeave={e => e.currentTarget.style.color='var(--text-secondary)'}>{t('edit')}</button>}
     </div>
   );
+}
+
+function translateOrFallback(key: string | null | undefined, fallback: string) {
+  if (!key) return fallback;
+  const translated = t(key as any);
+  return translated === key ? fallback : translated;
+}
+
+function formatTaskDisplayState(state?: { key?: string; label?: string } | null) {
+  if (!state) return 'Unknown';
+  const translated = t(`task_state_${state.key}` as any);
+  return translated === `task_state_${state.key}` ? (state.label || state.key || 'Unknown') : translated;
 }
 
 export function MessageList() {
@@ -340,14 +352,20 @@ export function MessageList() {
         const busy = taskActionBusy.value[task.task_id];
         const candidate = detail?.candidate;
         const state = task.display_state;
+        const operatorSummary = summarizeTaskOperatorState(task, detail);
+        const summaryTitle = translateOrFallback(operatorSummary.titleKey, t('task_operator_summary_title'));
+        const summaryBody = translateOrFallback(operatorSummary.bodyKey, t('task_intervention_desc'));
+        const nextMoveLabel = operatorSummary.actionKey
+          ? translateOrFallback(operatorSummary.actionKey, t('task_action_run_safe_resume'))
+          : formatTaskDisplayState(state);
         const isResumeLive = ['resume_requested', 'resume_queued', 'resume_running'].includes(state?.key || '');
         const canRunSafeResume = Boolean(candidate?.safe_to_execute);
         const canRecheck = ['waiting', 'verifying'].includes(task.status || '') && (!candidate || candidate?.recommended_action === 'recheck');
         const showRetryDispatchCta = state?.key === 'resume_dispatch_failed' && canRunSafeResume && !isResumeLive;
         const showManualResumeCta = state?.key === 'resume_manual_only' && !isResumeLive;
-        const tone = state?.tone === 'error' ? 'var(--error)' : state?.tone === 'success' ? 'var(--success)' : state?.tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--accent)';
-        const bgTone = state?.tone === 'error' ? 'rgba(255, 68, 68, 0.08)' : state?.tone === 'success' ? 'rgba(76, 175, 80, 0.08)' : state?.tone === 'warning' ? 'rgba(255, 184, 77, 0.08)' : 'rgba(124, 58, 237, 0.08)';
-        const borderTone = state?.tone === 'error' ? 'rgba(255, 68, 68, 0.28)' : state?.tone === 'success' ? 'rgba(76, 175, 80, 0.28)' : state?.tone === 'warning' ? 'rgba(255, 184, 77, 0.28)' : 'rgba(124, 58, 237, 0.28)';
+        const tone = operatorSummary.tone === 'error' ? 'var(--error)' : operatorSummary.tone === 'success' ? 'var(--success)' : operatorSummary.tone === 'warning' ? 'var(--warning, #ffb84d)' : 'var(--accent)';
+        const bgTone = operatorSummary.tone === 'error' ? 'rgba(255, 68, 68, 0.08)' : operatorSummary.tone === 'success' ? 'rgba(76, 175, 80, 0.08)' : operatorSummary.tone === 'warning' ? 'rgba(255, 184, 77, 0.08)' : 'rgba(124, 58, 237, 0.08)';
+        const borderTone = operatorSummary.tone === 'error' ? 'rgba(255, 68, 68, 0.28)' : operatorSummary.tone === 'success' ? 'rgba(76, 175, 80, 0.28)' : operatorSummary.tone === 'warning' ? 'rgba(255, 184, 77, 0.28)' : 'rgba(124, 58, 237, 0.28)';
 
         if (!showRetryDispatchCta && !showManualResumeCta && !canRunSafeResume && !canRecheck && !isResumeLive) {
           return null; // Not an active intervention card
@@ -357,18 +375,44 @@ export function MessageList() {
           <div key={`rescue-${task.task_id}`} style={{ maxWidth: '680px', width: '100%', margin: '8px auto', border: `1px solid ${borderTone}`, background: bgTone, borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: tone, fontFamily: 'var(--font-ui)', fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
               <span>🛡️</span>
-              <span>{(t as any)('task_intervention_required') || 'Intervention Required'}</span>
+              <span>{t('task_operator_summary_title')}</span>
             </div>
             
-            <div style={{ fontSize: '15px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-              {task.goal || (t as any)('task_intervention_desc')}
+            <div style={{ display: 'grid', gap: '4px' }}>
+              <div style={{ fontSize: '17px', color: 'var(--text-primary)', lineHeight: 1.45, fontWeight: 600 }}>
+                {summaryTitle}
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                {summaryBody}
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                {task.goal || t('task_intervention_desc')}
+              </div>
             </div>
 
-            {(showRetryDispatchCta || showManualResumeCta) && (
-              <div style={{ fontSize: '15px', color: tone, fontFamily: 'var(--font-ui)', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
-                {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
+            <div style={{ display: 'grid', gap: '8px', padding: '10px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: `1px solid ${borderTone}` }}>
+              <div style={{ display: 'grid', gap: '4px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {t('task_operator_summary_current_state')}
+                </div>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                  {formatTaskDisplayState(state)}
+                </div>
               </div>
-            )}
+              <div style={{ display: 'grid', gap: '4px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {t('task_operator_summary_next_action')}
+                </div>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                  {nextMoveLabel}
+                </div>
+              </div>
+              {(showRetryDispatchCta || showManualResumeCta) && (
+                <div style={{ fontSize: '13px', color: tone, fontFamily: 'var(--font-ui)', lineHeight: 1.45 }}>
+                  {showRetryDispatchCta ? t('task_operator_cta_resume_dispatch_failed') : t('task_operator_cta_manual_resume_only')}
+                </div>
+              )}
+            </div>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
               {showManualResumeCta && (

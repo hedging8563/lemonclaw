@@ -14,6 +14,7 @@ import {
   taskPanelError,
   type TaskStepRecord,
   type RetrievalMeta,
+  summarizeTaskOperatorState,
   triggerOutboxAbandon,
   triggerManualResume,
   triggerOutboxRetry,
@@ -25,6 +26,7 @@ import {
 import { activeSessionKey } from '../../stores/sessions';
 import { activeMemoryPanelTab, loadKnowledgeDocument } from '../../stores/knowledge';
 import { t } from '../../stores/i18n';
+import { buildTaskOperatorStory } from '../../utils/taskOperatorStory';
 
 function pillStyle(active = false) {
   return {
@@ -610,31 +612,66 @@ function renderTaskDetailBody(
   const structuredRetrieval = retrieval?.structured || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
-  const summaryAction = showSuggestedAction && candidate ? suggestedActionLabel(candidate) : t('task_action_noop');
   const summaryReason = showSuggestedAction && candidate ? formatCandidateReason(candidate) : formatDisplayDetail(detail.summary?.display_state || state);
-  const statusDetail = formatDisplayDetail(detail.summary?.display_state || state);
+  const story = buildTaskOperatorStory(task, detail);
+  const operatorSummary = summarizeTaskOperatorState(task, detail);
+  const operatorActionLabel = operatorSummary.actionKey ? t(operatorSummary.actionKey as any) : null;
   const statusTone = toneStyles(state?.tone || 'muted');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', ...(withTopDivider ? { borderTop: '1px dashed var(--border)', paddingTop: '10px' } : {}) }}>
+      <div style={{ ...summaryCardStyle, padding: '12px' }}>
+        <div style={summaryLabelStyle}>{t('task_operator_summary_title')}</div>
+        <div style={{ display: 'grid', gap: '10px' }}>
+          <div style={{ display: 'grid', gap: '4px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              {t('task_operator_summary_current_state')}
+            </div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: toneStyles(operatorSummary.tone).color, lineHeight: 1.4 }}>
+              {t(operatorSummary.titleKey as any)}
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55, wordBreak: 'break-word' }}>
+              {t(operatorSummary.bodyKey as any)}
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: '4px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              {t('task_operator_summary_next_action')}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+              <span style={{ ...pillStyle(true), cursor: 'default', color: toneStyles(operatorSummary.tone).color, borderColor: toneStyles(operatorSummary.tone).borderColor, background: toneStyles(operatorSummary.tone).background }}>
+                {operatorActionLabel || story.nextStep}
+              </span>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.45, wordBreak: 'break-word' }}>
+                {story.happened}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
         <div style={summaryCardStyle}>
-          <div style={summaryLabelStyle}>{t('task_current_status')}</div>
+          <div style={summaryLabelStyle}>{t('task_operator_story_what_happened')}</div>
           <div style={{ fontSize: '13px', color: statusTone.color, display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '7px', height: '7px', borderRadius: '999px', background: statusTone.color }} />
-            {formatDisplayState(state)}
+            {story.statusLabel}
           </div>
-          <div style={summaryDetailStyle}>{statusDetail}</div>
+          <div style={summaryDetailStyle}>{story.happened}</div>
         </div>
         <div style={summaryCardStyle}>
-          <div style={summaryLabelStyle}>{t('task_suggested_action')}</div>
-          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{summaryAction}</div>
+          <div style={summaryLabelStyle}>{t('task_operator_story_next_step')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{story.nextStep}</div>
           <div style={summaryDetailStyle}>{summaryReason}</div>
         </div>
         <div style={summaryCardStyle}>
-          <div style={summaryLabelStyle}>{t('task_workflow_title')}</div>
-          <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{route}</div>
-          <div style={summaryDetailStyle}>{workflowInstruction(task)}</div>
+          <div style={summaryLabelStyle}>{t('task_operator_story_where')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{story.where}</div>
+          <div style={summaryDetailStyle}>{story.whereHint}</div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_operator_story_checkpoint')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{story.checkpoint}</div>
+          <div style={summaryDetailStyle}>{route}</div>
         </div>
         {runtimeCorrection && (
           <div style={summaryCardStyle}>
