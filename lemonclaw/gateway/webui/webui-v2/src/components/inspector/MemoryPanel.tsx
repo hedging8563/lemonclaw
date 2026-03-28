@@ -6,6 +6,7 @@ import {
   activeKnowledgeChunks,
   activeKnowledgeDocument,
   activeKnowledgeFacts,
+  buildKnowledgeGovernanceSnapshot,
   filterKnowledgeDocuments,
   knowledgeDocuments,
   knowledgeError,
@@ -194,6 +195,10 @@ export function MemoryPanel() {
   const activeChunks = activeKnowledgeChunks.value;
   const activeFacts = activeKnowledgeFacts.value;
   const query = filter.trim().toLowerCase();
+  const governanceSnapshot = useMemo(
+    () => buildKnowledgeGovernanceSnapshot(knowledgeDocuments.value),
+    [knowledgeDocuments.value],
+  );
 
   const filteredEntities = useMemo(
     () =>
@@ -764,6 +769,82 @@ export function MemoryPanel() {
         <span style={pillStyle(Boolean(knowledgeSummary.value?.archived_count))}>{t('knowledge_count_archived')}: {knowledgeSummary.value?.archived_count || 0}</span>
       </div>
 
+      <div style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
+        <div style={{ ...sectionTitleStyle, color: 'var(--teal)' }}>{t('knowledge_governance_title')}</div>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+          {t('knowledge_governance_subtitle')}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+          {[
+            {
+              label: t('knowledge_governance_attention'),
+              count: governanceSnapshot.summary.attention,
+              detail: t('knowledge_governance_attention_detail'),
+              tone: governanceSnapshot.summary.attention > 0 ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)',
+              border: governanceSnapshot.summary.attention > 0 ? 'rgba(255, 184, 77, 0.22)' : 'var(--border)',
+              background: governanceSnapshot.summary.attention > 0 ? 'rgba(255, 184, 77, 0.08)' : 'var(--bg-secondary)',
+            },
+            {
+              label: t('knowledge_governance_freshness'),
+              count: governanceSnapshot.summary.freshness,
+              detail: t('knowledge_governance_freshness_detail'),
+              tone: governanceSnapshot.summary.freshness > 0 ? 'var(--accent)' : 'var(--text-secondary)',
+              border: governanceSnapshot.summary.freshness > 0 ? 'rgba(255, 107, 53, 0.22)' : 'var(--border)',
+              background: governanceSnapshot.summary.freshness > 0 ? 'rgba(255, 107, 53, 0.08)' : 'var(--bg-secondary)',
+            },
+            {
+              label: t('knowledge_governance_impact'),
+              count: governanceSnapshot.summary.impact,
+              detail: t('knowledge_governance_impact_detail'),
+              tone: governanceSnapshot.summary.impact > 0 ? 'var(--teal)' : 'var(--text-secondary)',
+              border: governanceSnapshot.summary.impact > 0 ? 'rgba(10, 186, 181, 0.22)' : 'var(--border)',
+              background: governanceSnapshot.summary.impact > 0 ? 'rgba(10, 186, 181, 0.08)' : 'var(--bg-secondary)',
+            },
+            {
+              label: t('knowledge_governance_ready'),
+              count: governanceSnapshot.summary.ready,
+              detail: t('knowledge_governance_ready_detail'),
+              tone: governanceSnapshot.summary.ready > 0 ? 'var(--success)' : 'var(--text-secondary)',
+              border: governanceSnapshot.summary.ready > 0 ? 'rgba(76, 175, 80, 0.22)' : 'var(--border)',
+              background: governanceSnapshot.summary.ready > 0 ? 'rgba(76, 175, 80, 0.08)' : 'var(--bg-secondary)',
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              style={{
+                border: `1px solid ${item.border}`,
+                background: item.background,
+                borderRadius: '10px',
+                padding: '10px 12px',
+                display: 'grid',
+                gap: '6px',
+              }}
+            >
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {item.label}
+              </div>
+              <div style={{ fontSize: '22px', color: item.tone, fontFamily: 'var(--font-display)', lineHeight: 1 }}>
+                {item.count}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                {item.detail}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          <span style={{ ...pillStyle(Boolean(snapshot?.search_index?.available)), cursor: 'default' }}>
+            {t('knowledge_governance_memory_index')}: {snapshot?.search_index?.available ? t('knowledge_governance_index_ready') : t('knowledge_governance_index_limited')}
+          </span>
+          <span style={{ ...pillStyle(Boolean(knowledgeSummary.value?.used_count)), cursor: 'default' }}>
+            {t('knowledge_governance_recent_helping')}: {governanceSnapshot.summary.used}
+          </span>
+          <span style={{ ...pillStyle(Boolean(knowledgeSummary.value?.due_count)), cursor: 'default' }}>
+            {t('knowledge_governance_due_soon')}: {governanceSnapshot.summary.due}
+          </span>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         {([
           ['all', t('knowledge_view_all')],
@@ -837,6 +918,38 @@ export function MemoryPanel() {
 
       {creatingKnowledge ? <div style={{ marginBottom: '10px' }}>{renderKnowledgeForm('create')}</div> : null}
       </div>
+
+      {governanceSnapshot.topRecentlyUsed.length > 0 ? (
+        renderAccordionSection(
+          t('knowledge_governance_recent_impact'),
+          governanceSnapshot.topRecentlyUsed.length,
+          governanceSnapshot.topRecentlyUsed.map((doc) => (
+            <div
+              key={`impact-${doc.doc_id}`}
+              onClick={() => openKnowledgeDetail(doc.doc_id)}
+              style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '10px', cursor: 'pointer', display: 'grid', gap: '6px' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {doc.title || doc.source}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{doc.source}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <span style={pillStyle(Boolean(doc.pinned))}>{`${t('knowledge_retrieval_count')}:${doc.retrieval_count || 0}`}</span>
+                  {doc.last_hit_at_ms ? <span style={pillStyle()}>{`${t('knowledge_last_hit')}:${formatTime(doc.last_hit_at_ms)}`}</span> : null}
+                </div>
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {doc.last_hit_query ? `${t('knowledge_governance_last_query')}: ${doc.last_hit_query}` : t('knowledge_governance_last_query_empty')}
+              </div>
+            </div>
+          )),
+          false,
+          240,
+        )
+      ) : null}
 
       {knowledgeDocuments.value.length > 0 ? (
         knowledgeView === 'all' ? (
