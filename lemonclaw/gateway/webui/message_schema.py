@@ -109,7 +109,13 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
     media_ids: dict[str, str] = {}
     media_counter = 0
 
-    def register_media(path: str, hinted: str | None = None, label: str | None = None) -> str:
+    def register_media(
+        path: str,
+        hinted: str | None = None,
+        label: str | None = None,
+        *,
+        source: str = "content_token",
+    ) -> str:
         nonlocal media_counter
         if path in media_ids:
             media_id = media_ids[path]
@@ -120,6 +126,8 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
                     existing["kind"] = inferred
                 if label and existing.get("filename") == _basename(path):
                     existing["filename"] = label
+                if source == "media_field":
+                    existing["source"] = "media_field"
             return media_id
         media_counter += 1
         media_id = f"m{media_counter}"
@@ -130,6 +138,7 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
             "path": path,
             "url": media_url(path, session_key),
             "filename": label or _basename(path),
+            "source": source,
         })
         return media_id
 
@@ -149,7 +158,7 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
             file_match = re.match(r"^(.*?)(?:\s*\(([^()]+)\))?$", payload)
             media_path = (file_match.group(1) if file_match else payload).strip()
             label = file_match.group(2).strip() if file_match and file_match.group(2) else None
-            media_id = register_media(media_path, kind, label)
+            media_id = register_media(media_path, kind, label, source="content_token")
             if not blocks or blocks[-1].get("type") != "media" or blocks[-1].get("mediaId") != media_id:
                 blocks.append({"type": "media", "mediaId": media_id})
         last_index = match.end()
@@ -163,7 +172,7 @@ def _parse_content_blocks(content: str, raw_media: list[str] | None = None, *, s
         if isinstance(block, dict) and block.get("type") == "media"
     }
     for path in raw_media or []:
-        media_id = register_media(path)
+        media_id = register_media(path, source="media_field")
         if media_id in existing_media_ids:
             continue
         blocks.append({"type": "media", "mediaId": media_id})

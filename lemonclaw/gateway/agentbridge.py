@@ -24,7 +24,7 @@ from lemonclaw.channels.agentbridge import AgentBridgeChannel
 from lemonclaw.channels.delivery_context import attach_delivery_context
 from lemonclaw.channels.session_keys import build_agentbridge_session_key
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
-from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
+from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 from lemonclaw.providers.catalog import resolve_model_id
 from lemonclaw.providers.registry import provider_family_for_model
 
@@ -160,6 +160,30 @@ def get_agentbridge_routes(
         if paths:
             entry["paths"].update(paths)
 
+    def _extract_message_grant_paths(message: dict[str, Any]) -> list[str]:
+        media = message.get("media")
+        if not isinstance(media, list):
+            return []
+
+        paths: list[str] = []
+        for item in media:
+            raw_path: str | None = None
+            if isinstance(item, str):
+                raw_path = item
+            elif isinstance(item, dict) and item.get("source") == "media_field" and isinstance(item.get("path"), str):
+                raw_path = item["path"]
+
+            if not raw_path:
+                continue
+
+            try:
+                resolved = Path(raw_path).expanduser().resolve(strict=True)
+            except OSError:
+                continue
+
+            paths.append(str(resolved))
+        return paths
+
     def _path_allowed_for_session(file_path: Path, session_key: str) -> bool:
         _cleanup_session_media_grants()
         entry = _session_media_grants.get(session_key)
@@ -170,7 +194,7 @@ def get_agentbridge_routes(
         if not session:
             return False
         for message in session.messages:
-            paths = extract_message_media_paths(message)
+            paths = _extract_message_grant_paths(message)
             if str(file_path) in paths:
                 _touch_session_media_grants(session_key, paths)
                 return True
@@ -243,7 +267,7 @@ def get_agentbridge_routes(
         for _idx, message in page:
             item = serialize_ui_message(message, session_key=session_key)
             payload.append(_rewrite_agentbridge_media_urls(item))
-            media_paths = extract_message_media_paths(message)
+            media_paths = _extract_message_grant_paths(message)
             if media_paths:
                 _touch_session_media_grants(session_key, media_paths)
 

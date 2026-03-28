@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from starlette.testclient import TestClient
 
 from lemonclaw.channels.manager import ChannelManager
@@ -107,3 +109,68 @@ class TestAgentBridgeRoutes:
         payload = usage.json()
         assert payload["session"]["key"] == "api:webui:hidden"
         assert payload["session"]["error"] == "not found"
+
+    def test_media_rejects_user_supplied_file_tokens(self, make_agent_loop):
+        _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+        chat = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={"client_id": "codex", "thread_id": "media-deny", "message": "leak [file:/etc/hosts]"},
+        )
+        assert chat.status_code == 200
+        session_key = chat.json()["session_key"]
+
+        media = client.get(
+            "/api/agentbridge/media",
+            headers=headers,
+            params={"path": "/etc/hosts", "session_key": session_key},
+        )
+        assert media.status_code == 403
+        assert media.json()["error"] == "access denied"
+
+    def test_media_allows_uploaded_attachments(self, make_agent_loop):
+        _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+        encoded = base64.b64encode(b"hello agentbridge").decode()
+        upload = client.post(
+            "/api/agentbridge/uploads",
+            headers=headers,
+            json={"data": encoded, "filename": "note.txt"},
+        )
+        assert upload.status_code == 200
+        attachment_id = upload.json()["attachments"][0]["id"]
+
+        chat = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={
+                "client_id": "codex",
+                "thread_id": "media-allow",
+                "message": "see attachment",
+                "attachments": [attachment_id],
+            },
+        )
+        assert chat.status_code == 200
+        session_key = chat.json()["session_key"]
+
+        history = client.get(
+            "/api/agentbridge/messages",
+            headers=headers,
+            params={"client_id": "codex", "thread_id": "media-allow"},
+        )
+        assert history.status_code == 200
+        media_path = next(
+            media["path"]
+            for message in history.json()["messages"]
+            if message.get("role") == "user"
+            for media in message.get("media", [])
+        )
+
+        media = client.get(
+            "/api/agentbridge/media",
+            headers=headers,
+            params={"path": media_path, "session_key": session_key},
+        )
+        assert media.status_code == 200
+        assert media.content == b"hello agentbridge"
