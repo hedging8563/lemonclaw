@@ -80,7 +80,18 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
         channel="telegram",
         goal="say hello",
         current_stage="execute",
-        metadata={"retrieval": {"strategy": "hybrid", "latency_ms": 9, "hit_sources": ["hybrid"]}},
+        metadata={
+            "retrieval": {
+                "strategy": "hybrid",
+                "latency_ms": 9,
+                "hit_sources": ["hybrid"],
+                "structured": {
+                    "session_summary": "hybrid trace",
+                    "fact_slots": [{"name": "tech", "value": "python"}],
+                    "retrieval_objects": [{"kind": "entity_card", "name": "tech"}],
+                },
+            }
+        },
     )
     step = ledger.start_step("task_1", step_type="tool_call", name="read_file", input_summary='{"path":"x"}')
     ledger.finish_step(step, status="completed")
@@ -104,6 +115,7 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["task"]["task_id"] == "task_1"
     assert data["task"]["display_state"]["key"] == "completed"
     assert data["task"]["retrieval"]["strategy"] == "hybrid"
+    assert data["task"]["retrieval"]["structured"]["session_summary"] == "hybrid trace"
     assert data["summary"]["step_count"] == 1
     assert data["summary"]["status_counts"]["completed"] == 1
     assert data["summary"]["display_state"]["key"] == "completed"
@@ -113,6 +125,7 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["recovery_history"][-1]["recovery_id"].startswith("rc_")
     assert data["summary"]["recovery_history"][-1]["ref"]["step_id"] == step.step_id
     assert data["summary"]["retrieval"]["latency_ms"] == 9
+    assert data["summary"]["retrieval"]["structured"]["fact_slots"][0]["name"] == "tech"
 
 
 def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
@@ -686,31 +699,53 @@ def test_task_markdown_exports_include_retrieval_trace(tmp_path):
         mode="chat",
         channel="telegram",
         goal="trace me",
-        metadata={"retrieval": {
-            "strategy": "hybrid",
-            "latency_ms": 12,
-            "fallback_count": 0,
-            "card_count": 1,
-            "rule_count": 1,
-            "knowledge_count": 1,
-            "hit_sources": ["hybrid", "knowledge"],
-            "card_hits": [{"name": "tech-stack", "type": "tech", "source": "hybrid"}],
-            "rule_hits": [{"trigger": "deploy", "source": "hybrid"}],
-            "knowledge_hits": [{"title": "Deploy Notes", "source": "manual://deploy", "result_type": "fact", "page_label": "p.1"}],
-        }},
+        metadata={
+            "retrieval": {
+                "strategy": "hybrid",
+                "latency_ms": 12,
+                "fallback_count": 0,
+                "card_count": 1,
+                "rule_count": 1,
+                "knowledge_count": 1,
+                "hit_sources": ["hybrid", "knowledge"],
+                "card_hits": [{"name": "tech-stack", "type": "tech", "source": "hybrid"}],
+                "rule_hits": [{"trigger": "deploy", "source": "hybrid"}],
+                "knowledge_hits": [{"title": "Deploy Notes", "source": "manual://deploy", "result_type": "fact", "page_label": "p.1"}],
+                "structured": {
+                    "session_summary": "deploy trace",
+                    "fact_slots": [{"name": "tech-stack", "value": "Python 3.13"}],
+                    "retrieval_objects": [{"kind": "knowledge_hit", "title": "Deploy Notes"}],
+                },
+            }
+        },
     )
 
     client = TestClient(app)
+    export_json = client.get("/api/tasks/task_retrieval_export/export", params={"format": "json"})
+    assert export_json.status_code == 200
+    assert export_json.json()["task"]["metadata"]["retrieval"]["structured"]["session_summary"] == "deploy trace"
+
     export_md = client.get("/api/tasks/task_retrieval_export/export", params={"format": "md"})
     assert export_md.status_code == 200
+    # Markdown renderers use the same retrieval payload; this fixture keeps
+    # the structured subtree in place so it will surface as soon as the
+    # renderer starts emitting it.
     assert "## Retrieval" in export_md.text
     assert "Card: tech-stack" in export_md.text
     assert "Rule: deploy" in export_md.text
     assert "Knowledge: Deploy Notes [p.1]" in export_md.text
 
+    bundle_json = client.get("/api/tasks/task_retrieval_export/bundle", params={"format": "json"})
+    assert bundle_json.status_code == 200
+    assert bundle_json.json()["summary"]["retrieval"]["structured"]["fact_slots"][0]["name"] == "tech-stack"
+
     bundle_md = client.get("/api/tasks/task_retrieval_export/bundle", params={"format": "md"})
     assert bundle_md.status_code == 200
     assert "## Retrieval" in bundle_md.text
+
+    pm_json = client.get("/api/tasks/task_retrieval_export/postmortem", params={"format": "json"})
+    assert pm_json.status_code == 200
+    assert pm_json.json()["task"]["metadata"]["retrieval"]["structured"]["retrieval_objects"][0]["kind"] == "knowledge_hit"
 
     pm_md = client.get("/api/tasks/task_retrieval_export/postmortem", params={"format": "md"})
     assert pm_md.status_code == 200

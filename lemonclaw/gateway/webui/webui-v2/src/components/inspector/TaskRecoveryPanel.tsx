@@ -13,6 +13,7 @@ import {
   taskDetails,
   taskPanelError,
   type TaskStepRecord,
+  type RetrievalMeta,
   triggerOutboxAbandon,
   triggerManualResume,
   triggerOutboxRetry,
@@ -469,6 +470,90 @@ function renderStringChips(values: string[] | undefined) {
   );
 }
 
+function renderStructuredRetrieval(structured?: RetrievalMeta['structured'] | null) {
+  const sessionSummary = String(structured?.session_summary || '').trim();
+  const factSlots = structured?.fact_slots || [];
+  const retrievalObjects = structured?.retrieval_objects || [];
+  if (!sessionSummary && factSlots.length === 0 && retrievalObjects.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: '8px' }}>
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        {t('task_retrieval_structured')}
+      </div>
+      {sessionSummary && (
+        <div style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', marginBottom: '4px' }}>
+            {t('task_retrieval_session_summary')}
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.55', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {sessionSummary}
+          </div>
+        </div>
+      )}
+      {factSlots.length > 0 && (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            {t('task_retrieval_fact_slots')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {factSlots.map((slot, idx) => (
+              <div key={`${slot.name || 'fact-slot'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                      {slot.name || '—'}
+                    </div>
+                    {slot.summary && (
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', wordBreak: 'break-word', marginTop: '4px' }}>
+                        {slot.summary}
+                      </div>
+                    )}
+                  </div>
+                  {slot.type ? (
+                    <span style={pillStyle()}>
+                      {slot.type}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {retrievalObjects.length > 0 && (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            {t('task_retrieval_retrieval_objects')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {retrievalObjects.map((item, idx) => (
+              <div key={`${item.id || item.title || 'retrieval-object'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                      {item.title || item.id || '—'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', wordBreak: 'break-all', marginTop: '2px' }}>
+                      {item.source || '—'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {item.kind ? <span style={pillStyle()}>{item.kind}</span> : null}
+                    {item.id ? <span style={pillStyle()}>{item.id}</span> : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SENSITIVE_COPY_KEY = /(^|[_-])(authorization|token|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)($|[_-])/i;
 
 function sanitizeForCopy(value: unknown): unknown {
@@ -522,6 +607,7 @@ function renderTaskDetailBody(
   const recovery = task.metadata?.recovery || {};
   const runtimeCorrection = task.metadata?.runtime_correction || null;
   const retrieval = detail.summary?.retrieval || task.retrieval || task.metadata?.retrieval || null;
+  const structuredRetrieval = retrieval?.structured || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
   const summaryAction = showSuggestedAction && candidate ? suggestedActionLabel(candidate) : t('task_action_noop');
@@ -667,6 +753,7 @@ function renderTaskDetailBody(
               cards:{retrieval.card_count ?? 0} · rules:{retrieval.rule_count ?? 0} · knowledge:{retrieval.knowledge_count ?? 0}
             </div>
           </div>
+          {renderStructuredRetrieval(structuredRetrieval)}
           {renderStringChips(retrieval.hit_sources) && (
             <div style={{ display: 'grid', gap: '6px' }}>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_hit_sources')}</div>

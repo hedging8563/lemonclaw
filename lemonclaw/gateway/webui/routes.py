@@ -206,6 +206,32 @@ def get_webui_routes(
         for item in list(retrieval.get("knowledge_hits") or []):
             page = f" [{item.get('page_label')}]" if item.get("page_label") else ""
             lines.append(f"- Knowledge: {item.get('title') or '—'}{page} · {item.get('result_type') or '—'} · {item.get('source') or '—'}")
+        structured = dict(retrieval.get("structured") or {})
+        session_summary = str(structured.get("session_summary") or "").strip()
+        if session_summary:
+            lines.extend(["", "### Session Summary", session_summary])
+
+        fact_slots = list(structured.get("fact_slots") or [])
+        if fact_slots:
+            lines.append("")
+            lines.append("### Fact Slots")
+            for item in fact_slots:
+                name = str(item.get("name") or "—")
+                slot_type = str(item.get("type") or "—")
+                summary = str(item.get("summary") or "").strip()
+                lines.append(f"- {name} · {slot_type}")
+                if summary:
+                    lines.append(f"  - {summary}")
+
+        retrieval_objects = list(structured.get("retrieval_objects") or [])
+        if retrieval_objects:
+            lines.append("")
+            lines.append("### Retrieval Objects")
+            for item in retrieval_objects:
+                kind = str(item.get("kind") or "—")
+                title = str(item.get("title") or item.get("id") or "—")
+                source = str(item.get("source") or "—")
+                lines.append(f"- {kind} · {title} · {source}")
 
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
