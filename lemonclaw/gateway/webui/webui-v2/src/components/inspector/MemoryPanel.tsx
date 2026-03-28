@@ -25,6 +25,7 @@ import {
   type KnowledgeView,
 } from '../../stores/knowledge';
 import { loadMemory, memory, memoryError, type MemoryEntityRecord, type MemoryRuleRecord } from '../../stores/memory';
+import { buildStructuredMemoryWorkSurface, sessionTasks, taskDetails } from '../../stores/tasks';
 
 const panelStyle = {
   background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-primary) 100%)',
@@ -104,6 +105,12 @@ function formatTime(value?: number | null) {
   } catch {
     return '—';
   }
+}
+
+function formatTaskStateLabel(state?: { key?: string; label?: string } | null) {
+  if (!state) return '—';
+  const translated = t(`task_state_${state.key}` as any);
+  return translated === `task_state_${state.key}` ? (state.label || state.key || '—') : translated;
 }
 
 function downloadJson(filename: string, payload: unknown) {
@@ -198,6 +205,10 @@ export function MemoryPanel() {
   const governanceSnapshot = useMemo(
     () => buildKnowledgeGovernanceSnapshot(knowledgeDocuments.value),
     [knowledgeDocuments.value],
+  );
+  const structuredMemorySurface = useMemo(
+    () => buildStructuredMemoryWorkSurface(sessionTasks.value, taskDetails.value),
+    [sessionTasks.value, taskDetails.value],
   );
 
   const filteredEntities = useMemo(
@@ -1194,6 +1205,120 @@ export function MemoryPanel() {
           <div style={pillStyle()}>{t('memory_count_entities')}: {snapshot.entities?.length || 0}</div>
           <div style={pillStyle()}>{t('memory_count_rules')}: {snapshot.rules?.length || 0}</div>
           <div style={pillStyle()}>{t('memory_count_indexed')}: {snapshot.search_index?.last_indexed_docs || 0}</div>
+        </div>
+
+        <div style={panelStyle}>
+          <div style={{ display: 'grid', gap: '8px' }}>
+            <div style={{ ...sectionTitleStyle, color: 'var(--teal)' }}>{t('memory_structured_title')}</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              {t('memory_structured_subtitle')}
+            </div>
+            {structuredMemorySurface ? (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  <span style={pillStyle(true)}>{t('task_retrieval_structured')}</span>
+                  <span style={pillStyle()}>{`${t('memory_structured_source_task')}: ${structuredMemorySurface.sourceTaskId}`}</span>
+                  <span style={pillStyle()}>{`${t('memory_structured_task_state')}: ${formatTaskStateLabel(structuredMemorySurface.sourceDisplayState)}`}</span>
+                  {structuredMemorySurface.strategy ? <span style={pillStyle()}>{`${t('task_retrieval_strategy')}: ${structuredMemorySurface.strategy}`}</span> : null}
+                  {structuredMemorySurface.latencyMs != null ? <span style={pillStyle()}>{`${t('task_retrieval_latency')}: ${structuredMemorySurface.latencyMs}ms`}</span> : null}
+                  {structuredMemorySurface.sourceUpdatedAtMs ? <span style={pillStyle()}>{`${t('memory_structured_updated_at')}: ${formatTime(structuredMemorySurface.sourceUpdatedAtMs)}`}</span> : null}
+                </div>
+
+                {structuredMemorySurface.sessionSummary ? (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '6px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {t('task_retrieval_session_summary')}
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {structuredMemorySurface.sessionSummary}
+                    </div>
+                  </div>
+                ) : null}
+
+                {structuredMemorySurface.factSlots.length > 0 ? (
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {t('task_retrieval_fact_slots')}
+                    </div>
+                    <div style={{ display: 'grid', gap: '6px' }}>
+                      {structuredMemorySurface.factSlots.map((slot, idx) => (
+                        <div key={`${slot?.name || 'slot'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                            <div style={{ minWidth: 0, flex: 1, fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                              {slot?.name || '—'}
+                            </div>
+                            {slot?.type ? <span style={pillStyle()}>{slot.type}</span> : null}
+                          </div>
+                          {slot?.summary ? (
+                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                              {slot.summary}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {structuredMemorySurface.retrievalObjects.length > 0 ? (
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {t('task_retrieval_retrieval_objects')}
+                    </div>
+                    <div style={{ display: 'grid', gap: '6px' }}>
+                      {structuredMemorySurface.retrievalObjects.map((item, idx) => (
+                        <div key={`${item?.id || item?.title || 'retrieval-object'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                                {item?.title || item?.id || '—'}
+                              </div>
+                              {item?.source ? (
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-all', marginTop: '2px' }}>
+                                  {item.source}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              {item?.kind ? <span style={pillStyle()}>{item.kind}</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {t('memory_structured_failsoft')}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    <span style={pillStyle(Boolean(structuredMemorySurface.fallbackCount))}>
+                      {`${t('memory_structured_fallback_count')}: ${structuredMemorySurface.fallbackCount}`}
+                    </span>
+                    {structuredMemorySurface.hitSources.map((source) => (
+                      <span key={`hit-${source}`} style={pillStyle()}>{source}</span>
+                    ))}
+                    {structuredMemorySurface.fallbacks.map((fallback) => (
+                      <span key={`fallback-${fallback}`} style={{ ...pillStyle(Boolean(structuredMemorySurface.fallbackCount)), cursor: 'default', maxWidth: '100%', wordBreak: 'break-all' }}>
+                        {fallback}
+                      </span>
+                    ))}
+                  </div>
+                  {structuredMemorySurface.fallbackCount === 0 && structuredMemorySurface.hitSources.length === 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      {t('memory_structured_failsoft_empty')}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                {t('memory_structured_empty')}
+              </div>
+            )}
+          </div>
         </div>
 
         <input

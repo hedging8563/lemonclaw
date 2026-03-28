@@ -175,6 +175,74 @@ export interface TaskOperatorSummary {
   actionKey?: string | null;
 }
 
+export interface StructuredMemoryWorkSurface {
+  sourceTaskId: string;
+  sourceGoal: string;
+  sourceUpdatedAtMs?: number;
+  sourceDisplayState?: TaskDisplayState | null;
+  strategy?: string;
+  latencyMs?: number;
+  sessionSummary: string;
+  factSlots: NonNullable<NonNullable<RetrievalMeta['structured']>['fact_slots']>;
+  retrievalObjects: NonNullable<NonNullable<RetrievalMeta['structured']>['retrieval_objects']>;
+  fallbackCount: number;
+  fallbacks: string[];
+  hitSources: string[];
+}
+
+function resolveTaskRetrieval(task: TaskRecord, detail?: TaskDetail | null): RetrievalMeta | null {
+  return (
+    detail?.summary?.retrieval
+    || detail?.task?.retrieval
+    || task.retrieval
+    || (task.metadata?.retrieval as RetrievalMeta | undefined)
+    || null
+  );
+}
+
+function hasStructuredMemoryPayload(retrieval: RetrievalMeta | null | undefined): boolean {
+  const structured = retrieval?.structured;
+  return Boolean(
+    structured?.session_summary
+    || structured?.fact_slots?.length
+    || structured?.retrieval_objects?.length
+    || retrieval?.fallback_count
+    || retrieval?.fallbacks?.length
+    || retrieval?.hit_sources?.length
+  );
+}
+
+export function buildStructuredMemoryWorkSurface(
+  tasks: TaskRecord[],
+  detailsById: Record<string, TaskDetail | undefined>,
+): StructuredMemoryWorkSurface | null {
+  const sorted = [...tasks].sort((a, b) => Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0));
+  const candidate = sorted.find((task) => hasStructuredMemoryPayload(resolveTaskRetrieval(task, detailsById[task.task_id])));
+  if (!candidate) {
+    return null;
+  }
+  const detail = detailsById[candidate.task_id];
+  const retrieval = resolveTaskRetrieval(candidate, detail);
+  if (!retrieval) {
+    return null;
+  }
+  const structured = retrieval.structured || {};
+  return {
+    sourceTaskId: candidate.task_id,
+    sourceGoal: candidate.goal || candidate.task_id,
+    sourceUpdatedAtMs: candidate.updated_at_ms,
+    sourceDisplayState: detail?.summary?.display_state || candidate.display_state || null,
+    strategy: retrieval.strategy,
+    latencyMs: retrieval.latency_ms,
+    sessionSummary: String(structured.session_summary || '').trim(),
+    factSlots: structured.fact_slots || [],
+    retrievalObjects: structured.retrieval_objects || [],
+    fallbackCount: Number(retrieval.fallback_count || 0),
+    fallbacks: (retrieval.fallbacks || []).filter(Boolean),
+    hitSources: (retrieval.hit_sources || []).filter(Boolean),
+  };
+}
+
 function getTaskStateKey(task: TaskRecord) {
   return String(task.display_state?.key || task.status || '').trim().toLowerCase();
 }
