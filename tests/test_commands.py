@@ -181,7 +181,7 @@ def test_runtime_version_falls_back_to_package_version(monkeypatch):
     from lemonclaw.cli.commands import _runtime_version
 
     monkeypatch.delenv("LEMONCLAW_RUNTIME_VERSION", raising=False)
-    assert _runtime_version() == "2026.2.28.1"
+    assert _runtime_version() == "2026.3.28.1"
 
 
 def test_llm_response_normalizes_stringified_text_blocks():
