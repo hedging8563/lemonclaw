@@ -41,6 +41,31 @@ export interface KnowledgeSummary {
 export type KnowledgeView = 'all' | 'pinned' | 'used' | 'due' | 'ingesting' | 'error' | 'registered' | 'archived';
 export type MemoryPanelTab = 'sources' | 'search' | 'detail' | 'memory';
 export type KnowledgeSort = 'health' | 'freshness' | 'usage' | 'updated';
+export type KnowledgeGovernanceLane = 'attention' | 'freshness' | 'impact' | 'ready';
+
+export interface KnowledgeGovernanceSummary {
+  total: number;
+  archived: number;
+  attention: number;
+  freshness: number;
+  impact: number;
+  ready: number;
+  used: number;
+  due: number;
+  pinned: number;
+  error: number;
+  registered: number;
+  ingesting: number;
+}
+
+export interface KnowledgeGovernanceSnapshot {
+  summary: KnowledgeGovernanceSummary;
+  attention: KnowledgeDocumentRecord[];
+  freshness: KnowledgeDocumentRecord[];
+  impact: KnowledgeDocumentRecord[];
+  ready: KnowledgeDocumentRecord[];
+  topRecentlyUsed: KnowledgeDocumentRecord[];
+}
 
 export const knowledgeSummary = signal<KnowledgeSummary | null>(null);
 export const knowledgeDocuments = signal<KnowledgeDocumentRecord[]>([]);
@@ -166,6 +191,107 @@ export function sortKnowledgeDocuments(
     if (healthDiff !== 0) return healthDiff;
     return Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0);
   });
+}
+
+function compareUsageDocuments(a: KnowledgeDocumentRecord, b: KnowledgeDocumentRecord): number {
+  const retrievalA = Number(a.retrieval_count || 0);
+  const retrievalB = Number(b.retrieval_count || 0);
+  if (retrievalA !== retrievalB) return retrievalB - retrievalA;
+  const hitA = Number(a.last_hit_at_ms || 0);
+  const hitB = Number(b.last_hit_at_ms || 0);
+  if (hitA !== hitB) return hitB - hitA;
+  const updatedA = Number(a.updated_at_ms || 0);
+  const updatedB = Number(b.updated_at_ms || 0);
+  if (updatedA !== updatedB) return updatedB - updatedA;
+  return String(a.title || a.source || a.doc_id).localeCompare(String(b.title || b.source || b.doc_id));
+}
+
+function compareFreshnessDocuments(a: KnowledgeDocumentRecord, b: KnowledgeDocumentRecord): number {
+  const nextRefreshA = Number(a.next_refresh_at_ms || 0);
+  const nextRefreshB = Number(b.next_refresh_at_ms || 0);
+  if (nextRefreshA !== nextRefreshB) return nextRefreshA - nextRefreshB;
+  const updatedA = Number(a.updated_at_ms || 0);
+  const updatedB = Number(b.updated_at_ms || 0);
+  if (updatedA !== updatedB) return updatedB - updatedA;
+  return String(a.title || a.source || a.doc_id).localeCompare(String(b.title || b.source || b.doc_id));
+}
+
+function compareAttentionDocuments(a: KnowledgeDocumentRecord, b: KnowledgeDocumentRecord): number {
+  const priority = (doc: KnowledgeDocumentRecord) => {
+    const status = String(doc.status || '');
+    if (status === 'error') return 0;
+    if (status === 'registered') return 1;
+    if (status === 'ingesting') return 2;
+    return 3;
+  };
+  const priorityDiff = priority(a) - priority(b);
+  if (priorityDiff !== 0) return priorityDiff;
+  const updatedA = Number(a.updated_at_ms || 0);
+  const updatedB = Number(b.updated_at_ms || 0);
+  if (updatedA !== updatedB) return updatedB - updatedA;
+  return String(a.title || a.source || a.doc_id).localeCompare(String(b.title || b.source || b.doc_id));
+}
+
+function isKnowledgeFreshSoon(doc: KnowledgeDocumentRecord, nowMs: number, windowMs: number): boolean {
+  const nextRefresh = Number(doc.next_refresh_at_ms || 0);
+  if (nextRefresh <= 0) return false;
+  if (nextRefresh <= nowMs) return true;
+  return nextRefresh <= nowMs + Math.max(0, windowMs);
+}
+
+export function buildKnowledgeGovernanceSnapshot(
+  docs: KnowledgeDocumentRecord[],
+  nowMs = Date.now(),
+  freshnessWindowMs = 24 * 60 * 60 * 1000,
+  recentUsageLimit = 5,
+): KnowledgeGovernanceSnapshot {
+  const visible = docs.filter((doc) => !doc.archived);
+  const archived = docs.filter((doc) => Boolean(doc.archived)).length;
+  const attention = visible.filter((doc) => {
+    const status = String(doc.status || '');
+    return status === 'error' || status === 'registered' || status === 'ingesting';
+  }).sort(compareAttentionDocuments);
+  const freshness = visible.filter((doc) => {
+    if (attention.some((item) => item.doc_id === doc.doc_id)) return false;
+    return isKnowledgeFreshSoon(doc, nowMs, freshnessWindowMs);
+  }).sort(compareFreshnessDocuments);
+  const impact = visible.filter((doc) => {
+    if (attention.some((item) => item.doc_id === doc.doc_id)) return false;
+    if (freshness.some((item) => item.doc_id === doc.doc_id)) return false;
+    return isKnowledgeUsed(doc);
+  }).sort(compareUsageDocuments);
+  const ready = visible.filter((doc) => {
+    if (attention.some((item) => item.doc_id === doc.doc_id)) return false;
+    if (freshness.some((item) => item.doc_id === doc.doc_id)) return false;
+    if (impact.some((item) => item.doc_id === doc.doc_id)) return false;
+    return true;
+  }).sort((a, b) => Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0));
+  const topRecentlyUsed = [...visible]
+    .filter((doc) => isKnowledgeUsed(doc))
+    .sort(compareUsageDocuments)
+    .slice(0, Math.max(0, recentUsageLimit));
+
+  return {
+    summary: {
+      total: visible.length,
+      archived,
+      attention: attention.length,
+      freshness: freshness.length,
+      impact: impact.length,
+      ready: ready.length,
+      used: visible.filter((doc) => isKnowledgeUsed(doc)).length,
+      due: visible.filter((doc) => isKnowledgeDue(doc, nowMs)).length,
+      pinned: visible.filter((doc) => Boolean(doc.pinned)).length,
+      error: visible.filter((doc) => String(doc.status || '') === 'error').length,
+      registered: visible.filter((doc) => String(doc.status || '') === 'registered').length,
+      ingesting: visible.filter((doc) => String(doc.status || '') === 'ingesting').length,
+    },
+    attention,
+    freshness,
+    impact,
+    ready,
+    topRecentlyUsed,
+  };
 }
 
 export async function loadKnowledge() {
