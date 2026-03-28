@@ -55,9 +55,16 @@ describe('buildStructuredMemoryWorkSurface', () => {
     expect(result?.sessionSummary).toBe('latest summary');
     expect(result?.factSlots[0]?.name).toBe('stack');
     expect(result?.retrievalObjects[0]?.kind).toBe('knowledge_hit');
+    expect(result?.cardHits).toEqual([]);
+    expect(result?.ruleHits).toEqual([]);
+    expect(result?.knowledgeHits).toEqual([]);
     expect(result?.fallbackCount).toBe(1);
     expect(result?.fallbacks).toEqual(['knowledge_search_error:RuntimeError']);
     expect(result?.hitSources).toEqual(['hybrid', 'knowledge']);
+    expect(result?.pipeline.search.active).toBe(true);
+    expect(result?.pipeline.search.totalHits).toBe(0);
+    expect(result?.pipeline.summarize.factSlotCount).toBe(1);
+    expect(result?.pipeline.failsoft.fallbackCount).toBe(1);
   });
 
   it('uses detail summary retrieval when the task list record has no retrieval', () => {
@@ -87,6 +94,45 @@ describe('buildStructuredMemoryWorkSurface', () => {
     expect(result?.sessionSummary).toBe('detail summary');
     expect(result?.retrievalObjects[0]?.title).toBe('ops');
     expect(result?.hitSources).toEqual(['memory']);
+    expect(result?.pipeline.search.hitSources).toEqual(['memory']);
+    expect(result?.pipeline.summarize.hasSessionSummary).toBe(true);
+  });
+
+  it('builds a search -> fetch -> summarize -> fail-soft pipeline view', () => {
+    const rich = task('task-pipeline', {
+      goal: 'pipeline task',
+      updated_at_ms: 500,
+      retrieval: {
+        strategy: 'hybrid',
+        latency_ms: 18,
+        card_count: 2,
+        rule_count: 1,
+        knowledge_count: 1,
+        card_hits: [{ name: 'stack', type: 'tech', source: 'memory.entities', preview: 'python 3.13' }],
+        rule_hits: [{ trigger: 'deploy', lesson: 'check rollback', action: 'verify image', source: 'memory.rules' }],
+        knowledge_hits: [{ title: 'Deploy Notes', source: 'manual://deploy', result_type: 'fact', page_label: 'p.1' }],
+        hit_sources: ['hybrid', 'knowledge'],
+        fallback_count: 2,
+        fallbacks: ['provider_unbound', 'knowledge_search_error:RuntimeError'],
+        structured: {
+          session_summary: 'pipeline summary',
+          fact_slots: [{ name: 'stack', type: 'fact', summary: 'python 3.13' }],
+          retrieval_objects: [{ kind: 'knowledge_hit', title: 'Deploy Notes', source: 'manual://deploy' }],
+        },
+      },
+    });
+
+    const result = buildStructuredMemoryWorkSurface([rich], {});
+
+    expect(result?.pipeline.search.totalHits).toBe(4);
+    expect(result?.pipeline.fetch.totalFetched).toBe(3);
+    expect(result?.pipeline.fetch.cardHitCount).toBe(1);
+    expect(result?.pipeline.fetch.ruleHitCount).toBe(1);
+    expect(result?.pipeline.fetch.knowledgeHitCount).toBe(1);
+    expect(result?.pipeline.summarize.factSlotCount).toBe(1);
+    expect(result?.pipeline.summarize.retrievalObjectCount).toBe(1);
+    expect(result?.pipeline.failsoft.active).toBe(true);
+    expect(result?.pipeline.failsoft.fallbacks).toEqual(['provider_unbound', 'knowledge_search_error:RuntimeError']);
   });
 
   it('returns null when no task carries structured retrieval or diagnostics', () => {

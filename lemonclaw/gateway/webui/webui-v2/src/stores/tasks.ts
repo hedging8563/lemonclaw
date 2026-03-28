@@ -185,9 +185,43 @@ export interface StructuredMemoryWorkSurface {
   sessionSummary: string;
   factSlots: NonNullable<NonNullable<RetrievalMeta['structured']>['fact_slots']>;
   retrievalObjects: NonNullable<NonNullable<RetrievalMeta['structured']>['retrieval_objects']>;
+  cardHits: NonNullable<NonNullable<RetrievalMeta['card_hits']>>;
+  ruleHits: NonNullable<NonNullable<RetrievalMeta['rule_hits']>>;
+  knowledgeHits: NonNullable<NonNullable<RetrievalMeta['knowledge_hits']>>;
   fallbackCount: number;
   fallbacks: string[];
   hitSources: string[];
+  pipeline: StructuredMemoryPipelineView;
+}
+
+export interface StructuredMemoryPipelineView {
+  search: {
+    active: boolean;
+    strategy?: string;
+    hitSources: string[];
+    cardCount: number;
+    ruleCount: number;
+    knowledgeCount: number;
+    totalHits: number;
+  };
+  fetch: {
+    active: boolean;
+    cardHitCount: number;
+    ruleHitCount: number;
+    knowledgeHitCount: number;
+    totalFetched: number;
+  };
+  summarize: {
+    active: boolean;
+    hasSessionSummary: boolean;
+    factSlotCount: number;
+    retrievalObjectCount: number;
+  };
+  failsoft: {
+    active: boolean;
+    fallbackCount: number;
+    fallbacks: string[];
+  };
 }
 
 function resolveTaskRetrieval(task: TaskRecord, detail?: TaskDetail | null): RetrievalMeta | null {
@@ -210,6 +244,50 @@ function hasStructuredMemoryPayload(retrieval: RetrievalMeta | null | undefined)
     || retrieval?.fallbacks?.length
     || retrieval?.hit_sources?.length
   );
+}
+
+function buildStructuredMemoryPipeline(retrieval: RetrievalMeta): StructuredMemoryPipelineView {
+  const structured = retrieval.structured || {};
+  const cardCount = Number(retrieval.card_count || 0);
+  const ruleCount = Number(retrieval.rule_count || 0);
+  const knowledgeCount = Number(retrieval.knowledge_count || 0);
+  const cardHitCount = (retrieval.card_hits || []).length;
+  const ruleHitCount = (retrieval.rule_hits || []).length;
+  const knowledgeHitCount = (retrieval.knowledge_hits || []).length;
+  const factSlotCount = (structured.fact_slots || []).length;
+  const retrievalObjectCount = (structured.retrieval_objects || []).length;
+  const sessionSummary = String(structured.session_summary || '').trim();
+  const fallbacks = (retrieval.fallbacks || []).filter(Boolean);
+
+  return {
+    search: {
+      active: Boolean(retrieval.strategy || retrieval.hit_sources?.length || cardCount || ruleCount || knowledgeCount),
+      strategy: retrieval.strategy,
+      hitSources: (retrieval.hit_sources || []).filter(Boolean),
+      cardCount,
+      ruleCount,
+      knowledgeCount,
+      totalHits: cardCount + ruleCount + knowledgeCount,
+    },
+    fetch: {
+      active: Boolean(cardHitCount || ruleHitCount || knowledgeHitCount),
+      cardHitCount,
+      ruleHitCount,
+      knowledgeHitCount,
+      totalFetched: cardHitCount + ruleHitCount + knowledgeHitCount,
+    },
+    summarize: {
+      active: Boolean(sessionSummary || factSlotCount || retrievalObjectCount),
+      hasSessionSummary: Boolean(sessionSummary),
+      factSlotCount,
+      retrievalObjectCount,
+    },
+    failsoft: {
+      active: Boolean(fallbacks.length || Number(retrieval.fallback_count || 0)),
+      fallbackCount: Number(retrieval.fallback_count || 0),
+      fallbacks,
+    },
+  };
 }
 
 export function buildStructuredMemoryWorkSurface(
@@ -237,9 +315,13 @@ export function buildStructuredMemoryWorkSurface(
     sessionSummary: String(structured.session_summary || '').trim(),
     factSlots: structured.fact_slots || [],
     retrievalObjects: structured.retrieval_objects || [],
+    cardHits: retrieval.card_hits || [],
+    ruleHits: retrieval.rule_hits || [],
+    knowledgeHits: retrieval.knowledge_hits || [],
     fallbackCount: Number(retrieval.fallback_count || 0),
     fallbacks: (retrieval.fallbacks || []).filter(Boolean),
     hitSources: (retrieval.hit_sources || []).filter(Boolean),
+    pipeline: buildStructuredMemoryPipeline(retrieval),
   };
 }
 

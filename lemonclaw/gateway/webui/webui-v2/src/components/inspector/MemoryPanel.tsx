@@ -1224,6 +1224,144 @@ export function MemoryPanel() {
                   {structuredMemorySurface.sourceUpdatedAtMs ? <span style={pillStyle()}>{`${t('memory_structured_updated_at')}: ${formatTime(structuredMemorySurface.sourceUpdatedAtMs)}`}</span> : null}
                 </div>
 
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {t('memory_structured_pipeline_title')}
+                  </div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                    {t('memory_structured_pipeline_subtitle')}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '8px' }}>
+                    {[
+                      {
+                        label: t('memory_structured_stage_search'),
+                        detail: t('memory_structured_stage_search_detail'),
+                        tone: structuredMemorySurface.pipeline.search.active ? 'var(--teal)' : 'var(--text-secondary)',
+                        border: structuredMemorySurface.pipeline.search.active ? 'rgba(10, 186, 181, 0.22)' : 'var(--border)',
+                        background: structuredMemorySurface.pipeline.search.active ? 'rgba(10, 186, 181, 0.08)' : 'var(--bg-secondary)',
+                        summary: structuredMemorySurface.pipeline.search.totalHits,
+                        extra: structuredMemorySurface.pipeline.search.strategy || '—',
+                        chips: structuredMemorySurface.pipeline.search.hitSources,
+                      },
+                      {
+                        label: t('memory_structured_stage_fetch'),
+                        detail: t('memory_structured_stage_fetch_detail'),
+                        tone: structuredMemorySurface.pipeline.fetch.active ? 'var(--accent)' : 'var(--text-secondary)',
+                        border: structuredMemorySurface.pipeline.fetch.active ? 'rgba(255, 107, 53, 0.22)' : 'var(--border)',
+                        background: structuredMemorySurface.pipeline.fetch.active ? 'rgba(255, 107, 53, 0.08)' : 'var(--bg-secondary)',
+                        summary: structuredMemorySurface.pipeline.fetch.totalFetched,
+                        extra: `cards ${structuredMemorySurface.pipeline.fetch.cardHitCount} · rules ${structuredMemorySurface.pipeline.fetch.ruleHitCount} · knowledge ${structuredMemorySurface.pipeline.fetch.knowledgeHitCount}`,
+                        chips: [],
+                      },
+                      {
+                        label: t('memory_structured_stage_summarize'),
+                        detail: t('memory_structured_stage_summarize_detail'),
+                        tone: structuredMemorySurface.pipeline.summarize.active ? 'var(--success)' : 'var(--text-secondary)',
+                        border: structuredMemorySurface.pipeline.summarize.active ? 'rgba(76, 175, 80, 0.22)' : 'var(--border)',
+                        background: structuredMemorySurface.pipeline.summarize.active ? 'rgba(76, 175, 80, 0.08)' : 'var(--bg-secondary)',
+                        summary: structuredMemorySurface.pipeline.summarize.factSlotCount + structuredMemorySurface.pipeline.summarize.retrievalObjectCount,
+                        extra: `summary ${structuredMemorySurface.pipeline.summarize.hasSessionSummary ? '1' : '0'} · slots ${structuredMemorySurface.pipeline.summarize.factSlotCount} · objects ${structuredMemorySurface.pipeline.summarize.retrievalObjectCount}`,
+                        chips: [],
+                      },
+                      {
+                        label: t('memory_structured_stage_failsoft'),
+                        detail: t('memory_structured_stage_failsoft_detail'),
+                        tone: structuredMemorySurface.pipeline.failsoft.active ? 'var(--warning, #ffb84d)' : 'var(--text-secondary)',
+                        border: structuredMemorySurface.pipeline.failsoft.active ? 'rgba(255, 184, 77, 0.22)' : 'var(--border)',
+                        background: structuredMemorySurface.pipeline.failsoft.active ? 'rgba(255, 184, 77, 0.08)' : 'var(--bg-secondary)',
+                        summary: structuredMemorySurface.pipeline.failsoft.fallbackCount,
+                        extra: structuredMemorySurface.pipeline.failsoft.fallbacks[0] || t('memory_structured_failsoft_empty'),
+                        chips: [],
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.label}
+                        style={{
+                          border: `1px solid ${item.border}`,
+                          background: item.background,
+                          borderRadius: '10px',
+                          padding: '10px 12px',
+                          display: 'grid',
+                          gap: '6px',
+                        }}
+                      >
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          {item.label}
+                        </div>
+                        <div style={{ fontSize: '22px', color: item.tone, fontFamily: 'var(--font-display)', lineHeight: 1 }}>
+                          {item.summary}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                          {item.detail}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.45, wordBreak: 'break-word' }}>
+                          {item.extra}
+                        </div>
+                        {item.chips.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {item.chips.map((chip) => (
+                              <span key={`${item.label}-${chip}`} style={pillStyle()}>{chip}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {(structuredMemorySurface.cardHits.length > 0 || structuredMemorySurface.ruleHits.length > 0 || structuredMemorySurface.knowledgeHits.length > 0) ? (
+                  <div style={{ display: 'grid', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {t('memory_structured_stage_fetch_detail')}
+                    </div>
+                    {structuredMemorySurface.cardHits.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '6px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_card_hits')}</div>
+                        {structuredMemorySurface.cardHits.map((item, idx) => (
+                          <div key={`${item?.name || 'card-hit'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item?.name || '—'}</div>
+                                {item?.source ? <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source}</div> : null}
+                              </div>
+                              {item?.type ? <span style={pillStyle()}>{item.type}</span> : null}
+                            </div>
+                            {item?.preview ? <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{item.preview}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {structuredMemorySurface.ruleHits.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '6px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_rule_hits')}</div>
+                        {structuredMemorySurface.ruleHits.map((item, idx) => (
+                          <div key={`${item?.trigger || 'rule-hit'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                            <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item?.trigger || '—'}</div>
+                            {item?.lesson ? <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, wordBreak: 'break-word' }}>{item.lesson}</div> : null}
+                            {item?.action ? <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>{item.action}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {structuredMemorySurface.knowledgeHits.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '6px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>{t('task_retrieval_knowledge_hits')}</div>
+                        {structuredMemorySurface.knowledgeHits.map((item, idx) => (
+                          <div key={`${item?.title || item?.source || 'knowledge-hit'}-${idx}`} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{item?.title || '—'}</div>
+                                {item?.source ? <div style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{item.source}</div> : null}
+                              </div>
+                              {item?.page_label ? <span style={pillStyle()}>{item.page_label}</span> : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {structuredMemorySurface.sessionSummary ? (
                   <div style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '6px' }}>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
