@@ -36,6 +36,14 @@ _ALLOWED_ENDPOINTS = {
 }
 _SCENE_CACHE_TTL_SECONDS = 30 * 60
 _RETRYABLE_ERROR_CODES = {"all_channels_failed", "upstream_error", "rate_limit_exceeded", "model_unavailable"}
+_RETRYABLE_TRANSPORT_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.RemoteProtocolError,
+)
 
 
 class LemonDataNonChatTool(Tool):
@@ -336,8 +344,8 @@ class LemonDataNonChatTool(Tool):
             "endpoint": endpoint,
             "error": response["error"],
             "response": response["body"],
-            "error_code": error_payload.get("code"),
-            "retryable": bool(error_payload.get("retryable")),
+            "error_code": error_payload.get("code") or ("transport_error" if response.get("transport_error") else None),
+            "retryable": bool(error_payload.get("retryable")) or bool(response.get("transport_error")),
         }
 
     @staticmethod
@@ -409,5 +417,7 @@ class LemonDataNonChatTool(Tool):
                     "body": payload,
                 }
             return {"ok": True, "body": payload}
+        except _RETRYABLE_TRANSPORT_ERRORS as exc:
+            return {"ok": False, "error": str(exc), "body": None, "transport_error": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "body": None}

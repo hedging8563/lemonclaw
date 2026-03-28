@@ -238,3 +238,45 @@ async def test_lemondata_nonchat_translation_requires_text_and_target_language(m
 
     assert result["ok"] is False
     assert "target_language" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_request_retries_on_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = LemonDataNonChatTool()
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=image&recommended_for=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {
+                            "id": "model-a",
+                            "lemondata": {"category": "image", "agent_preferences": {"image": {"status": "ready", "preferred_rank": 1}}},
+                        },
+                        {
+                            "id": "model-b",
+                            "lemondata": {"category": "image", "agent_preferences": {"image": {"status": "ready", "preferred_rank": 2}}},
+                        },
+                    ]
+                },
+            }
+        if path == "/v1/images/generations" and body and body["model"] == "model-a":
+            return {"ok": False, "error": "connect timeout", "body": None, "transport_error": True}
+        if path == "/v1/images/generations" and body and body["model"] == "model-b":
+            return {"ok": True, "body": {"id": "img_ok", "model": "model-b"}}
+        raise AssertionError((path, method, body))
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="image",
+            payload={"prompt": "fallback on transport"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["selected_model"] == "model-b"
+    assert result["attempted_models"] == ["model-a", "model-b"]
+    assert result["fallback_reason"] == "transport_error"
