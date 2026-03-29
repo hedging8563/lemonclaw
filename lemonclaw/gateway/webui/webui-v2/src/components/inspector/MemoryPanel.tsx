@@ -26,6 +26,7 @@ import {
 } from '../../stores/knowledge';
 import { loadMemory, memory, memoryError, type MemoryEntityRecord, type MemoryRuleRecord } from '../../stores/memory';
 import { buildStructuredMemoryWorkSurface, sessionTasks, taskDetails } from '../../stores/tasks';
+import { activeOperatorTaskId } from '../../stores/tasks';
 
 const panelStyle = {
   background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-primary) 100%)',
@@ -123,6 +124,37 @@ function downloadJson(filename: string, payload: unknown) {
   URL.revokeObjectURL(url);
 }
 
+const INSPECTOR_NAVIGATION_EVENT = 'lemonclaw:inspector-navigation';
+
+type InspectorNavigationDetail = {
+  target: 'task-retrieval';
+  taskId: string;
+  focus?: 'retrieval';
+  source?: 'memory';
+};
+
+function scrollToInspectorAnchor(anchorId: string) {
+  window.setTimeout(() => {
+    document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 0);
+}
+
+function openRetrievalPanel(taskId?: string | null) {
+  const nextTaskId = String(taskId || '').trim();
+  if (!nextTaskId) return;
+  activeOperatorTaskId.value = nextTaskId;
+  window.dispatchEvent(
+    new CustomEvent<InspectorNavigationDetail>(INSPECTOR_NAVIGATION_EVENT, {
+      detail: {
+        target: 'task-retrieval',
+        taskId: nextTaskId,
+        focus: 'retrieval',
+        source: 'memory',
+      },
+    }),
+  );
+}
+
 function renderAccordionSection(
   title: string,
   count: number | null,
@@ -210,6 +242,14 @@ export function MemoryPanel() {
     () => buildStructuredMemoryWorkSurface(sessionTasks.value, taskDetails.value),
     [sessionTasks.value, taskDetails.value],
   );
+  const hasSearchStatusIssue = Boolean(
+    snapshot?.search_index
+    && (
+      !snapshot.search_index.available
+      || !snapshot.search_index.db_exists
+      || Boolean(snapshot.search_index.last_error)
+    ),
+  );
 
   const filteredEntities = useMemo(
     () =>
@@ -256,6 +296,56 @@ export function MemoryPanel() {
   );
   const selectedVisibleDocs = visibleKnowledgeDocs.filter((doc) => selectedKnowledgeIds.includes(doc.doc_id));
   const allVisibleSelected = visibleKnowledgeDocs.length > 0 && visibleKnowledgeDocs.every((doc) => selectedKnowledgeIds.includes(doc.doc_id));
+
+  const focusSourcesLane = () => {
+    activeMemoryPanelTab.value = 'sources';
+    scrollToInspectorAnchor('memory-governance-overview');
+  };
+
+  const focusDueSources = () => {
+    activeMemoryPanelTab.value = 'sources';
+    setKnowledgeView('due');
+    scrollToInspectorAnchor('memory-governance-overview');
+  };
+
+  const focusSearchStatus = () => {
+    activeMemoryPanelTab.value = 'memory';
+    scrollToInspectorAnchor('memory-search-status');
+  };
+
+  const governanceActions = [
+    {
+      show: Boolean(structuredMemorySurface?.sourceTaskId),
+      label: t('memory_structured_open_retrieval_panel'),
+      tone: 'var(--teal)',
+      onClick: () => openRetrievalPanel(structuredMemorySurface?.sourceTaskId),
+    },
+    {
+      show: governanceSnapshot.summary.attention > 0,
+      label: t('memory_structured_view_attention_lane'),
+      tone: 'var(--warning, #ffb84d)',
+      onClick: focusSourcesLane,
+    },
+    {
+      show: governanceSnapshot.summary.due > 0,
+      label: t('memory_structured_view_due_sources'),
+      tone: 'var(--accent)',
+      onClick: focusDueSources,
+    },
+    {
+      show: hasSearchStatusIssue || Boolean(structuredMemorySurface?.fallbackCount),
+      label: t('memory_structured_view_search_status'),
+      tone: 'var(--success)',
+      onClick: focusSearchStatus,
+    },
+  ].filter((item) => item.show);
+
+  const failsoftAdvice = [
+    governanceSnapshot.summary.attention > 0 ? t('memory_structured_failsoft_advice_attention') : null,
+    governanceSnapshot.summary.due > 0 ? t('memory_structured_failsoft_advice_due') : null,
+    hasSearchStatusIssue ? t('memory_structured_failsoft_advice_search') : null,
+    Number(structuredMemorySurface?.fallbackCount || 0) > 0 ? t('memory_structured_failsoft_advice_retrieval') : null,
+  ].filter(Boolean) as string[];
 
   const flashKnowledgeNotice = (message: string) => {
     setKnowledgeActionNotice(message);
@@ -780,7 +870,7 @@ export function MemoryPanel() {
         <span style={pillStyle(Boolean(knowledgeSummary.value?.archived_count))}>{t('knowledge_count_archived')}: {knowledgeSummary.value?.archived_count || 0}</span>
       </div>
 
-      <div style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
+      <div id="memory-governance-overview" style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
         <div style={{ ...sectionTitleStyle, color: 'var(--teal)' }}>{t('knowledge_governance_title')}</div>
         <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
           {t('knowledge_governance_subtitle')}
@@ -843,6 +933,22 @@ export function MemoryPanel() {
             </div>
           ))}
         </div>
+        {governanceActions.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {governanceActions.map((action) => (
+              <button
+                key={action.label}
+                onClick={action.onClick}
+                style={{
+                  ...actionButtonStyle(action.tone),
+                  borderColor: action.tone === 'var(--text-secondary)' ? 'var(--border)' : action.tone,
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           <span style={{ ...pillStyle(Boolean(snapshot?.search_index?.available)), cursor: 'default' }}>
             {t('knowledge_governance_memory_index')}: {snapshot?.search_index?.available ? t('knowledge_governance_index_ready') : t('knowledge_governance_index_limited')}
@@ -1223,6 +1329,19 @@ export function MemoryPanel() {
                   {structuredMemorySurface.latencyMs != null ? <span style={pillStyle()}>{`${t('task_retrieval_latency')}: ${structuredMemorySurface.latencyMs}ms`}</span> : null}
                   {structuredMemorySurface.sourceUpdatedAtMs ? <span style={pillStyle()}>{`${t('memory_structured_updated_at')}: ${formatTime(structuredMemorySurface.sourceUpdatedAtMs)}`}</span> : null}
                 </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {structuredMemorySurface.sourceTaskId ? (
+                    <button
+                      onClick={() => openRetrievalPanel(structuredMemorySurface.sourceTaskId)}
+                      style={actionButtonStyle('var(--teal)')}
+                    >
+                      {t('memory_structured_open_retrieval_panel')}
+                    </button>
+                  ) : null}
+                  <button onClick={focusSearchStatus} style={actionButtonStyle('var(--text-secondary)')}>
+                    {t('memory_structured_view_search_status')}
+                  </button>
+                </div>
 
                 <div style={{ display: 'grid', gap: '8px' }}>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -1306,6 +1425,25 @@ export function MemoryPanel() {
                         ) : null}
                       </div>
                     ))}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {structuredMemorySurface.sourceTaskId ? (
+                      <button
+                        onClick={() => openRetrievalPanel(structuredMemorySurface.sourceTaskId)}
+                        style={actionButtonStyle('var(--teal)')}
+                      >
+                        {t('memory_structured_open_retrieval_panel')}
+                      </button>
+                    ) : null}
+                    <button onClick={focusSourcesLane} style={actionButtonStyle('var(--warning, #ffb84d)')}>
+                      {t('memory_structured_view_attention_lane')}
+                    </button>
+                    <button onClick={focusDueSources} style={actionButtonStyle('var(--accent)')}>
+                      {t('memory_structured_view_due_sources')}
+                    </button>
+                    <button onClick={focusSearchStatus} style={actionButtonStyle('var(--text-secondary)')}>
+                      {t('memory_structured_view_search_status')}
+                    </button>
                   </div>
                 </div>
 
@@ -1431,6 +1569,11 @@ export function MemoryPanel() {
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     {t('memory_structured_failsoft')}
                   </div>
+                  {failsoftAdvice.length > 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                      {failsoftAdvice.join(' · ')}
+                    </div>
+                  ) : null}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     <span style={pillStyle(Boolean(structuredMemorySurface.fallbackCount))}>
                       {`${t('memory_structured_fallback_count')}: ${structuredMemorySurface.fallbackCount}`}
@@ -1443,6 +1586,31 @@ export function MemoryPanel() {
                         {fallback}
                       </span>
                     ))}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {structuredMemorySurface.sourceTaskId ? (
+                      <button
+                        onClick={() => openRetrievalPanel(structuredMemorySurface.sourceTaskId)}
+                        style={actionButtonStyle('var(--teal)')}
+                      >
+                        {t('memory_structured_open_retrieval_panel')}
+                      </button>
+                    ) : null}
+                    {governanceSnapshot.summary.attention > 0 ? (
+                      <button onClick={focusSourcesLane} style={actionButtonStyle('var(--warning, #ffb84d)')}>
+                        {t('memory_structured_view_attention_lane')}
+                      </button>
+                    ) : null}
+                    {governanceSnapshot.summary.due > 0 ? (
+                      <button onClick={focusDueSources} style={actionButtonStyle('var(--accent)')}>
+                        {t('memory_structured_view_due_sources')}
+                      </button>
+                    ) : null}
+                    {hasSearchStatusIssue ? (
+                      <button onClick={focusSearchStatus} style={actionButtonStyle('var(--text-secondary)')}>
+                        {t('memory_structured_view_search_status')}
+                      </button>
+                    ) : null}
                   </div>
                   {structuredMemorySurface.fallbackCount === 0 && structuredMemorySurface.hitSources.length === 0 ? (
                     <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
@@ -1489,15 +1657,16 @@ export function MemoryPanel() {
         ) : null}
 
         <div style={{ display: 'grid', gap: '8px' }}>
-          {renderAccordionSection(
-            t('memory_search_index'),
-            snapshot.search_index?.last_indexed_docs || 0,
-            <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
-              {([
-                [
-                  t('memory_search_available'),
-                  <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
-                    {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
+          <div id="memory-search-status">
+            {renderAccordionSection(
+              t('memory_search_index'),
+              snapshot.search_index?.last_indexed_docs || 0,
+              <div style={{ display: 'grid', gap: '8px', fontSize: '13px' }}>
+                {([
+                  [
+                    t('memory_search_available'),
+                    <span style={{ color: snapshot.search_index?.available ? 'var(--success)' : 'var(--error)' }}>
+                      {snapshot.search_index?.available ? t('common_yes') : t('common_no')}
                   </span>,
                 ],
                 [
@@ -1527,10 +1696,11 @@ export function MemoryPanel() {
                   <span style={{ color: 'var(--text-muted)' }}>{t('memory_search_last_error')}:</span> {snapshot.search_index.last_error}
                 </div>
               ) : null}
-            </div>,
-            false,
-            220,
-          )}
+              </div>,
+              false,
+              220,
+            )}
+          </div>
 
           {snapshot.core ? (
             <div style={panelStyle}>

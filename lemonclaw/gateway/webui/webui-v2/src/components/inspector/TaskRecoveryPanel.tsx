@@ -241,6 +241,15 @@ function linkedCardStyle(active: boolean) {
   };
 }
 
+const INSPECTOR_NAVIGATION_EVENT = 'lemonclaw:inspector-navigation';
+
+type InspectorNavigationDetail = {
+  target: 'task-retrieval';
+  taskId: string;
+  focus?: 'retrieval';
+  source?: 'memory';
+};
+
 const summaryCardStyle = {
   background: 'var(--bg-secondary)',
   border: '1px solid var(--border)',
@@ -603,6 +612,8 @@ function renderTaskDetailBody(
   setLinkedFocus: (next: LinkedFocus | null) => void,
   copiedLabel: string | null,
   copyValue: (label: string, value: unknown) => Promise<void>,
+  retrievalSectionRef: { current: HTMLDetailsElement | null },
+  highlightRetrieval: boolean,
   withTopDivider = true,
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
@@ -773,7 +784,7 @@ function renderTaskDetailBody(
         </details>
       )}
       {retrieval && (
-        <details style={{ ...summaryCardStyle, padding: '10px 12px' }}>
+        <details ref={retrievalSectionRef} style={{ ...summaryCardStyle, padding: '10px 12px', ...linkedCardStyle(highlightRetrieval) }}>
           <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
             {t('task_retrieval_summary')}
           </summary>
@@ -1436,9 +1447,11 @@ export function TaskRecoveryPanel() {
   const [expanded, setExpanded] = useState(true);
   const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null);
   const [linkedFocus, setLinkedFocus] = useState<LinkedFocus | null>(null);
+  const [retrievalFocusTaskId, setRetrievalFocusTaskId] = useState<string | null>(null);
   const [showSettledTasks, setShowSettledTasks] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const timerRef = useRef<any>(null);
+  const retrievalSectionRef = useRef<HTMLDetailsElement | null>(null);
   const expandedTaskId = activeOperatorTaskId.value;
   const setExpandedTaskId = (taskId: string | null) => {
     activeOperatorTaskId.value = taskId;
@@ -1465,6 +1478,38 @@ export function TaskRecoveryPanel() {
   useEffect(() => {
     loadOperatorQueue();
   }, []);
+
+  useEffect(() => {
+    const handleInspectorNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<InspectorNavigationDetail>).detail;
+      if (!detail || detail.target !== 'task-retrieval' || !detail.taskId) return;
+      activeOperatorTaskId.value = detail.taskId;
+      setRetrievalFocusTaskId(detail.taskId);
+      setExpandedTaskId(detail.taskId);
+      void loadTaskDetail(detail.taskId);
+    };
+
+    window.addEventListener(INSPECTOR_NAVIGATION_EVENT, handleInspectorNavigation as EventListener);
+    return () => window.removeEventListener(INSPECTOR_NAVIGATION_EVENT, handleInspectorNavigation as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (!retrievalFocusTaskId || retrievalFocusTaskId !== expandedTaskId || !selectedTask) return;
+    if (!selectedDetail) return;
+
+    const targetTaskId = retrievalFocusTaskId;
+    const timer = window.setTimeout(() => {
+      if (retrievalSectionRef.current) {
+        retrievalSectionRef.current.open = true;
+        retrievalSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      window.setTimeout(() => {
+        setRetrievalFocusTaskId((current) => (current === targetTaskId ? null : current));
+      }, 1400);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [retrievalFocusTaskId, expandedTaskId, selectedTask, selectedDetail]);
 
   useEffect(() => {
     const startPolling = () => {
@@ -1815,7 +1860,20 @@ export function TaskRecoveryPanel() {
                 </button>
               </div>
             </details>
-            {renderTaskDetailBody(selectedTask, selectedDetail, selectedBusy, expandedOutboxId, setExpandedOutboxId, linkedFocus, setLinkedFocus, copiedLabel, copyValue, false)}
+            {renderTaskDetailBody(
+              selectedTask,
+              selectedDetail,
+              selectedBusy,
+              expandedOutboxId,
+              setExpandedOutboxId,
+              linkedFocus,
+              setLinkedFocus,
+              copiedLabel,
+              copyValue,
+              retrievalSectionRef,
+              retrievalFocusTaskId === expandedTaskId,
+              false,
+            )}
           </div>
         )}
         </div>
