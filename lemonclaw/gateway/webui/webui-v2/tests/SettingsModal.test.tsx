@@ -23,6 +23,42 @@ describe('normalizeChangedPath', () => {
   });
 });
 
+describe('dicloak runtime checklist', () => {
+  it('derives workflow guidance for an active lease', async () => {
+    const { deriveDICloakRuntimeChecklist } = await import('../src/components/settings/SettingsModal');
+    const result = deriveDICloakRuntimeChecklist(
+      {
+        enabled: true,
+        lease_count: 1,
+        leases: [{ session_name: 'lc-webui-abc', profile_id: 'profile-1', debug_port: 45010 }],
+        last_open: { ok: true, profile_id: 'profile-1', session_name: 'lc-webui-abc', debug_port: 45010 },
+        last_close: {},
+      },
+      true,
+    );
+
+    expect(result.showCard).toBe(true);
+    expect(result.guideKey).toBe('tool_status_dicloak_guide_active_lease');
+    expect(result.items.map((item: any) => item.state)).toEqual(['success', 'success', 'success', 'success', 'neutral']);
+  });
+
+  it('derives kernel remediation guidance when last open reports missing kernel', async () => {
+    const { deriveDICloakRuntimeChecklist } = await import('../src/components/settings/SettingsModal');
+    const result = deriveDICloakRuntimeChecklist(
+      {
+        enabled: true,
+        lease_count: 0,
+        last_open: { ok: false, profile_id: 'profile-2', error: 'BROWSER_NOT_INSTALL_2' },
+        last_close: {},
+      },
+      true,
+    );
+
+    expect(result.guideKey).toBe('tool_status_dicloak_guide_kernel');
+    expect(result.items.find((item: any) => item.key === 'open')?.state).toBe('warning');
+  });
+});
+
 describe('operator settings editors', () => {
   it('renders HTTP auth profiles editor', async () => {
     const { HTTPAuthProfilesEditor } = await import('../src/components/settings/HTTPAuthProfilesEditor');

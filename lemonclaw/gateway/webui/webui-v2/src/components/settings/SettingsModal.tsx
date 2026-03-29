@@ -172,6 +172,61 @@ export function normalizeChangedPath(path: string[]): string {
   return path.join('.');
 }
 
+export type DICloakRuntimeChecklistState = 'success' | 'warning' | 'neutral';
+
+export interface DICloakRuntimeChecklistItem {
+  key: 'runtime' | 'browser' | 'lease' | 'open' | 'close';
+  state: DICloakRuntimeChecklistState;
+}
+
+export interface DICloakRuntimeChecklist {
+  showCard: boolean;
+  guideKey: string;
+  items: DICloakRuntimeChecklistItem[];
+}
+
+function hasDICloakError(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function deriveDICloakRuntimeChecklist(
+  dicloakRuntime: any | null,
+  browserInstalled: boolean,
+): DICloakRuntimeChecklist {
+  const runtimeEnabled = Boolean(dicloakRuntime?.enabled);
+  const leaseCount = typeof dicloakRuntime?.lease_count === 'number' ? dicloakRuntime.lease_count : 0;
+  const openOk = typeof dicloakRuntime?.last_open?.ok === 'boolean' ? dicloakRuntime.last_open.ok : null;
+  const closeOk = typeof dicloakRuntime?.last_close?.ok === 'boolean' ? dicloakRuntime.last_close.ok : null;
+  const openError = hasDICloakError(dicloakRuntime?.last_open?.error);
+  const closeError = hasDICloakError(dicloakRuntime?.last_close?.error);
+  const kernelMissing = String(dicloakRuntime?.last_open?.error || '').includes('BROWSER_NOT_INSTALL_2');
+
+  let guideKey = 'tool_status_dicloak_guide_workflow';
+  if (!runtimeEnabled) {
+    guideKey = 'tool_status_dicloak_guide_configure';
+  } else if (!browserInstalled) {
+    guideKey = 'tool_status_dicloak_guide_browser_missing';
+  } else if (kernelMissing) {
+    guideKey = 'tool_status_dicloak_guide_kernel';
+  } else if (leaseCount > 0) {
+    guideKey = 'tool_status_dicloak_guide_active_lease';
+  } else if (openOk === false || openError || closeOk === false || closeError) {
+    guideKey = 'tool_status_dicloak_guide_repair';
+  }
+
+  return {
+    showCard: Boolean(dicloakRuntime) || browserInstalled,
+    guideKey,
+    items: [
+      { key: 'runtime', state: runtimeEnabled ? 'success' : 'warning' },
+      { key: 'browser', state: browserInstalled ? 'success' : 'warning' },
+      { key: 'lease', state: leaseCount > 0 ? 'success' : 'neutral' },
+      { key: 'open', state: openOk === true ? 'success' : openOk === false || openError ? 'warning' : 'neutral' },
+      { key: 'close', state: closeOk === true ? 'success' : closeOk === false || closeError ? 'warning' : 'neutral' },
+    ],
+  };
+}
+
 function humanizeLabel(key: string): string {
   return key.replaceAll('.', ' / ').replaceAll('_', ' ');
 }
@@ -655,6 +710,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!draft?.tools) return null;
     const browserInstalled = Boolean(toolStatus?.browser?.installed);
     const codingInstalled = Boolean(toolStatus?.coding?.installed);
+    const dicloakChecklist = deriveDICloakRuntimeChecklist(dicloakRuntime, browserInstalled);
     const rows: Array<{ id: string; title: string; enabled: boolean; installed: boolean; binary: string; warning: boolean }> = [
       {
         id: 'browser',
@@ -703,21 +759,51 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             ) : null}
           </div>
         ))}
-        {dicloakRuntime && (
+        {dicloakChecklist.showCard && (
           <div style={{ paddingTop: '16px', marginTop: '16px', borderTop: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
               <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-primary)', fontWeight: 500 }}>
                 {t('tool_status_dicloak_runtime_title')}
               </div>
-              <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '15px', background: dicloakRuntime.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: dicloakRuntime.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                {dicloakRuntime.enabled ? t('tool_status_enabled') : t('tool_status_disabled')}
+              <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '15px', background: dicloakRuntime?.enabled ? 'rgba(76, 175, 80, 0.15)' : 'var(--bg-primary)', color: dicloakRuntime?.enabled ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                {dicloakRuntime?.enabled ? t('tool_status_enabled') : t('tool_status_disabled')}
               </span>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'rgba(255,255,255,0.03)', marginBottom: '10px', display: 'grid', gap: '6px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {t('tool_status_dicloak_quick_guide')}
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                {t(dicloakChecklist.guideKey as any)}
+              </div>
+              <div style={{ display: 'grid', gap: '6px' }}>
+                {dicloakChecklist.items.map((item) => {
+                  const badgeColor = item.state === 'success'
+                    ? 'rgba(76, 175, 80, 0.15)'
+                    : item.state === 'warning'
+                      ? 'rgba(255, 107, 53, 0.15)'
+                      : 'var(--bg-primary)';
+                  const badgeText = item.state === 'success'
+                    ? 'var(--success)'
+                    : item.state === 'warning'
+                      ? 'var(--accent)'
+                      : 'var(--text-muted)';
+                  return (
+                    <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{t(`tool_status_dicloak_check_${item.key}` as any)}</div>
+                      <span style={{ padding: '4px 8px', borderRadius: '999px', fontFamily: 'var(--font-ui)', fontSize: '13px', background: badgeColor, color: badgeText, border: '1px solid var(--border)' }}>
+                        {item.state === 'success' ? t('tool_status_enabled') : item.state === 'warning' ? t('tool_status_requires_attention') : t('tool_status_pending')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div style={{ fontFamily: 'var(--font-ui)', fontSize: '15px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div>
-                {t('tool_status_dicloak_lease_count')}: <span style={{ color: 'var(--text-primary)' }}>{typeof dicloakRuntime.lease_count === 'number' ? dicloakRuntime.lease_count : 0}</span>
+                {t('tool_status_dicloak_lease_count')}: <span style={{ color: 'var(--text-primary)' }}>{typeof dicloakRuntime?.lease_count === 'number' ? dicloakRuntime.lease_count : 0}</span>
               </div>
-              {Array.isArray(dicloakRuntime.leases) && dicloakRuntime.leases.length > 0 ? (
+              {Array.isArray(dicloakRuntime?.leases) && dicloakRuntime.leases.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {dicloakRuntime.leases.map((lease: any) => (
                     <div key={`${lease.session_name}:${lease.profile_id}`} style={{ padding: '8px', background: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border)' }}>
@@ -732,18 +818,43 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               )}
               <div>
                 {t('tool_status_dicloak_last_open')}: <span style={{ color: 'var(--text-primary)' }}>
-                  {dicloakRuntime.last_open?.profile_id
+                  {dicloakRuntime?.last_open?.profile_id
                     ? `${dicloakRuntime.last_open.ok ? t('common_yes') : t('common_no')} · ${dicloakRuntime.last_open.profile_id}`
                     : t('channel_runtime_none')}
                 </span>
               </div>
+              {dicloakRuntime?.last_open?.session_name ? (
+                <div>
+                  {t('tool_status_dicloak_lease_session')}: <span style={{ color: 'var(--text-primary)' }}>{dicloakRuntime.last_open.session_name}</span>
+                </div>
+              ) : null}
+              {dicloakRuntime?.last_open?.debug_port ? (
+                <div>
+                  {t('tool_status_dicloak_lease_port')}: <span style={{ color: 'var(--text-primary)' }}>{dicloakRuntime.last_open.debug_port}</span>
+                </div>
+              ) : null}
+              {dicloakRuntime?.last_open?.error ? (
+                <div style={{ padding: '8px', background: 'rgba(255, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.2)', color: 'var(--error)', lineHeight: 1.5 }}>
+                  {dicloakRuntime.last_open.error}
+                </div>
+              ) : null}
               <div>
                 {t('tool_status_dicloak_last_close')}: <span style={{ color: 'var(--text-primary)' }}>
-                  {dicloakRuntime.last_close?.profile_id
+                  {dicloakRuntime?.last_close?.profile_id
                     ? `${dicloakRuntime.last_close.ok ? t('common_yes') : t('common_no')} · ${dicloakRuntime.last_close.profile_id}`
                     : t('channel_runtime_none')}
                 </span>
               </div>
+              {dicloakRuntime?.last_close?.session_name ? (
+                <div>
+                  {t('tool_status_dicloak_lease_session')}: <span style={{ color: 'var(--text-primary)' }}>{dicloakRuntime.last_close.session_name}</span>
+                </div>
+              ) : null}
+              {dicloakRuntime?.last_close?.error ? (
+                <div style={{ padding: '8px', background: 'rgba(255, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 68, 68, 0.2)', color: 'var(--error)', lineHeight: 1.5 }}>
+                  {dicloakRuntime.last_close.error}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
