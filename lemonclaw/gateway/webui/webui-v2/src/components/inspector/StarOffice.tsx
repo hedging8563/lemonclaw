@@ -46,6 +46,9 @@ export function StarOffice() {
   );
   const handoffSubtasks = subtasks.filter((task) => (task.depends_on || []).length > 0);
   const completedCount = subtasks.filter((task) => task.status === 'completed').length;
+  const artifactCount = subtasks.reduce((sum, task) => sum + (task.artifact_count || task.artifacts?.length || 0), 0);
+  const evaluatedCount = subtasks.filter((task) => Boolean(task.evaluation?.status || task.generator?.status || task.result_preview)).length;
+  const tracedCount = subtasks.filter((task) => Boolean(task.observability?.trace_id || task.observability?.duration_ms != null || task.observability?.attempt_count != null)).length;
   const busyAgents = workerAgents.filter((agent) => agent.status === 'busy').length;
   const errorAgents = workerAgents.filter((agent) => agent.status === 'error').length;
   const laneTemplates = (activeTemplateData?.roles?.length ? activeTemplateData.roles : [])
@@ -135,6 +138,18 @@ export function StarOffice() {
           <span class="star-hud-metric">
             <strong>{errorAgents}</strong>
             <span>errors</span>
+          </span>
+          <span class="star-hud-metric">
+            <strong>{artifactCount}</strong>
+            <span>{t('conductor_metric_artifacts')}</span>
+          </span>
+          <span class="star-hud-metric">
+            <strong>{evaluatedCount}</strong>
+            <span>{t('conductor_metric_evaluated')}</span>
+          </span>
+          <span class="star-hud-metric">
+            <strong>{tracedCount}</strong>
+            <span>{t('conductor_metric_traced')}</span>
           </span>
         </div>
         <div class="star-hud-body">

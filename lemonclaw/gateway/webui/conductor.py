@@ -8,7 +8,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from lemonclaw.conductor.types import SubTaskStatus
+from lemonclaw.conductor.serialization import serialize_plan
 
 if TYPE_CHECKING:
     from lemonclaw.agent.registry import AgentRegistry
@@ -65,8 +65,8 @@ def get_conductor_routes(
         plans = orchestrator.active_plans
         return JSONResponse({
             "plans": [
-                _serialize_plan(p, get_swarm_template(p.swarm_template_id))
-                for p in plans
+                serialize_plan(plan, get_swarm_template(plan.swarm_template_id))
+                for plan in plans
             ]
         })
 
@@ -100,55 +100,3 @@ def get_conductor_routes(
         Route("/api/conductor/plans", api_plans),
         Route("/api/conductor/templates", api_templates),
     ]
-
-
-def _serialize_plan(plan, template) -> dict:
-    subtasks = list(plan.subtasks or [])
-    completed_ids = {task.id for task in subtasks if task.status == SubTaskStatus.COMPLETED}
-    subtask_map = {task.id: task for task in subtasks}
-    role_map = {role.id: role for role in getattr(template, "roles", ())}
-
-    def _state_bucket(task) -> str:
-        status = task.status.value
-        if status == "pending" and any(dep not in completed_ids for dep in task.depends_on):
-            return "blocked"
-        if status == "pending":
-            return "ready"
-        return status
-
-    return {
-        "request_id": plan.request_id,
-        "phase": plan.phase.value,
-        "message": plan.original_message[:200],
-        "complexity": plan.intent.complexity.value,
-        "swarm_template_id": plan.swarm_template_id,
-        "swarm_template_label": plan.swarm_template_label,
-        "swarm_goal": plan.swarm_goal,
-        "team_roles": [
-            {"id": role.id, "label": role.label}
-            for role in getattr(template, "roles", ())
-        ],
-        "subtasks": [
-            {
-                "id": task.id,
-                "description": task.description[:100],
-                "role_hint": task.role_hint,
-                "role_label": role_map.get(task.role_hint).label if task.role_hint in role_map else None,
-                "status": task.status.value,
-                "state_bucket": _state_bucket(task),
-                "assigned_agent": task.assigned_agent_id,
-                "depends_on": list(task.depends_on),
-                "dependency_descriptions": [
-                    subtask_map[dep_id].description[:100]
-                    for dep_id in task.depends_on
-                    if dep_id in subtask_map
-                ],
-                "result_preview": (task.result or "")[:160] or None,
-            }
-            for task in subtasks
-        ],
-        "progress": (
-            sum(1 for task in subtasks if task.status.value in ("completed", "failed"))
-            / max(len(subtasks), 1)
-        ),
-    }

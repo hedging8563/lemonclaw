@@ -752,6 +752,70 @@ def test_task_markdown_exports_include_retrieval_trace(tmp_path):
     assert "## Retrieval" in pm_md.text
 
 
+def test_task_exports_include_conductor_chain(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_conductor_export",
+        session_key="telegram:123",
+        agent_id="conductor",
+        mode="operator",
+        channel="telegram",
+        goal="ship the campaign package",
+        metadata={
+            "conductor": {
+                "planner": {"complexity": "complex", "summary": "Ship campaign package"},
+                "generator": {"subtask_count": 2, "completed_count": 1, "failed_count": 0, "running_count": 1},
+                "evaluator": {"plan_status": "accepted", "accepted_count": 1, "warning_count": 1, "failed_count": 0},
+                "artifacts": {
+                    "count": 2,
+                    "items": [
+                        {"artifact_id": "t1:result", "kind": "subtask_result", "label": "Risk audit"},
+                        {"artifact_id": "plan:merged_result", "kind": "merged_result", "label": "Campaign package"},
+                    ],
+                },
+                "observability": {"phase": "monitoring", "progress": 0.5, "duration_ms": 42},
+                "subtasks": [
+                    {
+                        "id": "t1",
+                        "description": "Audit the current funnel",
+                        "status": "completed",
+                        "generator": {"mode": "direct", "agent_id": "swarm-marketing_campaign_room-strategist"},
+                        "evaluation": {"status": "accepted"},
+                        "artifacts": [{"artifact_id": "t1:result"}],
+                    },
+                    {
+                        "id": "t2",
+                        "description": "Draft the landing page copy package",
+                        "status": "running",
+                        "generator": {"mode": "direct", "agent_id": "swarm-marketing_campaign_room-copywriter"},
+                        "evaluation": {"status": "warning"},
+                        "artifacts": [],
+                    },
+                ],
+            }
+        },
+    )
+
+    client = TestClient(app)
+    export_json = client.get("/api/tasks/task_conductor_export/export", params={"format": "json"})
+    assert export_json.status_code == 200
+    assert export_json.json()["summary"]["conductor"]["planner"]["summary"] == "Ship campaign package"
+    assert export_json.json()["conductor"]["artifacts"]["count"] == 2
+
+    bundle_md = client.get("/api/tasks/task_conductor_export/bundle", params={"format": "md"})
+    assert bundle_md.status_code == 200
+    assert "## Conductor Chain" in bundle_md.text
+    assert "### Subtasks" in bundle_md.text
+
+    pm_json = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "json"})
+    assert pm_json.status_code == 200
+    assert pm_json.json()["conductor"]["evaluator"]["plan_status"] == "accepted"
+
+    pm_md = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "md"})
+    assert pm_md.status_code == 200
+    assert "## Conductor Chain" in pm_md.text
+
+
 def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     app, ledger = _build_app(tmp_path)
     ledger.ensure_task(

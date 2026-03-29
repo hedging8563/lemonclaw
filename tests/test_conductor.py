@@ -309,6 +309,16 @@ async def test_execute_subtask_uses_swarm_role_prompt_and_handoff(tmp_path):
     result = await orch._execute_subtask(plan, plan.subtasks[1])
 
     assert result == "done"
+    subtask = plan.subtasks[1]
+    assert subtask.generator.status == "completed"
+    assert subtask.generator.mode == "direct"
+    assert subtask.generator.details["output_kind"] == "text"
+    assert subtask.evaluation.status in {"accepted", "needs_review"}
+    assert len(subtask.artifacts) >= 1
+    assert subtask.artifacts[0].artifact_id.endswith(":result")
+    assert subtask.observability.trace_id
+    assert subtask.observability.details["status"] == "completed"
+    assert subtask.observability.duration_ms >= 0
     messages = provider.chat.await_args.kwargs["messages"]
     assert messages[0]["content"] == "You are the maker role."
     assert "Dependency handoff" in messages[1]["content"]

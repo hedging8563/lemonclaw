@@ -270,10 +270,12 @@ class TaskLedgerSharedMixin:
             return None
         outbox_events = [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)]
         summary = dict(task_view.get("summary") or {})
+        conductor = dict(summary.get("conductor") or {})
         postmortem = {
             "task": task_view.get("task"),
             "summary": summary,
             "candidate": self.build_resume_candidate(task_id),
+            "conductor": conductor,
             "outbox": {
                 "events": outbox_events,
                 "lifecycle": self.summarize_outbox_lifecycle(outbox_events),
@@ -340,6 +342,7 @@ class TaskLedgerSharedMixin:
             "steps": task_view.get("steps") or [],
             "outbox_events": [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)],
             "candidate": self.build_resume_candidate(task_id),
+            "conductor": dict(((task_view.get("summary") or {}).get("conductor") or {})),
             "postmortem": self.build_task_postmortem_view(task_id),
             "exported_at_ms": _now_ms(),
         }
@@ -572,6 +575,7 @@ class TaskLedgerSharedMixin:
 
         outbox = self.materialize_outbox_events_for_task(task_id)
         outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
+        conductor = dict((task.get("metadata") or {}).get("conductor") or {})
 
         return {
             "task": self.enrich_task_for_observer(task),
@@ -592,6 +596,7 @@ class TaskLedgerSharedMixin:
                 "recovery": (task.get("metadata") or {}).get("recovery"),
                 "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
                 "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
+                "conductor": conductor,
             },
         }
 
@@ -1840,6 +1845,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "outbox_terminal_count": outbox_lifecycle["terminal_count"],
                 "outbox_active_count": outbox_lifecycle["active_count"],
                 "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
+                "conductor": conductor,
             },
         }
 

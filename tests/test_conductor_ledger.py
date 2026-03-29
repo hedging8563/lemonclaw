@@ -51,3 +51,11 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
     assert task["resume_context"]["chat_id"] == "chat1"
     assert task["resume_context"]["session_key"] == "test:chat1"
     assert task["completion_gate"]["passed"] is True
+    view = ledger.read_task_view("task_abc")
+    assert view is not None
+    assert "conductor" in view["summary"]
+    conductor = task["metadata"]["conductor"]
+    assert conductor["planner"]["complexity"] == "moderate"
+    assert conductor["planner"]["summary"] == "complex task"
+    assert conductor["generator"]["subtask_count"] == 1
+    assert conductor["evaluator"]["plan_status"] == "not_run"

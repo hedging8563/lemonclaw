@@ -34,13 +34,23 @@ async def merge_results(
         return completed[0].result or ""
 
     subtask_summary = "\n\n".join(
-        f"### Task: {t.description}\n{t.result}" for t in completed
+        "\n".join(
+            [
+                f"### Task: {task.description}",
+                f"- Generator: {task.generator.summary or 'n/a'}",
+                f"- Evaluator: {task.evaluation.status or 'n/a'} · {task.evaluation.summary or 'n/a'}",
+                f"- Artifacts: {', '.join(artifact.title for artifact in task.artifacts) if task.artifacts else 'none'}",
+                "",
+                task.result or "",
+            ]
+        )
+        for task in completed
     )
     failed = plan.failed_tasks
     fail_note = ""
     if failed:
         fail_note = "\n\nNote: these subtasks failed:\n" + "\n".join(
-            f"- {t.description}: {t.result or 'no output'}" for t in failed
+            f"- {t.description}: {t.evaluation.summary or t.result or 'no output'}" for t in failed
         )
 
     try:

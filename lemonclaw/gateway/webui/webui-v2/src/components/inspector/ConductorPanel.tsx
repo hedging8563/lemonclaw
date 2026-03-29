@@ -41,6 +41,52 @@ const laneSubtaskStyle = {
   borderRadius: '8px',
 } as const;
 
+const subtaskMetaGridStyle = {
+  display: 'grid',
+  gap: '8px',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+} as const;
+
+const subtaskMetaCardStyle = {
+  display: 'grid',
+  gap: '6px',
+  padding: '8px 10px',
+  border: '1px solid var(--border)',
+  borderRadius: '8px',
+  background: 'var(--bg-primary)',
+} as const;
+
+const subtaskMetaLabelStyle = {
+  fontSize: '11px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: 'var(--text-muted)',
+  fontFamily: 'var(--font-ui)',
+} as const;
+
+const subtaskMetaValueStyle = {
+  fontSize: '13px',
+  color: 'var(--text-primary)',
+  lineHeight: 1.45,
+  wordBreak: 'break-word',
+  whiteSpace: 'pre-wrap',
+} as const;
+
+const subtaskMetaNoteStyle = {
+  fontSize: '12px',
+  color: 'var(--text-secondary)',
+  lineHeight: 1.45,
+  wordBreak: 'break-word',
+  whiteSpace: 'pre-wrap',
+} as const;
+
+const subtaskArtifactRowStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '6px',
+  alignItems: 'center',
+} as const;
+
 function pillStyle(active = false) {
   return {
     padding: '6px 10px',
@@ -181,6 +227,40 @@ function formatSummaryChip(label: string, count: number, tone: 'ready' | 'runnin
   );
 }
 
+function formatMaybeCount(value: number | null | undefined) {
+  return typeof value === 'number' ? String(value) : '—';
+}
+
+function formatMaybeText(value: unknown) {
+  const text = String(value ?? '').trim();
+  return text || '—';
+}
+
+function formatDurationMs(value: number | null | undefined) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '—';
+  if (value < 1000) return `${Math.round(value)}ms`;
+  if (value < 60000) return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
+  const minutes = Math.floor(value / 60000);
+  const seconds = Math.round((value % 60000) / 1000);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function formatShortId(value: string | null | undefined, maxLength = 12) {
+  const text = String(value ?? '').trim();
+  if (!text) return '—';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function getEvaluationTone(status: string | null | undefined) {
+  const normalized = normalizeKey(status);
+  if (['passed', 'pass', 'completed', 'success', 'ok', 'ready'].includes(normalized)) return 'completed' as const;
+  if (['failed', 'fail', 'error'].includes(normalized)) return 'failed' as const;
+  if (['warning', 'review', 'needs_review'].includes(normalized)) return 'blocked' as const;
+  if (['running', 'processing', 'pending', 'queued', 'checking'].includes(normalized)) return 'running' as const;
+  return 'ready' as const;
+}
+
 export function ConductorPanel() {
   const timerRef = useRef<any>(null);
   const [expanded, setExpanded] = useState(true);
@@ -217,6 +297,12 @@ export function ConductorPanel() {
   const activeCounts = summarizeStates(activeSubtasks, activeById);
   const activeIntentSummary = (activePlan as any)?.intent?.summary;
   const summaryMessage = activePlan?.message || t('no_plans');
+  const planPlanner = (activePlan as any)?.planner || {};
+  const planGenerator = (activePlan as any)?.generator || {};
+  const planMerge = (activePlan as any)?.merge || {};
+  const planEvaluator = (activePlan as any)?.evaluator || {};
+  const planArtifacts = (activePlan as any)?.artifacts || {};
+  const planObservability = (activePlan as any)?.observability || {};
 
   return (
     <div style={shellStyle}>
@@ -270,6 +356,59 @@ export function ConductorPanel() {
               </div>
 
               <div style={workboardStyle}>
+                <div style={subtaskMetaGridStyle}>
+                  <div style={{ ...subtaskMetaCardStyle, background: 'var(--bg-secondary)' }}>
+                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_planner')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ ...stateChipStyle(getEvaluationTone(planPlanner.status)), cursor: 'default' }}>{formatMaybeText(planPlanner.status)}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`subtasks ${formatMaybeCount(planPlanner.subtask_count ?? activeSubtasks.length)}`}</span>
+                    </div>
+                    <div style={subtaskMetaValueStyle}>{formatMaybeText(planPlanner.summary || activePlan.swarm_goal || activeIntentSummary || summaryMessage)}</div>
+                    <div style={subtaskMetaNoteStyle}>{formatMaybeText(planPlanner.reasoning)}</div>
+                  </div>
+                  <div style={{ ...subtaskMetaCardStyle, background: 'var(--bg-secondary)' }}>
+                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_generator')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ ...stateChipStyle(getEvaluationTone(planGenerator.status)), cursor: 'default' }}>{formatMaybeText(planGenerator.status)}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`done ${formatMaybeCount(planGenerator.completed_count)}`}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`running ${formatMaybeCount(planGenerator.running_count)}`}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`failed ${formatMaybeCount(planGenerator.failed_count)}`}</span>
+                    </div>
+                    <div style={subtaskMetaValueStyle}>{formatMaybeText(planGenerator.summary || `${formatMaybeCount(planGenerator.completed_count)} completed of ${formatMaybeCount(planGenerator.subtask_count ?? activeSubtasks.length)} subtasks`)}</div>
+                  </div>
+                  <div style={{ ...subtaskMetaCardStyle, background: 'var(--bg-secondary)' }}>
+                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_merge')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ ...stateChipStyle(getEvaluationTone(planMerge.status)), cursor: 'default' }}>{formatMaybeText(planMerge.status)}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`${t('conductor_section_artifact_count')}: ${formatMaybeCount(planMerge.artifact_count)}`}</span>
+                    </div>
+                    <div style={subtaskMetaValueStyle}>{formatMaybeText(planMerge.summary)}</div>
+                    <div style={subtaskMetaNoteStyle}>{formatMaybeText(planMerge.result_preview)}</div>
+                  </div>
+                  <div style={{ ...subtaskMetaCardStyle, background: 'var(--bg-secondary)' }}>
+                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_evaluator')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ ...stateChipStyle(getEvaluationTone(planEvaluator.plan_status || planEvaluator.status)), cursor: 'default' }}>{formatMaybeText(planEvaluator.plan_status || planEvaluator.status)}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`accepted ${formatMaybeCount(planEvaluator.accepted_count)}`}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`warning ${formatMaybeCount(planEvaluator.warning_count)}`}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`failed ${formatMaybeCount(planEvaluator.failed_count)}`}</span>
+                    </div>
+                    <div style={subtaskMetaValueStyle}>{formatMaybeText(planEvaluator.plan_reason || planEvaluator.summary)}</div>
+                    {typeof planEvaluator.plan_confidence === 'number' ? (
+                      <div style={subtaskMetaNoteStyle}>{`${t('conductor_section_confidence')}: ${planEvaluator.plan_confidence.toFixed(2)}`}</div>
+                    ) : null}
+                  </div>
+                  <div style={{ ...subtaskMetaCardStyle, background: 'var(--bg-secondary)' }}>
+                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_observability')}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`${t('conductor_section_phase')}: ${formatMaybeText(planObservability.phase || activePlan.phase)}`}</span>
+                      <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{`${t('conductor_section_duration')}: ${formatDurationMs(planObservability.duration_ms)}`}</span>
+                    </div>
+                    <div style={subtaskMetaValueStyle}>{`${t('conductor_section_trace')}: ${formatShortId(planObservability.trace_id, 16)}`}</div>
+                    <div style={subtaskMetaNoteStyle}>{`${t('conductor_section_artifacts')}: ${formatMaybeCount(planArtifacts.count)} · progress ${typeof activePlan.progress === 'number' ? `${Math.round(activePlan.progress * 100)}%` : '—'}`}</div>
+                  </div>
+                </div>
+
                 <div style={{ fontFamily: 'var(--font-ui)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                   {t('conductor_workboard_title')}
                 </div>
@@ -310,6 +449,32 @@ export function ConductorPanel() {
                             {laneSubtasks.length === 0 ? null : laneSubtasks.map((subtask: any) => {
                               const derived = getDerivedState(subtask, laneById);
                               const dependencyIds = Array.isArray(subtask.depends_on) ? subtask.depends_on : [];
+                              const planSummary = formatMaybeText(subtask.planner?.summary || activePlan?.intent?.summary || activePlan?.swarm_goal || activePlan?.message);
+                              const plannerRole = formatMaybeText(subtask.planner?.role_hint || subtask.role_hint || subtask.assigned_agent_id);
+                              const plannerDependsCount = typeof subtask.planner?.depends_on_count === 'number'
+                                ? subtask.planner.depends_on_count
+                                : dependencyIds.length;
+                              const generatorStatus = formatMaybeText(subtask.generator?.status || subtask.status);
+                              const generatorKind = formatMaybeText(subtask.generator?.output_kind || (subtask.artifacts?.length ? subtask.artifacts[0]?.kind : null));
+                              const generatorSummary = formatMaybeText(subtask.generator?.summary || subtask.generator?.preview || subtask.result_preview || subtask.description);
+                              const evaluationStatus = formatMaybeText(subtask.evaluation?.status || subtask.status);
+                              const evaluationTone = getEvaluationTone(subtask.evaluation?.status || subtask.status);
+                              const evaluationScore = typeof subtask.evaluation?.score === 'number' ? subtask.evaluation.score : null;
+                              const evaluationConfidence = typeof subtask.evaluation?.confidence === 'number' ? subtask.evaluation.confidence : null;
+                              const evaluationWarnings = Array.isArray(subtask.evaluation?.warnings) ? subtask.evaluation.warnings.filter(Boolean) : [];
+                              const evaluationSummary = formatMaybeText(subtask.evaluation?.summary);
+                              const artifacts = Array.isArray(subtask.artifacts) ? subtask.artifacts : [];
+                              const artifactCount = typeof subtask.artifact_count === 'number' ? subtask.artifact_count : artifacts.length;
+                              const observability = subtask.observability || {};
+                              const observabilityParts = [
+                                formatMaybeText(observability.execution_mode),
+                                formatShortId(observability.agent_id || subtask.assigned_agent_id || subtask.assigned_agent),
+                              ].filter((item) => item && item !== '—');
+                              const observabilityTrace = formatShortId(observability.trace_id, 16);
+                              const observabilityAttempts = formatMaybeCount(observability.attempt_count);
+                              const observabilityDuration = formatDurationMs(observability.duration_ms ?? null);
+                              const observabilityStarted = observability.started_at_ms ? new Date(observability.started_at_ms).toLocaleString() : '—';
+                              const observabilityCompleted = observability.completed_at_ms ? new Date(observability.completed_at_ms).toLocaleString() : '—';
                               const dependencyChips = dependencyIds.map((depId: string) => {
                                 const dep = laneById.get(depId) || activeById.get(depId);
                                 const depLabel = dep?.description ? truncateText(String(dep.description), 42) : depId;
@@ -337,6 +502,105 @@ export function ConductorPanel() {
 
                                   <div style={{ color: derived.key === 'completed' ? 'var(--text-muted)' : 'var(--text-secondary)', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
                                     {subtask.description}
+                                  </div>
+
+                                  <div style={subtaskMetaGridStyle}>
+                                    <div style={subtaskMetaCardStyle}>
+                                      <div style={subtaskMetaLabelStyle}>{t('conductor_section_planner')}</div>
+                                      <div style={subtaskMetaValueStyle}>{planSummary}</div>
+                                      <div style={subtaskMetaNoteStyle}>
+                                        {`${t('conductor_section_planner_meta')}: ${plannerRole} · ${plannerDependsCount}`}
+                                      </div>
+                                    </div>
+                                    <div style={subtaskMetaCardStyle}>
+                                      <div style={subtaskMetaLabelStyle}>{t('conductor_section_generator')}</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ ...stateChipStyle(getEvaluationTone(generatorStatus)), cursor: 'default' }}>{generatorStatus}</span>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{generatorKind}</span>
+                                      </div>
+                                      <div style={subtaskMetaValueStyle}>{generatorSummary}</div>
+                                    </div>
+                                    <div style={subtaskMetaCardStyle}>
+                                      <div style={subtaskMetaLabelStyle}>{t('conductor_section_evaluator')}</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ ...stateChipStyle(evaluationTone), cursor: 'default' }}>{evaluationStatus}</span>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {evaluationScore != null
+                                            ? `${t('conductor_section_score')}: ${evaluationScore.toFixed(2)}`
+                                            : t('conductor_section_score_missing')}
+                                        </span>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {evaluationConfidence != null
+                                            ? `${t('conductor_section_confidence')}: ${evaluationConfidence.toFixed(2)}`
+                                            : t('conductor_section_confidence_missing')}
+                                        </span>
+                                      </div>
+                                      <div style={subtaskMetaValueStyle}>{evaluationSummary}</div>
+                                      {evaluationWarnings.length ? (
+                                        <div style={subtaskMetaNoteStyle}>
+                                          {`${t('conductor_section_warnings')}: ${evaluationWarnings.length}`}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div style={subtaskMetaCardStyle}>
+                                      <div style={subtaskMetaLabelStyle}>{t('conductor_section_observability')}</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {`${t('conductor_section_trace')}: ${observabilityTrace}`}
+                                        </span>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {`${t('conductor_section_attempts')}: ${observabilityAttempts}`}
+                                        </span>
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {`${t('conductor_section_duration')}: ${observabilityDuration}`}
+                                        </span>
+                                      </div>
+                                      <div style={subtaskMetaValueStyle}>
+                                        {observabilityParts.length ? observabilityParts.join(' · ') : t('conductor_section_no_observability')}
+                                      </div>
+                                      <div style={subtaskMetaNoteStyle}>
+                                        {`${t('conductor_section_started_completed')}: ${observabilityStarted} → ${observabilityCompleted}`}
+                                      </div>
+                                      {observability.error ? (
+                                        <div style={{ ...subtaskMetaNoteStyle, color: 'var(--error)' }}>
+                                          {formatMaybeText(observability.error)}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+
+                                  <div style={subtaskMetaCardStyle}>
+                                    <div style={subtaskMetaLabelStyle}>{t('conductor_section_artifacts')}</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                                      <span style={{ ...pillStyle(Boolean(artifactCount)), cursor: 'default', fontSize: '11px' }}>
+                                        {`${t('conductor_section_artifact_count')}: ${artifactCount}`}
+                                      </span>
+                                      {!artifacts.length && artifactCount === 0 ? (
+                                        <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>
+                                          {t('conductor_section_no_artifacts')}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {artifacts.length ? (
+                                      <div style={{ display: 'grid', gap: '6px' }}>
+                                        {artifacts.slice(0, 3).map((artifact: any) => (
+                                          <div key={artifact.artifact_id || artifact.title || artifact.uri || JSON.stringify(artifact)} style={{ display: 'grid', gap: '4px', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                                              <span style={{ ...pillStyle(), cursor: 'default', fontSize: '11px' }}>{formatMaybeText(artifact.kind)}</span>
+                                              <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>{formatMaybeText(artifact.title || artifact.artifact_id)}</span>
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                                              {formatMaybeText(artifact.preview)}
+                                            </div>
+                                            {artifact.uri ? (
+                                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
+                                                {artifact.uri}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : null}
                                   </div>
 
                                   {dependencyChips.length ? (

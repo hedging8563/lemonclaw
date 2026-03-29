@@ -1325,9 +1325,12 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
     from starlette.testclient import TestClient
 
     from lemonclaw.conductor.types import (
+        ArtifactRef,
         IntentAnalysis,
+        ObservabilitySnapshot,
         OrchestrationPlan,
         OrchestratorPhase,
+        PipelineStage,
         SubTask,
         SubTaskStatus,
         TaskComplexity,
@@ -1345,6 +1348,11 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
         swarm_template_id='marketing_campaign_room',
         swarm_template_label='Marketing Campaign Room',
         swarm_goal='Ship a campaign package',
+        planner=PipelineStage(status='completed', mode='orchestrator', summary='Ship campaign package'),
+        merge=PipelineStage(status='pending', mode='merge', summary='Waiting for merge.'),
+        evaluation=PipelineStage(status='accepted', mode='heuristic', summary='merged response accepted', score=0.92),
+        artifacts=[ArtifactRef(artifact_id='plan-1:merged_result', kind='merged_result', title='Campaign package', preview='Top risk and landing page copy package')],
+        observability=ObservabilitySnapshot(trace_id='orch:plan-1', execution_mode='conductor', started_at_ms=100, completed_at_ms=140, duration_ms=40),
         subtasks=[
             SubTask(
                 id='t1',
@@ -1353,6 +1361,10 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
                 assigned_agent_id='swarm-marketing_campaign_room-strategist',
                 status=SubTaskStatus.COMPLETED,
                 result='Top risk: unclear value proposition on hero section.',
+                generator=PipelineStage(status='completed', mode='direct', summary='Top risk: unclear value proposition on hero section.', details={'output_kind': 'text', 'preview': 'Top risk: unclear value proposition on hero section.'}),
+                evaluation=PipelineStage(status='accepted', mode='heuristic', summary='output accepted', score=0.92),
+                artifacts=[ArtifactRef(artifact_id='t1:result', kind='subtask_result', title='Risk audit', preview='Top risk: unclear value proposition on hero section.')],
+                observability=ObservabilitySnapshot(trace_id='orch:plan-1:t1', execution_mode='direct', attempt_count=1, started_at_ms=110, completed_at_ms=130, duration_ms=20, agent_id='swarm-marketing_campaign_room-strategist'),
             ),
             SubTask(
                 id='t2',
@@ -1361,6 +1373,9 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
                 assigned_agent_id='swarm-marketing_campaign_room-copywriter',
                 depends_on=['t1'],
                 status=SubTaskStatus.PENDING,
+                generator=PipelineStage(status='pending', mode='direct', summary='Waiting on handoff.', details={'output_kind': 'text'}),
+                evaluation=PipelineStage(status='needs_review', mode='heuristic', summary='waiting on handoff'),
+                observability=ObservabilitySnapshot(execution_mode='direct', agent_id='swarm-marketing_campaign_room-copywriter', details={'queued_at_ms': 131, 'status': 'pending'}),
             ),
         ],
     )
@@ -1374,8 +1389,18 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
     current = payload['plans'][0]
     assert current['swarm_template_id'] == 'marketing_campaign_room'
     assert current['team_roles'][0]['id'] == 'lead'
+    assert current['planner']['summary'] == 'Ship campaign package'
+    assert current['generator']['completed_count'] == 1
+    assert current['merge']['status'] == 'pending'
+    assert current['evaluator']['plan_status'] == 'accepted'
+    assert current['artifacts']['count'] == 2
+    assert current['observability']['phase'] == 'monitoring'
     assert current['subtasks'][0]['role_label'] == 'Strategist'
     assert current['subtasks'][0]['state_bucket'] == 'completed'
     assert current['subtasks'][0]['result_preview'].startswith('Top risk:')
+    assert current['subtasks'][0]['generator']['status'] == 'completed'
+    assert current['subtasks'][0]['observability']['agent_id'] == 'swarm-marketing_campaign_room-strategist'
+    assert current['subtasks'][0]['evaluation']['status'] == 'accepted'
+    assert current['subtasks'][0]['artifact_count'] == 1
     assert current['subtasks'][1]['state_bucket'] == 'ready'
     assert current['subtasks'][1]['dependency_descriptions'] == ['Audit the current funnel and summarize the risks']

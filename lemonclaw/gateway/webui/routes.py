@@ -181,6 +181,7 @@ def get_webui_routes(
             "task": export_view.get("task") or {},
             "summary": export_view.get("summary") or {},
             "candidate": export_view.get("candidate") or {},
+            "conductor": export_view.get("conductor") or postmortem.get("conductor") or {},
             "postmortem": postmortem,
             "trigger": trigger,
         }
@@ -232,6 +233,40 @@ def get_webui_routes(
                 title = str(item.get("title") or item.get("id") or "—")
                 source = str(item.get("source") or "—")
                 lines.append(f"- {kind} · {title} · {source}")
+
+    def _append_conductor_markdown(lines: list[str], conductor: dict[str, Any] | None) -> None:
+        lines.extend(["", "## Conductor Chain"])
+        if not conductor:
+            lines.append("- none")
+            return
+        planner = dict(conductor.get("planner") or {})
+        generator = dict(conductor.get("generator") or {})
+        evaluator = dict(conductor.get("evaluator") or {})
+        artifacts = dict(conductor.get("artifacts") or {})
+        observability = dict(conductor.get("observability") or {})
+        lines.extend([
+            f"- Planner: {planner.get('summary') or '—'}",
+            f"- Complexity: {planner.get('complexity') or '—'}",
+            f"- Generator: completed={generator.get('completed_count') or 0} · failed={generator.get('failed_count') or 0} · running={generator.get('running_count') or 0}",
+            f"- Evaluator: status={evaluator.get('plan_status') or '—'} · accepted={evaluator.get('accepted_count') or 0} · warning={evaluator.get('warning_count') or 0} · failed={evaluator.get('failed_count') or 0}",
+            f"- Artifacts: {artifacts.get('count') or 0}",
+            f"- Observability: phase={observability.get('phase') or '—'} · progress={observability.get('progress') if observability.get('progress') is not None else '—'}",
+        ])
+        subtasks = list(conductor.get("subtasks") or [])
+        if subtasks:
+            lines.append("")
+            lines.append("### Subtasks")
+            for item in subtasks:
+                evaluation = dict(item.get("evaluation") or {})
+                generator_meta = dict(item.get("generator") or {})
+                observability = dict(item.get("observability") or {})
+                artifact_count = len(list(item.get("artifacts") or []))
+                lines.append(
+                    f"- {item.get('id') or '—'} · {item.get('status') or '—'} · {item.get('description') or '—'}"
+                )
+                lines.append(
+                    f"  - generator={generator_meta.get('status') or '—'}:{observability.get('agent_id') or item.get('assigned_agent_id') or '—'} · evaluator={evaluation.get('status') or '—'} · artifacts={artifact_count}"
+                )
 
     def _is_secure(request: Request) -> bool:
         """Detect HTTPS from request scheme or X-Forwarded-Proto."""
@@ -1901,6 +1936,7 @@ def get_webui_routes(
             else:
                 lines.append("- none")
             _append_retrieval_markdown(lines, retrieval)
+            _append_conductor_markdown(lines, export_view.get("conductor") or summary.get("conductor"))
             lines.extend([
                 "",
                 "## Recovery History",
@@ -1982,6 +2018,7 @@ def get_webui_routes(
             else:
                 lines.append("- none")
             _append_retrieval_markdown(lines, retrieval)
+            _append_conductor_markdown(lines, bundle.get("conductor") or summary.get("conductor"))
             lines.extend([
                 "",
                 "## Candidate",
@@ -2061,6 +2098,7 @@ def get_webui_routes(
             else:
                 lines.append("- none")
             _append_retrieval_markdown(lines, retrieval)
+            _append_conductor_markdown(lines, postmortem.get("conductor") or postmortem.get("summary", {}).get("conductor"))
             lines.extend([
                 "",
                 "## Outbox Lifecycle",

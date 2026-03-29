@@ -16,6 +16,57 @@ export interface ConductorAgent {
   created_at_ms?: number;
 }
 
+export interface ConductorArtifact {
+  artifact_id?: string;
+  id?: string;
+  kind?: string;
+  label?: string;
+  title?: string;
+  preview?: string;
+  uri?: string;
+  source?: string;
+}
+
+export interface ConductorPlannerSummary {
+  summary?: string | null;
+  role_hint?: string | null;
+  depends_on_count?: number | null;
+}
+
+export interface ConductorGeneratorSummary {
+  status?: string | null;
+  output_kind?: string | null;
+  summary?: string | null;
+  preview?: string | null;
+}
+
+export interface ConductorEvaluationSummary {
+  status?: string | null;
+  score?: number | null;
+  confidence?: number | null;
+  summary?: string | null;
+  warnings?: string[];
+}
+
+export interface ConductorObservabilitySummary {
+  phase?: string | null;
+  progress?: number | null;
+  trace_id?: string | null;
+  execution_mode?: string | null;
+  attempt_count?: number | null;
+  attempts?: number | null;
+  duration_ms?: number | null;
+  agent_id?: string | null;
+  started_at_ms?: number | null;
+  completed_at_ms?: number | null;
+  queued_at_ms?: number | null;
+  ended_at_ms?: number | null;
+  updated_at_ms?: number | null;
+  error_count?: number | null;
+  last_error?: string | null;
+  error?: string | null;
+}
+
 export interface ConductorSubtask {
   id: string;
   description: string;
@@ -24,6 +75,12 @@ export interface ConductorSubtask {
   status: ConductorSubtaskStatus;
   state_bucket?: string;
   assigned_agent?: string | null;
+  planner?: ConductorPlannerSummary | null;
+  generator?: ConductorGeneratorSummary | null;
+  evaluation?: ConductorEvaluationSummary | null;
+  artifacts?: ConductorArtifact[] | null;
+  artifact_count?: number | null;
+  observability?: ConductorObservabilitySummary | null;
   depends_on?: string[];
   dependency_descriptions?: string[];
   result_preview?: string | null;
@@ -40,6 +97,12 @@ export interface ConductorPlan {
   swarm_template_id?: string | null;
   swarm_template_label?: string | null;
   swarm_goal?: string | null;
+  planner?: Record<string, unknown> | null;
+  generator?: Record<string, unknown> | null;
+  merge?: Record<string, unknown> | null;
+  evaluator?: Record<string, unknown> | null;
+  artifacts?: { count?: number | null; items?: ConductorArtifact[] } | null;
+  observability?: ConductorObservabilitySummary | null;
   team_roles?: ConductorTemplateRole[];
   subtasks?: ConductorSubtask[];
   progress?: number;

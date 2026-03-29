@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -18,9 +19,12 @@ from loguru import logger
 from lemonclaw.utils.helpers import strip_fences
 
 from lemonclaw.conductor.types import (
+    ArtifactRef,
     IntentAnalysis,
+    ObservabilitySnapshot,
     OrchestrationPlan,
     OrchestratorPhase,
+    PipelineStage,
     SubTask,
     SubTaskStatus,
     TaskComplexity,
@@ -30,6 +34,7 @@ from lemonclaw.conductor.swarm_templates import (
     infer_role_hint,
     infer_swarm_template,
 )
+from lemonclaw.conductor.serialization import serialize_plan
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
@@ -69,6 +74,137 @@ class Orchestrator:
         self._subtask_timeout = subtask_timeout
         self._max_retries = max_retries
         self._ledger = ledger
+
+    @staticmethod
+    def _now_ms() -> int:
+        return int(time.time() * 1000)
+
+    def _build_subtask_artifacts(self, subtask: SubTask, result: str | None) -> list[ArtifactRef]:
+        content = str(result or "").strip()
+        if not content:
+            return []
+
+        artifacts: list[ArtifactRef] = []
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            parsed = None
+
+        if isinstance(parsed, dict):
+            for index, item in enumerate(list(parsed.get("artifacts") or []), start=1):
+                if not isinstance(item, dict):
+                    continue
+                artifact_id = str(item.get("artifact_id") or item.get("id") or f"{subtask.id}:artifact:{index}")
+                artifacts.append(
+                    ArtifactRef(
+                        artifact_id=artifact_id,
+                        kind=str(item.get("kind") or item.get("type") or "artifact"),
+                        title=str(item.get("label") or item.get("title") or subtask.description[:80]),
+                        source=str(item.get("source") or "tool"),
+                        preview=str(item.get("preview") or item.get("summary") or "")[:280],
+                        uri=str(item.get("uri") or item.get("path") or ""),
+                    )
+                )
+
+        if not artifacts:
+            artifacts.append(
+                ArtifactRef(
+                    artifact_id=f"{subtask.id}:result",
+                    kind="subtask_result",
+                    title=subtask.description[:80],
+                    source="generator",
+                    preview=content[:280],
+                    uri="",
+                )
+            )
+        return artifacts
+
+    def _evaluate_subtask_output(
+        self,
+        subtask: SubTask,
+        result: str | None,
+        artifacts: list[ArtifactRef],
+    ) -> PipelineStage:
+        content = str(result or "").strip()
+        issues: list[str] = []
+        status = "accepted"
+
+        if not content:
+            status = "failed"
+            issues.append("empty_result")
+        elif len(content) < 80:
+            status = "needs_review"
+            issues.append("thin_result")
+
+        if not artifacts:
+            issues.append("no_artifacts")
+
+        confidence = 0.92 if status == "accepted" else 0.62 if status == "needs_review" else 0.18
+        reason = "output accepted"
+        if status == "needs_review":
+            reason = "output accepted with follow-up risk"
+        if status == "failed":
+            reason = "output missing usable content"
+
+        return PipelineStage(
+            status=status,
+            mode="rules",
+            summary=reason,
+            score=confidence,
+            rationale=reason,
+            details={
+                "issues": issues,
+                "confidence": confidence,
+                "checked_at_ms": self._now_ms(),
+                "artifact_count": len(artifacts),
+                "content_length": len(content),
+                "role_hint": subtask.role_hint or "",
+            },
+        )
+
+    def _evaluate_merged_result(self, plan: OrchestrationPlan, result: str | None) -> PipelineStage:
+        content = str(result or "").strip()
+        issues: list[str] = []
+        status = "accepted"
+        if not content:
+            status = "failed"
+            issues.append("empty_merge")
+        elif len(content) < 120:
+            status = "needs_review"
+            issues.append("thin_merge")
+
+        reason = (
+            "merged response accepted"
+            if status == "accepted"
+            else "merged response needs review"
+            if status == "needs_review"
+            else "merged response missing usable content"
+        )
+        confidence = 0.94 if status == "accepted" else 0.66 if status == "needs_review" else 0.12
+        return PipelineStage(
+            status=status,
+            mode="rules",
+            summary=reason,
+            score=confidence,
+            rationale=reason,
+            details={
+                "issues": issues,
+                "confidence": confidence,
+                "checked_at_ms": self._now_ms(),
+                "completed_subtasks": sum(1 for task in plan.subtasks if task.status == SubTaskStatus.COMPLETED),
+                "failed_subtasks": sum(1 for task in plan.subtasks if task.status == SubTaskStatus.FAILED),
+                "content_length": len(content),
+            },
+        )
+
+    def _sync_plan_to_ledger(self, plan: OrchestrationPlan) -> None:
+        task_id = str(plan.metadata.get("_ledger_task_id") or "")
+        if not self._ledger or not task_id:
+            return
+        task = self._ledger.read_task(task_id) or {}
+        metadata = dict(task.get("metadata") or {})
+        metadata["conductor"] = serialize_plan(plan, get_swarm_template(plan.swarm_template_id))
+        self._ledger.update_task(task_id, metadata=metadata)
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -112,6 +248,7 @@ class Orchestrator:
         # Phase 2: SPLITTING
         plan = await self._split(msg.content, intent)
         plan.metadata["_ledger_task_id"] = task_id
+        self._sync_plan_to_ledger(plan)
         self._active_plans[plan.request_id] = plan
 
         try:
@@ -121,11 +258,13 @@ class Orchestrator:
             await self._assign(plan)
             if self._ledger:
                 self._ledger.update_task(task_id, current_stage=OrchestratorPhase.ASSIGNING.value)
+            self._sync_plan_to_ledger(plan)
 
             # Phase 4: MONITORING
             await self._monitor(plan)
             if self._ledger:
                 self._ledger.update_task(task_id, current_stage=OrchestratorPhase.MONITORING.value)
+            self._sync_plan_to_ledger(plan)
 
             # Check if all subtasks failed — degrade to single-agent direct processing
             all_failed = all(st.status == SubTaskStatus.FAILED for st in plan.subtasks)
@@ -140,6 +279,7 @@ class Orchestrator:
             if self._ledger:
                 self._ledger.update_task(task_id, current_stage=OrchestratorPhase.MERGING.value)
             result = await self._merge(plan)
+            self._sync_plan_to_ledger(plan)
             if self._ledger:
                 finalize_task(self._ledger, task_id)
             return result
@@ -176,6 +316,18 @@ class Orchestrator:
             original_message=message,
             intent=intent,
             phase=OrchestratorPhase.SPLITTING,
+            planner=PipelineStage(
+                status="completed",
+                mode="llm",
+                summary=intent.summary,
+                rationale=intent.reasoning,
+                details={"required_skills": list(intent.required_skills or [])},
+            ),
+            observability=ObservabilitySnapshot(
+                trace_id=f"orch:{uuid.uuid4().hex[:12]}",
+                execution_mode="conductor",
+                started_at_ms=self._now_ms(),
+            ),
         )
         template = infer_swarm_template(message, intent.required_skills)
         plan.swarm_template_id = template.id
@@ -229,6 +381,7 @@ class Orchestrator:
             )]
 
         logger.info("Orchestrator: split into {} subtasks", len(plan.subtasks))
+        self._sync_plan_to_ledger(plan)
         return plan
 
     # ── Phase 3: ASSIGNING ────────────────────────────────────────────────
@@ -239,6 +392,7 @@ class Orchestrator:
 
         plan.phase = OrchestratorPhase.ASSIGNING
         logger.info("Orchestrator: ASSIGNING {} subtasks", len(plan.subtasks))
+        self._sync_plan_to_ledger(plan)
 
         agents = self._registry.list_agents()
         template = get_swarm_template(plan.swarm_template_id)
@@ -299,6 +453,7 @@ class Orchestrator:
 
         plan.phase = OrchestratorPhase.MONITORING
         logger.info("Orchestrator: MONITORING")
+        self._sync_plan_to_ledger(plan)
 
         pending_futures: dict[str, asyncio.Task[str | None]] = {}
         monitor_timeout = self._plan_timeout
@@ -316,6 +471,27 @@ class Orchestrator:
                     if st.status in (SubTaskStatus.PENDING, SubTaskStatus.RUNNING):
                         st.status = SubTaskStatus.FAILED
                         st.result = st.result or "Monitoring timeout"
+                        st.generator = PipelineStage(
+                            status="failed",
+                            mode=st.generator.mode or "timeout",
+                            summary="Generator timed out before producing a usable result.",
+                            details=dict(st.generator.details or {}),
+                        )
+                        st.artifacts = self._build_subtask_artifacts(st, st.result)
+                        st.evaluation = self._evaluate_subtask_output(st, st.result, st.artifacts)
+                        ended_at_ms = self._now_ms()
+                        st.observability = ObservabilitySnapshot(
+                            trace_id=st.observability.trace_id or f"{plan.observability.trace_id}:{st.id}",
+                            execution_mode=st.observability.execution_mode or "timeout",
+                            attempt_count=st.observability.attempt_count,
+                            duration_ms=max(0, ended_at_ms - int(st.observability.started_at_ms or ended_at_ms)),
+                            started_at_ms=st.observability.started_at_ms,
+                            completed_at_ms=ended_at_ms,
+                            agent_id=st.observability.agent_id,
+                            error_count=1,
+                            error="monitoring timeout",
+                            details={"status": st.status.value},
+                        )
                 break
 
             # Launch runnable tasks
@@ -323,6 +499,8 @@ class Orchestrator:
                 if subtask.id in pending_futures:
                     continue
                 subtask.status = SubTaskStatus.RUNNING
+                subtask.observability.started_at_ms = self._now_ms()
+                self._sync_plan_to_ledger(plan)
                 task = asyncio.create_task(
                     self._execute_subtask(plan, subtask)
                 )
@@ -381,9 +559,21 @@ class Orchestrator:
 
             logger.info("Orchestrator: executing '{}' on agent '{}'", subtask.id, agent_id)
             self._registry.update_status(agent_id, AgentStatus.THINKING)
+            started_at_ms = self._now_ms()
 
             try:
                 step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500]) if self._ledger and task_id else None
+                subtask.generator = PipelineStage(
+                    status="running",
+                    mode=execution_mode,
+                    summary=f"Generating on {agent_id}.",
+                    details={
+                        "agent_id": agent_id,
+                        "model": self._model or "",
+                        "attempt": attempt + 1,
+                        "output_kind": "text",
+                    },
+                )
                 if agent_id != "default" and execution_mode == "bus" and agent_id in self._bus.registered_agents:
                     request_id = f"orch-{plan.request_id}-{subtask.id}-{_uuid.uuid4().hex[:6]}"
                     fut = self._bus.expect_response(request_id)
@@ -439,7 +629,29 @@ class Orchestrator:
                     result = response.content
 
                 subtask.result = result
+                subtask.artifacts = self._build_subtask_artifacts(subtask, result)
+                subtask.evaluation = self._evaluate_subtask_output(subtask, result, subtask.artifacts)
                 subtask.status = SubTaskStatus.COMPLETED
+                subtask.generator.status = "completed"
+                subtask.generator.summary = "Generated subtask output."
+                subtask.generator.details.update(
+                    {
+                        "preview": str(result or "")[:200],
+                        "artifact_count": len(subtask.artifacts),
+                    }
+                )
+                ended_at_ms = self._now_ms()
+                subtask.observability = ObservabilitySnapshot(
+                    trace_id=f"{plan.observability.trace_id}:{subtask.id}" if plan.observability.trace_id else f"orch:{plan.request_id}:{subtask.id}",
+                    execution_mode=execution_mode,
+                    attempt_count=attempt + 1,
+                    duration_ms=max(0, ended_at_ms - started_at_ms),
+                    started_at_ms=started_at_ms,
+                    completed_at_ms=ended_at_ms,
+                    agent_id=agent_id,
+                    details={"status": subtask.status.value},
+                )
+                self._sync_plan_to_ledger(plan)
                 self._registry.record_task_result(agent_id, success=True)
                 self._registry.update_status(agent_id, AgentStatus.IDLE)
                 if step:
@@ -459,6 +671,34 @@ class Orchestrator:
                      subtask.id, 1 + self._max_retries, last_error)
         subtask.result = str(last_error)
         subtask.status = SubTaskStatus.FAILED
+        subtask.artifacts = self._build_subtask_artifacts(subtask, subtask.result)
+        subtask.evaluation = self._evaluate_subtask_output(subtask, subtask.result, subtask.artifacts)
+        subtask.generator = PipelineStage(
+            status="failed",
+            mode=execution_mode,
+            summary="Generator failed before producing a clean result.",
+            details={
+                "preview": str(subtask.result or "")[:200],
+                "artifact_count": len(subtask.artifacts),
+                "attempt": 1 + self._max_retries,
+                "agent_id": agent_id,
+                "model": self._model or "",
+            },
+        )
+        ended_at_ms = self._now_ms()
+        subtask.observability = ObservabilitySnapshot(
+            trace_id=f"{plan.observability.trace_id}:{subtask.id}" if plan.observability.trace_id else f"orch:{plan.request_id}:{subtask.id}",
+            execution_mode=execution_mode,
+            attempt_count=1 + self._max_retries,
+            duration_ms=max(0, ended_at_ms - started_at_ms),
+            started_at_ms=started_at_ms,
+            completed_at_ms=ended_at_ms,
+            agent_id=agent_id,
+            error_count=1,
+            error=str(last_error or ""),
+            details={"status": subtask.status.value},
+        )
+        self._sync_plan_to_ledger(plan)
         self._registry.record_task_result(agent_id, success=False)
         self._registry.update_status(agent_id, AgentStatus.ERROR)
         return None
@@ -470,10 +710,30 @@ class Orchestrator:
 
         plan.phase = OrchestratorPhase.MERGING
         logger.info("Orchestrator: MERGING")
+        self._sync_plan_to_ledger(plan)
 
         async with self._llm_semaphore:
             result = await merge_results(self._provider, plan, self._model)
 
         plan.merged_result = result
+        plan.merge = PipelineStage(
+            status="completed",
+            mode="merge",
+            summary="Merged subtask outputs into the final response.",
+            details={"result_preview": str(result or "")[:200]},
+        )
+        plan.artifacts = [
+            ArtifactRef(
+                artifact_id=f"{plan.request_id}:merged_result",
+                kind="merged_result",
+                title=plan.intent.summary or plan.original_message[:80],
+                source="merge",
+                preview=str(result or "")[:320],
+                uri="",
+            )
+        ]
+        plan.evaluation = self._evaluate_merged_result(plan, result)
+        plan.observability.completed_at_ms = self._now_ms()
         plan.phase = OrchestratorPhase.IDLE
+        self._sync_plan_to_ledger(plan)
         return result
