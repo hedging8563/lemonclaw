@@ -1,5 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { buildStructuredMemoryWorkSurface, type TaskDetail, type TaskRecord } from '../src/stores/tasks';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  activeOperatorTaskId,
+  buildStructuredMemoryWorkSurface,
+  openTaskSurfaceNavigation,
+  taskDetails,
+  taskSurfaceNavigation,
+  type TaskDetail,
+  type TaskRecord,
+} from '../src/stores/tasks';
+import { apiFetch } from '../src/api/client';
+
+vi.mock('../src/api/client', () => ({
+  apiFetch: vi.fn(),
+}));
 
 function task(task_id: string, patch: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -15,6 +28,20 @@ function task(task_id: string, patch: Partial<TaskRecord> = {}): TaskRecord {
     ...patch,
   };
 }
+
+function jsonResponse(payload: any, ok = true) {
+  return {
+    ok,
+    json: async () => payload,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(apiFetch).mockReset();
+  activeOperatorTaskId.value = null;
+  taskSurfaceNavigation.value = null;
+  taskDetails.value = {};
+});
 
 describe('buildStructuredMemoryWorkSurface', () => {
   it('prefers the most recent task with structured retrieval', () => {
@@ -138,5 +165,56 @@ describe('buildStructuredMemoryWorkSurface', () => {
   it('returns null when no task carries structured retrieval or diagnostics', () => {
     const idle = task('task-empty', { updated_at_ms: 400 });
     expect(buildStructuredMemoryWorkSurface([idle], {})).toBeNull();
+  });
+});
+
+describe('task surface navigation', () => {
+  it('opens the retrieval surface, selects the task and loads task detail', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (path === '/api/tasks/task-123') {
+        return jsonResponse({
+          task: task('task-123', {
+            goal: 'surface task',
+            updated_at_ms: 900,
+            retrieval: {
+              structured: {
+                session_summary: 'surface summary',
+                fact_slots: [{ name: 'mode', type: 'fact', summary: 'retrieval' }],
+                retrieval_objects: [{ kind: 'knowledge_hit', title: 'Deploy Notes', source: 'manual://deploy' }],
+              },
+              hit_sources: ['memory'],
+            },
+          }),
+          summary: {
+            retrieval: {
+              structured: {
+                session_summary: 'surface summary',
+                fact_slots: [{ name: 'mode', type: 'fact', summary: 'retrieval' }],
+                retrieval_objects: [{ kind: 'knowledge_hit', title: 'Deploy Notes', source: 'manual://deploy' }],
+              },
+              hit_sources: ['memory'],
+            },
+          },
+          steps: [],
+        });
+      }
+      if (path === '/api/tasks/task-123/resume-candidate') {
+        return jsonResponse({ candidate: { safe_to_execute: false, recommended_action: 'recheck' } });
+      }
+      if (path === '/api/outbox?task_id=task-123&limit=50') {
+        return jsonResponse({ events: [] });
+      }
+      throw new Error(`Unexpected API call: ${String(path)}`);
+    });
+
+    const detail = await openTaskSurfaceNavigation('task-123');
+
+    expect(activeOperatorTaskId.value).toBe('task-123');
+    expect(taskSurfaceNavigation.value).toEqual({ taskId: 'task-123', section: 'retrieval' });
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/tasks/task-123');
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/tasks/task-123/resume-candidate', { silent404: true });
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/outbox?task_id=task-123&limit=50', { silent404: true });
+    expect(detail?.task.task_id).toBe('task-123');
+    expect(taskDetails.value['task-123']?.summary?.retrieval?.hit_sources).toEqual(['memory']);
   });
 });

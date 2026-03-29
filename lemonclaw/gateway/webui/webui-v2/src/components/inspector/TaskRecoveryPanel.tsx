@@ -9,9 +9,11 @@ import {
   recoverySummary,
   recoveryTasks,
   sessionTasks,
+  setTaskSurfaceNavigation,
   taskActionBusy,
   taskDetails,
   taskPanelError,
+  taskSurfaceNavigation,
   type TaskStepRecord,
   type RetrievalMeta,
   summarizeTaskOperatorState,
@@ -240,15 +242,6 @@ function linkedCardStyle(active: boolean) {
     background: 'rgba(10, 186, 181, 0.06)',
   };
 }
-
-const INSPECTOR_NAVIGATION_EVENT = 'lemonclaw:inspector-navigation';
-
-type InspectorNavigationDetail = {
-  target: 'task-retrieval';
-  taskId: string;
-  focus?: 'retrieval';
-  source?: 'memory';
-};
 
 const summaryCardStyle = {
   background: 'var(--bg-secondary)',
@@ -614,6 +607,7 @@ function renderTaskDetailBody(
   copyValue: (label: string, value: unknown) => Promise<void>,
   retrievalSectionRef: { current: HTMLDetailsElement | null },
   highlightRetrieval: boolean,
+  openStructuredMemoryView: () => void,
   withTopDivider = true,
 ) {
   const { candidate, state, showRetryDispatchCta, showManualResumeCta, showWorkflow, showSuggestedAction } = getTaskActionState(task, detail);
@@ -784,9 +778,28 @@ function renderTaskDetailBody(
         </details>
       )}
       {retrieval && (
-        <details ref={retrievalSectionRef} style={{ ...summaryCardStyle, padding: '10px 12px', ...linkedCardStyle(highlightRetrieval) }}>
-          <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-            {t('task_retrieval_summary')}
+        <details id="task-retrieval-panel" ref={retrievalSectionRef} style={{ ...summaryCardStyle, padding: '10px 12px', ...linkedCardStyle(highlightRetrieval) }}>
+          <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <span>{t('task_retrieval_summary')}</span>
+            <button
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openStructuredMemoryView();
+              }}
+              style={{
+                padding: '4px 8px',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '999px',
+                color: 'var(--text-secondary)',
+                fontFamily: 'var(--font-ui)',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              {t('task_retrieval_open_memory_view')}
+            </button>
           </summary>
           <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: '13px', lineHeight: '1.55' }}>
@@ -1480,18 +1493,21 @@ export function TaskRecoveryPanel() {
   }, []);
 
   useEffect(() => {
-    const handleInspectorNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<InspectorNavigationDetail>).detail;
-      if (!detail || detail.target !== 'task-retrieval' || !detail.taskId) return;
-      activeOperatorTaskId.value = detail.taskId;
-      setRetrievalFocusTaskId(detail.taskId);
-      setExpandedTaskId(detail.taskId);
-      void loadTaskDetail(detail.taskId);
-    };
-
-    window.addEventListener(INSPECTOR_NAVIGATION_EVENT, handleInspectorNavigation as EventListener);
-    return () => window.removeEventListener(INSPECTOR_NAVIGATION_EVENT, handleInspectorNavigation as EventListener);
-  }, []);
+    const navigation = taskSurfaceNavigation.value;
+    if (!navigation || navigation.section !== 'retrieval' || !navigation.taskId) return;
+    if (navigation.taskId !== expandedTaskId) {
+      activeOperatorTaskId.value = navigation.taskId;
+      setExpandedTaskId(navigation.taskId);
+      void loadTaskDetail(navigation.taskId);
+      return;
+    }
+    if (!selectedDetail) {
+      void loadTaskDetail(navigation.taskId);
+      return;
+    }
+    setRetrievalFocusTaskId(navigation.taskId);
+    setTaskSurfaceNavigation(null);
+  }, [expandedTaskId, selectedDetail, taskSurfaceNavigation.value]);
 
   useEffect(() => {
     if (!retrievalFocusTaskId || retrievalFocusTaskId !== expandedTaskId || !selectedTask) return;
@@ -1510,6 +1526,13 @@ export function TaskRecoveryPanel() {
 
     return () => window.clearTimeout(timer);
   }, [retrievalFocusTaskId, expandedTaskId, selectedTask, selectedDetail]);
+
+  const openStructuredMemoryView = () => {
+    activeMemoryPanelTab.value = 'memory';
+    window.setTimeout(() => {
+      document.getElementById('memory-structured-surface')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  };
 
   useEffect(() => {
     const startPolling = () => {
@@ -1872,6 +1895,7 @@ export function TaskRecoveryPanel() {
               copyValue,
               retrievalSectionRef,
               retrievalFocusTaskId === expandedTaskId,
+              openStructuredMemoryView,
               false,
             )}
           </div>

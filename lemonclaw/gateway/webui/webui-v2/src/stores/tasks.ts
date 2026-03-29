@@ -175,6 +175,13 @@ export interface TaskOperatorSummary {
   actionKey?: string | null;
 }
 
+export type TaskSurfaceNavigationSection = 'retrieval' | (string & {});
+
+export interface TaskSurfaceNavigationState {
+  taskId: string;
+  section: TaskSurfaceNavigationSection;
+}
+
 export interface StructuredMemoryWorkSurface {
   sourceTaskId: string;
   sourceGoal: string;
@@ -424,6 +431,7 @@ export const taskDetails = signal<Record<string, TaskDetail>>({});
 export const taskPanelError = signal<string | null>(null);
 export const taskActionBusy = signal<Record<string, string>>({});
 export const activeOperatorTaskId = signal<string | null>(null);
+export const taskSurfaceNavigation = signal<TaskSurfaceNavigationState | null>(null);
 
 function setTaskBusy(taskId: string, action: string | null) {
   const next = { ...taskActionBusy.peek() };
@@ -441,6 +449,17 @@ function mergeTaskDetail(taskId: string, patch: Partial<TaskDetail>) {
       ...patch,
     },
   };
+}
+
+export function setTaskSurfaceNavigation(taskId: string | null, section: TaskSurfaceNavigationSection = 'retrieval') {
+  taskSurfaceNavigation.value = taskId ? { taskId, section } : null;
+}
+
+export async function openTaskSurfaceNavigation(taskId: string, section: TaskSurfaceNavigationSection = 'retrieval') {
+  activeOperatorTaskId.value = taskId;
+  setTaskSurfaceNavigation(taskId, section);
+  await loadTaskDetail(taskId);
+  return taskDetails.peek()[taskId] || null;
 }
 
 export async function loadTaskPanel(sessionKey = activeSessionKey.value) {

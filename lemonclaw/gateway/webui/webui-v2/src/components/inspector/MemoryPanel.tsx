@@ -25,8 +25,7 @@ import {
   type KnowledgeView,
 } from '../../stores/knowledge';
 import { loadMemory, memory, memoryError, type MemoryEntityRecord, type MemoryRuleRecord } from '../../stores/memory';
-import { buildStructuredMemoryWorkSurface, sessionTasks, taskDetails } from '../../stores/tasks';
-import { activeOperatorTaskId } from '../../stores/tasks';
+import { buildStructuredMemoryWorkSurface, openTaskSurfaceNavigation, sessionTasks, taskDetails } from '../../stores/tasks';
 
 const panelStyle = {
   background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, var(--bg-primary) 100%)',
@@ -124,15 +123,6 @@ function downloadJson(filename: string, payload: unknown) {
   URL.revokeObjectURL(url);
 }
 
-const INSPECTOR_NAVIGATION_EVENT = 'lemonclaw:inspector-navigation';
-
-type InspectorNavigationDetail = {
-  target: 'task-retrieval';
-  taskId: string;
-  focus?: 'retrieval';
-  source?: 'memory';
-};
-
 function scrollToInspectorAnchor(anchorId: string) {
   window.setTimeout(() => {
     document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -142,17 +132,9 @@ function scrollToInspectorAnchor(anchorId: string) {
 function openRetrievalPanel(taskId?: string | null) {
   const nextTaskId = String(taskId || '').trim();
   if (!nextTaskId) return;
-  activeOperatorTaskId.value = nextTaskId;
-  window.dispatchEvent(
-    new CustomEvent<InspectorNavigationDetail>(INSPECTOR_NAVIGATION_EVENT, {
-      detail: {
-        target: 'task-retrieval',
-        taskId: nextTaskId,
-        focus: 'retrieval',
-        source: 'memory',
-      },
-    }),
-  );
+  void openTaskSurfaceNavigation(nextTaskId, 'retrieval').then(() => {
+    scrollToInspectorAnchor('task-retrieval-panel');
+  });
 }
 
 function renderAccordionSection(
