@@ -3,15 +3,15 @@ cases:
   - name: interactive-tty
     message: I need to control an interactive REPL in tmux.
     prompt_must_contain:
-      - Use tmux only when you need an interactive TTY.
+      - Use tmux only when an interactive TTY is genuinely needed.
   - name: split-panes
     message: Split this terminal into panes and attach to the session.
     prompt_must_contain:
-      - "Target format: `session:window.pane`"
+      - tmux -S "$SOCKET" list-panes -a
   - name: detach-instructions
     message: How do I detach from tmux after starting a session?
     prompt_must_contain:
-      - After starting a session, always print monitor commands
+      - Print monitor commands after creating a session
   - name: negative-summary
     message: Summarize this article for me.
     expect_triggered: false

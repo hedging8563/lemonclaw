@@ -3,7 +3,7 @@ cases:
   - name: analyze-csv
     message: Analyze this CSV and create a spreadsheet summary.
     prompt_must_contain:
-      - Excel / Spreadsheet Guide
+      - This is a `tool-wrapper` skill.
   - name: formulas
     message: Build an Excel model with formulas and formatting.
     prompt_must_contain:
@@ -11,7 +11,7 @@ cases:
   - name: chinese-table
     message: 帮我整理一下表格，做成 Excel。
     prompt_must_contain:
-      - Formula Verification Checklist
+      - Prefer spreadsheet formulas over hardcoded computed values
   - name: negative-json
     message: Write a JSON config file.
     expect_triggered: false

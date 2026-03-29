@@ -3,15 +3,15 @@ cases:
   - name: every-20-minutes
     message: Remind me every 20 minutes to stand up and stretch.
     prompt_must_contain:
-      - Use the `cron` tool to schedule reminders or recurring tasks.
+      - convert the user's timing intent into the smallest correct `cron(...)` call
   - name: weekly-standup
     message: Schedule a weekly standup reminder every Monday at 9am in Vancouver time.
     prompt_must_contain:
-      - Timezone-aware cron
+      - Timezone-aware recurring schedule
   - name: one-time-reminder
     message: Set a one-time reminder tomorrow at 3pm for my dentist appointment.
     prompt_must_contain:
-      - One-time scheduled task
+      - One-time schedule
   - name: negative-weather
     message: What's the weather tomorrow in Shanghai?
     expect_triggered: false

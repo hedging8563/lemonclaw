@@ -5,27 +5,27 @@ cases:
     message: 生成图片，一只戴墨镜的猫。
     expect_triggered: false
     prompt_must_contain:
-      - Agent-First Error Recovery
+      - This is a `tool-wrapper` skill.
   - name: embeddings
     message: 我需要嵌入向量，用来做客服工单的语义检索。
     expect_triggered: false
     prompt_must_contain:
-      - /v1/embeddings
+      - use `lemondata_nonchat(action="discover", category="...")`
   - name: tts
     message: 帮我配音一段产品演示文案。
     expect_triggered: false
     prompt_must_contain:
-      - Text-to-Speech
+      - TTS / STT / embeddings / rerank
   - name: rerank
     message: 请重排这批搜索结果，按相关性排序。
     expect_triggered: false
     prompt_must_contain:
-      - Rerank
+      - rerank
   - name: neutral-request
     message: What is the current balance on my account?
     expect_triggered: false
     prompt_must_contain:
-      - Agent-First Error Recovery
+      - This is a `tool-wrapper` skill.
     forbidden_skills:
       - content-writer
       - frontend-design

@@ -3,15 +3,15 @@ cases:
   - name: download-youtube
     message: "Download this YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     prompt_must_contain:
-      - yt-dlp Video Downloader Skill
+      - This is a `tool-wrapper` skill.
   - name: extract-audio
     message: "Extract audio from this video URL: https://youtu.be/dQw4w9WgXcQ"
     prompt_must_contain:
-      - Available Scripts
+      - scripts/extract_audio.py
   - name: info-bilibili
     message: "Show info only for this Bilibili URL: https://www.bilibili.com/video/BV1xx411c7mD"
     prompt_must_contain:
-      - Supported Platforms
+      - Prefer `--info-only`
   - name: negative-article
     message: Rewrite this headline for a new audience.
     expect_triggered: false

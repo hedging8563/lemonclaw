@@ -3,11 +3,11 @@ cases:
   - name: merge-pdfs
     message: Merge these two PDFs into one file.
     prompt_must_contain:
-      - PDF Processing Guide
+      - This is a `tool-wrapper` skill.
   - name: ocr-scanned
     message: OCR this scanned PDF and extract the text.
     prompt_must_contain:
-      - OCR Scanned PDFs
+      - For OCR, convert pages to images first.
   - name: create-pdf
     message: Create a PDF report from these bullet points.
     prompt_must_contain:

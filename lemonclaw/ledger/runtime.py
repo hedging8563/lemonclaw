@@ -1824,6 +1824,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
 
         outbox = self.materialize_outbox_events_for_task(task_id)
         outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
+        conductor = dict((task.get("metadata") or {}).get("conductor") or {})
 
         return {
             "task": self.enrich_task_for_observer(task),
