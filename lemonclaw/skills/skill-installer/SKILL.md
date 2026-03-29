@@ -1,59 +1,90 @@
 ---
 name: skill-installer
-description: Install, list, and manage agent skills from skills.sh, GitHub repos, or local paths. Use when the user asks to install, search, update, or remove skills.
-metadata: {"lemonclaw":{"emoji":"📦"}}
+description: Install, list, update, or remove LemonClaw skills from skills.sh, GitHub repos, or local paths.
+metadata: {"lemonclaw":{"emoji":"📦","pattern":"pipeline"}}
 triggers: "安装skill,install skill,add skill,update skill,update an installed skill,upgrade skill,remove skill,remove a skill,uninstall skill,uninstall a skill,skills.sh,skill列表,list skills,search skills,搜索skill,GitHub repo,GitHub repos,local path"
 ---
 
 # Skill Installer
 
-Install skills from skills.sh, GitHub repos, or local paths.
+This is a `pipeline` skill:
+1. inspect the source
+2. install or remove
+3. verify the result
 
-## When to use
+## Entry Rule
 
-Use this skill when the user asks any of:
-- "install a skill from ..."
-- "add skill ..."
-- "search for skills"
-- "list my skills"
-- "remove/uninstall a skill"
+Use this skill when the user asks to:
+- install a skill
+- list installed skills
+- remove or uninstall a skill
+- install from `skills.sh`, GitHub, or a local path
 
-## Install from skills.sh
+## Runtime Boundary
 
-skills.sh URLs follow the format: `https://skills.sh/<owner>/<repo>/<skill-name>`
+- Skill owns: source parsing, install path conventions, and verification steps.
+- Runtime owns: long-running retries and user approval for risky overwrites.
 
-Prefer skills.sh first for third-party skills, because it gives users a stable discovery surface without requiring us to maintain a separate official mirror repo.
+## Install Location
 
-To install, convert the URL to a GitHub clone. Run this as a SINGLE command:
+Workspace skills live at:
+
+```text
+~/.lemonclaw/workspace/skills/<skill-name>/
+```
+
+Workspace skills override built-in skills with the same name.
+
+## Inspect Before Installing
+
+### skills.sh
+
+Format:
+
+```text
+https://skills.sh/<owner>/<repo>/<skill-name>
+```
+
+Prefer skills.sh when the user gives a marketplace URL.
+
+### GitHub repo
+
+If the skill name is not obvious, clone first and inspect:
+
+```bash
+REPO_DIR=$(mktemp -d) && git clone --depth 1 <github-url> "$REPO_DIR" && find "$REPO_DIR" -name SKILL.md -type f
+```
+
+## Install
+
+From skills.sh:
 
 ```bash
 REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/<owner>/<repo>.git "$REPO_DIR" && mkdir -p ~/.lemonclaw/workspace/skills/<skill-name> && cp -r "$REPO_DIR/skills/<skill-name>/"* ~/.lemonclaw/workspace/skills/<skill-name>/ && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Installed <skill-name> successfully"
 ```
 
-### Example
-
-For `https://skills.sh/lwmxiaobei/yt-dlp-skill/yt-dlp`:
-- owner = `lwmxiaobei`, repo = `yt-dlp-skill`, skill = `yt-dlp`
+From GitHub:
 
 ```bash
-REPO_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/lwmxiaobei/yt-dlp-skill.git "$REPO_DIR" && mkdir -p ~/.lemonclaw/workspace/skills/yt-dlp && cp -r "$REPO_DIR/skills/yt-dlp/"* ~/.lemonclaw/workspace/skills/yt-dlp/ && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Installed yt-dlp successfully"
+REPO_DIR=$(mktemp -d) && git clone --depth 1 <github-url> "$REPO_DIR" && cp -r "$REPO_DIR/skills/<name>" ~/.lemonclaw/workspace/skills/<name> && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Installed <name> successfully"
 ```
 
-## Install from GitHub URL
-
-For direct GitHub repo URLs, run as a SINGLE command:
+From local path:
 
 ```bash
-REPO_DIR=$(mktemp -d) && git clone --depth 1 <github-url> "$REPO_DIR" && find "$REPO_DIR" -name "SKILL.md" -type f && cp -r "$REPO_DIR/skills/<name>" ~/.lemonclaw/workspace/skills/<name> && python3 -c "import shutil; shutil.rmtree('$REPO_DIR')" && echo "Done"
+mkdir -p ~/.lemonclaw/workspace/skills/<skill-name> && cp -r <local-skill-dir>/* ~/.lemonclaw/workspace/skills/<skill-name>/
 ```
 
-## List installed skills
+## Verify
+
+List installed skills:
 
 ```bash
 ls -la ~/.lemonclaw/workspace/skills/
 ```
 
-Or check each skill's description:
+Check description quickly:
+
 ```bash
 for d in ~/.lemonclaw/workspace/skills/*/; do
   name=$(basename "$d")
@@ -62,17 +93,20 @@ for d in ~/.lemonclaw/workspace/skills/*/; do
 done
 ```
 
-## Remove a skill
+For local or edited skills, prefer validating with:
+
+```bash
+python3 lemonclaw/lemonclaw/skills/skill-creator/scripts/quick_validate.py <path/to/skill>
+```
+
+## Remove
 
 ```bash
 python3 -c "import shutil; shutil.rmtree('$HOME/.lemonclaw/workspace/skills/<skill-name>')"
 ```
 
-## Notes
+## Guardrails
 
-- Skills are directories containing a `SKILL.md` file.
-- LemonClaw built-in skills live in the package and do not need to be installed separately.
-- Install location: `~/.lemonclaw/workspace/skills/<skill-name>/`
-- Skills are hot-loaded: newly installed skills are available immediately on the next message. Do NOT tell the user to start a new session.
-- Workspace skills override built-in skills with the same name.
-- Requires `git` for remote installs.
+- Do not overwrite an existing installed skill silently.
+- Do not use `rm -rf`; use `python3` + `shutil.rmtree`.
+- Built-in skills do not need installation.

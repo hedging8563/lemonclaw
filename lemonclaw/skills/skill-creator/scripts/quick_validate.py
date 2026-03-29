@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 MAX_NAME_LENGTH = 64
+ALLOWED_PATTERNS = {"tool-wrapper", "generator", "reviewer", "inversion", "pipeline"}
 ALLOWED_FRONTMATTER_KEYS = {
     "name",
     "description",
@@ -84,6 +85,17 @@ def validate_skill(skill_dir: Path) -> list[str]:
     description = frontmatter.get("description")
     if not isinstance(description, str) or not description.strip():
         errors.append("frontmatter.description must be a non-empty string")
+
+    metadata = frontmatter.get("metadata")
+    if isinstance(metadata, dict):
+        lemonclaw_meta = metadata.get("lemonclaw")
+        if isinstance(lemonclaw_meta, dict):
+            pattern = lemonclaw_meta.get("pattern")
+            if pattern is not None and pattern not in ALLOWED_PATTERNS:
+                errors.append(
+                    "metadata.lemonclaw.pattern must be one of: "
+                    + ", ".join(sorted(ALLOWED_PATTERNS))
+                )
 
     errors.extend(validate_references(skill_dir, content))
     return errors

@@ -4,6 +4,15 @@ This directory contains LemonClaw's built-in skills.
 
 Each skill lives in its own folder and must include a `SKILL.md` file with YAML frontmatter plus the markdown guidance loaded into agent context.
 
+## Authoring Rules
+
+- Pick one primary pattern per skill: `tool-wrapper`, `generator`, `reviewer`, `inversion`, or `pipeline`.
+- Keep `SKILL.md` focused on entry rules, guardrails, and the minimum workflow.
+- Move detailed checklists, schemas, templates, and long examples into `references/` or `assets/`.
+- If a flow needs durable state, confirmation gates, retries, or resume/replay, enforce that in LemonClaw runtime rather than only in prompt text.
+- For built-in skills, prefer deterministic `scripts/` over long fragile shell recipes when the same logic is repeated.
+- Skills marked `always` must be especially lean; move anything non-essential out of the main `SKILL.md`.
+
 ## Current Built-in Skills
 
 | Skill | Purpose | Availability |

@@ -1,24 +1,28 @@
 ---
 name: summarize
-description: Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for "transcribe this YouTube/video").
+description: Summarize URLs, local files, and YouTube links with the summarize CLI. Use when the user wants a summary, transcript extraction, or quick understanding of a link or file.
 homepage: https://summarize.sh
-metadata: {"lemonclaw":{"emoji":"🧾","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"}]}}
-triggers: 总结网页,总结链接,摘要,summarize,transcript,播客,podcast,总结视频,总结文章,YouTube summary,视频总结,链接总结
+metadata: {"lemonclaw":{"emoji":"🧾","pattern":"tool-wrapper","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"}]}}
+triggers: "总结网页,总结链接,摘要,summarize,transcript,播客,podcast,总结视频,总结文章,YouTube summary,视频总结,链接总结"
 ---
 
 # Summarize
 
-Fast CLI to summarize URLs, local files, and YouTube links.
+This is a `tool-wrapper` skill for the `summarize` CLI.
 
-## When to use (trigger phrases)
+## Entry Rule
 
-Use this skill immediately when the user asks any of:
-- "use summarize.sh"
-- "what’s this link/video about?"
-- "summarize this URL/article"
-- "transcribe this YouTube/video" (best-effort transcript extraction; no `yt-dlp` needed)
+Use this skill when the user wants:
+- a summary of a URL or file
+- a best-effort transcript from a video URL
+- a quick read on a long source before deeper analysis
 
-## Quick start
+## Runtime Boundary
+
+- Skill owns: command selection and result-shaping.
+- Runtime owns: larger analysis workflows and follow-up tasks.
+
+## Quick Start
 
 ```bash
 summarize "https://example.com" --model google/gemini-3-flash-preview
@@ -26,43 +30,27 @@ summarize "/path/to/file.pdf" --model google/gemini-3-flash-preview
 summarize "https://youtu.be/dQw4w9WgXcQ" --youtube auto
 ```
 
-## YouTube: summary vs transcript
+## Transcript Mode
 
-Best-effort transcript (URLs only):
+For best-effort transcript extraction from a video URL:
 
 ```bash
 summarize "https://youtu.be/dQw4w9WgXcQ" --youtube auto --extract-only
 ```
 
-If the user asked for a transcript but it’s huge, return a tight summary first, then ask which section/time range to expand.
+If the transcript is too large, summarize first and expand only the requested section.
 
-## Model + keys
-
-Set the API key for your chosen provider:
-- OpenAI: `OPENAI_API_KEY`
-- Anthropic: `ANTHROPIC_API_KEY`
-- xAI: `XAI_API_KEY`
-- Google: `GEMINI_API_KEY` (aliases: `GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`)
-
-Default model is `google/gemini-3-flash-preview` if none is set.
-
-## Useful flags
+## Useful Flags
 
 - `--length short|medium|long|xl|xxl|<chars>`
 - `--max-output-tokens <count>`
-- `--extract-only` (URLs only)
-- `--json` (machine readable)
-- `--firecrawl auto|off|always` (fallback extraction)
-- `--youtube auto` (Apify fallback if `APIFY_API_TOKEN` set)
+- `--extract-only`
+- `--json`
+- `--firecrawl auto|off|always`
+- `--youtube auto`
 
-## Config
+## Guardrails
 
-Optional config file: `~/.summarize/config.json`
-
-```json
-{ "model": "openai/gpt-5.2" }
-```
-
-Optional services:
-- `FIRECRAWL_API_KEY` for blocked sites
-- `APIFY_API_TOKEN` for YouTube fallback
+- Prefer concise summaries unless the user asked for detail.
+- Treat transcript extraction as best-effort, not guaranteed.
+- If the source is blocked, mention the extraction limit rather than pretending the summary is complete.

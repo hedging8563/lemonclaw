@@ -121,6 +121,56 @@ install:
     assert validate_skill(skill_dir) == []
 
 
+def test_quick_validate_accepts_known_pattern_metadata(tmp_path) -> None:
+    script_path = SKILLS_DIR / "skill-creator" / "scripts" / "quick_validate.py"
+    module_globals = runpy.run_path(str(script_path), run_name="quick_validate_pattern_test")
+    validate_skill = module_globals["validate_skill"]
+
+    skill_dir = tmp_path / "pattern-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: pattern-skill
+description: Validation smoke test.
+metadata:
+  lemonclaw:
+    pattern: tool-wrapper
+---
+
+# Pattern Skill
+""",
+        encoding="utf-8",
+    )
+
+    assert validate_skill(skill_dir) == []
+
+
+def test_quick_validate_rejects_unknown_pattern_metadata(tmp_path) -> None:
+    script_path = SKILLS_DIR / "skill-creator" / "scripts" / "quick_validate.py"
+    module_globals = runpy.run_path(str(script_path), run_name="quick_validate_bad_pattern_test")
+    validate_skill = module_globals["validate_skill"]
+
+    skill_dir = tmp_path / "bad-pattern-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: bad-pattern-skill
+description: Validation smoke test.
+metadata:
+  lemonclaw:
+    pattern: mystery
+---
+
+# Bad Pattern Skill
+""",
+        encoding="utf-8",
+    )
+
+    assert validate_skill(skill_dir) == [
+        "metadata.lemonclaw.pattern must be one of: generator, inversion, pipeline, reviewer, tool-wrapper"
+    ]
+
+
 def test_skills_loader_promotes_os_and_install_frontmatter(tmp_path) -> None:
     builtin_dir = tmp_path / "builtin"
     workspace = tmp_path / "workspace"

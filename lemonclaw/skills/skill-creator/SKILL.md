@@ -1,12 +1,18 @@
 ---
 name: skill-creator
 description: Create or update AgentSkills. Use when designing, structuring, or packaging skills with scripts, references, and assets.
+metadata: {"lemonclaw":{"emoji":"🧠","pattern":"reviewer"}}
 triggers: "创建skill,新建skill,写skill,create skill,make skill,skill模板"
 ---
 
 # Skill Creator
 
-This skill provides guidance for creating effective skills.
+Use this skill to create or refactor a LemonClaw skill.
+
+Read these references when needed:
+- [references/workflows.md](references/workflows.md) to choose the primary pattern
+- [references/runtime-boundaries.md](references/runtime-boundaries.md) to decide what belongs in skill vs runtime
+- [references/output-patterns.md](references/output-patterns.md) when shaping final output
 
 ## About Skills
 
@@ -23,6 +29,36 @@ equipped with procedural knowledge that no model can fully possess.
 4. Bundled resources - Scripts, references, and assets for complex and repetitive tasks
 
 ## Core Principles
+
+### Pick One Primary Pattern
+
+Start every skill by choosing one primary pattern:
+
+- `tool-wrapper`
+- `generator`
+- `reviewer`
+- `inversion`
+- `pipeline`
+
+Composing patterns is allowed, but one pattern must stay primary. If a skill tries to be all five at once, split it.
+
+### Respect The Runtime Boundary
+
+Keep these in the skill:
+- trigger rules
+- local heuristics
+- checklists
+- templates
+- references
+
+Move these to LemonClaw runtime or workflow code:
+- durable state
+- resume / replay
+- irreversible confirmation gates
+- retry budgets
+- side-effect ordering
+
+If skipping a step would cause a real bug, do not rely on `SKILL.md` text alone.
 
 ### Concise is Key
 
@@ -204,12 +240,13 @@ the agent reads REDLINING.md or OOXML.md only when the user needs those features
 Skill creation involves these steps:
 
 1. Understand the skill with concrete examples
-2. Plan reusable skill contents (scripts, references, assets)
-3. Initialize the skill (run init_skill.py)
-4. Edit the skill (implement resources and write SKILL.md)
-5. Validate the skill (run quick_validate.py)
-6. Package the skill (run package_skill.py)
-7. Iterate based on real usage
+2. Choose the primary pattern and runtime boundary
+3. Plan reusable skill contents (scripts, references, assets)
+4. Initialize the skill (run init_skill.py)
+5. Edit the skill (implement resources and write SKILL.md)
+6. Validate the skill (run quick_validate.py)
+7. Package the skill (run package_skill.py)
+8. Iterate based on real usage
 
 Follow these steps in order, skipping only if there is a clear reason why they are not applicable.
 

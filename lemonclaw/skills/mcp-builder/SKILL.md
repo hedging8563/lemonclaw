@@ -1,74 +1,73 @@
 ---
 name: mcp-builder
-description: Guide for creating MCP (Model Context Protocol) servers that enable LLMs to interact with external services. Use when building MCP servers to integrate APIs or services, in Python (FastMCP) or TypeScript (MCP SDK). Also triggers on 创建MCP、MCP服务、MCP开发.
+description: Build MCP servers in Python or TypeScript. Use when designing a new MCP server, wrapping an external API as MCP tools, or integrating MCP into LemonClaw.
+metadata: {"lemonclaw":{"pattern":"pipeline"}}
 triggers: "创建mcp,mcp服务,mcp开发,mcp server,build mcp server,fastmcp,model context protocol,mcp工具,mcp sdk,Python,TypeScript"
 ---
 
-# MCP Server Development Guide
+# MCP Builder
 
-Create MCP servers that enable LLMs to interact with external services through well-designed tools.
+This skill is a `pipeline` with a small `reviewer` step at the end.
 
-## Workflow
+## Entry Rule
 
-### Phase 1: Research and Planning
+Use this skill when the user wants to:
+- create a new MCP server
+- expose an API or service as MCP tools
+- add MCP integration guidance for LemonClaw
 
-**API Coverage vs. Workflow Tools:**
-Balance comprehensive API endpoint coverage with specialized workflow tools. When uncertain, prioritize comprehensive API coverage.
+## Runtime Boundary
 
-**Tool Naming:**
-Clear, descriptive names with consistent prefixes (e.g., `github_create_issue`, `github_list_repos`).
+- Skill owns: design sequence, tool-shaping rules, validation checklist.
+- Runtime owns: durable orchestration, retries, and long-lived deployment promotion.
 
-**Context Management:**
-Return focused, relevant data. Support filtering and pagination.
+## Pipeline
 
-**Error Messages:**
-Guide agents toward solutions with specific suggestions and next steps.
+### Step 1: Scope the server
 
-**Study MCP docs:**
-Start with `https://modelcontextprotocol.io/sitemap.xml`, then fetch pages with `.md` suffix.
+Clarify:
+- what service or API is being exposed
+- read-only vs write operations
+- expected auth model
+- expected result size, pagination, and filtering
 
-### Phase 2: Implementation
+### Step 2: Design the tool surface
 
-**TypeScript (recommended):**
+Prefer:
+- clear names
+- focused inputs
+- structured outputs
+- pagination for list operations
+- actionable errors
+
+Do not dump raw upstream payloads when a narrower contract is better.
+
+### Step 3: Implement
+
+TypeScript:
 ```bash
 npx @anthropic-ai/create-mcp-server my-server
 cd my-server && npm install
 ```
 
-Key patterns:
-- Use Zod for input/output schemas
-- Support pagination for list operations
-- Include tool annotations (`readOnlyHint`, `destructiveHint`)
-- Handle errors with actionable messages
-
-**Python (FastMCP):**
+Python:
 ```bash
 pip install fastmcp
 ```
 
-Key patterns:
-- Use Pydantic for schemas
-- Decorate tools with `@mcp.tool()`
-- Return structured data, not raw API responses
+### Step 4: Review
 
-### Phase 3: Review and Test
+Check:
+- no overlapping tools
+- input/output schemas are explicit
+- destructive operations are clearly marked
+- filtering and pagination exist where needed
+- errors suggest a next action
 
-```bash
-# TypeScript
-npm run build
+### Step 5: Integrate
 
-# Python
-python -m py_compile server.py
+For LemonClaw config:
 
-# Test with MCP Inspector
-npx @modelcontextprotocol/inspector
-```
-
-Verify: no duplication, consistent error handling, full type coverage.
-
-### Phase 4: Integration
-
-For LemonClaw, add to `config.json`:
 ```json
 {
   "tools": {
@@ -83,20 +82,8 @@ For LemonClaw, add to `config.json`:
 }
 ```
 
-For HTTP servers:
-```json
-{
-  "tools": {
-    "mcp_servers": {
-      "my-server": {
-        "url": "http://localhost:3100/mcp",
-        "tool_timeout": 30
-      }
-    }
-  }
-}
-```
+## Guardrails
 
-## References
-
-For language-specific implementation details, read the MCP specification at `https://modelcontextprotocol.io/specification/draft.md`.
+- Ask missing API/auth questions before generating server code.
+- Prefer one coherent tool surface over maximum endpoint count.
+- If a flow requires retries, checkpoints, or approval gates, keep that logic out of the skill and put it in runtime/workflow code.

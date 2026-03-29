@@ -2,50 +2,77 @@
 
 Use this file when the skill needs a repeatable execution flow.
 
-## Pattern 1: Decision Tree
+## Primary Patterns
 
-Use when the first step is choosing among multiple valid paths.
+### Tool Wrapper
+
+Use when the agent needs expert notes about a tool, API, or library.
 
 Structure:
-- State the input signals that determine the branch.
-- Give a short rule for each branch.
-- Link each branch to its detailed section or script.
+- When to trigger
+- When not to trigger
+- Inspect-first rules
+- Safe defaults
+- Verification after action
 
-## Pattern 2: Linear Procedure
+### Generator
 
-Use when the task should happen in a strict order.
+Use when output must follow a stable template.
+
+Structure:
+- Minimum required inputs
+- Template to load from `assets/`
+- Output validation checklist
+- Fallback when inputs are incomplete
+
+### Reviewer
+
+Use when quality is evaluated against a checklist.
+
+Structure:
+- Load checklist from `references/`
+- Apply each rule
+- Group findings by severity
+- Suggest concrete fixes
+
+### Inversion
+
+Use when the skill must gather missing context before acting.
+
+Structure:
+- Ask only the missing questions
+- Prefer one question at a time
+- Stop once enough information is gathered
+- Do not start irreversible work early
+
+### Pipeline
+
+Use when steps are ordered and each stage depends on the previous one.
 
 Structure:
 - Preconditions
 - Ordered steps
-- Verification
+- Verification after each stage
 - Cleanup or handoff
 
-## Pattern 3: Inspect Then Act
+Important:
+- Soft sequencing can live in the skill
+- Hard sequencing, retries, and checkpoints must be enforced by runtime/workflow code
+
+## Reusable Subpatterns
+
+### Decision Tree
+
+Use when the first step is choosing among multiple valid paths.
+
+### Inspect Then Act
 
 Use when the skill must gather context before deciding.
 
-Structure:
-- Inspect files, APIs, or environment first.
-- Summarize what matters.
-- Choose the least risky action.
-- Re-check the result after the action.
+### Safe Retry Loop
 
-## Pattern 4: Safe Retry Loop
+Describe retryable failures in the skill, but keep retry budgets and stop conditions in runtime when they affect correctness or side effects.
 
-Use when external systems are flaky.
+### Human Checkpoint
 
-Structure:
-- Define retryable failures.
-- Set a retry budget.
-- Record the last failure clearly.
-- Stop and surface the blocker when the budget is exhausted.
-
-## Pattern 5: Human Checkpoint
-
-Use when there are non-obvious consequences.
-
-Structure:
-- Do all reversible preparation work first.
-- Present the tradeoff in 1-2 sentences.
-- Ask for confirmation only at the irreversible boundary.
+Skills may present the tradeoff, but runtime should own the irreversible gate when skipping confirmation is unacceptable.

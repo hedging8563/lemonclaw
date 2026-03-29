@@ -13,13 +13,25 @@ MAX_NAME_LENGTH = 64
 SKILL_TEMPLATE = """---
 name: {skill_name}
 description: "TODO: Describe what this skill does and exactly when it should trigger."
+metadata:
+  lemonclaw:
+    pattern: tool-wrapper
 ---
 
 # {title}
 
-## Overview
+## Entry Rule
 
-TODO: Explain the skill's purpose in 1-2 sentences.
+TODO: State when this skill should trigger and when it should not.
+
+## Pattern
+
+TODO: Confirm the primary pattern: tool-wrapper / generator / reviewer / inversion / pipeline.
+
+## Runtime Boundary
+
+- Skill owns: TODO
+- Runtime owns: TODO
 
 ## Workflow
 
@@ -27,7 +39,7 @@ TODO: Explain the skill's purpose in 1-2 sentences.
 2. TODO: Add the key decision points.
 3. TODO: Reference bundled scripts, references, or assets when useful.
 
-## Notes
+## Guardrails
 
 - TODO: Add important constraints, gotchas, or conventions.
 """

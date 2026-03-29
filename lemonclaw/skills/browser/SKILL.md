@@ -1,13 +1,15 @@
 ---
 name: browser
 description: Browser automation for AI agents. Use when the user needs to interact with websites, fill forms, click buttons, take screenshots, extract data, test web apps, or automate any browser task. Triggers on "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data", "test this web app", "login to a site", or any browser interaction request.
-metadata: {"lemonclaw":{"emoji":"🌐","os":["darwin","linux"],"requires":{"bins":["agent-browser"]}}}
+metadata: {"lemonclaw":{"emoji":"🌐","pattern":"tool-wrapper","os":["darwin","linux"],"requires":{"bins":["agent-browser"]}}}
 triggers: "打开网页,浏览器,截图,网页截图,填表,填表单,fill out a form,点击按钮,click a button,爬取,scrape,screenshot,open website,open a website,browse,自动化测试,取屏幕截图,take a screenshot,抓取数据,scrape data,登录网站,login to a site,测试网页,test web app"
 ---
 
 # Browser Automation (agent-browser + DICloak)
 
 Use the `browser` tool for all web interaction. Pass the command string directly (without the `agent-browser` prefix).
+
+This is a `tool-wrapper` skill. Let the browser tool own browser state and session state. Do not invent extra browser workflow state inside the skill.
 
 There are two execution modes:
 
@@ -42,6 +44,11 @@ Use **DICloak** only for:
 - Tasks that explicitly mention DICloak, profile lease, or long-lived authenticated browser identity
 
 Do **not** use DICloak just because a site has a login page. Start with the normal browser unless the task clearly requires an existing profile.
+
+## Runtime Boundary
+
+- Skill owns: command patterns, DICloak selection rules, ref lifecycle guidance.
+- Runtime owns: profile lease state, browser session state, retries, and delivery of screenshots/artifacts.
 
 ## Core Workflow
 

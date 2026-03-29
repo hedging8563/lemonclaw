@@ -19,6 +19,9 @@ def test_init_skill_creates_benchmark_template_when_inferred(tmp_path) -> None:
 
     assert skill_dir == output_dir / "demo-skill"
     assert (skill_dir / "SKILL.md").exists()
+    skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "pattern: tool-wrapper" in skill_text
+    assert "## Runtime Boundary" in skill_text
     assert benchmark_path == tmp_path / "repo" / "benchmarks" / "skills" / "demo-skill.yaml"
     assert benchmark_path.exists()
     content = benchmark_path.read_text(encoding="utf-8")
