@@ -44,6 +44,8 @@ class AgentBridgeChannel(BaseChannel):
                     queue.put_nowait({"type": "closed"})
                 except asyncio.QueueFull:
                     pass
+        self._subscribers.clear()
+        self._buffers.clear()
 
     def subscribe(self, session_key: str) -> tuple[asyncio.Queue[dict[str, Any]], list[dict[str, Any]]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
@@ -58,6 +60,7 @@ class AgentBridgeChannel(BaseChannel):
         listeners.discard(queue)
         if not listeners:
             self._subscribers.pop(session_key, None)
+            self._buffers.pop(session_key, None)
 
     def is_session_supported(self, session_key: str) -> bool:
         return session_key.startswith("agentbridge:")

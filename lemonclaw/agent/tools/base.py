@@ -61,15 +61,14 @@ class Tool(ABC):
 
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
         label = path or "parameter"
+        errors = []
 
         if "const" in schema and val != schema["const"]:
-            return [f"{label} must equal {schema['const']!r}"]
+            errors.append(f"{label} must equal {schema['const']!r}")
 
         if "allOf" in schema:
-            errors = []
             for branch in schema.get("allOf", []):
                 errors.extend(self._validate(val, branch, path))
-            return errors
 
         for combiner in ("anyOf", "oneOf"):
             if combiner in schema:
@@ -80,36 +79,35 @@ class Tool(ABC):
                     branch_errors.append(candidate_errors)
                     if not candidate_errors:
                         matches += 1
-                if combiner == "anyOf" and matches >= 1:
-                    return []
-                if combiner == "oneOf" and matches == 1:
-                    return []
-                if branch_errors:
-                    return branch_errors[0]
-                return [f"{label} did not match {combiner} schema"]
+                if combiner == "anyOf" and matches < 1:
+                    errors.extend(branch_errors[0] if branch_errors else [f"{label} did not match anyOf schema"])
+                if combiner == "oneOf" and matches != 1:
+                    errors.extend(branch_errors[0] if branch_errors else [f"{label} did not match oneOf schema"])
 
         t = schema.get("type")
         if isinstance(t, list):
             if val is None and "null" in t:
-                return []
-            non_null = [item for item in t if item != "null"]
-            if len(non_null) == 1:
-                t = non_null[0]
+                t = None
             else:
-                return [f"{label} should be one of {t}"]
+                non_null = [item for item in t if item != "null"]
+                matches = [item for item in non_null if item in self._TYPE_MAP and isinstance(val, self._TYPE_MAP[item])]
+                if not matches:
+                    errors.append(f"{label} should be one of {t}")
+                    return errors
+                t = matches[0] if len(matches) == 1 else None
 
         if t in self._TYPE_MAP and not isinstance(val, self._TYPE_MAP[t]):
-            return [f"{label} should be {t}"]
+            errors.append(f"{label} should be {t}")
+            return errors
 
-        errors = []
         if "enum" in schema and val not in schema["enum"]:
             errors.append(f"{label} must be one of {schema['enum']}")
-        if t in ("integer", "number"):
+        if t in ("integer", "number") or (t is None and isinstance(val, (int, float)) and not isinstance(val, bool)):
             if "minimum" in schema and val < schema["minimum"]:
                 errors.append(f"{label} must be >= {schema['minimum']}")
             if "maximum" in schema and val > schema["maximum"]:
                 errors.append(f"{label} must be <= {schema['maximum']}")
-        if t == "string":
+        if t == "string" or (t is None and isinstance(val, str)):
             if "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
             if "maxLength" in schema and len(val) > schema["maxLength"]:

@@ -91,7 +91,12 @@ class Orchestrator:
             parsed = None
 
         if isinstance(parsed, dict):
-            for index, item in enumerate(list(parsed.get("artifacts") or []), start=1):
+            raw_artifacts = parsed.get("artifacts")
+            if isinstance(raw_artifacts, list):
+                iterable_artifacts = raw_artifacts
+            else:
+                iterable_artifacts = []
+            for index, item in enumerate(iterable_artifacts, start=1):
                 if not isinstance(item, dict):
                     continue
                 artifact_id = str(item.get("artifact_id") or item.get("id") or f"{subtask.id}:artifact:{index}")

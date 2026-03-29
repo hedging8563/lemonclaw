@@ -410,7 +410,7 @@ def get_webui_routes(
     _default_model_cache: dict[str, Any] = {"value": "", "expires_at": 0.0}
     _default_session_alignment_cache: dict[str, float] = {"expires_at": 0.0}
 
-    def _configured_default_model() -> str:
+    async def _configured_default_model() -> str:
         now = time.monotonic()
         if now < float(_default_model_cache["expires_at"]):
             return str(_default_model_cache["value"] or "")
@@ -421,8 +421,9 @@ def get_webui_routes(
             cfg_path = get_config_path()
             if cfg_path.exists():
                 import json as _json_mod
-                with open(cfg_path, encoding="utf-8") as f:
-                    raw = _json_mod.load(f)
+                raw = await asyncio.to_thread(
+                    lambda: _json_mod.loads(cfg_path.read_text(encoding="utf-8"))
+                )
                 configured = raw.get("agents", {}).get("defaults", {}).get("model", "")
                 if configured:
                     current = configured
@@ -439,13 +440,13 @@ def get_webui_routes(
         resolved = resolve_model_id(configured or runtime_default)
         return resolved or configured or runtime_default
 
-    def _ensure_webui_default_session_alignment() -> None:
+    async def _ensure_webui_default_session_alignment() -> None:
         now = time.monotonic()
         if now < float(_default_session_alignment_cache["expires_at"]):
             return
         _default_session_alignment_cache["expires_at"] = now + _DEFAULT_SESSION_ALIGNMENT_TTL_S
 
-        default_model = _configured_default_model()
+        default_model = await _configured_default_model()
         if not default_model:
             return
 
@@ -767,7 +768,7 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
-        _ensure_webui_default_session_alignment()
+        await _ensure_webui_default_session_alignment()
         sessions = session_manager.list_sessions()
         # Filter to webui sessions only (model already included from list_sessions)
         webui_sessions = [s for s in sessions if s.get("key", "").startswith("webui:")]
@@ -834,7 +835,7 @@ def get_webui_routes(
         if not ok:
             return err  # type: ignore[return-value]
 
-        _ensure_webui_default_session_alignment()
+        await _ensure_webui_default_session_alignment()
         models = [
             {"id": m.id, "label": m.label, "tier": m.tier, "description": m.description, **get_model_runtime_meta(m.id, scene="chat")}
             for m in MODEL_CATALOG

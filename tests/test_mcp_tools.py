@@ -6,9 +6,36 @@ from types import SimpleNamespace
 
 import pytest
 
-from lemonclaw.agent.tools.mcp import _probe_http_endpoint, connect_mcp_servers
+from lemonclaw.agent.tools.mcp import _normalize_mcp_schema, _probe_http_endpoint, connect_mcp_servers
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
+
+
+def test_normalize_mcp_schema_preserves_parent_fields_when_merging_allof() -> None:
+    normalized, warnings = _normalize_mcp_schema(
+        {
+            "type": ["object", "null"],
+            "properties": {
+                "parent": {"type": "string"},
+            },
+            "required": ["parent"],
+            "allOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "child": {"type": "number"},
+                    },
+                    "required": ["child"],
+                }
+            ],
+        }
+    )
+
+    assert normalized["type"] == ["object", "null"]
+    assert normalized["properties"]["parent"]["type"] == "string"
+    assert normalized["properties"]["child"]["type"] == "number"
+    assert normalized["required"] == ["child", "parent"]
+    assert warnings == []
 
 
 @pytest.mark.asyncio

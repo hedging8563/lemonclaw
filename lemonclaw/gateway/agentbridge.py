@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 import base64
 import hmac
 import json
 import mimetypes
+import shutil
 import tempfile
 import time
 import uuid
@@ -77,8 +79,11 @@ def _build_chat_identity(body: dict[str, Any]) -> dict[str, str]:
 
 def _rewrite_agentbridge_media_urls(message: dict[str, Any]) -> dict[str, Any]:
     payload = dict(message)
+    raw_media = payload.get("media")
+    if not isinstance(raw_media, list):
+        return payload
     media = []
-    for item in payload.get("media", []) or []:
+    for item in raw_media:
         if isinstance(item, dict) and isinstance(item.get("url"), str):
             media_item = dict(item)
             media_item["url"] = media_item["url"].replace("/api/media", "/api/agentbridge/media", 1)
@@ -109,6 +114,7 @@ def get_agentbridge_routes(
         return []
 
     _upload_dir = Path(tempfile.mkdtemp(prefix="lemonclaw_agentbridge_uploads_"))
+    atexit.register(lambda path=_upload_dir: shutil.rmtree(path, ignore_errors=True))
     _attachments: dict[str, dict[str, Any]] = {}
     _session_media_grants: dict[str, dict[str, Any]] = {}
 
@@ -177,7 +183,7 @@ def get_agentbridge_routes(
                 continue
 
             try:
-                resolved = Path(raw_path).expanduser().resolve(strict=True)
+                resolved = Path(raw_path).expanduser().resolve(strict=False)
             except OSError:
                 continue
 
@@ -193,11 +199,17 @@ def get_agentbridge_routes(
         session = session_manager.get(session_key)
         if not session:
             return False
+        session_version = int(getattr(session, "version", 0) or 0)
+        if entry and entry.get("scanned_version") == session_version:
+            return False
+        collected: list[str] = []
         for message in session.messages:
-            paths = _extract_message_grant_paths(message)
-            if str(file_path) in paths:
-                _touch_session_media_grants(session_key, paths)
-                return True
+            collected.extend(_extract_message_grant_paths(message))
+        if collected:
+            _touch_session_media_grants(session_key, collected)
+            _session_media_grants[session_key]["scanned_version"] = session_version
+            return str(file_path) in _session_media_grants[session_key].get("paths", set())
+        _session_media_grants[session_key] = {"paths": set(), "last_access": time.time(), "scanned_version": session_version}
         return False
 
     def _cleanup_uploads() -> None:
@@ -334,6 +346,16 @@ def get_agentbridge_routes(
         max_upload_bytes = max(1, int(getattr(channel_manager.config.channels.agentbridge, "max_upload_bytes", 20 * 1024 * 1024) or 20 * 1024 * 1024))
         if len(raw) > max_upload_bytes:
             return _json({"error": f"File too large (max {max_upload_bytes} bytes)"}, 400)
+        max_active_uploads = max(1, int(getattr(channel_manager.config.channels.agentbridge, "max_active_uploads", 128) or 128))
+        if len(_attachments) >= max_active_uploads:
+            return _json({"error": f"Too many active uploads (max {max_active_uploads})"}, 429)
+        max_total_upload_bytes = max(
+            max_upload_bytes,
+            int(getattr(channel_manager.config.channels.agentbridge, "max_total_upload_bytes", 200 * 1024 * 1024) or 200 * 1024 * 1024),
+        )
+        active_upload_bytes = sum(int(item.get("size", 0) or 0) for item in _attachments.values())
+        if active_upload_bytes + len(raw) > max_total_upload_bytes:
+            return _json({"error": f"Active upload quota exceeded (max {max_total_upload_bytes} bytes)"}, 429)
 
         safe_name = "".join(ch for ch in filename if ch.isalnum() or ch in "._-")[:80] or "file"
         unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
@@ -598,7 +620,7 @@ def get_agentbridge_routes(
                     try:
                         item = await asyncio.wait_for(queue.get(), timeout=15.0)
                     except asyncio.TimeoutError:
-                        yield _line({"type": "ping"})
+                        yield _sse_line({"type": "ping"})
                         continue
                     if item is None:
                         break
@@ -662,21 +684,21 @@ def get_agentbridge_routes(
                     event = deepcopy(item)
                     if event.get("type") == "outbound" and isinstance(event.get("data"), dict):
                         event["data"] = _rewrite_agentbridge_media_urls(event["data"])
-                    yield _line(event)
+                    yield _sse_line(event)
                 while True:
                     if await request.is_disconnected():
                         break
                     try:
                         item = await asyncio.wait_for(queue.get(), timeout=30.0)
                     except asyncio.TimeoutError:
-                        yield _line({"type": "ping"})
+                        yield _sse_line({"type": "ping"})
                         continue
                     if item.get("type") == "closed":
                         break
                     event = deepcopy(item)
                     if event.get("type") == "outbound" and isinstance(event.get("data"), dict):
                         event["data"] = _rewrite_agentbridge_media_urls(event["data"])
-                    yield _line(event)
+                    yield _sse_line(event)
             finally:
                 channel.unsubscribe(identity["session_key"], queue)
 

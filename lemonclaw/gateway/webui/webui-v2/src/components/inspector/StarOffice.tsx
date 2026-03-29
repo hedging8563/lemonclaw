@@ -23,6 +23,15 @@ function statusTone(status: string) {
   return 'muted';
 }
 
+function resolveTaskRole(task: any) {
+  const roleHint = String(task?.role_hint || '').trim();
+  if (roleHint) return roleHint;
+  const assigned = String(task?.assigned_agent_id || task?.assigned_agent || '').trim().toLowerCase();
+  if (!assigned) return 'unassigned';
+  if (assigned === 'default' || assigned.includes('lead')) return 'lead';
+  return assigned;
+}
+
 export function StarOffice() {
   const workerAgents = agents.value || [];
   const isConductorBusy = isStreaming.value || plans.value.length > 0;
@@ -55,7 +64,7 @@ export function StarOffice() {
     .map((role) => ({
       id: role.id,
       label: role.label,
-      tasks: subtasks.filter((task) => task.role_hint === role.id || (role.id === 'lead' && task.role_hint == null)),
+      tasks: subtasks.filter((task) => resolveTaskRole(task) === role.id),
       agent: workerAgents.find((agent) => agent.role === role.id) || null,
     }))
     .filter((lane) => lane.tasks.length > 0 || lane.agent);
@@ -64,14 +73,14 @@ export function StarOffice() {
     : Array.from(
         new Map(
           subtasks
-            .map((task) => task.role_hint || 'unassigned')
+            .map((task) => resolveTaskRole(task))
             .filter(Boolean)
             .map((roleId) => [roleId, roleId]),
         ).values(),
       ).map((roleId) => ({
         id: roleId,
         label: roleId === 'unassigned' ? 'Unassigned' : roleId.replace(/_/g, ' '),
-        tasks: subtasks.filter((task) => (task.role_hint || 'unassigned') === roleId),
+        tasks: subtasks.filter((task) => resolveTaskRole(task) === roleId),
         agent: workerAgents.find((agent) => agent.role === roleId) || null,
       }));
   const roleLanes = derivedRoleLanes.slice(0, 4);

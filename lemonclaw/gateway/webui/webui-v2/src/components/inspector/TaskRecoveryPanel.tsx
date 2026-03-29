@@ -1516,17 +1516,21 @@ export function TaskRecoveryPanel() {
     if (!selectedDetail) return;
 
     const targetTaskId = retrievalFocusTaskId;
+    let resetTimer: number | null = null;
     const timer = window.setTimeout(() => {
       if (retrievalSectionRef.current) {
         retrievalSectionRef.current.open = true;
         retrievalSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      window.setTimeout(() => {
+      resetTimer = window.setTimeout(() => {
         setRetrievalFocusTaskId((current) => (current === targetTaskId ? null : current));
       }, 1400);
     }, 0);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      if (resetTimer != null) window.clearTimeout(resetTimer);
+    };
   }, [retrievalFocusTaskId, expandedTaskId, selectedTask, selectedDetail]);
 
   const openStructuredMemoryView = () => {

@@ -89,7 +89,7 @@ def get_weixin_pairing_routes(
             state = await asyncio.to_thread(
                 get_weixin_pairing_state,
                 config.channels.weixin,
-                start_if_needed=False,
+                start_if_needed=True,
                 wait_timeout=5.0,
             )
             if state.get("status") == "connected" or state.get("accounts"):

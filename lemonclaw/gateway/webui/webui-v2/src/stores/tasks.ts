@@ -361,15 +361,6 @@ export function summarizeTaskOperatorState(task: TaskRecord, detail?: TaskDetail
     };
   }
 
-  if (candidate?.safe_to_execute && !isResumeLive) {
-    return {
-      tone: 'accent',
-      titleKey: 'task_operator_summary_continue_ready_title',
-      bodyKey: 'task_operator_summary_continue_ready_body',
-      actionKey: 'task_action_run_safe_resume',
-    };
-  }
-
   if (stateKey === 'verifying' || stateKey === 'waiting') {
     return {
       tone: 'muted',
@@ -403,6 +394,15 @@ export function summarizeTaskOperatorState(task: TaskRecord, detail?: TaskDetail
       titleKey: 'task_operator_summary_completed_title',
       bodyKey: 'task_operator_summary_completed_body',
       actionKey: null,
+    };
+  }
+
+  if (candidate?.safe_to_execute && !isResumeLive) {
+    return {
+      tone: 'accent',
+      titleKey: 'task_operator_summary_continue_ready_title',
+      bodyKey: 'task_operator_summary_continue_ready_body',
+      actionKey: 'task_action_run_safe_resume',
     };
   }
 

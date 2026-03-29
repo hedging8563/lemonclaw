@@ -236,6 +236,8 @@ class AgentBridgeConfig(Base):
     enabled: bool = True
     upload_ttl_seconds: int = 60 * 60
     max_upload_bytes: int = 20 * 1024 * 1024
+    max_active_uploads: int = 128
+    max_total_upload_bytes: int = 200 * 1024 * 1024
     event_buffer_size: int = 100
 
 

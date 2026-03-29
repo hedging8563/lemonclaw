@@ -251,7 +251,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             name = str(getattr(card, "name", "") or "").strip()
             if not name:
                 continue
-            card_meta = dict(getattr(card, "meta", {}) or {})
+            raw_meta = getattr(card, "meta", {}) or {}
+            card_meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
             card_type = str(card_meta.get("type", "") or "").strip()
             summary = ContextBuilder._compact_summary(str(getattr(card, "body", "") or ""), limit=160)
             keywords = [
@@ -528,7 +529,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "card_hits": [
                 {
                     "name": str(card.name or ""),
-                    "type": str(card.meta.get("type", "") or ""),
+                    "type": str((((getattr(card, "meta", {}) or {})) if isinstance(getattr(card, "meta", {}) or {}, dict) else {}).get("type", "") or ""),
                     "source": str((trace.get("card_sources") or {}).get(card.name) or ""),
                     "preview": str(card.body or "").strip()[:160],
                 }

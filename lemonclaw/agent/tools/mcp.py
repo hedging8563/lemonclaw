@@ -82,8 +82,37 @@ def _normalize_mcp_schema(
             warnings.extend(branch_warnings)
         merged, merge_warnings = _merge_object_schema_branches(branches)
         if merged is not None:
-            normalized = {**normalized, **merged}
+            parent_props = normalized.get("properties", {})
+            parent_required = normalized.get("required", [])
+            parent_additional = normalized.get("additionalProperties", True)
+            parent_type = normalized.get("type")
             normalized.pop("allOf", None)
+            normalized["properties"] = {
+                **(parent_props if isinstance(parent_props, dict) else {}),
+                **(merged.get("properties", {}) if isinstance(merged.get("properties"), dict) else {}),
+            }
+            merged_required = list(merged.get("required", [])) if isinstance(merged.get("required"), list) else []
+            combined_required = [
+                *[str(item) for item in parent_required if item],
+                *[str(item) for item in merged_required if item],
+            ]
+            if combined_required:
+                normalized["required"] = sorted(dict.fromkeys(combined_required))
+            elif "required" in normalized:
+                normalized.pop("required", None)
+            if parent_type is None:
+                normalized["type"] = merged.get("type", "object")
+            else:
+                normalized["type"] = parent_type
+            merged_additional = merged.get("additionalProperties", True)
+            if parent_additional is False:
+                normalized["additionalProperties"] = False
+            elif isinstance(parent_additional, dict):
+                normalized["additionalProperties"] = parent_additional
+            elif merged_additional is not True:
+                normalized["additionalProperties"] = merged_additional
+            else:
+                normalized.pop("additionalProperties", None)
             warnings.extend(merge_warnings)
         else:
             normalized["allOf"] = branches

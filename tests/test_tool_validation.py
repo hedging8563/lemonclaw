@@ -62,6 +62,36 @@ class ExplodingTool(Tool):
         raise RuntimeError("boom")
 
 
+class CombinedSchemaTool(Tool):
+    @property
+    def name(self) -> str:
+        return "combined"
+
+    @property
+    def description(self) -> str:
+        return "combined schema tool"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "allOf": [
+                        {"type": "number"},
+                        {"minimum": 3},
+                    ],
+                },
+                "union": {
+                    "type": ["string", "number"],
+                },
+            },
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
 def test_validate_params_missing_required() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi"})
@@ -101,6 +131,18 @@ def test_validate_params_ignores_unknown_fields() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi", "count": 2, "extra": "x"})
     assert errors == []
+
+
+def test_validate_params_allof_keeps_outer_rules() -> None:
+    tool = CombinedSchemaTool()
+    errors = tool.validate_params({"value": 1})
+    assert any("value must be >= 3" in e for e in errors)
+
+
+def test_validate_params_multi_type_accepts_matching_branch() -> None:
+    tool = CombinedSchemaTool()
+    assert tool.validate_params({"union": 3}) == []
+    assert tool.validate_params({"union": "ok"}) == []
 
 
 async def test_registry_returns_validation_error() -> None:
