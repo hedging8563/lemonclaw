@@ -519,6 +519,46 @@ async def test_mcp_wrapper_normalizes_allof_object_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_wrapper_appends_compatibility_diagnostics_to_description() -> None:
+    from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
+
+    class Session:
+        async def call_tool(self, name, arguments=None):
+            return SimpleNamespace(content=[])
+
+    async def _noop():
+        return None
+
+    schema = {
+        "allOf": [
+            {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+            {"type": "array"},
+        ]
+    }
+    wrapper = MCPToolWrapper(
+        _MCPBinding(session=Session(), reconnect=_noop),
+        "filesystem",
+        SimpleNamespace(name="inspect", description="Inspect", inputSchema=schema),
+        tool_timeout=1,
+    )
+
+    assert wrapper.description.startswith("Inspect")
+    assert "Compatibility diagnostics:" in wrapper.description
+    assert "Compatibility section:" in wrapper.description
+    assert "- status=degraded" in wrapper.description
+    assert "- warning_count=2" in wrapper.description
+    assert "Compatibility warnings:" in wrapper.description
+    assert "- warning=allOf contains a non-object branch" in wrapper.description
+    assert "- warning=input schema is not an object schema; falling back to empty object schema" in wrapper.description
+    assert wrapper.compatibility_status == "degraded"
+    assert wrapper.compatibility_profile == "mcp_schema_normalization"
+    assert wrapper.compatibility_warnings == (
+        "allOf contains a non-object branch",
+        "input schema is not an object schema; falling back to empty object schema",
+    )
+
+
+@pytest.mark.asyncio
 async def test_mcp_wrapper_accepts_nullable_oneof_string_schema() -> None:
     from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
 

@@ -33,6 +33,8 @@ function formatCandidateReason(candidate: Record<string, any> | null | undefined
   const replayableFailedCount = Number(candidate.replayable_failed_count || 0);
   const nonReplayableFailedCount = Number(candidate.non_replayable_failed_count || 0);
   switch (action) {
+    case 'retry_resume_dispatch':
+      return t('task_state_detail_resume_dispatch_failed');
     case 'retry_outbox':
       return t('task_candidate_reason_retry_outbox').replace('{count}', String(failedOutboxCount));
     case 'replay_failed_steps':
@@ -67,7 +69,7 @@ function formatResumeRoute(task: TaskRecord): string {
   const channel = ctx.channel || task.channel || '—';
   const chatId = ctx.chat_id || '—';
   const sessionKey = ctx.session_key || task.session_key || '—';
-  return `${channel}:${chatId} · ${sessionKey}`;
+  return `channel ${channel} · chat ${chatId} · session ${sessionKey}`;
 }
 
 function workflowInstruction(task: TaskRecord): string {

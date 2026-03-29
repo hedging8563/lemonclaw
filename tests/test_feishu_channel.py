@@ -70,13 +70,20 @@ async def test_feishu_on_message_includes_reply_context(feishu_channel: FeishuCh
     kwargs = feishu_channel._handle_message.await_args.kwargs
     assert kwargs["content"] == "[Reply to: 上一条 Feishu 消息]\n现在继续"
     assert kwargs["metadata"]["parent_id"] == "om_parent"
+    assert kwargs["session_key"] == "feishu:ou_user_1:om_parent"
 
 
 @pytest.mark.asyncio
 async def test_feishu_on_message_records_stream_trigger(tmp_path) -> None:
     trigger_runtime = TriggerRuntime(tmp_path)
     channel = FeishuChannel(
-        FeishuConfig(enabled=True, app_id="app", app_secret="secret"),
+        FeishuConfig(
+            enabled=True,
+            app_id="app",
+            app_secret="secret",
+            group_policy="open",
+            group_require_mention=False,
+        ),
         MessageBus(),
         trigger_runtime=trigger_runtime,
     )
@@ -96,6 +103,44 @@ async def test_feishu_on_message_records_stream_trigger(tmp_path) -> None:
     assert record["source"] == "stream.feishu"
     assert record["kind"] == "im.message.receive_v1.text"
     assert record["chat_id"] == "ou_user_1"
+    assert record["session_key"] == "feishu:ou_user_1"
+
+
+@pytest.mark.asyncio
+async def test_feishu_on_group_message_uses_root_id_for_session_key(tmp_path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    channel = FeishuChannel(
+        FeishuConfig(
+            enabled=True,
+            app_id="app",
+            app_secret="secret",
+            group_policy="open",
+            group_require_mention=False,
+        ),
+        MessageBus(),
+        trigger_runtime=trigger_runtime,
+    )
+    data = _feishu_event(
+        message_id="om_thread",
+        text="继续处理",
+        chat_type="group",
+        parent_id="om_parent",
+        root_id="om_root",
+    )
+    channel._add_reaction = AsyncMock()
+    channel._handle_message = AsyncMock()
+
+    await channel._on_message(data)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["chat_id"] == "oc_test123"
+    assert kwargs["session_key"] == "feishu:oc_test123:om_root"
+
+    trigger_id = kwargs["metadata"]["_trigger_id"]
+    record = trigger_runtime.read_trigger(trigger_id)
+    assert record is not None
+    assert record["session_key"] == "feishu:oc_test123:om_root"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-from lemonclaw.channels.session_keys import build_channel_session_key
+from lemonclaw.channels.session_keys import build_channel_session_key, build_system_session_key
 
 
 def test_build_channel_session_key_without_optional_dimensions() -> None:
@@ -28,3 +28,7 @@ def test_build_channel_session_key_uses_topic_when_thread_missing() -> None:
 
 def test_build_channel_session_key_keeps_zero_thread_dimension() -> None:
     assert build_channel_session_key("telegram", "12345", thread_id=0) == "telegram:12345:0"
+
+
+def test_build_system_session_key_is_explicit() -> None:
+    assert build_system_session_key("heartbeat") == "system:heartbeat"

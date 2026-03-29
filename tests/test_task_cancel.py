@@ -28,6 +28,25 @@ def _make_loop():
     return loop, bus
 
 
+class TestRuntimeCorrectionClassification:
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ("Please, stop.", "interrupt"),
+            ("Would you please continue?", "continue"),
+            ("Only emit the patch, don't commit.", "constraint_patch"),
+            ("请停止一下。", "interrupt"),
+            ("麻烦继续执行。", "continue"),
+            ("只改这一个文件，不要提交。", "constraint_patch"),
+            ("改成英文版本。", "correction"),
+        ],
+    )
+    def test_classify_runtime_correction(self, content, expected):
+        from lemonclaw.agent.loop import AgentLoop
+
+        assert AgentLoop._classify_runtime_correction(content) == expected
+
+
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
@@ -309,6 +328,57 @@ class TestSteeringLoop:
         assert runtime_correction["kind"]
         assert runtime_correction["message_preview"]
         assert first_task_id in runtime_correction["supersedes_task_ids"]
+        assert runtime_correction["interrupted_task_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_non_command_follow_up_interrupts_active_task_and_marks_constraint_patch(self, make_agent_loop):
+        """A constraint patch follow-up should persist its runtime-correction kind."""
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = make_agent_loop()
+
+        first_started = asyncio.Event()
+        first_cancelled = asyncio.Event()
+        second_started = asyncio.Event()
+
+        async def fake_process(msg, **kwargs):
+            if msg.content == "draft answer":
+                first_started.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    first_cancelled.set()
+                    raise
+            if msg.content == "please, only patch the text":
+                second_started.set()
+                return OutboundMessage(channel="test", chat_id="c1", content="patched answer")
+            raise AssertionError(f"unexpected content: {msg.content!r}")
+
+        loop._process_message = fake_process
+
+        first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
+        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="please, only patch the text")
+
+        first_task = loop._spawn_dispatch_task(first_msg)
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        second_task = loop._spawn_dispatch_task(second_msg)
+
+        await asyncio.wait_for(first_cancelled.wait(), timeout=1.0)
+        await asyncio.wait_for(second_started.wait(), timeout=1.0)
+
+        outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert outbound.content == "patched answer"
+
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1.0)
+
+        second_task_id = str(second_msg.metadata["_task_id"])
+        new_task = loop.ledger.read_task(second_task_id)
+
+        assert new_task is not None
+        runtime_correction = new_task["metadata"]["runtime_correction"]
+        assert runtime_correction["kind"] == "constraint_patch"
+        assert runtime_correction["message_preview"] == "please, only patch the text"
         assert runtime_correction["interrupted_task_count"] == 1
 
 

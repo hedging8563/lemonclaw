@@ -130,7 +130,7 @@ LemonClaw now also repairs legacy WebUI task/tool-prelude history on startup so 
 Hosted control-plane surfaces now also expose the most important runtime-adjacent actions without turning Dashboard/Admin back into the main work surface:
 
 - instance cards can show DICloak runtime status and Weixin connection state
-- hosted Dashboard instance cards support Weixin QR connect and an "other channels" docs entry
+- hosted Dashboard instance cards support Weixin QR connect, AgentBridge runtime credentials, and an "other channels" docs entry
 - `/admin/claw` includes a unified debug drawer for instance summary, runtime state, Weixin/DICloak, and raw container logs
 
 Recent runtime fixes worth knowing:
@@ -186,6 +186,15 @@ LemonClaw now treats **single-instance swarm** as the next collaboration layer a
 - conductor can attach swarm templates and role hints to subtasks
 - WebUI surfaces can show active team / goal / role hints
 - the current direction is still one instance = one work studio, with leader + specialist workers sharing the same session / ledger / recovery / knowledge substrate
+
+## AgentBridge Runtime Truth
+
+Hosted Dashboard only exposes an entry into the AgentBridge runtime, not a second control plane.
+
+- AgentBridge uses a runtime-only bearer token, not an organization API key
+- the canonical session key template is `agentbridge:<client_id>:<workspace_id>:<thread_id>`
+- the primary interactive route is `POST /api/agentbridge/chat/stream`
+- uploads, messages, events, media, and stop continue to share the same runtime session / ledger / recovery semantics as the main `AgentLoop`
 
 ## Architecture
 
@@ -267,7 +276,7 @@ Operational notes from the current LemonData fleet workflow:
 
 - `--deploy-all` still prompts for confirmation unless you set `FORCE=1`
 - if build/publish already succeeded and rollout was interrupted, you can resume safely by reusing the published digest instead of rebuilding
-- current canary-first practice is to roll a single instance (for example `test3` or a targeted problem instance) before a fleet-wide reconcile
+- current targeted-rollout practice is to roll one designated production instance before a fleet-wide reconcile; `test3` is now treated as a formal production instance, not a canary-only environment
 
 ## Repository Layout
 

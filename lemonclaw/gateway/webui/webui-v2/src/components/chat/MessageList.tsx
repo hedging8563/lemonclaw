@@ -353,8 +353,8 @@ export function MessageList() {
         const candidate = detail?.candidate;
         const state = task.display_state;
         const operatorSummary = summarizeTaskOperatorState(task, detail);
-        const summaryTitle = translateOrFallback(operatorSummary.titleKey, t('task_operator_summary_title'));
-        const summaryBody = translateOrFallback(operatorSummary.bodyKey, t('task_intervention_desc'));
+        const summaryTitle = translateOrFallback(operatorSummary.titleKey, t('task_operator_summary_attention_title'));
+        const summaryBody = translateOrFallback(operatorSummary.bodyKey, t('task_operator_summary_attention_body'));
         const nextMoveLabel = operatorSummary.actionKey
           ? translateOrFallback(operatorSummary.actionKey, t('task_action_run_safe_resume'))
           : formatTaskDisplayState(state);

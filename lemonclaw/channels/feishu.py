@@ -15,6 +15,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.config.schema import FeishuConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
@@ -919,13 +920,19 @@ class FeishuChannel(BaseChannel):
 
             # Forward to message bus
             reply_to = chat_id if is_group else sender_id
+            thread_scope = getattr(message, "root_id", None) or getattr(message, "parent_id", None)
+            session_key = (
+                build_channel_session_key("feishu", reply_to, thread_id=thread_scope)
+                if thread_scope
+                else build_channel_session_key("feishu", reply_to)
+            )
             trigger_metadata: dict[str, Any] = {}
             if self._trigger_runtime:
                 trigger = self._trigger_runtime.record_trigger(
                     source="stream.feishu",
                     kind=f"im.message.receive_v1.{msg_type or 'unknown'}",
                     payload_summary=content[:200] if content else f"[{msg_type}]",
-                    session_key=f"{self.name}:{reply_to}",
+                    session_key=session_key,
                     channel=self.name,
                     chat_id=reply_to,
                     metadata={
@@ -950,6 +957,7 @@ class FeishuChannel(BaseChannel):
                     "parent_id": getattr(message, "parent_id", None),
                     "root_id": getattr(message, "root_id", None),
                 },
+                session_key=session_key,
                 pairing_policy=self.config.dm_policy if not is_group else None,
             )
 

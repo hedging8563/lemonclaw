@@ -47,3 +47,9 @@ def build_agentbridge_session_key(
         "agentbridge",
         f"{client_id}:{workspace_id}:{thread_id}",
     )
+
+
+def build_system_session_key(name: str) -> str:
+    """Build the canonical session key for system-triggered work."""
+
+    return build_channel_session_key("system", str(name))

@@ -491,18 +491,37 @@ def get_agentbridge_routes(
                               tool_result: bool = False) -> None:
             if thinking:
                 event_type = "thinking"
+                progress_kind = "thinking"
             elif tool_hint:
                 event_type = "tool_hint"
+                progress_kind = "tool_hint"
             elif tool_start:
                 event_type = "tool_start"
+                progress_kind = "tool_start"
             elif tool_result:
                 event_type = "tool_result"
+                progress_kind = "tool_result"
             else:
                 event_type = "content"
-            await queue.put(_sse_line({"type": event_type, "data": content, "session_key": identity["session_key"]}))
+                progress_kind = "content"
+            await queue.put(
+                _sse_line(
+                    {
+                        "type": event_type,
+                        "data": content,
+                        "session_key": identity["session_key"],
+                        "progress_kind": progress_kind,
+                    }
+                )
+            )
 
         async def on_chunk(content: str, *, first: bool = False) -> None:
-            event: dict[str, Any] = {"type": "content", "data": content, "session_key": identity["session_key"]}
+            event: dict[str, Any] = {
+                "type": "content",
+                "data": content,
+                "session_key": identity["session_key"],
+                "progress_kind": "chunk",
+            }
             if first:
                 event["first"] = True
             await queue.put(_sse_line(event))

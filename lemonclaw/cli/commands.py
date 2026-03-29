@@ -539,6 +539,7 @@ def gateway(
     from lemonclaw.bus.queue import MessageBus
     from lemonclaw.agent.loop import AgentLoop
     from lemonclaw.channels.manager import ChannelManager
+    from lemonclaw.channels.session_keys import build_system_session_key
     from lemonclaw.session.manager import SessionManager
     from lemonclaw.cron.service import CronService
     from lemonclaw.cron.types import CronJob
@@ -702,7 +703,7 @@ def gateway(
             source="heartbeat",
             kind="heartbeat.run",
             payload_summary=tasks[:500],
-            session_key="heartbeat",
+            session_key=build_system_session_key("heartbeat"),
             channel=channel,
             chat_id=chat_id,
         )
@@ -712,7 +713,7 @@ def gateway(
 
         return await agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=build_system_session_key("heartbeat"),
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,

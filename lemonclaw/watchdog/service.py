@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from lemonclaw.channels.session_keys import build_system_session_key
 
 if TYPE_CHECKING:
     from lemonclaw.channels.manager import ChannelManager
@@ -423,6 +424,7 @@ class WatchdogService:
         """Soft recovery: clear stuck sessions, log warning."""
         self._state.total_soft_recoveries += 1
         names = ", ".join(c.name for c in checks)
+        watchdog_session_key = build_system_session_key("watchdog")
         logger.warning(f"watchdog: soft recovery triggered ({names})")
         self._record_alert_triggers(checks, phase="soft")
         trigger = None
@@ -431,7 +433,7 @@ class WatchdogService:
                 source="watchdog",
                 kind="watchdog.soft_recovery",
                 payload_summary=names[:500],
-                session_key="watchdog",
+                session_key=watchdog_session_key,
                 channel="system",
                 chat_id="watchdog",
                 metadata={"checks": [c.name for c in checks]},
@@ -494,6 +496,7 @@ class WatchdogService:
         self._state.total_hard_restarts += 1
         self._state.last_hard_restart_time = now
         names = ", ".join(c.name for c in checks)
+        watchdog_session_key = build_system_session_key("watchdog")
         logger.critical(f"watchdog: HARD RESTART — {self._state.consecutive_failures} consecutive failures ({names})")
         self._record_alert_triggers(checks, phase="hard")
         trigger = None
@@ -502,7 +505,7 @@ class WatchdogService:
                 source="watchdog",
                 kind="watchdog.hard_recovery",
                 payload_summary=names[:500],
-                session_key="watchdog",
+                session_key=watchdog_session_key,
                 channel="system",
                 chat_id="watchdog",
                 metadata={"checks": [c.name for c in checks]},
@@ -553,12 +556,13 @@ class WatchdogService:
     def _record_alert_triggers(self, checks: list[HealthCheck], *, phase: str) -> None:
         if not self._trigger_runtime:
             return
+        watchdog_session_key = build_system_session_key("watchdog")
         for check in checks:
             self._trigger_runtime.record_trigger(
                 source="alert.watchdog",
                 kind=f"{phase}.{check.name}",
                 payload_summary=str(check.detail or check.name)[:500],
-                session_key="watchdog",
+                session_key=watchdog_session_key,
                 channel="system",
                 chat_id="watchdog",
                 status="raised",

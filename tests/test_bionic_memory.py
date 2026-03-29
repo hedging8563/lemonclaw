@@ -1,6 +1,7 @@
 """Tests for bionic memory system — P3-D Step 1."""
 
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -477,6 +478,80 @@ async def test_context_builder_resolve_retrieval_context_includes_knowledge_hits
     assert meta["knowledge_hits"][0]["source"] == "manual://deploy-notes"
     assert "knowledge" in meta["hit_sources"]
     assert meta["structured"]["retrieval_objects"]
+
+
+@pytest.mark.asyncio
+async def test_context_builder_structured_memory_is_normalized(tmp_path):
+    from lemonclaw.agent.context import ContextBuilder
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "memory").mkdir()
+
+    ctx = ContextBuilder(workspace)
+    ctx.memory.today.append("Initial sync", ["Collected retrieval signals", "Collected retrieval signals"])
+    ctx.memory.today.append("Latest pass", ["Removed duplicate memory entries", "Added knowledge summary"])
+
+    memory_ctx, rules_ctx, meta = await ctx.resolve_retrieval_context("no matching retrieval keywords here")
+    assert memory_ctx == ""
+    assert rules_ctx == ""
+    assert meta["structured"]["session_summary"] == (
+        "Latest pass\nRemoved duplicate memory entries\nAdded knowledge summary"
+    )
+
+    structured = ctx._build_structured_retrieval_objects(
+        cards=[
+            SimpleNamespace(name="beta", meta={"type": "tech"}, body="# Beta\nBeta detail\n", keywords=["python", "python"]),
+            SimpleNamespace(name="alpha", meta={"type": "person"}, body="# Alpha\nAlpha detail\n- Alpha detail\n", keywords=["owner"]),
+            SimpleNamespace(name="alpha", meta={"type": "person"}, body="# Alpha\nAlpha detail\n", keywords=["owner"]),
+        ],
+        rules=[
+            {"trigger": "zeta", "lesson": "Prefer stable outputs", "action": "Sort before emit", "source": "memory.rules"},
+            {"trigger": "alpha", "lesson": "Keep it compact", "action": "Dedupe duplicates", "source": "manual"},
+            {"trigger": "alpha", "lesson": "Keep it compact", "action": "Dedupe duplicates", "source": "manual"},
+        ],
+        knowledge_hits=[
+            {
+                "doc_id": "kd_2",
+                "title": "Zeta Notes",
+                "source": "manual://zeta",
+                "snippet": "  Zeta reference\n- Trimmed for display  ",
+                "result_type": "chunk",
+                "page_label": "p.2",
+            },
+            {
+                "doc_id": "kd_1",
+                "title": "Alpha Notes",
+                "source": "manual://alpha",
+                "snippet": "Alpha reference\nAlpha detail",
+                "result_type": "fact",
+                "page_label": "p.1",
+            },
+            {
+                "doc_id": "kd_1",
+                "title": "Alpha Notes",
+                "source": "manual://alpha",
+                "snippet": "Alpha reference\nAlpha detail",
+                "result_type": "fact",
+                "page_label": "p.1",
+            },
+        ],
+    )
+
+    assert [slot["name"] for slot in structured["fact_slots"]] == ["alpha", "beta"]
+    assert structured["fact_slots"][0]["summary"] == "Alpha detail"
+    assert structured["fact_slots"][0]["keywords"] == ["owner"]
+    assert [obj["kind"] for obj in structured["retrieval_objects"]] == [
+        "entity_card",
+        "entity_card",
+        "procedural_rule",
+        "procedural_rule",
+        "knowledge_hit",
+        "knowledge_hit",
+    ]
+    assert structured["retrieval_objects"][0]["summary"] == "Alpha detail"
+    assert structured["retrieval_objects"][4]["summary"] == "Alpha reference Alpha detail"
+    assert structured["retrieval_objects"][4]["page_label"] == "p.1"
 
 
 @pytest.mark.asyncio

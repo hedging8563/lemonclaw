@@ -12,6 +12,7 @@ from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
 from lemonclaw.ledger.runtime import TaskLedger
 from lemonclaw.session.manager import SessionManager
+from lemonclaw.channels.session_keys import build_system_session_key
 from lemonclaw.triggers import build_trigger_metadata
 from lemonclaw.triggers import TriggerRuntime
 
@@ -96,7 +97,7 @@ def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
         source="heartbeat",
         kind="heartbeat.run",
         payload_summary="check tasks",
-        session_key="heartbeat",
+        session_key=build_system_session_key("heartbeat"),
         channel="cli",
         chat_id="direct",
     )
@@ -120,6 +121,7 @@ def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
     detail_resp = client.get(f"/api/triggers/{trigger['trigger_id']}")
     assert detail_resp.status_code == 200
     assert detail_resp.json()["trigger"]["kind"] == "heartbeat.run"
+    assert detail_resp.json()["trigger"]["session_key"] == "system:heartbeat"
 
 
 def test_trigger_bundle_includes_linked_task_bundle(tmp_path: Path) -> None:

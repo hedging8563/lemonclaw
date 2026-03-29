@@ -54,6 +54,29 @@ class TestAgentBridgeRoutes:
         assert payload["session_key"] == "agentbridge:codex:default:demo"
         assert any(msg.get("role") == "assistant" and msg.get("content") for msg in payload["messages"])
 
+    def test_chat_stream_surfaces_progress_kind(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+
+        async def _fake_process_direct(*args, **kwargs):
+            on_progress = kwargs["on_progress"]
+            on_chunk = kwargs["on_chunk"]
+            await on_progress("tool starts", tool_start=True)
+            await on_chunk("chunk-1", first=True)
+            return "done"
+
+        loop.process_direct = _fake_process_direct
+
+        headers = {"Authorization": "Bearer secret-token"}
+        resp = client.post(
+            "/api/agentbridge/chat/stream",
+            headers=headers,
+            json={"client_id": "codex", "thread_id": "progress-demo", "message": "hello"},
+        )
+
+        assert resp.status_code == 200
+        assert '"progress_kind": "tool_start"' in resp.text or '"progress_kind":"tool_start"' in resp.text
+        assert '"progress_kind": "chunk"' in resp.text or '"progress_kind":"chunk"' in resp.text
+
     def test_chat_rejects_cross_provider_model_switch(self, make_agent_loop):
         loop, _manager, client = _make_agentbridge_app(make_agent_loop)
         session = loop.sessions.get_or_create("agentbridge:codex:default:demo")

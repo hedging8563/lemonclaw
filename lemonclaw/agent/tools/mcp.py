@@ -126,6 +126,19 @@ def _normalize_mcp_schema(
     return normalized, warnings
 
 
+def _format_schema_compatibility_notes(warnings: list[str]) -> str:
+    """Render schema compatibility warnings in a stable, agent-readable format."""
+    unique_warnings = list(dict.fromkeys(warnings))
+    if not unique_warnings:
+        return ""
+    lines = ["", "Compatibility diagnostics:", "Compatibility section:"]
+    lines.append("- status=degraded")
+    lines.append(f"- warning_count={len(unique_warnings)}")
+    lines.append("Compatibility warnings:")
+    lines.extend(f"- warning={warning}" for warning in unique_warnings)
+    return "\n".join(lines)
+
+
 @dataclass
 class _MCPBinding:
     session: Any
@@ -145,10 +158,10 @@ class MCPToolWrapper(Tool):
             tool_def.inputSchema or {"type": "object", "properties": {}},
             require_object=True,
         )
-        self._schema_warnings = warnings
-        if warnings:
-            suffix = "; ".join(sorted(dict.fromkeys(warnings)))
-            self._description = f"{self._description}\n\nSchema compatibility notes: {suffix}"
+        self._schema_warnings = tuple(dict.fromkeys(warnings))
+        self._compatibility_status = "compatible" if not self._schema_warnings else "degraded"
+        self._compatibility_profile = "mcp_schema_normalization"
+        self._description = f"{self._description}{_format_schema_compatibility_notes(warnings)}"
         self._tool_timeout = tool_timeout
 
     @property
@@ -162,6 +175,18 @@ class MCPToolWrapper(Tool):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
+
+    @property
+    def compatibility_status(self) -> str:
+        return self._compatibility_status
+
+    @property
+    def compatibility_profile(self) -> str:
+        return self._compatibility_profile
+
+    @property
+    def compatibility_warnings(self) -> tuple[str, ...]:
+        return self._schema_warnings
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types

@@ -1,3 +1,4 @@
+import pytest
 from starlette.testclient import TestClient
 
 from lemonclaw.bus.queue import MessageBus
@@ -160,6 +161,20 @@ def test_session_ws_streams_incremental_messages(tmp_path):
         assert payload['session_key'] == 'telegram:123'
         assert len(payload['messages']) == 1
         assert payload['messages'][0]['content'] == 'second'
+
+
+def test_session_ws_rejects_system_sessions(tmp_path):
+    from lemonclaw.gateway.server import create_app
+
+    mgr = SessionManager(tmp_path)
+
+    from types import SimpleNamespace
+    app = create_app(auth_token=None, session_manager=mgr, agent_loop=SimpleNamespace(workspace=tmp_path), webui_enabled=True)
+    with TestClient(app).websocket_connect('/ws/session?session_key=system:heartbeat&known_count=0') as ws:
+        message = ws.receive()
+        assert message["type"] == "websocket.close"
+        assert message["code"] == 4403
+        assert message["reason"] == "access denied"
 
 
 

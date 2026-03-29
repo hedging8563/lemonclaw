@@ -13,6 +13,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.capabilities import ALL_CHANNEL_NAMES, get_channel_capability
 from lemonclaw.channels.delivery_context import apply_delivery_route, resolve_delivery_session_key
+from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.config.schema import Config
 from lemonclaw.triggers import TriggerRuntime
 
@@ -484,10 +485,13 @@ class ChannelManager:
 
     @staticmethod
     def _activity_session_key(msg: OutboundMessage) -> str:
-        thread_id = (msg.metadata or {}).get("message_thread_id")
-        if thread_id:
-            return f"{msg.channel}:{msg.chat_id}:{thread_id}"
-        return f"{msg.channel}:{msg.chat_id}"
+        metadata = dict(msg.metadata or {})
+        return build_channel_session_key(
+            msg.channel,
+            str(msg.chat_id),
+            thread_id=metadata.get("message_thread_id"),
+            topic_id=metadata.get("topic_id") or metadata.get("root_id") or metadata.get("parent_id"),
+        )
 
     @staticmethod
     def _is_internal_message(msg: OutboundMessage) -> bool:
@@ -559,6 +563,8 @@ class ChannelManager:
                         "content": msg.content,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                    if meta.get("_progress_kind"):
+                        event["progress_kind"] = str(meta.get("_progress_kind"))
                     if meta.get("_chunk_first"):
                         event["first"] = True
                     await self.activity_bus.broadcast(event)

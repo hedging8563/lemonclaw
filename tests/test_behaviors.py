@@ -1206,6 +1206,31 @@ class TestWebUIRoutes:
         assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
 
     @pytest.mark.asyncio
+    async def test_chat_stream_surfaces_progress_kind(self, make_agent_loop):
+        from starlette.testclient import TestClient
+
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+
+        async def _fake_process_direct(*args, **kwargs):
+            on_progress = kwargs["on_progress"]
+            on_chunk = kwargs["on_chunk"]
+            await on_progress("tool starts", tool_start=True)
+            await on_chunk("chunk-1", first=True)
+            return "done"
+
+        loop.process_direct = _fake_process_direct
+
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post("/api/chat/stream", json={"message": "hello"})
+        assert resp.status_code == 200
+        assert '"progress_kind": "tool_start"' in resp.text or '"progress_kind":"tool_start"' in resp.text
+        assert '"progress_kind": "chunk"' in resp.text or '"progress_kind":"chunk"' in resp.text
+
+    @pytest.mark.asyncio
     async def test_chat_stream_cross_provider_switch_creates_new_webui_session(self, make_agent_loop):
         from starlette.testclient import TestClient
 

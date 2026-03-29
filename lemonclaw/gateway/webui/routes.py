@@ -662,19 +662,24 @@ def get_webui_routes(
                               tool_result: bool = False) -> None:
             if thinking:
                 etype = "thinking"
+                progress_kind = "thinking"
             elif tool_hint:
                 etype = "tool_hint"
+                progress_kind = "tool_hint"
             elif tool_start:
                 etype = "tool_start"
+                progress_kind = "tool_start"
             elif tool_result:
                 etype = "tool_result"
+                progress_kind = "tool_result"
             else:
                 etype = "content"
-            event = {"type": etype, "data": content}
+                progress_kind = "content"
+            event = {"type": etype, "data": content, "progress_kind": progress_kind}
             await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
         async def on_chunk(content: str, *, first: bool = False) -> None:
-            event = {"type": "content", "data": content}
+            event = {"type": "content", "data": content, "progress_kind": "chunk"}
             await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
 
         async def run_agent() -> None:
@@ -952,7 +957,7 @@ def get_webui_routes(
             await websocket.accept()
             await websocket.close(code=4400, reason="session_key is required")
             return
-        if session_key.startswith(("api:", "cron:")):
+        if session_key.startswith(("api:", "cron:", "system:")):
             await websocket.accept()
             await websocket.close(code=4403, reason="access denied")
             return

@@ -34,11 +34,12 @@ def test_memory_create_entity_roundtrip(tmp_path: Path) -> None:
     assert entity["name"] == "research-notes"
     assert entity["type"] == "research"
     assert "retrieval" in entity["keywords"]
+    assert "Knowledge ingestion needs a product surface." in entity["body"]
 
     memory_resp = client.get("/api/memory")
     assert memory_resp.status_code == 200
     data = memory_resp.json()
-    assert any(item["name"] == "research-notes" for item in data["entities"])
+    assert any(item["name"] == "research-notes" and "product surface" in item["body"] for item in data["entities"])
 
 
 def test_memory_create_entity_rejects_invalid_name(tmp_path: Path) -> None:

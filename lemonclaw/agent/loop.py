@@ -604,6 +604,27 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _progress_kind(
+        *,
+        tool_hint: bool = False,
+        thinking: bool = False,
+        tool_start: bool = False,
+        tool_result: bool = False,
+        chunk: bool = False,
+    ) -> str:
+        if thinking:
+            return "thinking"
+        if tool_hint:
+            return "tool_hint"
+        if tool_start:
+            return "tool_start"
+        if tool_result:
+            return "tool_result"
+        if chunk:
+            return "chunk"
+        return "content"
+
     def _persist_inbound_media(self, session_key: str, content: str, media: list[str] | None) -> tuple[str, list[str]]:
         """Copy inbound attachments into the session-native attachment directory."""
         persisted_media, path_map = self.sessions.persist_attachments(session_key, media)
@@ -649,10 +670,47 @@ class AgentLoop:
         return bool(stripped.startswith("/") and not stripped[1:2].isspace())
 
     @staticmethod
-    def _classify_runtime_correction(content: str) -> str:
+    def _normalize_runtime_correction_content(content: str) -> tuple[str, str]:
         stripped = content.strip()
         lowered = stripped.lower()
-        if not stripped:
+        normalized = re.sub(r"\s+", " ", lowered)
+        polite_prefixes = (
+            "would you please",
+            "could you please",
+            "can you please",
+            "can we please",
+            "please",
+            "pls",
+            "kindly",
+            "could you",
+            "would you",
+            "can you",
+            "can we",
+            "麻烦",
+            "请",
+            "帮我",
+            "帮忙",
+            "能否",
+            "可以",
+        )
+        for _ in range(3):
+            candidate = normalized
+            for prefix in polite_prefixes:
+                candidate = re.sub(
+                    rf"^(?:{re.escape(prefix)})[\s,.;:!?，。！？、\-—]*",
+                    "",
+                    candidate,
+                )
+            candidate = candidate.lstrip(" \t\r\n,.;:!?，。！？、-—")
+            if candidate == normalized:
+                break
+            normalized = candidate
+        return normalized, lowered
+
+    @staticmethod
+    def _classify_runtime_correction(content: str) -> str:
+        normalized, lowered = AgentLoop._normalize_runtime_correction_content(content)
+        if not normalized:
             return "correction"
 
         interrupt_prefixes = (
@@ -665,11 +723,11 @@ class AgentLoop:
             "取消",
             "先停",
         )
-        if any(lowered.startswith(prefix) for prefix in interrupt_prefixes):
+        if any(normalized.startswith(prefix) for prefix in interrupt_prefixes):
             return "interrupt"
 
         continue_prefixes = ("continue", "go on", "carry on", "继续", "接着")
-        if any(lowered.startswith(prefix) for prefix in continue_prefixes):
+        if any(normalized.startswith(prefix) for prefix in continue_prefixes):
             return "continue"
 
         constraint_markers = (
@@ -691,7 +749,7 @@ class AgentLoop:
             "skip ",
             "limit ",
         )
-        if any(marker in lowered or marker in stripped for marker in constraint_markers):
+        if any(marker in lowered or marker in normalized for marker in constraint_markers):
             return "constraint_patch"
 
         correction_markers = (
@@ -706,7 +764,7 @@ class AgentLoop:
             "replace with",
             "update to",
         )
-        if any(marker in lowered or marker in stripped for marker in correction_markers):
+        if any(marker in lowered or marker in normalized for marker in correction_markers):
             return "correction"
 
         return "correction"
@@ -839,6 +897,12 @@ class AgentLoop:
             replacement_task_id=str(metadata.get("_task_id") or ""),
             msg=msg,
             kind=kind,
+        )
+        logger.info(
+            "Runtime correction classified for session {}: kind={} interrupted_tasks={}",
+            msg.session_key,
+            kind,
+            len(interrupted_tasks),
         )
         metadata["_runtime_correction"] = {
             "kind": kind,
@@ -1712,6 +1776,12 @@ class AgentLoop:
                                 tool_result: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
+            meta["_progress_kind"] = self._progress_kind(
+                tool_hint=tool_hint,
+                thinking=thinking,
+                tool_start=tool_start,
+                tool_result=tool_result,
+            )
             meta["_tool_hint"] = tool_hint
             meta["_thinking"] = thinking
             meta["_tool_start"] = tool_start
@@ -1724,6 +1794,7 @@ class AgentLoop:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_chunk"] = True
+            meta["_progress_kind"] = self._progress_kind(chunk=True)
             if first:
                 meta["_chunk_first"] = True
             await self.bus.publish_outbound(OutboundMessage(

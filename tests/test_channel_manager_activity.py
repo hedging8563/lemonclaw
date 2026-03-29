@@ -22,6 +22,17 @@ def test_activity_session_key_includes_message_thread_id() -> None:
     assert ChannelManager._activity_session_key(msg) == "telegram:-100123:456"
 
 
+def test_activity_session_key_uses_topic_or_reply_dimensions_when_present() -> None:
+    msg = OutboundMessage(
+        channel="feishu",
+        chat_id="oc_test123",
+        content="hello",
+        metadata={"root_id": "om_root"},
+    )
+
+    assert ChannelManager._activity_session_key(msg) == "feishu:oc_test123:om_root"
+
+
 def test_telegram_progress_is_not_skipped_from_manager_broadcast() -> None:
     progress = OutboundMessage(
         channel="telegram",
@@ -209,6 +220,31 @@ async def test_manager_applies_delivery_route_before_activity_broadcast() -> Non
 
     event = activity_bus.broadcast.await_args.args[0]
     assert event["session_key"] == "telegram:-100123:456"
+
+
+@pytest.mark.asyncio
+async def test_manager_activity_broadcast_includes_progress_kind() -> None:
+    bus = MessageBus()
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    manager = ChannelManager(Config(), bus, activity_bus=activity_bus)
+    manager.channels["matrix"] = SimpleNamespace(send=AsyncMock())
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:example.com",
+            content="working...",
+            metadata={"_progress": True, "_progress_kind": "tool_hint", "_tool_hint": True},
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    event = activity_bus.broadcast.await_args.args[0]
+    assert event["type"] == "progress"
+    assert event["progress_kind"] == "tool_hint"
 
 
 @pytest.mark.asyncio

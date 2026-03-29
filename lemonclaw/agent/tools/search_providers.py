@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
 
@@ -26,12 +26,41 @@ class SearchResult:
     description: str = ""
 
 
+SearchProviderStatus = Literal["success", "empty", "warning", "error"]
+SearchProviderCompatibility = Literal["native"]
+
+
 @dataclass
 class SearchResponse:
     provider: str
     results: list[SearchResult]
     error: str | None = None
     warning: str | None = None
+    status: SearchProviderStatus = "success"
+    compatibility: SearchProviderCompatibility = "native"
+
+
+@dataclass(frozen=True)
+class SearchProviderAttempt:
+    provider: str
+    status: SearchProviderStatus
+    compatibility: SearchProviderCompatibility
+    result_count: int
+    error: str | None = None
+    warning: str | None = None
+
+    def to_line(self) -> str:
+        parts = [
+            f"provider={self.provider}",
+            f"status={self.status}",
+            f"compatibility={self.compatibility}",
+            f"results={self.result_count}",
+        ]
+        if self.error:
+            parts.append(f"error={self.error}")
+        if self.warning:
+            parts.append(f"warning={self.warning}")
+        return "- " + "; ".join(parts)
 
 
 def _looks_like_ddg_no_results(body: str) -> bool:
@@ -77,9 +106,13 @@ class BraveSearchProvider:
                 for item in raw_results[:count]
                 if item.get("title") and item.get("url")
             ]
-            return SearchResponse(provider=self.name, results=results)
+            return SearchResponse(
+                provider=self.name,
+                results=results,
+                status="success" if results else "empty",
+            )
         except Exception as exc:
-            return SearchResponse(provider=self.name, results=[], error=str(exc))
+            return SearchResponse(provider=self.name, results=[], error=str(exc), status="error")
 
 
 class DuckDuckGoSearchProvider:
@@ -114,6 +147,11 @@ class DuckDuckGoSearchProvider:
             if not results and not _looks_like_ddg_no_results(response.text):
                 warning = "DuckDuckGo HTML returned 200 but parser found no results; result markup may have changed."
 
-            return SearchResponse(provider=self.name, results=results, warning=warning)
+            return SearchResponse(
+                provider=self.name,
+                results=results,
+                warning=warning,
+                status="success" if results else ("warning" if warning else "empty"),
+            )
         except Exception as exc:
-            return SearchResponse(provider=self.name, results=[], error=str(exc))
+            return SearchResponse(provider=self.name, results=[], error=str(exc), status="error")

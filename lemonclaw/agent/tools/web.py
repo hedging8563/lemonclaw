@@ -16,12 +16,22 @@ from lemonclaw.agent.tools.search_providers import (
     BraveSearchProvider,
     DuckDuckGoSearchProvider,
     SearchProvider,
+    SearchProviderAttempt,
     SearchResponse,
 )
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+
+
+def _format_search_diagnostics(provider_names: list[str], attempts: list[SearchProviderAttempt]) -> str:
+    """Format search fallback diagnostics in a compact, agent-readable way."""
+    lines = ["Diagnostics:", "Provider chain:"]
+    lines.extend(f"- provider={name}" for name in provider_names or ["none"])
+    lines.append("Provider matrix:")
+    lines.extend(attempt.to_line() for attempt in attempts)
+    return "\n".join(lines)
 
 
 def _strip_tags(text: str) -> str:
@@ -36,6 +46,16 @@ def _normalize(text: str) -> str:
     """Normalize whitespace."""
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def _infer_search_status(result: SearchResponse) -> str:
+    if result.error:
+        return "error"
+    if result.results:
+        return "success"
+    if result.warning:
+        return "warning"
+    return "empty"
 
 
 def _is_private_ip_addr(ip_str: str) -> bool:
@@ -133,28 +153,26 @@ class WebSearchTool(Tool):
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         n = min(max(count or self.max_results, 1), 10)
         providers = self._providers or self._default_providers()
-        failures: list[str] = []
-        warnings: list[str] = []
+        provider_names = [provider.name for provider in providers]
+        attempts: list[SearchProviderAttempt] = []
 
         for provider in providers:
             result = await provider.search(query, n)
-            if result.results:
-                return self._format_results(query, result)
-            if result.error:
-                failures.append(f"{provider.name}: {result.error}")
-            elif result.warning:
-                warnings.append(f"{provider.name}: {result.warning}")
-
-        if failures:
-            return f"Search error: {'; '.join(failures)}"
-        if warnings:
-            return (
-                f"No results for: {query}\n"
-                f"Warnings: {'; '.join(warnings)}\n"
-                f"Provider chain: {', '.join(provider.name for provider in providers) or 'none'}"
+            attempts.append(
+                SearchProviderAttempt(
+                    provider=result.provider,
+                    status=_infer_search_status(result),
+                    compatibility=result.compatibility,
+                    result_count=len(result.results),
+                    error=result.error,
+                    warning=result.warning,
+                )
             )
-        provider_names = ", ".join(provider.name for provider in providers) or "none"
-        return f"No results for: {query}\nProvider chain: {provider_names}"
+            if result.results:
+                return self._format_results(query, result, attempts[-1])
+
+        headline = f"Search error: {query}" if any(item.error for item in attempts) else f"No results for: {query}"
+        return "\n".join([headline, _format_search_diagnostics(provider_names, attempts)])
 
     def _default_providers(self) -> list[SearchProvider]:
         providers: list[SearchProvider] = []
@@ -164,8 +182,16 @@ class WebSearchTool(Tool):
         return providers
 
     @staticmethod
-    def _format_results(query: str, response: SearchResponse) -> str:
-        lines = [f"Results for: {query}", f"Provider: {response.provider}", ""]
+    def _format_results(query: str, response: SearchResponse, attempt: SearchProviderAttempt) -> str:
+        lines = [
+            f"Results for: {query}",
+            f"Provider: {response.provider}",
+            f"Provider status: {attempt.status}",
+            f"Provider compatibility: {attempt.compatibility}",
+            "Provider matrix:",
+            attempt.to_line(),
+            "",
+        ]
         for i, item in enumerate(response.results, 1):
             lines.append(f"{i}. {item.title}\n   {item.url}")
             if item.description:

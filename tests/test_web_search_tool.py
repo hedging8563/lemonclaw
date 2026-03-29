@@ -32,6 +32,9 @@ async def test_web_search_tool_includes_source_attribution() -> None:
     result = await tool.execute("example")
 
     assert "Provider: brave" in result
+    assert "Provider status: success" in result
+    assert "Provider matrix:" in result
+    assert "provider=brave; status=success; compatibility=native; results=1" in result
     assert "https://example.com" in result
 
 
@@ -55,9 +58,14 @@ async def test_web_search_tool_reports_provider_chain_errors() -> None:
 
     result = await tool.execute("broken query")
 
-    assert "Search error:" in result
-    assert "brave: quota exceeded" in result
-    assert "duckduckgo: network down" in result
+    assert result.startswith("Search error: broken query")
+    assert "Diagnostics:" in result
+    assert "Provider chain:" in result
+    assert "- provider=brave" in result
+    assert "- provider=duckduckgo" in result
+    assert "Provider matrix:" in result
+    assert "provider=brave; status=error; compatibility=native; results=0; error=quota exceeded" in result
+    assert "provider=duckduckgo; status=error; compatibility=native; results=0; error=network down" in result
 
 
 async def test_web_search_tool_surfaces_provider_warnings_when_no_results() -> None:
@@ -68,5 +76,22 @@ async def test_web_search_tool_surfaces_provider_warnings_when_no_results() -> N
     result = await tool.execute("broken html")
 
     assert "No results for: broken html" in result
-    assert "Warnings:" in result
-    assert "duckduckgo: parser found no result markup" in result
+    assert "Diagnostics:" in result
+    assert "Provider chain:" in result
+    assert "- provider=duckduckgo" in result
+    assert "Provider matrix:" in result
+    assert "provider=duckduckgo; status=warning; compatibility=native; results=0; warning=parser found no result markup" in result
+
+
+async def test_web_search_tool_reports_mixed_failures_and_warnings_together() -> None:
+    tool = WebSearchTool(providers=[
+        _FakeProvider("brave", error="quota exceeded"),
+        _FakeProvider("duckduckgo", warning="parser found no result markup"),
+    ])
+
+    result = await tool.execute("mixed diagnostics")
+
+    assert result.startswith("Search error: mixed diagnostics")
+    assert "Provider matrix:" in result
+    assert "provider=brave; status=error; compatibility=native; results=0; error=quota exceeded" in result
+    assert "provider=duckduckgo; status=warning; compatibility=native; results=0; warning=parser found no result markup" in result

@@ -178,8 +178,66 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         today = self.memory.today.read().strip()
         if not today:
             return ""
-        lines = [line.strip() for line in today.splitlines() if line.strip() and not line.startswith("#")]
-        return "\n".join(lines[:3])[:240]
+        entries: list[list[str]] = []
+        current: list[str] = []
+
+        for raw_line in today.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("# "):
+                continue
+            if line.startswith("## "):
+                if current:
+                    entries.append(current)
+                current = []
+                title = line[3:].strip()
+                if " — " in title:
+                    title = title.split(" — ", 1)[1].strip()
+                if title:
+                    current.append(title)
+                continue
+            for prefix in ("- ", "* ", "+ ", "• "):
+                if line.startswith(prefix):
+                    line = line[len(prefix):].strip()
+                    break
+            if line:
+                current.append(line)
+
+        if current:
+            entries.append(current)
+        if not entries:
+            return ""
+
+        recent_lines: list[str] = []
+        seen: set[str] = set()
+        for entry in reversed(entries):
+            for line in entry:
+                if line in seen:
+                    continue
+                seen.add(line)
+                recent_lines.append(line)
+                if len(recent_lines) >= 3:
+                    break
+            if len(recent_lines) >= 3:
+                break
+
+        return "\n".join(recent_lines[:3])[:240]
+
+    @staticmethod
+    def _compact_summary(text: str, *, limit: int = 160) -> str:
+        lines: list[str] = []
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for prefix in ("- ", "* ", "+ ", "• "):
+                if line.startswith(prefix):
+                    line = line[len(prefix):].strip()
+                    break
+            if line and line not in lines:
+                lines.append(line)
+        if not lines:
+            return str(text or "").strip()[:limit]
+        return " ".join(lines)[:limit]
 
     @staticmethod
     def _build_structured_retrieval_objects(
@@ -188,41 +246,112 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         rules: list[dict[str, Any]],
         knowledge_hits: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        fact_slots = [
-            {
-                "name": str(card.name or ""),
-                "type": str(card.meta.get("type", "") or ""),
-                "summary": str(card.body or "").strip()[:160],
-            }
-            for card in cards
-        ]
-        retrieval_objects = [
-            {
+        normalized_cards: list[dict[str, Any]] = []
+        for card in cards:
+            name = str(getattr(card, "name", "") or "").strip()
+            if not name:
+                continue
+            card_meta = dict(getattr(card, "meta", {}) or {})
+            card_type = str(card_meta.get("type", "") or "").strip()
+            summary = ContextBuilder._compact_summary(str(getattr(card, "body", "") or ""), limit=160)
+            keywords = [
+                keyword
+                for keyword in dict.fromkeys(
+                    str(keyword or "").strip()
+                    for keyword in list(getattr(card, "keywords", []) or [])
+                    if str(keyword or "").strip()
+                )
+            ]
+            normalized_cards.append({
+                "name": name,
+                "type": card_type,
+                "summary": summary,
+                "keywords": keywords,
+            })
+        normalized_cards.sort(key=lambda item: (item["name"].casefold(), item["type"].casefold(), item["summary"].casefold()))
+
+        fact_slots: list[dict[str, Any]] = []
+        retrieval_objects: list[dict[str, Any]] = []
+        seen_card_names: set[str] = set()
+        for item in normalized_cards:
+            card_key = item["name"].casefold()
+            if card_key in seen_card_names:
+                continue
+            seen_card_names.add(card_key)
+            fact_slots.append(item)
+            retrieval_objects.append({
                 "kind": "entity_card",
-                "id": str(card.name or ""),
-                "title": str(card.name or ""),
+                "id": item["name"],
+                "title": item["name"],
                 "source": "memory.entities",
-            }
-            for card in cards
-        ]
-        retrieval_objects.extend(
-            {
+                "summary": item["summary"],
+                "keywords": item["keywords"],
+            })
+
+        normalized_rules: list[dict[str, Any]] = []
+        for rule in rules:
+            trigger = str(rule.get("trigger") or "").strip()
+            if not trigger:
+                continue
+            source = str(rule.get("source") or "memory.rules").strip() or "memory.rules"
+            lesson = str(rule.get("lesson") or "").strip()
+            action = str(rule.get("action") or "").strip()
+            summary = " ".join(part for part in (lesson, action) if part)
+            normalized_rules.append({
+                "trigger": trigger,
+                "id": str(rule.get("header") or trigger).strip() or trigger,
+                "source": source,
+                "summary": ContextBuilder._compact_summary(summary, limit=160),
+                "lesson": lesson,
+                "action": action,
+            })
+        normalized_rules.sort(key=lambda item: (item["trigger"].casefold(), item["source"].casefold(), item["summary"].casefold()))
+
+        seen_rule_keys: set[tuple[str, str]] = set()
+        for item in normalized_rules:
+            rule_key = (item["trigger"].casefold(), item["source"].casefold())
+            if rule_key in seen_rule_keys:
+                continue
+            seen_rule_keys.add(rule_key)
+            retrieval_objects.append({
                 "kind": "procedural_rule",
-                "id": str(rule.get("header") or rule.get("trigger") or ""),
-                "title": str(rule.get("trigger") or ""),
-                "source": str(rule.get("source") or "memory.rules"),
-            }
-            for rule in rules
-        )
-        retrieval_objects.extend(
-            {
+                "id": item["id"],
+                "title": item["trigger"],
+                "source": item["source"],
+                "summary": item["summary"],
+                "lesson": item["lesson"],
+                "action": item["action"],
+            })
+
+        normalized_hits: list[dict[str, Any]] = []
+        for item in knowledge_hits:
+            doc_id = str(item.get("doc_id") or "").strip()
+            if not doc_id:
+                continue
+            title = str(item.get("title") or doc_id or "").strip()
+            source = str(item.get("source") or "").strip()
+            page_label = str(item.get("page_label") or "").strip()
+            result_type = str(item.get("result_type") or "").strip()
+            summary = ContextBuilder._compact_summary(str(item.get("snippet") or item.get("summary") or ""), limit=160)
+            normalized_hits.append({
                 "kind": "knowledge_hit",
-                "id": str(item.get("doc_id") or ""),
-                "title": str(item.get("title") or item.get("doc_id") or ""),
-                "source": str(item.get("source") or ""),
-            }
-            for item in knowledge_hits
-        )
+                "id": doc_id,
+                "title": title or doc_id,
+                "source": source,
+                "summary": summary,
+                "result_type": result_type,
+                "page_label": page_label,
+            })
+        normalized_hits.sort(key=lambda item: (item["source"].casefold(), item["title"].casefold(), item["id"].casefold(), item["summary"].casefold()))
+
+        seen_hit_keys: set[tuple[str, str, str]] = set()
+        for item in normalized_hits:
+            hit_key = (item["id"].casefold(), item["source"].casefold(), item["title"].casefold())
+            if hit_key in seen_hit_keys:
+                continue
+            seen_hit_keys.add(hit_key)
+            retrieval_objects.append(item)
+
         return {
             "session_summary": "",
             "fact_slots": fact_slots,
