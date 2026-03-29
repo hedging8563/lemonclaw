@@ -39,8 +39,6 @@ def get_weixin_pairing_routes(
         config = load_config(config_path)
         try:
             state = await asyncio.to_thread(get_weixin_pairing_state, config.channels.weixin, start_if_needed=False, wait_timeout=5.0)
-            if state.get("status") == "connected" or state.get("accounts"):
-                await _ensure_runtime_channel(config)
             return JSONResponse(state)
         except WeixinBridgeError as exc:
             return JSONResponse({"error": str(exc), "status": "error", "running": False}, status_code=400)
@@ -71,6 +69,31 @@ def get_weixin_pairing_routes(
                 account_id=str(body.get("accountId") or "").strip() or None,
                 wait_timeout=20.0,
             )
+            return JSONResponse(state)
+        except WeixinBridgeError as exc:
+            return JSONResponse({"error": str(exc), "status": "error", "running": False}, status_code=400)
+
+    async def repair_pairing(request: Request) -> JSONResponse:
+        auth_error = _require_bearer(request)
+        if auth_error:
+            return auth_error
+
+        from lemonclaw.config.loader import load_config, save_config
+
+        config = load_config(config_path)
+        if not config.channels.weixin.enabled:
+            config.channels.weixin.enabled = True
+            save_config(config, config_path)
+
+        try:
+            state = await asyncio.to_thread(
+                get_weixin_pairing_state,
+                config.channels.weixin,
+                start_if_needed=False,
+                wait_timeout=5.0,
+            )
+            if state.get("status") == "connected" or state.get("accounts"):
+                await _ensure_runtime_channel(config)
             return JSONResponse(state)
         except WeixinBridgeError as exc:
             return JSONResponse({"error": str(exc), "status": "error", "running": False}, status_code=400)
@@ -112,5 +135,6 @@ def get_weixin_pairing_routes(
     return [
         Route("/api/weixin/pairing", get_pairing_state, methods=["GET"]),
         Route("/api/weixin/pairing", start_pairing, methods=["POST"]),
+        Route("/api/weixin/repair", repair_pairing, methods=["POST"]),
         Route("/api/weixin/disconnect", disconnect_pairing, methods=["POST"]),
     ]

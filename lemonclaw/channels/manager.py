@@ -30,7 +30,6 @@ _CHANNEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "qq": ("app_id", "secret"),
     "matrix": ("access_token", "user_id"),
     "mochat": ("claw_token",),
-    "weixin": ("bridge_token",),
 }
 
 

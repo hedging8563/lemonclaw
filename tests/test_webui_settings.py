@@ -1,5 +1,6 @@
 from starlette.testclient import TestClient
 
+from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import load_config, save_config
 from lemonclaw.config.schema import Config, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
@@ -92,6 +93,51 @@ def test_whatsapp_disconnect_surfaces_stop_failure(monkeypatch, tmp_path):
     resp = client.post('/api/settings/channels/whatsapp/disconnect')
     assert resp.status_code == 400
     assert 'Failed to stop running WhatsApp bridge process.' in resp.json()['error']
+
+
+def test_weixin_pairing_get_is_read_only_and_repair_registers_runtime_channel(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.weixin.enabled = True
+    save_config(cfg, config_path)
+
+    class _FakeChannelManager:
+        def __init__(self) -> None:
+            self.bus = MessageBus()
+            self.trigger_runtime = None
+            self._channels = {}
+            self.ensure_calls: list[str] = []
+
+        def get_channel(self, name: str):
+            return self._channels.get(name)
+
+        async def ensure_channel(self, name: str, channel):
+            self.ensure_calls.append(name)
+            self._channels[name] = channel
+
+    def _fake_state(config, *, start_if_needed=False, wait_timeout=10.0, force=False, account_id=None):
+        return {
+            'status': 'connected',
+            'accounts': [{'accountId': 'wx-1'}],
+            'account': {'accountId': 'wx-1'},
+            'running': False,
+        }
+
+    monkeypatch.setattr('lemonclaw.gateway.weixin_pairing.get_weixin_pairing_state', _fake_state)
+
+    channel_manager = _FakeChannelManager()
+    app = create_app(config_path=config_path, auth_token=None, channel_manager=channel_manager)
+    client = TestClient(app)
+
+    resp = client.get('/api/weixin/pairing')
+    assert resp.status_code == 200
+    assert resp.json()['status'] == 'connected'
+    assert channel_manager.ensure_calls == []
+
+    resp = client.post('/api/weixin/repair')
+    assert resp.status_code == 200
+    assert resp.json()['status'] == 'connected'
+    assert channel_manager.ensure_calls == ['weixin']
 
 
 

@@ -149,6 +149,20 @@ def test_channel_manager_enabled_but_incomplete_whatsapp_is_blocked():
     assert "missing config: bridge_url" in status["whatsapp"]["error"]
 
 
+def test_channel_manager_enabled_weixin_without_bridge_token_is_allowed():
+    config = Config()
+    config.channels.weixin.enabled = True
+
+    manager = ChannelManager(config, MessageBus())
+    status = manager.get_channel_status()
+
+    assert "weixin" in manager.channels
+    assert status["weixin"]["configured_enabled"] is True
+    assert status["weixin"]["configured_complete"] is True
+    assert status["weixin"]["available"] is True
+    assert status["weixin"]["error"] == ""
+
+
 @pytest.mark.asyncio
 async def test_channel_manager_ensure_channel_enables_auto_pairing() -> None:
     config = Config()
