@@ -46,12 +46,27 @@ def build_task_resume_context(
     sender_id: str = "",
     timezone: str = "",
     run_mode: str = "",
+    session_context: dict[str, Any] | None = None,
     message_id: str = "",
     delivery_context: dict[str, Any] | None = None,
     auto_resume_allowed: bool = True,
     resume_disabled_reason: str = "",
 ) -> dict[str, Any]:
     """Build a stable resume context payload for later task recovery."""
+    normalized_session_context = dict(session_context or {})
+    if not normalized_session_context:
+        normalized_session_context = {
+            "session_key": str(session_key),
+            "identity": {
+                "channel": str(channel),
+                "account": "",
+                "chat": str(chat_id),
+                "thread": "",
+                "topic": "",
+            },
+            "timezone": str(timezone or ""),
+            "run_mode": str(run_mode or ""),
+        }
     return {
         "channel": str(channel),
         "chat_id": str(chat_id),
@@ -59,6 +74,7 @@ def build_task_resume_context(
         "session_key": str(session_key),
         "timezone": str(timezone or ""),
         "run_mode": str(run_mode or ""),
+        "session_context": normalized_session_context,
         "message_id": str(message_id or ""),
         "delivery_context": dict(delivery_context or {}),
         "auto_resume_allowed": bool(auto_resume_allowed),

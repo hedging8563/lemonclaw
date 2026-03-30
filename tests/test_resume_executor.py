@@ -118,6 +118,18 @@ async def test_agent_loop_execute_safe_resume_propagates_run_mode(make_agent_loo
             "session_key": "agentbridge:codex:default:resume-demo",
             "timezone": "Asia/Shanghai",
             "run_mode": "detached",
+            "session_context": {
+                "session_key": "agentbridge:codex:default:resume-demo",
+                "identity": {
+                    "channel": "agentbridge",
+                    "account": "",
+                    "chat": "codex:default:resume-demo",
+                    "thread": "resume-demo",
+                    "topic": "",
+                },
+                "timezone": "Asia/Shanghai",
+                "run_mode": "detached",
+            },
         },
     )
     step = loop.ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
@@ -138,6 +150,8 @@ async def test_agent_loop_execute_safe_resume_propagates_run_mode(make_agent_loo
     assert isinstance(metadata, dict)
     assert metadata["timezone"] == "Asia/Shanghai"
     assert metadata["run_mode"] == "detached"
+    assert metadata["_session_context"]["run_mode"] == "detached"
+    assert metadata["_session_context"]["identity"]["thread"] == "resume-demo"
 
 
 @pytest.mark.asyncio

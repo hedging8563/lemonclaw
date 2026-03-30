@@ -277,6 +277,7 @@ class CronService:
                     session_key=effective_session_key,
                     timezone=str(payload_metadata.get("timezone") or ""),
                     run_mode="system",
+                    session_context=dict(payload_metadata.get("_session_context") or {}) if isinstance(payload_metadata.get("_session_context"), dict) else None,
                     message_id="",
                     delivery_context=delivery_context,
                     auto_resume_allowed=has_explicit_resume_target,

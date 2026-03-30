@@ -245,6 +245,7 @@ class Orchestrator:
                     session_key=msg.session_key,
                     timezone=str((msg.metadata or {}).get("timezone") or ""),
                     run_mode=str((msg.metadata or {}).get("run_mode") or "system"),
+                    session_context=dict((msg.metadata or {}).get("_session_context") or {}) if isinstance((msg.metadata or {}).get("_session_context"), dict) else None,
                     message_id=str((msg.metadata or {}).get("message_id") or ""),
                     delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
                 ),

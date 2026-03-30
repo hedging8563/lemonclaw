@@ -35,11 +35,31 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
     )
 
     with patch.object(orch, "_analyze", return_value=intent), \
-         patch.object(orch, "_split", return_value=plan), \
-         patch.object(orch, "_assign", return_value=None), \
-         patch.object(orch, "_monitor", return_value=None), \
-         patch.object(orch, "_merge", return_value="merged result"):
-        msg = InboundMessage(channel="test", sender_id="user1", chat_id="chat1", content="complex task", metadata={"_task_id": "task_abc"})
+        patch.object(orch, "_split", return_value=plan), \
+        patch.object(orch, "_assign", return_value=None), \
+        patch.object(orch, "_monitor", return_value=None), \
+        patch.object(orch, "_merge", return_value="merged result"):
+        msg = InboundMessage(
+            channel="test",
+            sender_id="user1",
+            chat_id="chat1",
+            content="complex task",
+            metadata={
+                "_task_id": "task_abc",
+                "_session_context": {
+                    "session_key": "test:chat1",
+                    "identity": {
+                        "channel": "test",
+                        "account": "",
+                        "chat": "chat1",
+                        "thread": "",
+                        "topic": "",
+                    },
+                    "timezone": "",
+                    "run_mode": "interactive",
+                },
+            },
+        )
         result = await orch.handle_message(msg)
 
     assert result == "merged result"
@@ -50,6 +70,8 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
     assert task["resume_context"]["channel"] == "test"
     assert task["resume_context"]["chat_id"] == "chat1"
     assert task["resume_context"]["session_key"] == "test:chat1"
+    assert task["resume_context"]["session_context"]["identity"]["channel"] == "test"
+    assert task["resume_context"]["session_context"]["run_mode"] == "interactive"
     assert task["completion_gate"]["passed"] is True
     view = ledger.read_task_view("task_abc")
     assert view is not None

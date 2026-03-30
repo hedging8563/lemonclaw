@@ -708,6 +708,7 @@ class AgentLoop:
             session_key=msg.session_key,
             timezone=str(metadata.get("timezone") or ""),
             run_mode=str(metadata.get("run_mode") or ""),
+            session_context=dict(metadata.get("_session_context") or {}) if isinstance(metadata.get("_session_context"), dict) else None,
             message_id=str(metadata.get("message_id") or ""),
             delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
         )
@@ -1185,6 +1186,8 @@ class AgentLoop:
             metadata["timezone"] = str(resume_context["timezone"])
         if resume_context.get("run_mode"):
             metadata["run_mode"] = str(resume_context["run_mode"])
+        if isinstance(resume_context.get("session_context"), dict) and resume_context.get("session_context"):
+            metadata["_session_context"] = dict(resume_context["session_context"])
         if resume_context.get("message_id"):
             metadata["message_id"] = str(resume_context["message_id"])
 
@@ -2429,6 +2432,7 @@ class AgentLoop:
                     session_key=session_key,
                     timezone=str(direct_metadata.get("timezone") or self.default_timezone or ""),
                     run_mode=str(direct_metadata.get("run_mode") or ""),
+                    session_context=dict(direct_metadata.get("_session_context") or {}) if isinstance(direct_metadata.get("_session_context"), dict) else None,
                     message_id=str(direct_metadata.get("message_id") or ""),
                     delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
                 ),
