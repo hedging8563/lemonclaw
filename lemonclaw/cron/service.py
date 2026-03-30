@@ -276,6 +276,7 @@ class CronService:
                     sender_id="cron",
                     session_key=effective_session_key,
                     timezone=str(payload_metadata.get("timezone") or ""),
+                    run_mode="system",
                     message_id="",
                     delivery_context=delivery_context,
                     auto_resume_allowed=has_explicit_resume_target,

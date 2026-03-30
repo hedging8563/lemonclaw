@@ -244,6 +244,7 @@ class Orchestrator:
                     sender_id=str(msg.sender_id),
                     session_key=msg.session_key,
                     timezone=str((msg.metadata or {}).get("timezone") or ""),
+                    run_mode=str((msg.metadata or {}).get("run_mode") or "system"),
                     message_id=str((msg.metadata or {}).get("message_id") or ""),
                     delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
                 ),

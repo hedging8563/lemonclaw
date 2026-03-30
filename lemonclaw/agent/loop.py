@@ -707,6 +707,7 @@ class AgentLoop:
             sender_id=str(msg.sender_id),
             session_key=msg.session_key,
             timezone=str(metadata.get("timezone") or ""),
+            run_mode=str(metadata.get("run_mode") or ""),
             message_id=str(metadata.get("message_id") or ""),
             delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
         )
@@ -731,6 +732,7 @@ class AgentLoop:
         metadata = dict(msg.metadata or {})
         metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
         metadata.setdefault("_mode", self._infer_mode(msg))
+        metadata.setdefault("run_mode", self._default_run_mode(channel=msg.channel, mode=str(metadata.get("_mode") or "")))
         metadata.setdefault("_agent_id", self.agent_id)
         msg.metadata = metadata
         return metadata
@@ -750,6 +752,12 @@ class AgentLoop:
     def _is_command_message(content: str) -> bool:
         stripped = content.strip()
         return bool(stripped.startswith("/") and not stripped[1:2].isspace())
+
+    @staticmethod
+    def _default_run_mode(*, channel: str, mode: str) -> str:
+        if mode in {"cron", "operator"} or channel in {"cron", "internal", "system"}:
+            return "system"
+        return "interactive"
 
     @staticmethod
     def _normalize_runtime_correction_content(content: str) -> tuple[str, str]:
@@ -1175,6 +1183,8 @@ class AgentLoop:
             metadata["_delivery_context"] = dict(delivery_context)
         if resume_context.get("timezone"):
             metadata["timezone"] = str(resume_context["timezone"])
+        if resume_context.get("run_mode"):
+            metadata["run_mode"] = str(resume_context["run_mode"])
         if resume_context.get("message_id"):
             metadata["message_id"] = str(resume_context["message_id"])
 
@@ -2401,6 +2411,7 @@ class AgentLoop:
             direct_metadata = dict(metadata or {})
             direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
             direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
+            direct_metadata.setdefault("run_mode", self._default_run_mode(channel=channel, mode=str(direct_metadata.get("_mode") or "")))
             direct_metadata.setdefault("_agent_id", self.agent_id)
             task_metadata = self._task_trigger_metadata(direct_metadata)
             self.ledger.ensure_task(
@@ -2417,6 +2428,7 @@ class AgentLoop:
                     sender_id="user",
                     session_key=session_key,
                     timezone=str(direct_metadata.get("timezone") or self.default_timezone or ""),
+                    run_mode=str(direct_metadata.get("run_mode") or ""),
                     message_id=str(direct_metadata.get("message_id") or ""),
                     delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
                 ),

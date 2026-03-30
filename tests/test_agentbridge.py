@@ -168,6 +168,29 @@ class TestAgentBridgeRoutes:
             "run_mode": "system",
         }
 
+    def test_chat_persists_run_mode_in_task_resume_context(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+
+        resp = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={
+                "client_id": "codex",
+                "workspace_id": "default",
+                "thread_id": "resume-mode-demo",
+                "message": "hello",
+                "timezone": "Asia/Shanghai",
+                "run_mode": "detached",
+            },
+        )
+
+        assert resp.status_code == 200
+        task = loop.ledger.read_task(resp.json()["task_id"])
+        assert task is not None
+        assert task["resume_context"]["timezone"] == "Asia/Shanghai"
+        assert task["resume_context"]["run_mode"] == "detached"
+
     def test_usage_accepts_agentbridge_session_key(self, make_agent_loop):
         _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
         headers = {"Authorization": "Bearer secret-token"}

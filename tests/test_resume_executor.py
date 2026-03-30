@@ -100,6 +100,47 @@ async def test_agent_loop_execute_safe_resume_rolls_back_when_dispatch_spawn_fai
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_execute_safe_resume_propagates_run_mode(make_agent_loop, monkeypatch):
+    loop, _bus = make_agent_loop()
+    loop.ledger.ensure_task(
+        task_id="task_1",
+        session_key="agentbridge:codex:default:resume-demo",
+        agent_id=loop.agent_id,
+        mode="chat",
+        channel="agentbridge",
+        goal="resume demo",
+        status="failed",
+        current_stage="error",
+        resume_context={
+            "channel": "agentbridge",
+            "chat_id": "codex:default:resume-demo",
+            "sender_id": "user-1",
+            "session_key": "agentbridge:codex:default:resume-demo",
+            "timezone": "Asia/Shanghai",
+            "run_mode": "detached",
+        },
+    )
+    step = loop.ledger.start_step("task_1", step_type="tool_call", name="read_file", replayable=True)
+    loop.ledger.finish_step(step, status="failed", error="file not found")
+
+    captured: dict[str, object] = {}
+
+    def _capture_spawn(msg):
+        captured["metadata"] = dict(msg.metadata or {})
+        return asyncio.create_task(asyncio.sleep(0))
+
+    monkeypatch.setattr(loop, "_spawn_dispatch_task", _capture_spawn)
+
+    candidate = await loop.execute_safe_resume("task_1", source="test_resume_executor")
+
+    assert candidate is not None
+    metadata = captured["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["timezone"] == "Asia/Shanghai"
+    assert metadata["run_mode"] == "detached"
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_execute_safe_resume_rejects_cron_task_without_explicit_target(make_agent_loop):
     loop, _bus = make_agent_loop()
 
