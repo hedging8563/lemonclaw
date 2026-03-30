@@ -11,6 +11,7 @@ from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
+from lemonclaw.channels.delivery_context import get_delivery_policy
 from lemonclaw.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
@@ -260,6 +261,7 @@ class CronService:
         effective_chat_id = job.payload.to or "direct"
         payload_metadata = dict(job.payload.metadata or {})
         delivery_context = dict(payload_metadata.get("delivery_context") or {})
+        delivery_policy = get_delivery_policy(payload_metadata)
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         if self._task_ledger:
             self._task_ledger.ensure_task(
@@ -280,6 +282,7 @@ class CronService:
                     session_context=dict(payload_metadata.get("_session_context") or {}) if isinstance(payload_metadata.get("_session_context"), dict) else None,
                     message_id="",
                     delivery_context=delivery_context,
+                    delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
                     auto_resume_allowed=has_explicit_resume_target,
                     resume_disabled_reason=(
                         "" if has_explicit_resume_target

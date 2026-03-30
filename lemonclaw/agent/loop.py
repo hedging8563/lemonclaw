@@ -46,6 +46,7 @@ from lemonclaw.agent.tools.spawn import SpawnTool
 from lemonclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
+from lemonclaw.channels.delivery_context import get_delivery_policy
 from lemonclaw.gateway.webui.message_schema import serialize_ui_message
 from lemonclaw.providers.base import LLMProvider
 from lemonclaw.providers.catalog import format_model_list, fuzzy_match, resolve_model_id
@@ -701,6 +702,7 @@ class AgentLoop:
         """Persist the minimum routing context needed for later task resume."""
         metadata = dict(msg.metadata or {})
         delivery_context = metadata.get("_delivery_context")
+        delivery_policy = get_delivery_policy(metadata)
         resume_context = build_task_resume_context(
             channel=msg.channel,
             chat_id=str(msg.chat_id),
@@ -711,6 +713,7 @@ class AgentLoop:
             session_context=dict(metadata.get("_session_context") or {}) if isinstance(metadata.get("_session_context"), dict) else None,
             message_id=str(metadata.get("message_id") or ""),
             delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
+            delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
         )
         runtime_correction = metadata.get("_runtime_correction")
         if isinstance(runtime_correction, dict) and runtime_correction:
@@ -1188,6 +1191,8 @@ class AgentLoop:
             metadata["run_mode"] = str(resume_context["run_mode"])
         if isinstance(resume_context.get("session_context"), dict) and resume_context.get("session_context"):
             metadata["_session_context"] = dict(resume_context["session_context"])
+        if isinstance(resume_context.get("delivery_policy"), dict) and resume_context.get("delivery_policy"):
+            metadata["_delivery_policy"] = dict(resume_context["delivery_policy"])
         if resume_context.get("message_id"):
             metadata["message_id"] = str(resume_context["message_id"])
 
@@ -2004,6 +2009,7 @@ class AgentLoop:
             "_default_chat_id": msg.chat_id,
             "_default_message_id": metadata.get("message_id"),
             "_default_delivery_context": metadata.get("_delivery_context"),
+            "_default_delivery_policy": get_delivery_policy(metadata),
             "_message_turn_state": message_turn_state,
             "_capability_token": self.governance.issue_token(
                 task_id=str(metadata.get("_task_id")),
@@ -2412,6 +2418,7 @@ class AgentLoop:
         self._session_lock_order.append(session_key)
         async with self._session_locks[session_key]:
             direct_metadata = dict(metadata or {})
+            delivery_policy = get_delivery_policy(direct_metadata)
             direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
             direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
             direct_metadata.setdefault("run_mode", self._default_run_mode(channel=channel, mode=str(direct_metadata.get("_mode") or "")))
@@ -2435,6 +2442,7 @@ class AgentLoop:
                     session_context=dict(direct_metadata.get("_session_context") or {}) if isinstance(direct_metadata.get("_session_context"), dict) else None,
                     message_id=str(direct_metadata.get("message_id") or ""),
                     delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
+                    delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
                 ),
                 metadata=task_metadata or None,
             )

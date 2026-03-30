@@ -46,6 +46,10 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
             content="complex task",
             metadata={
                 "_task_id": "task_abc",
+                "_delivery_policy": {
+                    "mode": "replace",
+                    "preserve_message_identity": True,
+                },
                 "_session_context": {
                     "session_key": "test:chat1",
                     "identity": {
@@ -72,6 +76,8 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
     assert task["resume_context"]["session_key"] == "test:chat1"
     assert task["resume_context"]["session_context"]["identity"]["channel"] == "test"
     assert task["resume_context"]["session_context"]["run_mode"] == "interactive"
+    assert task["resume_context"]["delivery_policy"]["mode"] == "replace"
+    assert task["resume_context"]["delivery_policy"]["preserve_message_identity"] is True
     assert task["completion_gate"]["passed"] is True
     view = ledger.read_task_view("task_abc")
     assert view is not None

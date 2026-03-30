@@ -92,6 +92,7 @@ class CronTool(Tool):
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
+        _default_delivery_policy: dict[str, Any] | None = None,
         _session_key: str | None = None,
         **kwargs: Any
     ) -> str:
@@ -113,6 +114,7 @@ class CronTool(Tool):
                 _default_chat_id,
                 _session_key,
                 dict(_default_delivery_context or {}),
+                dict(_default_delivery_policy or {}),
             )
         elif action == "list":
             return self._list_jobs()
@@ -131,6 +133,7 @@ class CronTool(Tool):
         chat_id: str,
         session_key: str | None,
         delivery_context: dict[str, Any],
+        delivery_policy: dict[str, Any],
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -163,6 +166,12 @@ class CronTool(Tool):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
         
+        metadata: dict[str, Any] = {}
+        if delivery_context:
+            metadata["delivery_context"] = delivery_context
+        if delivery_policy:
+            metadata["delivery_policy"] = delivery_policy
+
         job = self._cron.add_job(
             name=message[:30],
             schedule=schedule,
@@ -171,7 +180,7 @@ class CronTool(Tool):
             channel=channel,
             to=chat_id,
             session_key=session_key,
-            metadata={"delivery_context": delivery_context} if delivery_context else {},
+            metadata=metadata,
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"

@@ -128,6 +128,12 @@ class TestAgentBridgeRoutes:
         assert isinstance(metadata, dict)
         assert metadata["timezone"] == "Asia/Shanghai"
         assert metadata["run_mode"] == "detached"
+        assert metadata["_session_context"]["session_key"] == "agentbridge:codex:default:ctx-demo"
+        assert metadata["_session_context"]["identity"]["channel"] == "agentbridge"
+        assert metadata["_session_context"]["identity"]["chat"] == "codex:default:ctx-demo"
+        assert metadata["_session_context"]["identity"]["thread"] == "ctx-demo"
+        assert metadata["_session_context"]["timezone"] == "Asia/Shanghai"
+        assert metadata["_session_context"]["run_mode"] == "detached"
         assert metadata["agentbridge"]["session_context"] == {
             "timezone": "Asia/Shanghai",
             "run_mode": "detached",
@@ -163,6 +169,12 @@ class TestAgentBridgeRoutes:
         assert isinstance(metadata, dict)
         assert metadata["timezone"] == "UTC"
         assert metadata["run_mode"] == "system"
+        assert metadata["_session_context"]["session_key"] == "agentbridge:codex:default:ctx-stream-demo"
+        assert metadata["_session_context"]["identity"]["channel"] == "agentbridge"
+        assert metadata["_session_context"]["identity"]["chat"] == "codex:default:ctx-stream-demo"
+        assert metadata["_session_context"]["identity"]["thread"] == "ctx-stream-demo"
+        assert metadata["_session_context"]["timezone"] == "UTC"
+        assert metadata["_session_context"]["run_mode"] == "system"
         assert metadata["agentbridge"]["session_context"] == {
             "timezone": "UTC",
             "run_mode": "system",

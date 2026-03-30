@@ -118,6 +118,11 @@ async def test_agent_loop_execute_safe_resume_propagates_run_mode(make_agent_loo
             "session_key": "agentbridge:codex:default:resume-demo",
             "timezone": "Asia/Shanghai",
             "run_mode": "detached",
+            "delivery_policy": {
+                "mode": "replace",
+                "preserve_message_identity": True,
+                "throttle_ms": 250,
+            },
             "session_context": {
                 "session_key": "agentbridge:codex:default:resume-demo",
                 "identity": {
@@ -152,6 +157,9 @@ async def test_agent_loop_execute_safe_resume_propagates_run_mode(make_agent_loo
     assert metadata["run_mode"] == "detached"
     assert metadata["_session_context"]["run_mode"] == "detached"
     assert metadata["_session_context"]["identity"]["thread"] == "resume-demo"
+    assert metadata["_delivery_policy"]["mode"] == "replace"
+    assert metadata["_delivery_policy"]["preserve_message_identity"] is True
+    assert metadata["_delivery_policy"]["throttle_ms"] == 250
 
 
 @pytest.mark.asyncio

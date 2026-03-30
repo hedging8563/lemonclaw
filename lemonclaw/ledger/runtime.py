@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from lemonclaw.channels.delivery_context import normalize_delivery_policy
 from lemonclaw.governance.redaction import redact_sensitive_value
 from lemonclaw.ledger.types import (
     OutboxEventRecord,
@@ -49,6 +50,7 @@ def build_task_resume_context(
     session_context: dict[str, Any] | None = None,
     message_id: str = "",
     delivery_context: dict[str, Any] | None = None,
+    delivery_policy: dict[str, Any] | None = None,
     auto_resume_allowed: bool = True,
     resume_disabled_reason: str = "",
 ) -> dict[str, Any]:
@@ -77,6 +79,7 @@ def build_task_resume_context(
         "session_context": normalized_session_context,
         "message_id": str(message_id or ""),
         "delivery_context": dict(delivery_context or {}),
+        "delivery_policy": normalize_delivery_policy(delivery_policy or {}),
         "auto_resume_allowed": bool(auto_resume_allowed),
         "resume_disabled_reason": str(resume_disabled_reason or ""),
     }

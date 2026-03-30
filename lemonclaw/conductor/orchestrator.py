@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from json_repair import repair_json
 from loguru import logger
 
+from lemonclaw.channels.delivery_context import get_delivery_policy
 from lemonclaw.utils.helpers import strip_fences
 
 from lemonclaw.conductor.types import (
@@ -229,6 +230,7 @@ class Orchestrator:
             return None  # Caller handles directly
 
         task_id = str((msg.metadata or {}).get("_task_id") or f"task_orch_{uuid.uuid4().hex[:12]}")
+        delivery_policy = get_delivery_policy(msg.metadata)
         if self._ledger:
             self._ledger.ensure_task(
                 task_id=task_id,
@@ -248,6 +250,7 @@ class Orchestrator:
                     session_context=dict((msg.metadata or {}).get("_session_context") or {}) if isinstance((msg.metadata or {}).get("_session_context"), dict) else None,
                     message_id=str((msg.metadata or {}).get("message_id") or ""),
                     delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
+                    delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
                 ),
                 metadata={"source": "orchestrator"},
             )

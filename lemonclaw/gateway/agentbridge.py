@@ -24,6 +24,7 @@ from starlette.routing import Route
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.channels.agentbridge import AgentBridgeChannel
 from lemonclaw.channels.delivery_context import attach_delivery_context
+from lemonclaw.channels.session_context import attach_session_context
 from lemonclaw.channels.session_keys import build_agentbridge_session_key
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
 from lemonclaw.gateway.webui.message_schema import serialize_ui_message
@@ -441,6 +442,12 @@ def get_agentbridge_routes(
                 "request_id": request_id,
             },
         )
+        metadata = attach_session_context(
+            channel="agentbridge",
+            chat_id=identity["chat_id"],
+            session_key=identity["session_key"],
+            metadata=metadata,
+        )
         try:
             response = await agent_loop.process_direct(
                 content=message,
@@ -524,6 +531,12 @@ def get_agentbridge_routes(
                     "metadata": body.get("metadata") or {},
                 },
             },
+        )
+        metadata = attach_session_context(
+            channel="agentbridge",
+            chat_id=identity["chat_id"],
+            session_key=identity["session_key"],
+            metadata=metadata,
         )
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 

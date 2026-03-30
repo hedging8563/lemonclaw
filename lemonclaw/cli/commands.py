@@ -45,6 +45,9 @@ def _normalize_runtime_delivery_metadata(metadata: dict | None) -> dict:
     delivery_context = normalized.get("delivery_context")
     if isinstance(delivery_context, dict) and "_delivery_context" not in normalized:
         normalized["_delivery_context"] = dict(delivery_context)
+    delivery_policy = normalized.get("delivery_policy")
+    if isinstance(delivery_policy, dict) and "_delivery_policy" not in normalized:
+        normalized["_delivery_policy"] = dict(delivery_policy)
     return normalized
 
 

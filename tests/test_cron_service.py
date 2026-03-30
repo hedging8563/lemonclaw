@@ -20,20 +20,26 @@ def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     assert service.list_jobs(include_disabled=True) == []
 
 
-def test_normalize_runtime_delivery_metadata_promotes_delivery_context() -> None:
+def test_normalize_runtime_delivery_metadata_promotes_delivery_contract() -> None:
     metadata = {
         "delivery_context": {
             "source_channel": "telegram",
             "source_chat_id": "123",
             "session_key": "telegram:123:456",
             "route": {"reply_to_message_id": 321, "message_thread_id": 456},
-        }
+        },
+        "delivery_policy": {
+            "mode": "replace",
+            "preserve_message_identity": True,
+        },
     }
 
     normalized = _normalize_runtime_delivery_metadata(metadata)
 
     assert normalized["_delivery_context"]["route"]["message_thread_id"] == 456
     assert normalized["delivery_context"]["session_key"] == "telegram:123:456"
+    assert normalized["_delivery_policy"]["mode"] == "replace"
+    assert normalized["delivery_policy"]["preserve_message_identity"] is True
 
 
 async def test_cron_tool_blocks_add_in_cron_context(tmp_path) -> None:
@@ -119,6 +125,10 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
             "session_key": "telegram:123:456",
             "route": {"reply_to_message_id": 321, "message_thread_id": 456},
         },
+        _default_delivery_policy={
+            "mode": "replace",
+            "preserve_message_identity": True,
+        },
     )
 
     assert "Created job" in result
@@ -126,6 +136,8 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
     assert len(jobs) == 1
     assert jobs[0].payload.session_key == "telegram:123:456"
     assert jobs[0].payload.metadata["delivery_context"]["route"]["message_thread_id"] == 456
+    assert jobs[0].payload.metadata["delivery_policy"]["mode"] == "replace"
+    assert jobs[0].payload.metadata["delivery_policy"]["preserve_message_identity"] is True
 
 
 def test_cron_service_round_trips_session_key_from_json(tmp_path) -> None:
@@ -209,7 +221,12 @@ async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -
                 "source_chat_id": "123",
                 "session_key": "telegram:123:456",
                 "route": {"reply_to_message_id": 321, "message_thread_id": 456},
-            }
+            },
+            "delivery_policy": {
+                "mode": "replace",
+                "preserve_message_identity": True,
+                "throttle_ms": "250",
+            },
         },
     )
 
@@ -230,3 +247,6 @@ async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -
     assert task["resume_context"]["session_context"]["run_mode"] == "system"
     assert task["resume_context"]["auto_resume_allowed"] is True
     assert task["resume_context"]["delivery_context"]["route"]["message_thread_id"] == 456
+    assert task["resume_context"]["delivery_policy"]["mode"] == "replace"
+    assert task["resume_context"]["delivery_policy"]["preserve_message_identity"] is True
+    assert task["resume_context"]["delivery_policy"]["throttle_ms"] == 250
