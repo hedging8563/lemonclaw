@@ -23,6 +23,7 @@ from lemonclaw.ledger.types import (
     OUTBOX_TERMINAL_STATUSES,
     describe_outbox_effect_type,
     is_supported_outbox_effect_type,
+    summarize_verification_metadata,
 )
 
 
@@ -575,7 +576,9 @@ class TaskLedgerSharedMixin:
 
         outbox = self.materialize_outbox_events_for_task(task_id)
         outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
-        conductor = dict((task.get("metadata") or {}).get("conductor") or {})
+        metadata = dict(task.get("metadata") or {})
+        conductor = dict(metadata.get("conductor") or {})
+        verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
 
         return {
             "task": self.enrich_task_for_observer(task),
@@ -593,10 +596,11 @@ class TaskLedgerSharedMixin:
                 "outbox_terminal_count": outbox_lifecycle["terminal_count"],
                 "outbox_active_count": outbox_lifecycle["active_count"],
                 "completion_gate": task.get("completion_gate"),
-                "recovery": (task.get("metadata") or {}).get("recovery"),
-                "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
-                "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
+                "recovery": metadata.get("recovery"),
+                "recovery_history": list(metadata.get("recovery_history") or []),
+                "retrieval": dict(metadata.get("retrieval") or {}),
                 "conductor": conductor,
+                "verification": verification,
             },
         }
 
@@ -1824,7 +1828,9 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
 
         outbox = self.materialize_outbox_events_for_task(task_id)
         outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
-        conductor = dict((task.get("metadata") or {}).get("conductor") or {})
+        metadata = dict(task.get("metadata") or {})
+        conductor = dict(metadata.get("conductor") or {})
+        verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
 
         return {
             "task": self.enrich_task_for_observer(task),
@@ -1837,16 +1843,17 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "current_stage": task.get("current_stage"),
                 "display_state": display_state,
                 "completion_gate": task.get("completion_gate"),
-                "recovery": (task.get("metadata") or {}).get("recovery"),
-                "recovery_history": list((task.get("metadata") or {}).get("recovery_history") or []),
-                "recovery_history_count": len((task.get("metadata") or {}).get("recovery_history") or []),
+                "recovery": metadata.get("recovery"),
+                "recovery_history": list(metadata.get("recovery_history") or []),
+                "recovery_history_count": len(metadata.get("recovery_history") or []),
                 "outbox_count": len(outbox),
                 "outbox_status_counts": outbox_lifecycle["status_counts"],
                 "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
                 "outbox_terminal_count": outbox_lifecycle["terminal_count"],
                 "outbox_active_count": outbox_lifecycle["active_count"],
-                "retrieval": dict((task.get("metadata") or {}).get("retrieval") or {}),
+                "retrieval": dict(metadata.get("retrieval") or {}),
                 "conductor": conductor,
+                "verification": verification,
             },
         }
 

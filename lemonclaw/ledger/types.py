@@ -33,6 +33,7 @@ OUTBOX_SUCCESS_STATUSES = frozenset({"sent", "compensated"})
 OUTBOX_FAILURE_STATUSES = frozenset({"failed", "expired"})
 OUTBOX_ABANDONED_STATUSES = frozenset({"abandoned"})
 OUTBOX_TERMINAL_STATUSES = OUTBOX_SUCCESS_STATUSES | OUTBOX_FAILURE_STATUSES | OUTBOX_ABANDONED_STATUSES
+_VERIFICATION_ACCEPTED_STATUSES = frozenset({"accepted", "complete", "completed", "passed", "ok", "recorded"})
 
 
 def is_supported_outbox_effect_type(effect_type: str) -> bool:
@@ -124,6 +125,70 @@ class CompletionGateResult:
     checked_at_ms: int
     open_steps: list[str] = field(default_factory=list)
     open_outbox: list[str] = field(default_factory=list)
+    verification: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def summarize_verification_metadata(
+    verification: dict[str, Any] | None,
+    *,
+    steps: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload = dict(verification or {}) if isinstance(verification, dict) else {}
+    if not payload:
+        return {}
+
+    requirements = dict(payload.get("requirements") or {}) if isinstance(payload.get("requirements"), dict) else {}
+    tool_trace = [dict(item) for item in list(payload.get("tool_trace") or []) if isinstance(item, dict)]
+    acceptance_evidence = [dict(item) for item in list(payload.get("acceptance_evidence") or []) if isinstance(item, dict)]
+    required_evidence = [
+        str(item).strip()
+        for item in list(requirements.get("required_evidence") or [])
+        if str(item).strip()
+    ]
+    min_tool_traces = 0
+    if requirements.get("require_tool_trace"):
+        min_tool_traces = 1
+    if requirements.get("min_tool_traces") is not None:
+        try:
+            min_tool_traces = max(min_tool_traces, int(requirements.get("min_tool_traces") or 0))
+        except (TypeError, ValueError):
+            min_tool_traces = max(min_tool_traces, 0)
+
+    accepted_evidence = []
+    accepted_kinds: set[str] = set()
+    for item in acceptance_evidence:
+        kind = str(item.get("kind") or "").strip()
+        status = str(item.get("status") or "accepted").strip().lower()
+        if not kind:
+            continue
+        if status in _VERIFICATION_ACCEPTED_STATUSES:
+            accepted_evidence.append(item)
+            accepted_kinds.add(kind)
+
+    missing_requirements: list[str] = []
+    if min_tool_traces and len(tool_trace) < min_tool_traces:
+        missing_requirements.append("tool_trace")
+    for kind in required_evidence:
+        if kind not in accepted_kinds:
+            missing_requirements.append(f"evidence:{kind}")
+
+    return {
+        "enabled": True,
+        "required": bool(min_tool_traces or required_evidence),
+        "step_trace_count": len(steps or []),
+        "tool_trace_count": len(tool_trace),
+        "acceptance_evidence_count": len(acceptance_evidence),
+        "accepted_evidence_count": len(accepted_evidence),
+        "requirements": {
+            "min_tool_traces": min_tool_traces,
+            "required_evidence": required_evidence,
+        },
+        "missing_requirements": missing_requirements,
+        "ui_channel_replay_available": bool(payload.get("ui_channel_replay_available") or payload.get("ui_channel_replay")),
+        "ui_channel_replay": dict(payload.get("ui_channel_replay") or {}) if isinstance(payload.get("ui_channel_replay"), dict) else {},
+        "tool_trace": tool_trace,
+        "acceptance_evidence": acceptance_evidence,
+    }

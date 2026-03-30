@@ -184,6 +184,55 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
     assert runtime_correction["interrupted_task_count"] == 1
 
 
+def test_tasks_api_exposes_verification_summary(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_verify",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="verify detail",
+        metadata={
+            "verification": {
+                "requirements": {
+                    "min_tool_traces": 1,
+                    "required_evidence": ["artifact_bundle"],
+                },
+                "tool_trace": [
+                    {
+                        "tool_name": "read_file",
+                        "status": "completed",
+                        "ok": True,
+                    }
+                ],
+                "acceptance_evidence": [
+                    {
+                        "kind": "artifact_bundle",
+                        "status": "accepted",
+                    }
+                ],
+                "ui_channel_replay": {
+                    "channel": "telegram",
+                    "chat_id": "123",
+                },
+            }
+        },
+    )
+    ledger.update_task("task_verify", status="completed", current_stage="done")
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks/task_verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    verification = data["summary"]["verification"]
+    assert verification["required"] is True
+    assert verification["tool_trace_count"] == 1
+    assert verification["accepted_evidence_count"] == 1
+    assert verification["ui_channel_replay_available"] is True
+    assert verification["missing_requirements"] == []
+
+
 def test_info_api_includes_channel_status_snapshot(tmp_path):
     channel_manager = SimpleNamespace(
         get_channel_status=lambda: {
@@ -750,6 +799,48 @@ def test_task_markdown_exports_include_retrieval_trace(tmp_path):
     pm_md = client.get("/api/tasks/task_retrieval_export/postmortem", params={"format": "md"})
     assert pm_md.status_code == 200
     assert "## Retrieval" in pm_md.text
+
+
+def test_task_exports_surface_repo_change_memory_objects(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_repo_change",
+        session_key="agentbridge:codex:default:demo",
+        agent_id="default",
+        mode="chat",
+        channel="agentbridge",
+        goal="repo aware task",
+        metadata={
+            "retrieval": {
+                "strategy": "hybrid",
+                "latency_ms": 5,
+                "hit_sources": ["repo_change_memory"],
+                "repo_change_memory_count": 1,
+                "structured": {
+                    "session_summary": "repo aware trace",
+                    "fact_slots": [],
+                    "retrieval_objects": [
+                        {
+                            "kind": "repo_change_memory",
+                            "title": "Repo Change Memory (default)",
+                            "summary": "prefer service adapters",
+                            "preferred_internal_apis": ["service.adapters.run"],
+                        }
+                    ],
+                },
+            }
+        },
+    )
+
+    client = TestClient(app)
+    export_json = client.get("/api/tasks/task_repo_change/export", params={"format": "json"})
+    assert export_json.status_code == 200
+    retrieval_objects = export_json.json()["summary"]["retrieval"]["structured"]["retrieval_objects"]
+    assert retrieval_objects[0]["kind"] == "repo_change_memory"
+
+    postmortem_json = client.get("/api/tasks/task_repo_change/postmortem", params={"format": "json"})
+    assert postmortem_json.status_code == 200
+    assert postmortem_json.json()["summary"]["retrieval"]["repo_change_memory_count"] == 1
 
 
 def test_task_exports_include_conductor_chain(tmp_path):

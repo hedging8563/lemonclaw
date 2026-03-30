@@ -125,6 +125,87 @@ def test_completion_gate_fails_closed_when_evaluation_raises(tmp_path: Path):
     assert task["current_stage"] == "error"
 
 
+def test_completion_gate_blocks_when_required_verification_is_missing(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="verify me",
+        metadata={
+            "verification": {
+                "requirements": {
+                    "min_tool_traces": 1,
+                    "required_evidence": ["artifact_bundle"],
+                },
+                "tool_trace": [],
+                "acceptance_evidence": [],
+            }
+        },
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+
+    result = finalize_task(ledger, "task_1")
+
+    assert result is not None
+    assert result.passed is False
+    assert result.next_status == "running"
+    assert result.next_stage == "verify"
+    assert result.verification["missing_requirements"] == ["tool_trace", "evidence:artifact_bundle"]
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "running"
+    assert task["current_stage"] == "verify"
+
+
+def test_completion_gate_passes_when_required_verification_is_present(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="verify me",
+        metadata={
+            "verification": {
+                "requirements": {
+                    "min_tool_traces": 1,
+                    "required_evidence": ["artifact_bundle"],
+                },
+                "tool_trace": [
+                    {
+                        "tool_name": "read_file",
+                        "status": "completed",
+                        "ok": True,
+                    }
+                ],
+                "acceptance_evidence": [
+                    {
+                        "kind": "artifact_bundle",
+                        "status": "accepted",
+                    }
+                ],
+            }
+        },
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+
+    result = finalize_task(ledger, "task_1")
+
+    assert result is not None
+    assert result.passed is True
+    assert result.verification["missing_requirements"] == []
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "completed"
+    assert task["completion_gate"]["verification"]["accepted_evidence_count"] == 1
+
+
 def test_completion_gate_returns_none_for_missing_task(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
 

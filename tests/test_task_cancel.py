@@ -381,6 +381,73 @@ class TestSteeringLoop:
         assert runtime_correction["message_preview"] == "please, only patch the text"
         assert runtime_correction["interrupted_task_count"] == 1
 
+    @pytest.mark.asyncio
+    async def test_continue_follow_up_does_not_interrupt_active_task(self, make_agent_loop):
+        """A continue follow-up should queue behind the current task instead of cancelling it."""
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = make_agent_loop()
+
+        first_started = asyncio.Event()
+        allow_first_finish = asyncio.Event()
+        first_cancelled = asyncio.Event()
+        second_started = asyncio.Event()
+
+        async def fake_process(msg, **kwargs):
+            if msg.content == "draft answer":
+                first_started.set()
+                try:
+                    await asyncio.wait_for(allow_first_finish.wait(), timeout=1.0)
+                except asyncio.CancelledError:
+                    first_cancelled.set()
+                    raise
+                return OutboundMessage(channel="test", chat_id="c1", content="draft complete")
+            if msg.content == "continue with tests":
+                second_started.set()
+                return OutboundMessage(channel="test", chat_id="c1", content="continued")
+            raise AssertionError(f"unexpected content: {msg.content!r}")
+
+        loop._process_message = fake_process
+
+        first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
+        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="continue with tests")
+
+        first_task = loop._spawn_dispatch_task(first_msg)
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        second_task = loop._spawn_dispatch_task(second_msg)
+        await asyncio.sleep(0.05)
+
+        assert first_cancelled.is_set() is False
+        assert second_started.is_set() is False
+
+        allow_first_finish.set()
+        await asyncio.wait_for(second_started.wait(), timeout=1.0)
+
+        first_outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        second_outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert first_outbound.content == "draft complete"
+        assert second_outbound.content == "continued"
+
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1.0)
+
+        first_task_id = str(first_msg.metadata["_task_id"])
+        second_task_id = str(second_msg.metadata["_task_id"])
+        old_task = loop.ledger.read_task(first_task_id)
+        new_task = loop.ledger.read_task(second_task_id)
+
+        assert old_task is not None
+        assert old_task["status"] == "completed"
+        assert old_task["current_stage"] == "done"
+        assert old_task["metadata"].get("recovery_history") in (None, [])
+
+        assert new_task is not None
+        runtime_correction = new_task["metadata"]["runtime_correction"]
+        assert runtime_correction["kind"] == "continue"
+        assert runtime_correction["interrupted_task_count"] == 0
+        assert runtime_correction["continued_task_count"] == 1
+        assert runtime_correction["continued_task_ids"] == [first_task_id]
+
 
 class TestSubagentCancellation:
     @pytest.mark.asyncio

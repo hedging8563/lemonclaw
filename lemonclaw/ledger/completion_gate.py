@@ -11,6 +11,7 @@ from lemonclaw.ledger.types import (
     OUTBOX_ABANDONED_STATUSES,
     OUTBOX_ACTIVE_STATUSES,
     OUTBOX_FAILURE_STATUSES,
+    summarize_verification_metadata,
 )
 
 if TYPE_CHECKING:
@@ -32,8 +33,10 @@ def evaluate_completion(
     steps: list[dict[str, Any]],
     outbox_events: list[dict[str, Any]],
     checked_at_ms: int,
+    verification: dict[str, Any] | None = None,
 ) -> CompletionGateResult:
     """Evaluate whether a task is safe to mark completed."""
+    verification_summary = summarize_verification_metadata(verification, steps=steps)
     failed_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _FAILED_STEP_STATUSES]
     if failed_steps:
         return CompletionGateResult(
@@ -44,6 +47,7 @@ def evaluate_completion(
             next_stage="error",
             checked_at_ms=checked_at_ms,
             open_steps=failed_steps[:20],
+            verification=verification_summary,
         )
 
     abandoned_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _ABANDONED_OUTBOX_STATUSES]
@@ -56,6 +60,7 @@ def evaluate_completion(
             next_stage="abandoned",
             checked_at_ms=checked_at_ms,
             open_outbox=abandoned_outbox[:20],
+            verification=verification_summary,
         )
 
     expired_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _EXPIRED_OUTBOX_STATUSES]
@@ -68,6 +73,7 @@ def evaluate_completion(
             next_stage="error",
             checked_at_ms=checked_at_ms,
             open_outbox=expired_outbox[:20],
+            verification=verification_summary,
         )
 
     failed_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _FAILED_OUTBOX_STATUSES]
@@ -83,6 +89,7 @@ def evaluate_completion(
             next_stage="waiting_outbox",
             checked_at_ms=checked_at_ms,
             open_outbox=failed_outbox[:20],
+            verification=verification_summary,
         )
 
     open_outbox = [str(event.get("event_id") or "") for event in outbox_events if event.get("status") in _OPEN_OUTBOX_STATUSES]
@@ -95,6 +102,7 @@ def evaluate_completion(
             next_stage="waiting_outbox",
             checked_at_ms=checked_at_ms,
             open_outbox=open_outbox[:20],
+            verification=verification_summary,
         )
 
     waiting_outbox_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _OUTBOX_WAITING_STEP_STATUSES]
@@ -107,6 +115,7 @@ def evaluate_completion(
             next_stage="waiting_outbox",
             checked_at_ms=checked_at_ms,
             open_steps=waiting_outbox_steps[:20],
+            verification=verification_summary,
         )
 
     open_steps = [str(step.get("step_id") or step.get("name") or "") for step in steps if step.get("status") in _OPEN_STEP_STATUSES]
@@ -119,6 +128,19 @@ def evaluate_completion(
             next_stage="verify",
             checked_at_ms=checked_at_ms,
             open_steps=open_steps[:20],
+            verification=verification_summary,
+        )
+
+    if verification_summary.get("required") and verification_summary.get("missing_requirements"):
+        missing = [str(item) for item in verification_summary.get("missing_requirements") or [] if str(item)]
+        return CompletionGateResult(
+            task_id=task_id,
+            passed=False,
+            reason=f"verification requirements remain: {', '.join(missing[:5])}",
+            next_status="running",
+            next_stage="verify",
+            checked_at_ms=checked_at_ms,
+            verification=verification_summary,
         )
 
     return CompletionGateResult(
@@ -128,6 +150,7 @@ def evaluate_completion(
         next_status="completed",
         next_stage="done",
         checked_at_ms=checked_at_ms,
+        verification=verification_summary,
     )
 
 
@@ -145,6 +168,7 @@ def finalize_task(ledger: "TaskLedger", task_id: str) -> CompletionGateResult | 
             steps=ledger.materialize_steps(task_id),
             outbox_events=ledger.materialize_outbox_events_for_task(task_id),
             checked_at_ms=ledger.now_ms(),
+            verification=((task.get("metadata") or {}).get("verification") or {}),
         )
     except Exception as exc:
         logger.exception("Completion gate evaluation failed for {}", task_id)

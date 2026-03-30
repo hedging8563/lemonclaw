@@ -172,3 +172,29 @@ async def test_registry_marks_existing_step_failed_when_tool_raises(tmp_path: Pa
     assert len(steps) == 1
     assert steps[0]["status"] == "failed"
     assert steps[0]["error"] == "boom"
+
+
+async def test_registry_appends_tool_trace_to_verification_metadata(tmp_path: Path) -> None:
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="trace tool",
+    )
+    reg = ToolRegistry(ledger=ledger)
+    reg.register(SampleTool())
+
+    result = await reg.execute("sample", {"query": "hello", "count": 1}, context={"_task_id": "task_1"})
+
+    assert result == "ok"
+    task = ledger.read_task("task_1")
+    assert task is not None
+    verification = dict(task.get("metadata") or {}).get("verification") or {}
+    tool_trace = verification.get("tool_trace") or []
+    assert len(tool_trace) == 1
+    assert tool_trace[0]["tool_name"] == "sample"
+    assert tool_trace[0]["status"] == "completed"
+    assert tool_trace[0]["ok"] is True

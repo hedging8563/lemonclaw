@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 from starlette.testclient import TestClient
 
@@ -197,3 +198,36 @@ class TestAgentBridgeRoutes:
         )
         assert media.status_code == 200
         assert media.content == b"hello agentbridge"
+
+    def test_agentbridge_chat_loads_repo_change_memory_sidecar(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+        sidecar = loop.workspace / ".lemonclaw-state" / "repo-change-memory"
+        sidecar.mkdir(parents=True, exist_ok=True)
+        (sidecar / "codex__default__repo-demo.json").write_text(
+            json.dumps(
+                {
+                    "summary": "Prefer service adapters over direct route edits.",
+                    "preferred_internal_apis": ["service.adapters.run"],
+                    "path_conventions": ["services/**"],
+                    "historical_patch_patterns": ["adapter-first refactors"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        resp = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={"client_id": "codex", "thread_id": "repo-demo", "message": "continue"},
+        )
+
+        assert resp.status_code == 200
+        task = loop.ledger.read_task(resp.json()["task_id"])
+        assert task is not None
+        retrieval = dict(task.get("metadata") or {}).get("retrieval") or {}
+        assert retrieval["repo_change_memory_count"] == 1
+        assert "repo_change_memory" in retrieval["hit_sources"]
+        repo_change = retrieval["structured"]["retrieval_objects"][-1]
+        assert repo_change["kind"] == "repo_change_memory"
+        assert repo_change["preferred_internal_apis"] == ["service.adapters.run"]

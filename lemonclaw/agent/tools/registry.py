@@ -44,6 +44,25 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
 
+    def _append_tool_trace(
+        self,
+        *,
+        task_id: str,
+        trace: dict[str, Any],
+    ) -> None:
+        if not self._ledger or not task_id:
+            return
+        task = self._ledger.read_task(task_id)
+        if not task:
+            return
+        metadata = dict(task.get("metadata") or {})
+        verification = dict(metadata.get("verification") or {})
+        tool_trace = [dict(item) for item in list(verification.get("tool_trace") or []) if isinstance(item, dict)]
+        tool_trace.append(dict(trace))
+        verification["tool_trace"] = tool_trace[-100:]
+        metadata["verification"] = verification
+        self._ledger.update_task(task_id, metadata=metadata)
+
     async def execute(
         self,
         name: str,
@@ -64,6 +83,7 @@ class ToolRegistry:
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _TOOL_ERROR_HINT
             started_at = time.time()
+            started_at_ms = int(started_at * 1000)
             call_context = dict(context or {})
             capability_id = tool.resolve_capability(params, call_context)
             capability_token = call_context.get("_capability_token")
@@ -104,6 +124,21 @@ class ToolRegistry:
                     )
                     if step:
                         self._ledger.finish_step(step, status="failed", error=f"denied: {decision.reason}")
+                    self._append_tool_trace(
+                        task_id=task_id,
+                        trace={
+                            "tool_name": name,
+                            "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
+                            "capability_id": capability_id,
+                            "status": "denied",
+                            "ok": False,
+                            "replayable": tool.is_replayable(capability_id),
+                            "started_at_ms": started_at_ms,
+                            "ended_at_ms": int(ended_at * 1000),
+                            "params_summary": json.dumps(params, ensure_ascii=False)[:500],
+                            "result_summary": str(decision.reason or "")[:500],
+                        },
+                    )
                     return f"Error: Capability '{capability_id}' denied: {decision.reason}" + _TOOL_ERROR_HINT
                 sandbox_allowed, sandbox_reason = self._governance.validate_tool_call(
                     capability=decision.capability,
@@ -126,10 +161,26 @@ class ToolRegistry:
                     )
                     if step:
                         self._ledger.finish_step(step, status="failed", error=f"denied: {sandbox_reason}")
+                    self._append_tool_trace(
+                        task_id=task_id,
+                        trace={
+                            "tool_name": name,
+                            "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
+                            "capability_id": capability_id,
+                            "status": "denied",
+                            "ok": False,
+                            "replayable": tool.is_replayable(capability_id),
+                            "started_at_ms": started_at_ms,
+                            "ended_at_ms": int(ended_at * 1000),
+                            "params_summary": json.dumps(params, ensure_ascii=False)[:500],
+                            "result_summary": str(sandbox_reason or "")[:500],
+                        },
+                    )
                     return f"Error: Capability '{capability_id}' denied: {sandbox_reason}" + _TOOL_ERROR_HINT
 
             result = await tool.execute(**params, **call_context)
             normalized = tool.normalize_result(result)
+            ended_at_ms = int(time.time() * 1000)
             if step:
                 step_status = str(normalized.get("step_status") or ("completed" if normalized.get("ok") else "failed"))
                 self._ledger.finish_step(
@@ -137,6 +188,23 @@ class ToolRegistry:
                     status=step_status,
                     error=None if normalized.get("ok") else str(normalized.get("summary", ""))[:500],
                 )
+            else:
+                step_status = str(normalized.get("step_status") or ("completed" if normalized.get("ok") else "failed"))
+            self._append_tool_trace(
+                task_id=task_id,
+                trace={
+                    "tool_name": name,
+                    "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
+                    "capability_id": capability_id,
+                    "status": step_status,
+                    "ok": bool(normalized.get("ok")),
+                    "replayable": tool.is_replayable(capability_id),
+                    "started_at_ms": started_at_ms,
+                    "ended_at_ms": ended_at_ms,
+                    "params_summary": json.dumps(params, ensure_ascii=False)[:500],
+                    "result_summary": str(normalized.get("summary") or "")[:500],
+                },
+            )
             if self._governance:
                 capability = decision.capability if decision else self._governance.authorize(
                     capability_id=capability_id,
@@ -178,6 +246,22 @@ class ToolRegistry:
                         replayable=replayable,
                     )
                     self._ledger.finish_step(fallback_step, status="failed", error=str(e)[:500])
+                    step = fallback_step
+            self._append_tool_trace(
+                task_id=task_id,
+                trace={
+                    "tool_name": name,
+                    "step_id": str(getattr(step, "step_id", "") or ""),
+                    "capability_id": capability_id,
+                    "status": "failed",
+                    "ok": False,
+                    "replayable": tool.is_replayable(capability_id) if capability_id else True,
+                    "started_at_ms": int(started_at * 1000) if "started_at" in locals() else int(time.time() * 1000),
+                    "ended_at_ms": int(time.time() * 1000),
+                    "params_summary": json.dumps(params, ensure_ascii=False)[:500],
+                    "result_summary": str(e)[:500],
+                },
+            )
             return f"Error executing {name}: {str(e)}" + _TOOL_ERROR_HINT
 
     @property

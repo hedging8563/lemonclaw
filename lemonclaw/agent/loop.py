@@ -54,6 +54,7 @@ from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 from lemonclaw.utils.attachments import rewrite_text_paths
 from lemonclaw.agent.prompting import infer_mode
+from lemonclaw.memory.repo_change import load_repo_change_memory
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
@@ -414,6 +415,72 @@ class AgentLoop:
         metadata = dict(task.get("metadata") or {})
         metadata["retrieval"] = dict(retrieval_meta)
         self.ledger.update_task(task_id, metadata=metadata)
+
+    def _append_agentbridge_repo_change_memory(
+        self,
+        *,
+        msg: InboundMessage,
+        memory_ctx: str,
+        retrieval_meta: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        metadata = dict(msg.metadata or {})
+        agentbridge_meta = metadata.get("agentbridge")
+        if msg.channel != "agentbridge" and not isinstance(agentbridge_meta, dict):
+            return memory_ctx, retrieval_meta
+        if not isinstance(agentbridge_meta, dict):
+            return memory_ctx, retrieval_meta
+
+        repo_change = load_repo_change_memory(
+            self.workspace,
+            client_id=str(agentbridge_meta.get("client_id") or ""),
+            workspace_id=str(agentbridge_meta.get("workspace_id") or "default"),
+            thread_id=str(agentbridge_meta.get("thread_id") or "default"),
+            metadata=dict(agentbridge_meta.get("metadata") or {}) if isinstance(agentbridge_meta.get("metadata"), dict) else {},
+        )
+        if not repo_change:
+            return memory_ctx, retrieval_meta
+
+        context_block = str(repo_change.get("context") or "").strip()
+        if context_block:
+            memory_ctx = f"{memory_ctx}\n\n{context_block}".strip() if memory_ctx else context_block
+
+        updated_meta = dict(retrieval_meta or {})
+        structured = dict(updated_meta.get("structured") or {})
+        retrieval_objects = list(structured.get("retrieval_objects") or [])
+        seen = {
+            (
+                str(item.get("kind") or ""),
+                str(item.get("id") or ""),
+                str(item.get("source") or ""),
+            )
+            for item in retrieval_objects
+            if isinstance(item, dict)
+        }
+        added = 0
+        for item in repo_change.get("retrieval_objects") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("kind") or ""),
+                str(item.get("id") or ""),
+                str(item.get("source") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            retrieval_objects.append(dict(item))
+            added += 1
+        if not added:
+            return memory_ctx, updated_meta
+
+        structured["retrieval_objects"] = retrieval_objects
+        updated_meta["structured"] = structured
+        updated_meta["hit_sources"] = list(dict.fromkeys([*list(updated_meta.get("hit_sources") or []), "repo_change_memory"]))
+        updated_meta["repo_change_memory_count"] = int(updated_meta.get("repo_change_memory_count") or 0) + added
+        updated_meta["repo_change_memory_sources"] = list(
+            dict.fromkeys([*list(updated_meta.get("repo_change_memory_sources") or []), str(repo_change.get("source") or "")])
+        )
+        return memory_ctx, updated_meta
 
     def update_defaults(
         self,
@@ -866,6 +933,29 @@ class AgentLoop:
             )
             self.ledger.update_task(task_id, metadata=metadata)
 
+    @staticmethod
+    def _build_runtime_correction_payload(
+        *,
+        kind: str,
+        msg: InboundMessage,
+        interrupted_tasks: list[dict[str, Any]],
+        continued_tasks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        continued_tasks = continued_tasks or []
+        return {
+            "kind": kind,
+            "message_preview": msg.content.strip()[:200],
+            "supersedes_task_ids": [
+                str(task.get("task_id") or "") for task in interrupted_tasks if task.get("task_id")
+            ],
+            "continued_task_ids": [
+                str(task.get("task_id") or "") for task in continued_tasks if task.get("task_id")
+            ],
+            "interrupted_task_count": len(interrupted_tasks),
+            "continued_task_count": len(continued_tasks),
+            "at_ms": int(time.time() * 1000),
+        }
+
     async def _interrupt_active_session_for_correction(
         self,
         msg: InboundMessage,
@@ -889,6 +979,21 @@ class AgentLoop:
             exclude_task_id=str(metadata.get("_task_id") or ""),
         )
         kind = self._classify_runtime_correction(msg.content)
+        if kind == "continue":
+            logger.info(
+                "Runtime correction classified for session {}: kind={} queued_behind_tasks={}",
+                msg.session_key,
+                kind,
+                len(interrupted_tasks),
+            )
+            metadata["_runtime_correction"] = self._build_runtime_correction_payload(
+                kind=kind,
+                msg=msg,
+                interrupted_tasks=[],
+                continued_tasks=interrupted_tasks,
+            )
+            msg.metadata = metadata
+            return True
         self._session_cancel_reasons[msg.session_key] = "user_correction_interrupt"
         await self._cancel_session_work(msg.session_key, exclude_task=current_task)
         self._session_cancel_reasons.pop(msg.session_key, None)
@@ -904,15 +1009,11 @@ class AgentLoop:
             kind,
             len(interrupted_tasks),
         )
-        metadata["_runtime_correction"] = {
-            "kind": kind,
-            "message_preview": msg.content.strip()[:200],
-            "supersedes_task_ids": [
-                str(task.get("task_id") or "") for task in interrupted_tasks if task.get("task_id")
-            ],
-            "interrupted_task_count": len(interrupted_tasks),
-            "at_ms": int(time.time() * 1000),
-        }
+        metadata["_runtime_correction"] = self._build_runtime_correction_payload(
+            kind=kind,
+            msg=msg,
+            interrupted_tasks=interrupted_tasks,
+        )
         msg.metadata = metadata
         return True
 
@@ -1747,6 +1848,11 @@ class AgentLoop:
 
         history = session.get_history(max_messages=self.memory_window)
         memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
+        memory_ctx, retrieval_meta = self._append_agentbridge_repo_change_memory(
+            msg=msg,
+            memory_ctx=memory_ctx,
+            retrieval_meta=retrieval_meta,
+        )
         logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
         if task_id:
             self._record_retrieval_meta(task_id, retrieval_meta)
