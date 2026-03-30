@@ -99,6 +99,75 @@ class TestAgentBridgeRoutes:
         assert resp.status_code == 409
         assert resp.json()["error"] == "provider_family_conflict"
 
+    def test_chat_injects_session_context_into_process_direct(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        captured: dict[str, object] = {}
+
+        async def _fake_process_direct(*args, **kwargs):
+            captured["metadata"] = kwargs["metadata"]
+            return "ok"
+
+        loop.process_direct = _fake_process_direct
+
+        headers = {"Authorization": "Bearer secret-token"}
+        resp = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={
+                "client_id": "codex",
+                "workspace_id": "default",
+                "thread_id": "ctx-demo",
+                "message": "hello",
+                "timezone": "Asia/Shanghai",
+                "run_mode": "detached",
+            },
+        )
+
+        assert resp.status_code == 200
+        metadata = captured["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata["timezone"] == "Asia/Shanghai"
+        assert metadata["run_mode"] == "detached"
+        assert metadata["agentbridge"]["session_context"] == {
+            "timezone": "Asia/Shanghai",
+            "run_mode": "detached",
+        }
+
+    def test_chat_stream_injects_session_context_into_process_direct(self, make_agent_loop):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        captured: dict[str, object] = {}
+
+        async def _fake_process_direct(*args, **kwargs):
+            captured["metadata"] = kwargs["metadata"]
+            return "streamed"
+
+        loop.process_direct = _fake_process_direct
+
+        headers = {"Authorization": "Bearer secret-token"}
+        resp = client.post(
+            "/api/agentbridge/chat/stream",
+            headers=headers,
+            json={
+                "client_id": "codex",
+                "workspace_id": "default",
+                "thread_id": "ctx-stream-demo",
+                "message": "hello",
+                "timezone": "UTC",
+                "run_mode": "system",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
+        metadata = captured["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata["timezone"] == "UTC"
+        assert metadata["run_mode"] == "system"
+        assert metadata["agentbridge"]["session_context"] == {
+            "timezone": "UTC",
+            "run_mode": "system",
+        }
+
     def test_usage_accepts_agentbridge_session_key(self, make_agent_loop):
         _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
         headers = {"Authorization": "Bearer secret-token"}

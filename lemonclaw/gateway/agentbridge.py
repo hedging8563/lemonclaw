@@ -77,6 +77,17 @@ def _build_chat_identity(body: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _build_session_context(body: dict[str, Any]) -> dict[str, str]:
+    timezone = str(body.get("timezone") or "").strip()[:64]
+    run_mode = str(body.get("run_mode") or "interactive").strip()
+    if run_mode not in {"interactive", "detached", "system"}:
+        raise ValueError("run_mode must be one of: interactive, detached, system")
+    return {
+        "timezone": timezone,
+        "run_mode": run_mode,
+    }
+
+
 def _rewrite_agentbridge_media_urls(message: dict[str, Any]) -> dict[str, Any]:
     payload = dict(message)
     raw_media = payload.get("media")
@@ -392,6 +403,7 @@ def get_agentbridge_routes(
 
         try:
             identity = _build_chat_identity(body)
+            session_context = _build_session_context(body)
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
 
@@ -416,11 +428,14 @@ def get_agentbridge_routes(
             metadata={
                 "_task_id": task_id,
                 **({"model": requested_model} if requested_model else {}),
+                "timezone": session_context["timezone"],
+                "run_mode": session_context["run_mode"],
                 "agentbridge": {
                     "request_id": request_id,
                     "client_id": identity["client_id"],
                     "workspace_id": identity["workspace_id"],
                     "thread_id": identity["thread_id"],
+                    "session_context": session_context,
                     "metadata": body.get("metadata") or {},
                 },
                 "request_id": request_id,
@@ -472,6 +487,7 @@ def get_agentbridge_routes(
 
         try:
             identity = _build_chat_identity(body)
+            session_context = _build_session_context(body)
         except ValueError as exc:
             return _json({"error": str(exc)}, 400)
 
@@ -497,11 +513,14 @@ def get_agentbridge_routes(
                 "_task_id": task_id,
                 "request_id": request_id,
                 **({"model": requested_model} if requested_model else {}),
+                "timezone": session_context["timezone"],
+                "run_mode": session_context["run_mode"],
                 "agentbridge": {
                     "request_id": request_id,
                     "client_id": identity["client_id"],
                     "workspace_id": identity["workspace_id"],
                     "thread_id": identity["thread_id"],
+                    "session_context": session_context,
                     "metadata": body.get("metadata") or {},
                 },
             },
