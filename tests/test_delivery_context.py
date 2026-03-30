@@ -3,10 +3,14 @@ from __future__ import annotations
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.channels.delivery_context import (
     DELIVERY_CONTEXT_KEY,
+    DELIVERY_POLICY_KEY,
     apply_delivery_route,
+    apply_delivery_policy,
     attach_delivery_context,
+    attach_delivery_policy,
     build_delivery_context,
     get_delivery_context,
+    get_delivery_policy,
     resolve_delivery_route,
     resolve_delivery_session_key,
 )
@@ -110,3 +114,46 @@ def test_apply_delivery_route_sets_reply_to_for_discord() -> None:
 
     assert msg.reply_to == "msg123"
     assert DELIVERY_CONTEXT_KEY not in msg.metadata
+
+
+def test_attach_delivery_policy_normalizes_and_is_idempotent() -> None:
+    metadata = attach_delivery_policy(
+        {
+            "delivery_policy": {
+                "mode": "Replace",
+                "preserve_message_identity": 1,
+                "max_retries": "5",
+                "throttle_ms": "250",
+            }
+        }
+    )
+    attached = attach_delivery_policy(metadata)
+
+    assert attached == metadata
+    assert metadata[DELIVERY_POLICY_KEY] == {
+        "mode": "replace",
+        "preserve_message_identity": True,
+        "max_retries": 5,
+        "throttle_ms": 250,
+    }
+    assert get_delivery_policy(metadata)["mode"] == "replace"
+
+
+def test_apply_delivery_policy_preserves_policy_metadata() -> None:
+    msg = OutboundMessage(
+        channel="telegram",
+        chat_id="12345",
+        content="hello",
+        metadata={
+            DELIVERY_POLICY_KEY: {
+                "mode": "final_only",
+                "preserve_message_identity": True,
+                "max_retries": 3,
+            }
+        },
+    )
+
+    apply_delivery_policy(msg)
+
+    assert msg.metadata[DELIVERY_POLICY_KEY]["mode"] == "final_only"
+    assert msg.metadata[DELIVERY_POLICY_KEY]["preserve_message_identity"] is True

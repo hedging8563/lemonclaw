@@ -6,6 +6,8 @@ from typing import Any
 from lemonclaw.bus.events import OutboundMessage
 
 DELIVERY_CONTEXT_KEY = "_delivery_context"
+DELIVERY_POLICY_KEY = "_delivery_policy"
+_DELIVERY_POLICY_ALIAS_KEY = "delivery_policy"
 
 
 def build_delivery_context(
@@ -76,6 +78,58 @@ def attach_delivery_context(
         session_key=session_key,
         metadata=meta,
     )
+    return meta
+
+
+def normalize_delivery_policy(policy: Any) -> dict[str, Any]:
+    if not isinstance(policy, dict):
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for key, value in policy.items():
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, (dict, list)):
+            normalized[key] = deepcopy(value)
+        else:
+            normalized[key] = value
+
+    if "mode" in normalized:
+        normalized["mode"] = str(normalized["mode"]).strip().lower()
+    if "preserve_message_identity" in normalized:
+        normalized["preserve_message_identity"] = bool(normalized["preserve_message_identity"])
+    for key in ("max_retries", "retry_backoff_ms", "throttle_ms"):
+        if key in normalized:
+            try:
+                normalized[key] = int(normalized[key])
+            except (TypeError, ValueError):
+                normalized.pop(key, None)
+    return normalized
+
+
+def get_delivery_policy(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return None
+    policy = metadata.get(DELIVERY_POLICY_KEY)
+    if isinstance(policy, dict):
+        normalized = normalize_delivery_policy(policy)
+        return normalized or None
+    alias = metadata.get(_DELIVERY_POLICY_ALIAS_KEY)
+    if isinstance(alias, dict):
+        normalized = normalize_delivery_policy(alias)
+        return normalized or None
+    return None
+
+
+def attach_delivery_policy(
+    metadata: dict[str, Any] | None,
+    policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    meta = dict(metadata or {})
+    effective_policy = normalize_delivery_policy(policy or get_delivery_policy(meta) or {})
+    if effective_policy:
+        meta[DELIVERY_POLICY_KEY] = effective_policy
+        meta.pop(_DELIVERY_POLICY_ALIAS_KEY, None)
     return meta
 
 
@@ -173,4 +227,10 @@ def apply_delivery_route(msg: OutboundMessage) -> None:
             if route.get(key) and key not in metadata:
                 metadata[key] = route[key]
 
+    msg.metadata = metadata
+
+
+def apply_delivery_policy(msg: OutboundMessage) -> None:
+    metadata = attach_delivery_policy(msg.metadata)
+    metadata.pop(_DELIVERY_POLICY_ALIAS_KEY, None)
     msg.metadata = metadata

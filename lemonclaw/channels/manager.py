@@ -12,7 +12,7 @@ from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
 from lemonclaw.channels.capabilities import ALL_CHANNEL_NAMES, get_channel_capability
-from lemonclaw.channels.delivery_context import apply_delivery_route, resolve_delivery_session_key
+from lemonclaw.channels.delivery_context import apply_delivery_policy, apply_delivery_route, get_delivery_policy, resolve_delivery_session_key
 from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.config.schema import Config
 from lemonclaw.triggers import TriggerRuntime
@@ -543,6 +543,8 @@ class ChannelManager:
                     chat_id=msg.chat_id,
                 )
                 apply_delivery_route(msg)
+                delivery_policy = get_delivery_policy(msg.metadata)
+                apply_delivery_policy(msg)
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
                 if msg.channel != "webui" and self.activity_bus and not self._should_skip_activity_broadcast(msg):
@@ -567,6 +569,8 @@ class ChannelManager:
                         event["progress_kind"] = str(meta.get("_progress_kind"))
                     if meta.get("_chunk_first"):
                         event["first"] = True
+                    if delivery_policy:
+                        event["delivery_policy"] = dict(delivery_policy)
                     await self.activity_bus.broadcast(event)
 
                 if msg.metadata.get("_progress"):

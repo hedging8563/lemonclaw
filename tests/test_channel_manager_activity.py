@@ -192,6 +192,50 @@ async def test_manager_applies_delivery_route_before_send() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manager_preserves_delivery_policy_through_send_and_activity_event() -> None:
+    bus = MessageBus()
+    activity_bus = SimpleNamespace(broadcast=AsyncMock())
+    manager = ChannelManager(Config(), bus, activity_bus=activity_bus)
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    manager.channels["telegram"] = SimpleNamespace(send=AsyncMock(side_effect=_send))
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="12345",
+            content="hello",
+            metadata={
+                DELIVERY_CONTEXT_KEY: {
+                    "source_channel": "telegram",
+                    "source_chat_id": "12345",
+                    "session_key": "telegram:12345:456",
+                    "route": {"reply_to_message_id": 321},
+                },
+                "_delivery_policy": {
+                    "mode": "replace",
+                    "preserve_message_identity": True,
+                    "max_retries": 5,
+                },
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    assert len(sent) == 1
+    assert sent[0].metadata["message_id"] == 321
+    assert sent[0].metadata["_delivery_policy"]["mode"] == "replace"
+    event = activity_bus.broadcast.await_args.args[0]
+    assert event["delivery_policy"]["mode"] == "replace"
+
+
+@pytest.mark.asyncio
 async def test_manager_applies_delivery_route_before_activity_broadcast() -> None:
     bus = MessageBus()
     activity_bus = SimpleNamespace(broadcast=AsyncMock())
