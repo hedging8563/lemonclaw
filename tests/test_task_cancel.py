@@ -329,6 +329,9 @@ class TestSteeringLoop:
         assert runtime_correction["message_preview"]
         assert first_task_id in runtime_correction["supersedes_task_ids"]
         assert runtime_correction["interrupted_task_count"] == 1
+        assert new_task["resume_context"]["runtime_correction"]["kind"] == runtime_correction["kind"]
+        assert new_task["resume_context"]["runtime_correction"]["supersedes_task_ids"] == [first_task_id]
+        assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
     @pytest.mark.asyncio
     async def test_non_command_follow_up_interrupts_active_task_and_marks_constraint_patch(self, make_agent_loop):
@@ -380,6 +383,8 @@ class TestSteeringLoop:
         assert runtime_correction["kind"] == "constraint_patch"
         assert runtime_correction["message_preview"] == "please, only patch the text"
         assert runtime_correction["interrupted_task_count"] == 1
+        assert new_task["resume_context"]["runtime_correction"]["kind"] == "constraint_patch"
+        assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
     @pytest.mark.asyncio
     async def test_continue_follow_up_does_not_interrupt_active_task(self, make_agent_loop):
@@ -447,6 +452,8 @@ class TestSteeringLoop:
         assert runtime_correction["interrupted_task_count"] == 0
         assert runtime_correction["continued_task_count"] == 1
         assert runtime_correction["continued_task_ids"] == [first_task_id]
+        assert new_task["resume_context"]["runtime_correction"]["continued_task_ids"] == [first_task_id]
+        assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_continue"
 
 
 class TestSubagentCancellation:

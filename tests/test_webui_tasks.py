@@ -184,6 +184,67 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
     assert runtime_correction["interrupted_task_count"] == 1
 
 
+def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    metadata = {
+        "runtime_correction": {
+            "kind": "constraint_patch",
+            "message_preview": "please only patch this file",
+            "supersedes_task_ids": ["task_old"],
+            "interrupted_task_count": 1,
+            "at_ms": 123456,
+        }
+    }
+    ledger.append_recovery_history(
+        metadata,
+        source="session_user_correction",
+        action="runtime_correction_received",
+        reason="user follow-up revised in-flight task (constraint_patch)",
+        details={
+            "session_key": "telegram:123",
+            "correction_kind": "constraint_patch",
+            "supersedes_task_ids": ["task_old"],
+        },
+        at_ms=123456,
+    )
+    ledger.ensure_task(
+        task_id="task_runtime_context",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="apply constraint patch",
+        resume_context={
+            "channel": "telegram",
+            "chat_id": "123",
+            "sender_id": "u1",
+            "session_key": "telegram:123",
+            "timezone": "Asia/Shanghai",
+            "message_id": "",
+            "delivery_context": {},
+            "auto_resume_allowed": True,
+            "resume_disabled_reason": "",
+            "runtime_correction": {
+                "kind": "constraint_patch",
+                "supersedes_task_ids": ["task_old"],
+                "continued_task_ids": [],
+                "interrupted_task_count": 1,
+                "continued_task_count": 0,
+                "requested_at_ms": 123456,
+            },
+        },
+        metadata=metadata,
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks/task_runtime_context")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["task"]["resume_context"]["runtime_correction"]["kind"] == "constraint_patch"
+    assert data["task"]["resume_context"]["runtime_correction"]["supersedes_task_ids"] == ["task_old"]
+    assert data["task"]["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
+
+
 def test_tasks_api_exposes_verification_summary(tmp_path):
     app, ledger = _build_app(tmp_path)
     ledger.ensure_task(

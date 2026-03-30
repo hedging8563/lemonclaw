@@ -701,7 +701,7 @@ class AgentLoop:
         """Persist the minimum routing context needed for later task resume."""
         metadata = dict(msg.metadata or {})
         delivery_context = metadata.get("_delivery_context")
-        return build_task_resume_context(
+        resume_context = build_task_resume_context(
             channel=msg.channel,
             chat_id=str(msg.chat_id),
             sender_id=str(msg.sender_id),
@@ -710,6 +710,21 @@ class AgentLoop:
             message_id=str(metadata.get("message_id") or ""),
             delivery_context=dict(delivery_context) if isinstance(delivery_context, dict) else {},
         )
+        runtime_correction = metadata.get("_runtime_correction")
+        if isinstance(runtime_correction, dict) and runtime_correction:
+            resume_context["runtime_correction"] = {
+                "kind": str(runtime_correction.get("kind") or ""),
+                "supersedes_task_ids": [
+                    str(item) for item in list(runtime_correction.get("supersedes_task_ids") or []) if str(item)
+                ],
+                "continued_task_ids": [
+                    str(item) for item in list(runtime_correction.get("continued_task_ids") or []) if str(item)
+                ],
+                "interrupted_task_count": int(runtime_correction.get("interrupted_task_count") or 0),
+                "continued_task_count": int(runtime_correction.get("continued_task_count") or 0),
+                "requested_at_ms": int(runtime_correction.get("at_ms") or 0),
+            }
+        return resume_context
 
     def _prepare_dispatch_metadata(self, msg: InboundMessage) -> dict[str, Any]:
         """Ensure tracked dispatch metadata exists before task orchestration decisions."""
@@ -955,6 +970,45 @@ class AgentLoop:
             "continued_task_count": len(continued_tasks),
             "at_ms": int(time.time() * 1000),
         }
+
+    def _append_runtime_correction_history(
+        self,
+        *,
+        task_metadata: dict[str, Any],
+        runtime_correction: dict[str, Any],
+        session_key: str,
+    ) -> dict[str, Any]:
+        kind = str(runtime_correction.get("kind") or "").strip() or "correction"
+        action = "runtime_correction_continue" if kind == "continue" else "runtime_correction_received"
+        details = {
+            "session_key": session_key,
+            "correction_kind": kind,
+            "interrupted_task_count": int(runtime_correction.get("interrupted_task_count") or 0),
+            "continued_task_count": int(runtime_correction.get("continued_task_count") or 0),
+            "supersedes_task_ids": [
+                str(item) for item in list(runtime_correction.get("supersedes_task_ids") or []) if str(item)
+            ],
+            "continued_task_ids": [
+                str(item) for item in list(runtime_correction.get("continued_task_ids") or []) if str(item)
+            ],
+        }
+        message_preview = str(runtime_correction.get("message_preview") or "").strip()
+        reason = (
+            f"user follow-up queued behind active task ({kind})"
+            if kind == "continue"
+            else f"user follow-up revised in-flight task ({kind})"
+        )
+        if message_preview:
+            details["message_preview"] = message_preview
+        self.ledger.append_recovery_history(
+            task_metadata,
+            source="session_user_correction",
+            action=action,
+            reason=reason,
+            details=details,
+            at_ms=int(runtime_correction.get("at_ms") or 0) or None,
+        )
+        return task_metadata
 
     async def _interrupt_active_session_for_correction(
         self,
@@ -1509,6 +1563,11 @@ class AgentLoop:
         runtime_correction = metadata.get("_runtime_correction")
         if isinstance(runtime_correction, dict) and runtime_correction:
             task_metadata = {**task_metadata, "runtime_correction": dict(runtime_correction)}
+            task_metadata = self._append_runtime_correction_history(
+                task_metadata=task_metadata,
+                runtime_correction=runtime_correction,
+                session_key=msg.session_key,
+            )
         task_id = str(metadata["_task_id"])
         self.ledger.ensure_task(
             task_id=task_id,
