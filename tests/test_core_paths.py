@@ -457,6 +457,7 @@ class TestMemorySearchUpsert:
 @pytest.mark.asyncio
 async def test_base_channel_rate_limits_repeated_messages():
     from lemonclaw.channels.base import BaseChannel
+    from lemonclaw.channels.session_context import SESSION_CONTEXT_KEY
 
     class _Bus:
         def __init__(self):
@@ -491,3 +492,6 @@ async def test_base_channel_rate_limits_repeated_messages():
         await ch._handle_message('u1', 'c1', f'msg-{i}')
 
     assert len(ch.bus.inbound) == 3
+    assert ch.bus.inbound[0].metadata[SESSION_CONTEXT_KEY]["identity"]["channel"] == "test"
+    assert ch.bus.inbound[0].metadata[SESSION_CONTEXT_KEY]["identity"]["chat"] == "c1"
+    assert ch.bus.inbound[0].metadata[SESSION_CONTEXT_KEY]["run_mode"] == "interactive"
