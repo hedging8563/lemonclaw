@@ -359,6 +359,34 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "retrieval_objects": retrieval_objects,
         }
 
+    @staticmethod
+    def _build_retrieval_diagnostics_object(meta: dict[str, Any]) -> dict[str, Any] | None:
+        fallback_count = int(meta.get("fallback_count") or 0)
+        fallbacks = [str(item) for item in list(meta.get("fallbacks") or []) if str(item)]
+        hit_sources = [str(item) for item in list(meta.get("hit_sources") or []) if str(item)]
+        if fallback_count <= 0 and not fallbacks:
+            return None
+
+        structured = dict(meta.get("structured") or {})
+        return {
+            "kind": "retrieval_diagnostics",
+            "id": f"retrieval:{str(meta.get('strategy') or 'unknown')}:{fallback_count}",
+            "title": "Retrieval Diagnostics",
+            "source": "memory.failsoft",
+            "summary": (
+                f"{str(meta.get('strategy') or 'unknown')} retrieval "
+                f"with {fallback_count} fallback(s)"
+            ),
+            "fallback_count": fallback_count,
+            "fallbacks": fallbacks,
+            "hit_sources": hit_sources,
+            "card_count": int(meta.get("card_count") or 0),
+            "rule_count": int(meta.get("rule_count") or 0),
+            "knowledge_count": int(meta.get("knowledge_count") or 0),
+            "session_summary": str(structured.get("session_summary") or "").strip(),
+            "status": "fail_soft" if fallback_count > 0 else "healthy",
+        }
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -570,6 +598,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             knowledge_hits=knowledge_hits,
         )
         meta["structured"]["session_summary"] = self._session_summary_snippet()
+        diagnostics = self._build_retrieval_diagnostics_object(meta)
+        if diagnostics:
+            meta["structured"]["retrieval_objects"].append(diagnostics)
         if knowledge_hits and "knowledge" not in meta["hit_sources"]:
             meta["hit_sources"] = sorted([*meta["hit_sources"], "knowledge"])
         return memory_ctx, rules_ctx, meta

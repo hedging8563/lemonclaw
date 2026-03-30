@@ -446,6 +446,9 @@ async def test_context_builder_resolve_retrieval_context_falls_back_without_prov
     assert meta["fallbacks"] == ["provider_unbound"]
     assert meta["card_hits"][0]["preview"].startswith("# Tech")
     assert meta["rule_hits"][0]["lesson"] == "需要 venv"
+    assert meta["structured"]["retrieval_objects"][-1]["kind"] == "retrieval_diagnostics"
+    assert meta["structured"]["retrieval_objects"][-1]["fallback_count"] == 1
+    assert meta["structured"]["retrieval_objects"][-1]["fallbacks"] == ["provider_unbound"]
 
 
 @pytest.mark.asyncio
@@ -584,6 +587,9 @@ async def test_context_builder_resolve_retrieval_context_fails_soft_per_layer(tm
     assert "knowledge_search_error:RuntimeError" in meta["fallbacks"]
     assert meta["structured"]["fact_slots"][0]["name"] == "tech"
     assert meta["structured"]["retrieval_objects"][0]["kind"] == "entity_card"
+    assert meta["structured"]["retrieval_objects"][-1]["kind"] == "retrieval_diagnostics"
+    assert meta["structured"]["retrieval_objects"][-1]["status"] == "fail_soft"
+    assert "hybrid_retrieval_error:RuntimeError" in meta["structured"]["retrieval_objects"][-1]["fallbacks"]
 
 
 # ── Core Promotion / Demotion ────────────────────────────────────────────────
