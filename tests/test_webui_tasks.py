@@ -1035,16 +1035,57 @@ def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     )
 
     client = TestClient(app)
+    task_resp = client.get("/api/tasks/task_pm")
+    assert task_resp.status_code == 200
+    assert task_resp.json()["summary"]["outbox_delivery_outcome_counts"]["permanent_error"] == 1
+
     resp = client.get("/api/tasks/task_pm/postmortem")
     assert resp.status_code == 200
     data = resp.json()
     assert data["outbox"]["lifecycle"]["status_counts"]["failed"] == 1
+    assert data["outbox"]["lifecycle"]["delivery_outcome_counts"]["permanent_error"] == 1
     assert data["outbox"]["events"][0]["effect"]["category"] == "webhook"
+    assert data["outbox"]["events"][0]["lifecycle"]["delivery_outcome"]["kind"] == "permanent_error"
 
     md_resp = client.get("/api/tasks/task_pm/postmortem", params={"format": "md"})
     assert md_resp.status_code == 200
     assert "## Outbox Lifecycle" in md_resp.text
     assert "## Outbox Events" in md_resp.text
+
+
+def test_task_postmortem_api_surfaces_replaced_delivery_outcome(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_pm_replaced",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="replaced me",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_pm_replaced", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="superseded")
+    event = ledger.enqueue_outbox(
+        task_id="task_pm_replaced",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="pending",
+    )
+    ledger.abandon_outbox_event(
+        event["event_id"],
+        source="test",
+        reason="superseded by newer work",
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks/task_pm_replaced/postmortem")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["outbox"]["lifecycle"]["delivery_outcome_counts"]["replaced"] == 1
+    assert data["outbox"]["events"][0]["lifecycle"]["delivery_outcome"]["kind"] == "replaced"
 
 
 def test_outbox_abandon_api_marks_event_and_task_abandoned(tmp_path):

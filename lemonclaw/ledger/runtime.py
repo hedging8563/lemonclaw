@@ -23,6 +23,7 @@ from lemonclaw.ledger.types import (
     OUTBOX_SUCCESS_STATUSES,
     OUTBOX_TERMINAL_STATUSES,
     describe_outbox_effect_type,
+    infer_delivery_outcome,
     is_supported_outbox_effect_type,
     summarize_verification_metadata,
 )
@@ -240,6 +241,7 @@ class TaskLedgerSharedMixin:
     def summarize_outbox_lifecycle(events: list[dict[str, Any]]) -> dict[str, Any]:
         effect_type_counts: dict[str, int] = {}
         status_counts: dict[str, int] = {}
+        delivery_outcome_counts: dict[str, int] = {}
         active_count = 0
         terminal_count = 0
         for event in events:
@@ -247,6 +249,14 @@ class TaskLedgerSharedMixin:
             status = str(event.get("status") or "unknown")
             effect_type_counts[effect_type] = effect_type_counts.get(effect_type, 0) + 1
             status_counts[status] = status_counts.get(status, 0) + 1
+            outcome = infer_delivery_outcome(
+                status=status,
+                metadata=dict(event.get("metadata") or {}),
+                error=str(event.get("error") or ""),
+            )
+            kind = str(outcome.get("kind") or "")
+            if kind:
+                delivery_outcome_counts[kind] = delivery_outcome_counts.get(kind, 0) + 1
             if status in OUTBOX_ACTIVE_STATUSES:
                 active_count += 1
             if status in OUTBOX_TERMINAL_STATUSES:
@@ -254,6 +264,7 @@ class TaskLedgerSharedMixin:
         return {
             "effect_type_counts": effect_type_counts,
             "status_counts": status_counts,
+            "delivery_outcome_counts": delivery_outcome_counts,
             "active_count": active_count,
             "terminal_count": terminal_count,
         }
@@ -281,6 +292,11 @@ class TaskLedgerSharedMixin:
             "next_attempt_at_ms": item.get("next_attempt_at_ms"),
             "expires_at_ms": item.get("expires_at_ms"),
             "terminal_at_ms": item.get("terminal_at_ms"),
+            "delivery_outcome": infer_delivery_outcome(
+                status=str(item.get("status") or ""),
+                metadata=metadata,
+                error=str(item.get("error") or ""),
+            ),
             "last_delivery_result": redact_sensitive_value(metadata.get("delivery_result") or metadata.get("last_delivery_result") or {}),
             "delivery_history": redact_sensitive_value(list(metadata.get("delivery_history") or [])),
         }
@@ -614,6 +630,7 @@ class TaskLedgerSharedMixin:
                 "outbox_count": len(outbox),
                 "outbox_status_counts": outbox_lifecycle["status_counts"],
                 "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
+                "outbox_delivery_outcome_counts": outbox_lifecycle["delivery_outcome_counts"],
                 "outbox_terminal_count": outbox_lifecycle["terminal_count"],
                 "outbox_active_count": outbox_lifecycle["active_count"],
                 "completion_gate": task.get("completion_gate"),
@@ -1870,6 +1887,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "outbox_count": len(outbox),
                 "outbox_status_counts": outbox_lifecycle["status_counts"],
                 "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
+                "outbox_delivery_outcome_counts": outbox_lifecycle["delivery_outcome_counts"],
                 "outbox_terminal_count": outbox_lifecycle["terminal_count"],
                 "outbox_active_count": outbox_lifecycle["active_count"],
                 "retrieval": dict(metadata.get("retrieval") or {}),

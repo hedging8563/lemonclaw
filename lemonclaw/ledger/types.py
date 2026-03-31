@@ -34,6 +34,7 @@ OUTBOX_FAILURE_STATUSES = frozenset({"failed", "expired"})
 OUTBOX_ABANDONED_STATUSES = frozenset({"abandoned"})
 OUTBOX_TERMINAL_STATUSES = OUTBOX_SUCCESS_STATUSES | OUTBOX_FAILURE_STATUSES | OUTBOX_ABANDONED_STATUSES
 _VERIFICATION_ACCEPTED_STATUSES = frozenset({"accepted", "complete", "completed", "passed", "ok", "recorded"})
+DELIVERY_OUTCOME_VALUES = frozenset({"success", "retryable_error", "permanent_error", "dropped", "replaced"})
 
 
 def is_supported_outbox_effect_type(effect_type: str) -> bool:
@@ -52,6 +53,70 @@ def describe_outbox_effect_type(effect_type: str) -> dict[str, str]:
             },
         ),
     }
+
+
+def normalize_delivery_outcome(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    aliases = {
+        "delivered": "success",
+        "sent": "success",
+        "accepted": "success",
+        "ok": "success",
+        "retryable": "retryable_error",
+        "temporary_error": "retryable_error",
+        "transient_error": "retryable_error",
+        "permanent": "permanent_error",
+        "failed": "permanent_error",
+        "error": "permanent_error",
+        "skip": "dropped",
+        "skipped": "dropped",
+        "superseded": "replaced",
+    }
+    normalized = aliases.get(text, text)
+    return normalized if normalized in DELIVERY_OUTCOME_VALUES else ""
+
+
+def infer_delivery_outcome(
+    *,
+    status: str,
+    metadata: dict[str, Any] | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    meta = dict(metadata or {})
+    result = meta.get("delivery_result") or meta.get("last_delivery_result") or {}
+    explicit = ""
+    if isinstance(result, dict):
+        explicit = normalize_delivery_outcome(result.get("delivery_outcome") or result.get("delivery_state"))
+        if not explicit and result.get("retryable") is True:
+            explicit = "retryable_error"
+    if not explicit:
+        explicit = normalize_delivery_outcome(meta.get("delivery_outcome"))
+    if explicit:
+        return {"kind": explicit, "source": "result"}
+
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status in OUTBOX_SUCCESS_STATUSES:
+        return {"kind": "success", "source": "status"}
+    if normalized_status == "retrying":
+        return {"kind": "retryable_error", "source": "status"}
+    if normalized_status in OUTBOX_FAILURE_STATUSES:
+        return {"kind": "permanent_error", "source": "status"}
+    if normalized_status in OUTBOX_ABANDONED_STATUSES:
+        reason_text = " ".join(
+            str(part).strip().lower()
+            for part in (
+                meta.get("terminal_reason"),
+                error,
+                meta.get("error"),
+            )
+            if str(part or "").strip()
+        )
+        if any(token in reason_text for token in ("replace", "replaced", "supersed", "superseded")):
+            return {"kind": "replaced", "source": "terminal_reason"}
+        return {"kind": "dropped", "source": "status"}
+    return {}
 
 
 def build_acceptance_evidence_summary(verification: dict[str, Any] | None) -> dict[str, Any]:
