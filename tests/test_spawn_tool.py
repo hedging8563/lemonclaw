@@ -33,6 +33,7 @@ async def test_spawn_prefers_per_call_default_context_over_instance_context() ->
         "origin_chat_id": "target",
         "session_key": "fresh:target:thread",
         "origin_delivery_context": {},
+        "origin_delivery_policy": {},
     }]
 
 
@@ -83,6 +84,7 @@ async def test_spawn_preserves_thread_scoped_session_key_when_provided() -> None
         "origin_chat_id": "123",
         "session_key": "telegram:123:456",
         "origin_delivery_context": {},
+        "origin_delivery_policy": {},
     }]
 
 
@@ -118,3 +120,26 @@ async def test_spawn_ignores_partial_per_call_override_to_avoid_mixed_context() 
 
     assert "spawn only works inside an active conversation" in result
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_carries_delivery_policy() -> None:
+    calls = []
+
+    async def _spawn(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    tool = SpawnTool(SimpleNamespace(spawn=_spawn))
+
+    result = await tool.execute(
+        task="do work",
+        _default_channel="telegram",
+        _default_chat_id="123",
+        _session_key="telegram:123:456",
+        _default_delivery_policy={"mode": "replace", "preserve_message_identity": True},
+    )
+
+    assert result == "ok"
+    assert calls[0]["origin_delivery_policy"]["mode"] == "replace"
+    assert calls[0]["origin_delivery_policy"]["preserve_message_identity"] is True

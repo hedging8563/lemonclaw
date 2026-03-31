@@ -51,6 +51,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_delivery_context: dict[str, Any] | None = None,
+        origin_delivery_policy: dict[str, Any] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -60,6 +61,7 @@ class SubagentManager:
             "chat_id": origin_chat_id,
             "session_key": session_key or f"{origin_channel}:{origin_chat_id}",
             "delivery_context": dict(origin_delivery_context or {}),
+            "delivery_policy": dict(origin_delivery_policy or {}),
         }
 
         bg_task = asyncio.create_task(
@@ -201,7 +203,10 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
-            metadata={"_delivery_context": dict(origin.get("delivery_context") or {})} if origin.get("delivery_context") else {},
+            metadata={
+                **({"_delivery_context": dict(origin.get("delivery_context") or {})} if origin.get("delivery_context") else {}),
+                **({"_delivery_policy": dict(origin.get("delivery_policy") or {})} if origin.get("delivery_policy") else {}),
+            },
             session_key_override=str(origin.get("session_key") or ""),
         )
         
