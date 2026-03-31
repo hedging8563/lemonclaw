@@ -670,6 +670,8 @@ class AgentLoop:
         channel: str,
         chat_id: str,
         message_id: str | None = None,
+        delivery_context: dict[str, Any] | None = None,
+        delivery_policy: dict[str, Any] | None = None,
         session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info.
@@ -682,7 +684,13 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
-                        tool.set_context(channel, chat_id, message_id)
+                        tool.set_context(
+                            channel,
+                            chat_id,
+                            message_id,
+                            delivery_context=dict(delivery_context or {}),
+                            delivery_policy=dict(delivery_policy or {}),
+                        )
                     else:
                         tool.set_context(channel, chat_id, session_key=session_key)
 
@@ -1983,7 +1991,14 @@ class AgentLoop:
             self._consolidating.add(session.key)
             self._schedule_background_consolidation(session.key)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), session_key=key)
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id"),
+            delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
+            delivery_policy=get_delivery_policy(msg.metadata),
+            session_key=key,
+        )
         message_turn_state: dict[str, Any] | None = None
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):

@@ -4,7 +4,7 @@ from typing import Any, Awaitable, Callable
 
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.bus.events import OutboundMessage
-from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY
+from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY, DELIVERY_POLICY_KEY
 
 
 class MessageTool(Tool):
@@ -22,6 +22,7 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._default_delivery_context: dict[str, Any] | None = None
+        self._default_delivery_policy: dict[str, Any] | None = None
 
     def set_context(
         self,
@@ -29,12 +30,14 @@ class MessageTool(Tool):
         chat_id: str,
         message_id: str | None = None,
         delivery_context: dict[str, Any] | None = None,
+        delivery_policy: dict[str, Any] | None = None,
     ) -> None:
         """Set the current message context."""
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
         self._default_delivery_context = dict(delivery_context or {}) or None
+        self._default_delivery_policy = dict(delivery_policy or {}) or None
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -94,6 +97,7 @@ class MessageTool(Tool):
         _default_chat_id: str | None = None,
         _default_message_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
+        _default_delivery_policy: dict[str, Any] | None = None,
         _message_turn_state: dict[str, Any] | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
         _task_id: str | None = None,
@@ -106,6 +110,7 @@ class MessageTool(Tool):
         effective_default_chat_id = _default_chat_id or self._default_chat_id
         effective_default_message_id = _default_message_id or self._default_message_id
         effective_default_delivery_context = _default_delivery_context or self._default_delivery_context
+        effective_default_delivery_policy = _default_delivery_policy or self._default_delivery_policy
 
         channel = channel or effective_default_channel
         chat_id = chat_id or effective_default_chat_id
@@ -123,6 +128,8 @@ class MessageTool(Tool):
         same_target = channel == effective_default_channel and chat_id == effective_default_chat_id
         if same_target and effective_default_delivery_context:
             metadata[DELIVERY_CONTEXT_KEY] = dict(effective_default_delivery_context)
+        if same_target and effective_default_delivery_policy:
+            metadata[DELIVERY_POLICY_KEY] = dict(effective_default_delivery_policy)
         if message_id:
             metadata["message_id"] = message_id
 
