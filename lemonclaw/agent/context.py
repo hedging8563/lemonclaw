@@ -354,6 +354,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             seen_hit_keys.add(hit_key)
             retrieval_objects.append(item)
 
+        retrieval_surface_summary = ContextBuilder._build_retrieval_surface_summary_object(
+            rules=normalized_rules,
+            knowledge_hits=normalized_hits,
+        )
+
         summary_text = str(session_summary or "").strip()
         summary_object = {
             "kind": "session_summary",
@@ -368,7 +373,60 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return {
             "session_summary": summary_text,
             "fact_slots": fact_slots,
-            "retrieval_objects": [summary_object, *retrieval_objects],
+            "retrieval_objects": [summary_object, retrieval_surface_summary, *retrieval_objects],
+        }
+
+    @staticmethod
+    def _build_retrieval_surface_summary_object(
+        *,
+        rules: list[dict[str, Any]],
+        knowledge_hits: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        rule_triggers: list[str] = []
+        seen_rule_keys: set[tuple[str, str]] = set()
+        for item in rules:
+            trigger = str(item.get("trigger") or "").strip()
+            source = str(item.get("source") or "").strip()
+            if not trigger:
+                continue
+            key = (trigger.casefold(), source.casefold())
+            if key in seen_rule_keys:
+                continue
+            seen_rule_keys.add(key)
+            rule_triggers.append(trigger)
+
+        knowledge_titles: list[str] = []
+        seen_hit_keys: set[tuple[str, str, str]] = set()
+        for item in knowledge_hits:
+            doc_id = str(item.get("id") or "").strip()
+            source = str(item.get("source") or "").strip()
+            title = str(item.get("title") or item.get("id") or "").strip()
+            if not doc_id or not title:
+                continue
+            key = (doc_id.casefold(), source.casefold(), title.casefold())
+            if key in seen_hit_keys:
+                continue
+            seen_hit_keys.add(key)
+            knowledge_titles.append(title)
+
+        summary_parts: list[str] = []
+        if rule_triggers:
+            summary_parts.append(f"{len(rule_triggers)} procedural rule(s)")
+        if knowledge_titles:
+            summary_parts.append(f"{len(knowledge_titles)} knowledge hit(s)")
+
+        summary = "; ".join(summary_parts)
+        return {
+            "kind": "retrieval_surface_summary",
+            "id": "retrieval_surface_summary",
+            "title": "Retrieval Surface Summary",
+            "source": "memory.retrieval",
+            "summary": summary,
+            "status": "present" if summary_parts else "empty",
+            "procedural_rule_count": len(rule_triggers),
+            "knowledge_hit_count": len(knowledge_titles),
+            "procedural_rules": rule_triggers[:4],
+            "knowledge_titles": knowledge_titles[:4],
         }
 
     @staticmethod

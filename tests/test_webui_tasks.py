@@ -320,6 +320,10 @@ def test_tasks_api_exposes_verification_summary(tmp_path):
     assert verification["accepted_evidence_count"] == 1
     assert verification["ui_channel_replay_available"] is True
     assert verification["missing_requirements"] == []
+    assert verification["acceptance_evidence_summary"]["count"] == 1
+    assert verification["acceptance_evidence_summary"]["accepted_count"] == 1
+    assert verification["surface_replay_pointer"]["channel"] == "telegram"
+    assert verification["surface_replay_pointer"]["chat_id"] == "123"
 
 
 def test_info_api_includes_channel_status_snapshot(tmp_path):
