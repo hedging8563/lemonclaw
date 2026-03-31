@@ -354,6 +354,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             seen_hit_keys.add(hit_key)
             retrieval_objects.append(item)
 
+        fact_slot_summary = ContextBuilder._build_fact_slot_summary_object(fact_slots=fact_slots)
         retrieval_surface_summary = ContextBuilder._build_retrieval_surface_summary_object(
             rules=normalized_rules,
             knowledge_hits=normalized_hits,
@@ -373,7 +374,51 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return {
             "session_summary": summary_text,
             "fact_slots": fact_slots,
-            "retrieval_objects": [summary_object, retrieval_surface_summary, *retrieval_objects],
+            "fact_slot_summary": fact_slot_summary,
+            "retrieval_objects": [summary_object, retrieval_surface_summary, fact_slot_summary, *retrieval_objects],
+        }
+
+    @staticmethod
+    def _build_fact_slot_summary_object(*, fact_slots: list[dict[str, Any]]) -> dict[str, Any]:
+        names: list[str] = []
+        summaries: list[str] = []
+        keywords: list[str] = []
+        seen_keywords: set[str] = set()
+        for item in fact_slots:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if name:
+                names.append(name)
+            if summary:
+                summaries.append(summary)
+            for keyword in list(item.get("keywords") or []):
+                keyword_text = str(keyword or "").strip()
+                if not keyword_text or keyword_text in seen_keywords:
+                    continue
+                seen_keywords.add(keyword_text)
+                keywords.append(keyword_text)
+
+        summary_parts: list[str] = []
+        if names:
+            summary_parts.append(f"{len(names)} fact slot(s)")
+            summary_parts.append(", ".join(names[:3]))
+        if summaries:
+            summary_parts.append(" | ".join(summaries[:2]))
+
+        summary = "; ".join(part for part in summary_parts if part).strip()
+        return {
+            "kind": "fact_slot_summary",
+            "id": "fact_slot_summary",
+            "title": "Fact Slot Summary",
+            "source": "memory.entities",
+            "summary": summary,
+            "status": "present" if summary else "empty",
+            "fact_slot_count": len(names),
+            "fact_slot_names": names[:4],
+            "fact_slot_summaries": summaries[:4],
+            "keywords": keywords[:6],
         }
 
     @staticmethod

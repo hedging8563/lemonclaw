@@ -162,6 +162,7 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
                 "kind": "user_follow_up",
                 "message_preview": "actually, correct that",
                 "supersedes_task_ids": ["task_old"],
+                "supersedes_task_stages": ["dispatch"],
                 "interrupted_task_count": 1,
                 "delivery_intent": {
                     "delivery_policy": {
@@ -187,6 +188,7 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
     assert runtime_correction["kind"] == "user_follow_up"
     assert runtime_correction["message_preview"] == "actually, correct that"
     assert runtime_correction["supersedes_task_ids"] == ["task_old"]
+    assert runtime_correction["supersedes_task_stages"] == ["dispatch"]
     assert runtime_correction["interrupted_task_count"] == 1
     assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "replace"
 
@@ -198,6 +200,7 @@ def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_pat
             "kind": "constraint_patch",
             "message_preview": "please only patch this file",
             "supersedes_task_ids": ["task_old"],
+            "supersedes_task_stages": ["dispatch"],
             "interrupted_task_count": 1,
             "at_ms": 123456,
             "delivery_intent": {
@@ -217,6 +220,7 @@ def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_pat
             "session_key": "telegram:123",
             "correction_kind": "constraint_patch",
             "supersedes_task_ids": ["task_old"],
+            "supersedes_task_stages": ["dispatch"],
             "delivery_intent": {
                 "delivery_policy": {
                     "mode": "final_only",
@@ -246,7 +250,9 @@ def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_pat
             "runtime_correction": {
                 "kind": "constraint_patch",
                 "supersedes_task_ids": ["task_old"],
+                "supersedes_task_stages": ["dispatch"],
                 "continued_task_ids": [],
+                "continued_task_stages": [],
                 "interrupted_task_count": 1,
                 "continued_task_count": 0,
                 "requested_at_ms": 123456,
@@ -267,8 +273,11 @@ def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_pat
     data = resp.json()
     assert data["task"]["resume_context"]["runtime_correction"]["kind"] == "constraint_patch"
     assert data["task"]["resume_context"]["runtime_correction"]["supersedes_task_ids"] == ["task_old"]
+    assert data["task"]["resume_context"]["runtime_correction"]["supersedes_task_stages"] == ["dispatch"]
     assert data["task"]["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
     assert data["task"]["metadata"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+    assert data["task"]["metadata"]["runtime_correction"]["supersedes_task_stages"] == ["dispatch"]
+    assert data["task"]["metadata"]["recovery_history"][-1]["details"]["supersedes_task_stages"] == ["dispatch"]
     assert data["task"]["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
     assert data["task"]["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
