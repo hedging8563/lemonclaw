@@ -447,6 +447,19 @@ class AgentLoop:
 
         updated_meta = dict(retrieval_meta or {})
         structured = dict(updated_meta.get("structured") or {})
+        repo_change_summary = str(repo_change.get("summary") or "").strip()
+        if repo_change_summary and not structured.get("repo_change_summary"):
+            structured["repo_change_summary"] = repo_change_summary
+        fact_slots = list(structured.get("fact_slots") or [])
+        seen_fact_keys = {
+            (
+                str(item.get("name") or ""),
+                str(item.get("type") or ""),
+                str(item.get("summary") or ""),
+            )
+            for item in fact_slots
+            if isinstance(item, dict)
+        }
         retrieval_objects = list(structured.get("retrieval_objects") or [])
         seen = {
             (
@@ -471,13 +484,31 @@ class AgentLoop:
             seen.add(key)
             retrieval_objects.append(dict(item))
             added += 1
-        if not added:
+        fact_added = 0
+        for item in repo_change.get("fact_slots") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("name") or ""),
+                str(item.get("type") or ""),
+                str(item.get("summary") or ""),
+            )
+            if key in seen_fact_keys:
+                continue
+            seen_fact_keys.add(key)
+            fact_slots.append(dict(item))
+            fact_added += 1
+        if not added and not fact_added and not repo_change_summary:
             return memory_ctx, updated_meta
 
+        if fact_slots:
+            structured["fact_slots"] = fact_slots
         structured["retrieval_objects"] = retrieval_objects
         updated_meta["structured"] = structured
-        updated_meta["hit_sources"] = list(dict.fromkeys([*list(updated_meta.get("hit_sources") or []), "repo_change_memory"]))
+        if added or fact_added:
+            updated_meta["hit_sources"] = list(dict.fromkeys([*list(updated_meta.get("hit_sources") or []), "repo_change_memory"]))
         updated_meta["repo_change_memory_count"] = int(updated_meta.get("repo_change_memory_count") or 0) + added
+        updated_meta["repo_change_fact_slot_count"] = int(updated_meta.get("repo_change_fact_slot_count") or 0) + fact_added
         updated_meta["repo_change_memory_sources"] = list(
             dict.fromkeys([*list(updated_meta.get("repo_change_memory_sources") or []), str(repo_change.get("source") or "")])
         )

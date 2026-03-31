@@ -907,7 +907,15 @@ def test_task_exports_surface_repo_change_memory_objects(tmp_path):
                 "repo_change_memory_count": 1,
                 "structured": {
                     "session_summary": "repo aware trace",
-                    "fact_slots": [],
+                    "repo_change_summary": "prefer service adapters",
+                    "fact_slots": [
+                        {
+                            "name": "repo_change_focus",
+                            "type": "repo_change_memory",
+                            "summary": "prefer service adapters",
+                            "keywords": ["service.adapters.run"],
+                        }
+                    ],
                     "retrieval_objects": [
                         {
                             "kind": "repo_change_memory",
@@ -924,6 +932,8 @@ def test_task_exports_surface_repo_change_memory_objects(tmp_path):
     client = TestClient(app)
     export_json = client.get("/api/tasks/task_repo_change/export", params={"format": "json"})
     assert export_json.status_code == 200
+    assert export_json.json()["task"]["metadata"]["retrieval"]["structured"]["repo_change_summary"] == "prefer service adapters"
+    assert export_json.json()["task"]["metadata"]["retrieval"]["structured"]["fact_slots"][0]["name"] == "repo_change_focus"
     retrieval_objects = export_json.json()["summary"]["retrieval"]["structured"]["retrieval_objects"]
     assert retrieval_objects[0]["kind"] == "repo_change_memory"
 

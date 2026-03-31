@@ -331,7 +331,13 @@ class TestAgentBridgeRoutes:
         assert task is not None
         retrieval = dict(task.get("metadata") or {}).get("retrieval") or {}
         assert retrieval["repo_change_memory_count"] == 1
+        assert retrieval["repo_change_fact_slot_count"] == 1
         assert "repo_change_memory" in retrieval["hit_sources"]
+        assert retrieval["structured"]["repo_change_summary"] == "Prefer service adapters over direct route edits."
+        assert any(
+            slot.get("name") == "repo_change_focus"
+            for slot in retrieval["structured"]["fact_slots"]
+        )
         repo_change = retrieval["structured"]["retrieval_objects"][-1]
         assert repo_change["kind"] == "repo_change_memory"
         assert repo_change["preferred_internal_apis"] == ["service.adapters.run"]

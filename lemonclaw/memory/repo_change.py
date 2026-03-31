@@ -35,6 +35,34 @@ def _read_sidecar(path: Path) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def _build_fact_slots(
+    *,
+    summary: str,
+    preferred_internal_apis: list[str],
+    path_conventions: list[str],
+    historical_patch_patterns: list[str],
+) -> list[dict[str, Any]]:
+    keywords = list(
+        dict.fromkeys(
+            [
+                *preferred_internal_apis[:3],
+                *path_conventions[:3],
+                *historical_patch_patterns[:3],
+            ]
+        )
+    )
+    if not summary and not keywords:
+        return []
+    return [
+        {
+            "name": "repo_change_focus",
+            "type": "repo_change_memory",
+            "summary": summary,
+            "keywords": keywords,
+        }
+    ]
+
+
 def load_repo_change_memory(
     workspace: Path,
     *,
@@ -107,8 +135,16 @@ def load_repo_change_memory(
         "path_conventions": path_conventions,
         "historical_patch_patterns": historical_patch_patterns,
     }
+    fact_slots = _build_fact_slots(
+        summary=summary,
+        preferred_internal_apis=preferred_internal_apis,
+        path_conventions=path_conventions,
+        historical_patch_patterns=historical_patch_patterns,
+    )
     return {
         "context": "\n".join(context_lines),
+        "summary": summary,
+        "fact_slots": fact_slots,
         "retrieval_objects": [retrieval_object],
         "source": source,
     }
