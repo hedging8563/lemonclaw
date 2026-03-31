@@ -2,6 +2,7 @@ from pathlib import Path
 import asyncio
 
 from lemonclaw.agent.tools.task_checkpoint import TaskCheckpointTool
+from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -96,3 +97,10 @@ def test_task_checkpoint_merges_verification_metadata_without_dropping_existing_
     assert verification["acceptance_evidence"][0]["status"] == "accepted"
     assert verification["replay_pointer"]["kind"] == "task_bundle"
     assert verification["ui_channel_replay"]["step_id"] == "step_abc"
+
+    gate = finalize_task(ledger, "task_1")
+    assert gate is not None
+    assert gate.passed is True
+    assert gate.verification["acceptance_evidence_summary"]["count"] == 1
+    assert gate.verification["surface_replay_pointer"]["kind"] == "task_bundle"
+    assert gate.verification["surface_replay_pointer"]["step_id"] == "step_abc"

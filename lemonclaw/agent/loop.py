@@ -717,6 +717,7 @@ class AgentLoop:
         )
         runtime_correction = metadata.get("_runtime_correction")
         if isinstance(runtime_correction, dict) and runtime_correction:
+            delivery_intent = runtime_correction.get("delivery_intent")
             resume_context["runtime_correction"] = {
                 "kind": str(runtime_correction.get("kind") or ""),
                 "supersedes_task_ids": [
@@ -729,6 +730,8 @@ class AgentLoop:
                 "continued_task_count": int(runtime_correction.get("continued_task_count") or 0),
                 "requested_at_ms": int(runtime_correction.get("at_ms") or 0),
             }
+            if isinstance(delivery_intent, dict) and delivery_intent:
+                resume_context["runtime_correction"]["delivery_intent"] = dict(delivery_intent)
         return resume_context
 
     def _prepare_dispatch_metadata(self, msg: InboundMessage) -> dict[str, Any]:
@@ -969,7 +972,7 @@ class AgentLoop:
         continued_tasks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         continued_tasks = continued_tasks or []
-        return {
+        payload = {
             "kind": kind,
             "message_preview": msg.content.strip()[:200],
             "supersedes_task_ids": [
@@ -982,6 +985,10 @@ class AgentLoop:
             "continued_task_count": len(continued_tasks),
             "at_ms": int(time.time() * 1000),
         }
+        delivery_policy = get_delivery_policy(msg.metadata)
+        if isinstance(delivery_policy, dict) and delivery_policy:
+            payload["delivery_intent"] = {"delivery_policy": dict(delivery_policy)}
+        return payload
 
     def _append_runtime_correction_history(
         self,
@@ -1004,6 +1011,8 @@ class AgentLoop:
                 str(item) for item in list(runtime_correction.get("continued_task_ids") or []) if str(item)
             ],
         }
+        if isinstance(runtime_correction.get("delivery_intent"), dict) and runtime_correction.get("delivery_intent"):
+            details["delivery_intent"] = dict(runtime_correction["delivery_intent"])
         message_preview = str(runtime_correction.get("message_preview") or "").strip()
         reason = (
             f"user follow-up queued behind active task ({kind})"

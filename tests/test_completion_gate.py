@@ -155,6 +155,7 @@ def test_completion_gate_blocks_when_required_verification_is_missing(tmp_path: 
     assert result.next_status == "running"
     assert result.next_stage == "verify"
     assert result.verification["missing_requirements"] == ["tool_trace", "evidence:artifact_bundle"]
+    assert result.verification["acceptance_evidence_summary"]["count"] == 0
     task = ledger.read_task("task_1")
     assert task is not None
     assert task["status"] == "running"
@@ -200,10 +201,64 @@ def test_completion_gate_passes_when_required_verification_is_present(tmp_path: 
     assert result is not None
     assert result.passed is True
     assert result.verification["missing_requirements"] == []
+    assert result.verification["acceptance_evidence_summary"]["count"] == 1
+    assert result.verification["acceptance_evidence_summary"]["accepted_count"] == 1
     task = ledger.read_task("task_1")
     assert task is not None
     assert task["status"] == "completed"
     assert task["completion_gate"]["verification"]["accepted_evidence_count"] == 1
+
+
+def test_completion_gate_exposes_surface_replay_pointer_from_verification_metadata(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="verify me",
+        metadata={
+            "verification": {
+                "requirements": {
+                    "min_tool_traces": 1,
+                },
+                "tool_trace": [
+                    {
+                        "tool_name": "read_file",
+                        "status": "completed",
+                        "ok": True,
+                    }
+                ],
+                "acceptance_evidence": [
+                    {
+                        "kind": "artifact_bundle",
+                        "status": "accepted",
+                    }
+                ],
+                "ui_channel_replay": {
+                    "kind": "task_bundle",
+                    "channel": "telegram",
+                    "chat_id": "123",
+                    "thread_id": "456",
+                    "message_id": "789",
+                    "task_id": "task_1",
+                    "step_id": "step_abc",
+                    "note": "replay pointer",
+                },
+            }
+        },
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+
+    result = finalize_task(ledger, "task_1")
+
+    assert result is not None
+    assert result.passed is True
+    assert result.verification["surface_replay_pointer"]["kind"] == "task_bundle"
+    assert result.verification["surface_replay_pointer"]["thread_id"] == "456"
+    assert result.verification["surface_replay_pointer"]["step_id"] == "step_abc"
 
 
 def test_completion_gate_returns_none_for_missing_task(tmp_path: Path):

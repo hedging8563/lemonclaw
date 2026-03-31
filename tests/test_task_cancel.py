@@ -295,7 +295,13 @@ class TestSteeringLoop:
         loop._process_message = fake_process
 
         first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
-        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="actually, correct that")
+        second_msg = InboundMessage(
+            channel="test",
+            sender_id="u1",
+            chat_id="c1",
+            content="actually, correct that",
+            metadata={"_delivery_policy": {"mode": "replace", "preserve_message_identity": True}},
+        )
 
         first_task = loop._spawn_dispatch_task(first_msg)
         await asyncio.wait_for(first_started.wait(), timeout=1.0)
@@ -329,8 +335,11 @@ class TestSteeringLoop:
         assert runtime_correction["message_preview"]
         assert first_task_id in runtime_correction["supersedes_task_ids"]
         assert runtime_correction["interrupted_task_count"] == 1
+        assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "replace"
         assert new_task["resume_context"]["runtime_correction"]["kind"] == runtime_correction["kind"]
         assert new_task["resume_context"]["runtime_correction"]["supersedes_task_ids"] == [first_task_id]
+        assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "replace"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
     @pytest.mark.asyncio
@@ -415,7 +424,13 @@ class TestSteeringLoop:
         loop._process_message = fake_process
 
         first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
-        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="continue with tests")
+        second_msg = InboundMessage(
+            channel="test",
+            sender_id="u1",
+            chat_id="c1",
+            content="continue with tests",
+            metadata={"_delivery_policy": {"mode": "final_only", "preserve_message_identity": True}},
+        )
 
         first_task = loop._spawn_dispatch_task(first_msg)
         await asyncio.wait_for(first_started.wait(), timeout=1.0)
@@ -452,7 +467,10 @@ class TestSteeringLoop:
         assert runtime_correction["interrupted_task_count"] == 0
         assert runtime_correction["continued_task_count"] == 1
         assert runtime_correction["continued_task_ids"] == [first_task_id]
+        assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
         assert new_task["resume_context"]["runtime_correction"]["continued_task_ids"] == [first_task_id]
+        assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_continue"
 
 
