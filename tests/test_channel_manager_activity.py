@@ -132,6 +132,69 @@ async def test_manager_allows_kickoff_progress_delivery_for_matrix() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manager_respects_final_only_delivery_policy_for_kickoff_progress_channels() -> None:
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    fake_channel = SimpleNamespace(send=AsyncMock())
+    manager.channels["matrix"] = fake_channel
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:example.com",
+            content="working...",
+            metadata={
+                "_progress": True,
+                "_delivery_policy": {
+                    "mode": "final_only",
+                    "preserve_message_identity": True,
+                },
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    fake_channel.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manager_keeps_replace_delivery_policy_enabled_for_kickoff_progress_channels() -> None:
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    manager.channels["matrix"] = SimpleNamespace(send=AsyncMock(side_effect=_send))
+
+    dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    await bus.publish_outbound(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:example.com",
+            content="working...",
+            metadata={
+                "_progress": True,
+                "_delivery_policy": {
+                    "mode": "replace",
+                    "preserve_message_identity": True,
+                },
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+    dispatch_task.cancel()
+    await dispatch_task
+
+    assert len(sent) == 1
+    assert sent[0].metadata["_delivery_policy"]["mode"] == "replace"
+
+
+@pytest.mark.asyncio
 async def test_manager_still_suppresses_tool_hints_for_kickoff_progress_channels() -> None:
     bus = MessageBus()
     manager = ChannelManager(Config(), bus)

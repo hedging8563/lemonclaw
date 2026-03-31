@@ -245,6 +245,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         cards: list[Any],
         rules: list[dict[str, Any]],
         knowledge_hits: list[dict[str, Any]],
+        session_summary: str = "",
     ) -> dict[str, Any]:
         normalized_cards: list[dict[str, Any]] = []
         for card in cards:
@@ -353,10 +354,21 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             seen_hit_keys.add(hit_key)
             retrieval_objects.append(item)
 
+        summary_text = str(session_summary or "").strip()
+        summary_object = {
+            "kind": "session_summary",
+            "id": "session_summary",
+            "title": "Session Summary",
+            "source": "memory.today",
+            "summary": summary_text,
+            "session_summary": summary_text,
+            "status": "present" if summary_text else "empty",
+        }
+
         return {
-            "session_summary": "",
+            "session_summary": summary_text,
             "fact_slots": fact_slots,
-            "retrieval_objects": retrieval_objects,
+            "retrieval_objects": [summary_object, *retrieval_objects],
         }
 
     @staticmethod
@@ -596,8 +608,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             cards=cards,
             rules=rules,
             knowledge_hits=knowledge_hits,
+            session_summary=self._session_summary_snippet(),
         )
-        meta["structured"]["session_summary"] = self._session_summary_snippet()
         diagnostics = self._build_retrieval_diagnostics_object(meta)
         if diagnostics:
             meta["structured"]["retrieval_objects"].append(diagnostics)

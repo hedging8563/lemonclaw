@@ -508,7 +508,15 @@ class ChannelManager:
         meta = msg.metadata or {}
         return bool(meta.get("_thinking"))
 
-    def _channel_allows_progress_delivery(self, channel_name: str, *, tool_hint: bool = False) -> bool:
+    def _channel_allows_progress_delivery(
+        self,
+        channel_name: str,
+        *,
+        tool_hint: bool = False,
+        delivery_policy: dict[str, Any] | None = None,
+    ) -> bool:
+        if str((delivery_policy or {}).get("mode") or "").strip().lower() == "final_only":
+            return False
         if channel_name == "webui":
             if tool_hint:
                 return bool(self.config.channels.send_tool_hints)
@@ -580,6 +588,7 @@ class ChannelManager:
                     if not self._channel_allows_progress_delivery(
                         msg.channel,
                         tool_hint=bool(msg.metadata.get("_tool_hint")),
+                        delivery_policy=delivery_policy,
                     ):
                         continue
 
