@@ -161,6 +161,10 @@ def finalize_task(ledger: "TaskLedger", task_id: str) -> CompletionGateResult | 
         logger.warning("Completion gate skipped missing task {}", task_id)
         return None
 
+    original_status = str(task.get("status") or "")
+    original_stage = str(task.get("current_stage") or "")
+    original_error = task.get("error")
+    original_completion_gate = task.get("completion_gate")
     ledger.update_task(task_id, status="verifying", current_stage="verify")
     try:
         result = evaluate_completion(
@@ -190,5 +194,19 @@ def finalize_task(ledger: "TaskLedger", task_id: str) -> CompletionGateResult | 
         updates["error"] = None
     elif result.next_status == "failed":
         updates["error"] = result.reason[:500]
-    ledger.update_task(task_id, **updates)
+    try:
+        ledger.update_task(task_id, **updates)
+    except Exception:
+        logger.exception("Completion gate final state write failed for {}", task_id)
+        rollback_updates: dict[str, Any] = {
+            "status": original_status,
+            "current_stage": original_stage,
+            "completion_gate": original_completion_gate,
+            "error": original_error,
+        }
+        try:
+            ledger.update_task(task_id, **rollback_updates)
+        except Exception:
+            logger.exception("Completion gate rollback failed for {}", task_id)
+        raise
     return result

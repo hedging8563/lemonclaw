@@ -229,6 +229,9 @@ class TaskLedgerSharedMixin:
             "at_ms": int(at_ms or _now_ms()),
             "source": str(source or ""),
         }
+        outcome = infer_delivery_outcome(status=status, metadata=metadata, error=error)
+        if outcome:
+            entry["delivery_outcome"] = outcome
         if result:
             entry["result"] = redact_sensitive_value(result)
         if error:
@@ -496,13 +499,25 @@ class TaskLedgerSharedMixin:
             "detail": "",
         }
 
-    def enrich_task_for_observer(self, task: dict[str, Any] | None) -> dict[str, Any] | None:
+    def enrich_task_for_observer(
+        self,
+        task: dict[str, Any] | None,
+        *,
+        verification: dict[str, Any] | None = None,
+        outbox_lifecycle: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """Add observer-friendly derived fields without mutating stored task data."""
         if not task:
             return None
         enriched = dict(task)
         enriched["display_state"] = self.describe_task_display_state(task)
         enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
+        enriched["verification"] = (
+            dict(verification)
+            if isinstance(verification, dict)
+            else summarize_verification_metadata((task.get("metadata") or {}).get("verification"))
+        )
+        enriched["outbox_lifecycle"] = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
         return enriched
 
     def mark_task_stale(
@@ -618,7 +633,7 @@ class TaskLedgerSharedMixin:
         verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
 
         return {
-            "task": self.enrich_task_for_observer(task),
+            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle),
             "steps": steps,
             "summary": {
                 "step_count": len(steps),
@@ -1749,13 +1764,25 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
             "detail": "",
         }
 
-    def enrich_task_for_observer(self, task: dict[str, Any] | None) -> dict[str, Any] | None:
+    def enrich_task_for_observer(
+        self,
+        task: dict[str, Any] | None,
+        *,
+        verification: dict[str, Any] | None = None,
+        outbox_lifecycle: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """Add observer-friendly derived fields without mutating stored task data."""
         if not task:
             return None
         enriched = dict(task)
         enriched["display_state"] = self.describe_task_display_state(task)
         enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
+        enriched["verification"] = (
+            dict(verification)
+            if isinstance(verification, dict)
+            else summarize_verification_metadata((task.get("metadata") or {}).get("verification"))
+        )
+        enriched["outbox_lifecycle"] = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
         return enriched
 
     def mark_task_stale(
@@ -1871,7 +1898,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
 
         return {
-            "task": self.enrich_task_for_observer(task),
+            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle),
             "steps": steps,
             "summary": {
                 "step_count": len(steps),

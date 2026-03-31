@@ -314,6 +314,8 @@ def test_tasks_api_exposes_verification_summary(tmp_path):
     resp = client.get("/api/tasks/task_verify")
     assert resp.status_code == 200
     data = resp.json()
+    assert data["task"]["verification"]["acceptance_evidence_summary"]["count"] == 1
+    assert data["task"]["verification"]["surface_replay_pointer"]["channel"] == "telegram"
     verification = data["summary"]["verification"]
     assert verification["required"] is True
     assert verification["tool_trace_count"] == 1
@@ -324,6 +326,16 @@ def test_tasks_api_exposes_verification_summary(tmp_path):
     assert verification["acceptance_evidence_summary"]["accepted_count"] == 1
     assert verification["surface_replay_pointer"]["channel"] == "telegram"
     assert verification["surface_replay_pointer"]["chat_id"] == "123"
+
+    export_json = client.get("/api/tasks/task_verify/export", params={"format": "json"})
+    assert export_json.status_code == 200
+    assert export_json.json()["task"]["verification"]["acceptance_evidence_summary"]["accepted_count"] == 1
+    assert export_json.json()["summary"]["verification"]["surface_replay_pointer"]["channel"] == "telegram"
+
+    pm_json = client.get("/api/tasks/task_verify/postmortem", params={"format": "json"})
+    assert pm_json.status_code == 200
+    assert pm_json.json()["task"]["verification"]["acceptance_evidence_summary"]["count"] == 1
+    assert pm_json.json()["summary"]["verification"]["surface_replay_pointer"]["chat_id"] == "123"
 
 
 def test_info_api_includes_channel_status_snapshot(tmp_path):
@@ -1029,15 +1041,20 @@ def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
         effect_type="webhook_json",
         target="https://example.com/hook",
         payload={"content": "hello"},
-        status="failed",
+    )
+    event = ledger.materialize_outbox_events_for_task("task_pm")[-1]
+    ledger.mark_outbox_failed(
+        event["event_id"],
         error="boom",
-        metadata={"delivery_result": {"status_code": 500}},
+        result={"delivery_outcome": "permanent_error", "status_code": 500},
     )
 
     client = TestClient(app)
     task_resp = client.get("/api/tasks/task_pm")
     assert task_resp.status_code == 200
-    assert task_resp.json()["summary"]["outbox_delivery_outcome_counts"]["permanent_error"] == 1
+    task_data = task_resp.json()
+    assert task_data["summary"]["outbox_delivery_outcome_counts"]["permanent_error"] == 1
+    assert task_data["task"]["outbox_lifecycle"]["delivery_outcome_counts"]["permanent_error"] == 1
 
     resp = client.get("/api/tasks/task_pm/postmortem")
     assert resp.status_code == 200
@@ -1046,6 +1063,7 @@ def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):
     assert data["outbox"]["lifecycle"]["delivery_outcome_counts"]["permanent_error"] == 1
     assert data["outbox"]["events"][0]["effect"]["category"] == "webhook"
     assert data["outbox"]["events"][0]["lifecycle"]["delivery_outcome"]["kind"] == "permanent_error"
+    assert data["outbox"]["events"][0]["lifecycle"]["delivery_history"][-1]["delivery_outcome"]["kind"] == "permanent_error"
 
     md_resp = client.get("/api/tasks/task_pm/postmortem", params={"format": "md"})
     assert md_resp.status_code == 200
@@ -1084,8 +1102,10 @@ def test_task_postmortem_api_surfaces_replaced_delivery_outcome(tmp_path):
     resp = client.get("/api/tasks/task_pm_replaced/postmortem")
     assert resp.status_code == 200
     data = resp.json()
+    assert data["task"]["outbox_lifecycle"]["delivery_outcome_counts"]["replaced"] == 1
     assert data["outbox"]["lifecycle"]["delivery_outcome_counts"]["replaced"] == 1
     assert data["outbox"]["events"][0]["lifecycle"]["delivery_outcome"]["kind"] == "replaced"
+    assert data["outbox"]["events"][0]["lifecycle"]["delivery_history"][-1]["delivery_outcome"]["kind"] == "replaced"
 
 
 def test_outbox_abandon_api_marks_event_and_task_abandoned(tmp_path):

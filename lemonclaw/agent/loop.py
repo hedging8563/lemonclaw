@@ -754,8 +754,14 @@ class AgentLoop:
                 "supersedes_task_ids": [
                     str(item) for item in list(runtime_correction.get("supersedes_task_ids") or []) if str(item)
                 ],
+                "supersedes_task_stages": [
+                    str(item) for item in list(runtime_correction.get("supersedes_task_stages") or []) if str(item)
+                ],
                 "continued_task_ids": [
                     str(item) for item in list(runtime_correction.get("continued_task_ids") or []) if str(item)
+                ],
+                "continued_task_stages": [
+                    str(item) for item in list(runtime_correction.get("continued_task_stages") or []) if str(item)
                 ],
                 "interrupted_task_count": int(runtime_correction.get("interrupted_task_count") or 0),
                 "continued_task_count": int(runtime_correction.get("continued_task_count") or 0),
@@ -995,6 +1001,15 @@ class AgentLoop:
             self.ledger.update_task(task_id, metadata=metadata)
 
     @staticmethod
+    def _collect_runtime_correction_stages(tasks: list[dict[str, Any]]) -> list[str]:
+        stages: list[str] = []
+        for task in tasks:
+            stage = str(task.get("current_stage") or "").strip()
+            if stage and stage not in stages:
+                stages.append(stage)
+        return stages
+
+    @staticmethod
     def _build_runtime_correction_payload(
         *,
         kind: str,
@@ -1003,15 +1018,19 @@ class AgentLoop:
         continued_tasks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         continued_tasks = continued_tasks or []
+        superseded_stages = AgentLoop._collect_runtime_correction_stages(interrupted_tasks)
+        continued_stages = AgentLoop._collect_runtime_correction_stages(continued_tasks)
         payload = {
             "kind": kind,
             "message_preview": msg.content.strip()[:200],
             "supersedes_task_ids": [
                 str(task.get("task_id") or "") for task in interrupted_tasks if task.get("task_id")
             ],
+            "supersedes_task_stages": superseded_stages,
             "continued_task_ids": [
                 str(task.get("task_id") or "") for task in continued_tasks if task.get("task_id")
             ],
+            "continued_task_stages": continued_stages,
             "interrupted_task_count": len(interrupted_tasks),
             "continued_task_count": len(continued_tasks),
             "at_ms": int(time.time() * 1000),
@@ -1038,8 +1057,14 @@ class AgentLoop:
             "supersedes_task_ids": [
                 str(item) for item in list(runtime_correction.get("supersedes_task_ids") or []) if str(item)
             ],
+            "supersedes_task_stages": [
+                str(item) for item in list(runtime_correction.get("supersedes_task_stages") or []) if str(item)
+            ],
             "continued_task_ids": [
                 str(item) for item in list(runtime_correction.get("continued_task_ids") or []) if str(item)
+            ],
+            "continued_task_stages": [
+                str(item) for item in list(runtime_correction.get("continued_task_stages") or []) if str(item)
             ],
         }
         if isinstance(runtime_correction.get("delivery_intent"), dict) and runtime_correction.get("delivery_intent"):
@@ -1657,102 +1682,103 @@ class AgentLoop:
         stop_event = asyncio.Event()
         self._stop_events[msg.session_key] = stop_event
 
-        async with lock:
-            try:
-                response = await self._process_message(msg, stop_event=stop_event)
-                finalize_task(self.ledger, str(metadata["_task_id"]))
-                self._finish_trigger_success(
-                    metadata,
-                    task_id=str(metadata["_task_id"]),
-                    session_key=msg.session_key,
-                    result_summary=(response.content if response else "")[:500],
-                )
+        try:
+            async with lock:
+                try:
+                    response = await self._process_message(msg, stop_event=stop_event)
+                    finalize_task(self.ledger, str(metadata["_task_id"]))
+                    self._finish_trigger_success(
+                        metadata,
+                        task_id=str(metadata["_task_id"]),
+                        session_key=msg.session_key,
+                        result_summary=(response.content if response else "")[:500],
+                    )
 
-                # Internal request-response: resolve Future instead of outbound
-                if request_id:
-                    content = response.content if response else ""
-                    self.bus.resolve_response(request_id, content)
-                    return
+                    # Internal request-response: resolve Future instead of outbound
+                    if request_id:
+                        content = response.content if response else ""
+                        self.bus.resolve_response(request_id, content)
+                        return
 
-                if response is not None:
-                    # Ensure routing metadata (e.g. message_thread_id) propagates to outbound
-                    if not response.metadata:
-                        response.metadata = dict(msg.metadata or {})
-                    # Use a copy for _final so we don't pollute the original metadata
-                    if response.channel != "webui":
-                        response.metadata = {**(response.metadata or {}), "_final": True}
-                    await self.bus.publish_outbound(response)
-                else:
-                    # MessageTool sent the reply directly — broadcast done to Activity Feed
-                    if msg.channel != "webui" and self.activity_bus:
-                        await self.activity_bus.broadcast({
-                            "type": "done",
-                            "session_key": msg.session_key,
-                            "channel": msg.channel,
-                            "role": "assistant",
-                            "content": "",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        })
-                    if msg.channel == "cli":
+                    if response is not None:
+                        # Ensure routing metadata (e.g. message_thread_id) propagates to outbound
+                        if not response.metadata:
+                            response.metadata = dict(msg.metadata or {})
+                        # Use a copy for _final so we don't pollute the original metadata
+                        if response.channel != "webui":
+                            response.metadata = {**(response.metadata or {}), "_final": True}
+                        await self.bus.publish_outbound(response)
+                    else:
+                        # MessageTool sent the reply directly — broadcast done to Activity Feed
+                        if msg.channel != "webui" and self.activity_bus:
+                            await self.activity_bus.broadcast({
+                                "type": "done",
+                                "session_key": msg.session_key,
+                                "channel": msg.channel,
+                                "role": "assistant",
+                                "content": "",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                        if msg.channel == "cli":
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content="", metadata=msg.metadata or {},
+                            ))
+                except asyncio.CancelledError:
+                    logger.info("Task cancelled for session {}", msg.session_key)
+                    self.ledger.update_task(str(metadata["_task_id"]), status="abandoned", current_stage="cancelled")
+                    self._finish_trigger_failure(
+                        metadata,
+                        task_id=str(metadata["_task_id"]),
+                        session_key=msg.session_key,
+                        error="cancelled",
+                    )
+                    if request_id:
+                        self.bus.resolve_response(request_id, "[cancelled]")
+                    if self._session_cancel_reasons.get(msg.session_key) == "user_correction_interrupt":
+                        return None
+                    raise
+                except Exception as exc:
+                    logger.exception("Error processing message for session {}", msg.session_key)
+                    # Procedural memory: reflect on failure to learn from it
+                    try:
+                        active_model = resolve_model_id(self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model) or self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model
+                        active_provider = self._provider_for_model(active_model)
+                        await self.context.memory.procedural.reflect(
+                            active_provider,
+                            task_description=msg.content[:200],
+                            error=str(exc)[:200],
+                            model=active_model,
+                        )
+                    except Exception:
+                        pass  # reflect is best-effort, never block error handling
+                    self.ledger.update_task(
+                        str(metadata["_task_id"]),
+                        status="failed",
+                        current_stage="error",
+                        error=str(exc)[:500],
+                    )
+                    self._finish_trigger_failure(
+                        metadata,
+                        task_id=str(metadata["_task_id"]),
+                        session_key=msg.session_key,
+                        error=str(exc),
+                    )
+                    if request_id:
+                        self.bus.resolve_response(request_id, "[error]")
+                    else:
+                        lang = session_lang(self.sessions._load(msg.session_key))
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata=msg.metadata or {},
+                            content=t("error", lang),
                         ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                self.ledger.update_task(str(metadata["_task_id"]), status="abandoned", current_stage="cancelled")
-                self._finish_trigger_failure(
-                    metadata,
-                    task_id=str(metadata["_task_id"]),
-                    session_key=msg.session_key,
-                    error="cancelled",
-                )
-                if request_id:
-                    self.bus.resolve_response(request_id, "[cancelled]")
-                if self._session_cancel_reasons.get(msg.session_key) == "user_correction_interrupt":
-                    return None
-                raise
-            except Exception as exc:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                # Procedural memory: reflect on failure to learn from it
-                try:
-                    active_model = resolve_model_id(self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model) or self.sessions.get_or_create(msg.session_key).metadata.get("current_model") or self.model
-                    active_provider = self._provider_for_model(active_model)
-                    await self.context.memory.procedural.reflect(
-                        active_provider,
-                        task_description=msg.content[:200],
-                        error=str(exc)[:200],
-                        model=active_model,
-                    )
-                except Exception:
-                    pass  # reflect is best-effort, never block error handling
-                self.ledger.update_task(
-                    str(metadata["_task_id"]),
-                    status="failed",
-                    current_stage="error",
-                    error=str(exc)[:500],
-                )
-                self._finish_trigger_failure(
-                    metadata,
-                    task_id=str(metadata["_task_id"]),
-                    session_key=msg.session_key,
-                    error=str(exc),
-                )
-                if request_id:
-                    self.bus.resolve_response(request_id, "[error]")
-                else:
-                    lang = session_lang(self.sessions._load(msg.session_key))
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content=t("error", lang),
-                    ))
-            finally:
-                active_ids = self._active_task_ids.get(msg.session_key)
-                if active_ids:
-                    active_ids.discard(task_id)
-                    if not active_ids:
-                        self._active_task_ids.pop(msg.session_key, None)
-                self._stop_events.pop(msg.session_key, None)
+        finally:
+            active_ids = self._active_task_ids.get(msg.session_key)
+            if active_ids:
+                active_ids.discard(task_id)
+                if not active_ids:
+                    self._active_task_ids.pop(msg.session_key, None)
+            self._stop_events.pop(msg.session_key, None)
 
     @staticmethod
     def _infer_mode(msg: InboundMessage) -> str:

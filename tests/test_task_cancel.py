@@ -181,6 +181,36 @@ class TestDispatch:
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
+    @pytest.mark.asyncio
+    async def test_dispatch_cleans_task_tracking_when_cancelled_waiting_for_lock(self):
+        from lemonclaw.bus.events import InboundMessage
+
+        loop, _bus = _make_loop()
+        loop._process_message = AsyncMock()
+        held_lock = asyncio.Lock()
+        await held_lock.acquire()
+        loop._session_locks["test:c1"] = held_lock
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="blocked")
+        dispatch_task = asyncio.create_task(loop._dispatch(msg))
+
+        for _ in range(50):
+            if "test:c1" in loop._stop_events and str((msg.metadata or {}).get("_task_id") or ""):
+                break
+            await asyncio.sleep(0.01)
+
+        task_id = str((msg.metadata or {}).get("_task_id") or "")
+        assert task_id
+        assert task_id in (loop._active_task_ids.get("test:c1") or set())
+        assert "test:c1" in loop._stop_events
+
+        dispatch_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch_task
+
+        assert loop._active_task_ids.get("test:c1") in (None, set())
+        assert "test:c1" not in loop._stop_events
+        held_lock.release()
 
     @pytest.mark.asyncio
     async def test_stop_sets_stop_event(self):
@@ -334,11 +364,14 @@ class TestSteeringLoop:
         assert runtime_correction["kind"]
         assert runtime_correction["message_preview"]
         assert first_task_id in runtime_correction["supersedes_task_ids"]
+        assert runtime_correction["supersedes_task_stages"] == ["dispatch"]
         assert runtime_correction["interrupted_task_count"] == 1
         assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "replace"
         assert new_task["resume_context"]["runtime_correction"]["kind"] == runtime_correction["kind"]
         assert new_task["resume_context"]["runtime_correction"]["supersedes_task_ids"] == [first_task_id]
+        assert new_task["resume_context"]["runtime_correction"]["supersedes_task_stages"] == ["dispatch"]
         assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        assert new_task["metadata"]["recovery_history"][-1]["details"]["supersedes_task_stages"] == ["dispatch"]
         assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "replace"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
@@ -467,9 +500,12 @@ class TestSteeringLoop:
         assert runtime_correction["interrupted_task_count"] == 0
         assert runtime_correction["continued_task_count"] == 1
         assert runtime_correction["continued_task_ids"] == [first_task_id]
+        assert runtime_correction["continued_task_stages"] == ["dispatch"]
         assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
         assert new_task["resume_context"]["runtime_correction"]["continued_task_ids"] == [first_task_id]
+        assert new_task["resume_context"]["runtime_correction"]["continued_task_stages"] == ["dispatch"]
         assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        assert new_task["metadata"]["recovery_history"][-1]["details"]["continued_task_stages"] == ["dispatch"]
         assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_continue"
 

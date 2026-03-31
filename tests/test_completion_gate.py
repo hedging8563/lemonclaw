@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger
 
@@ -259,6 +261,43 @@ def test_completion_gate_exposes_surface_replay_pointer_from_verification_metada
     assert result.verification["surface_replay_pointer"]["kind"] == "task_bundle"
     assert result.verification["surface_replay_pointer"]["thread_id"] == "456"
     assert result.verification["surface_replay_pointer"]["step_id"] == "step_abc"
+
+
+def test_completion_gate_rolls_back_when_final_state_write_fails(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+        status="running",
+        current_stage="dispatch",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+
+    original_update_task = ledger.update_task
+    call_count = 0
+
+    def flaky_update(task_id: str, **updates):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("persist failed")
+        return original_update_task(task_id, **updates)
+
+    ledger.update_task = flaky_update  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="persist failed"):
+        finalize_task(ledger, "task_1")
+
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["status"] == "running"
+    assert task["current_stage"] == "dispatch"
+    assert task.get("completion_gate") is None
 
 
 def test_completion_gate_returns_none_for_missing_task(tmp_path: Path):
