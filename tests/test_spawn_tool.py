@@ -34,6 +34,7 @@ async def test_spawn_prefers_per_call_default_context_over_instance_context() ->
         "session_key": "fresh:target:thread",
         "origin_delivery_context": {},
         "origin_delivery_policy": {},
+        "origin_session_context": {},
     }]
 
 
@@ -85,6 +86,7 @@ async def test_spawn_preserves_thread_scoped_session_key_when_provided() -> None
         "session_key": "telegram:123:456",
         "origin_delivery_context": {},
         "origin_delivery_policy": {},
+        "origin_session_context": {},
     }]
 
 
@@ -143,3 +145,37 @@ async def test_spawn_carries_delivery_policy() -> None:
     assert result == "ok"
     assert calls[0]["origin_delivery_policy"]["mode"] == "replace"
     assert calls[0]["origin_delivery_policy"]["preserve_message_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_carries_session_context() -> None:
+    calls = []
+
+    async def _spawn(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    tool = SpawnTool(SimpleNamespace(spawn=_spawn))
+
+    result = await tool.execute(
+        task="do work",
+        _default_channel="agentbridge",
+        _default_chat_id="codex:default:demo",
+        _session_key="agentbridge:codex:default:demo",
+        _default_session_context={
+            "session_key": "agentbridge:codex:default:demo",
+            "identity": {
+                "channel": "agentbridge",
+                "account": "",
+                "chat": "codex:default:demo",
+                "thread": "demo",
+                "topic": "",
+            },
+            "timezone": "Asia/Shanghai",
+            "run_mode": "detached",
+        },
+    )
+
+    assert result == "ok"
+    assert calls[0]["origin_session_context"]["identity"]["thread"] == "demo"
+    assert calls[0]["origin_session_context"]["run_mode"] == "detached"

@@ -2091,6 +2091,7 @@ class AgentLoop:
             "_default_message_id": metadata.get("message_id"),
             "_default_delivery_context": metadata.get("_delivery_context"),
             "_default_delivery_policy": get_delivery_policy(metadata),
+            "_default_session_context": dict(metadata.get("_session_context") or {}) if isinstance(metadata.get("_session_context"), dict) else {},
             "_message_turn_state": message_turn_state,
             "_capability_token": self.governance.issue_token(
                 task_id=str(metadata.get("_task_id")),

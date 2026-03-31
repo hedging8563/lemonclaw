@@ -70,6 +70,7 @@ class SpawnTool(Tool):
         _default_chat_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
         _default_delivery_policy: dict[str, Any] | None = None,
+        _default_session_context: dict[str, Any] | None = None,
         _session_key: str | None = None,
         **kwargs: Any,
     ) -> str:
@@ -90,4 +91,5 @@ class SpawnTool(Tool):
             session_key=session_key,
             origin_delivery_context=dict(_default_delivery_context or {}),
             origin_delivery_policy=dict(_default_delivery_policy or {}),
+            origin_session_context=dict(_default_session_context or {}),
         )

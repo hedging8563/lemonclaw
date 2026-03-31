@@ -52,6 +52,7 @@ class SubagentManager:
         session_key: str | None = None,
         origin_delivery_context: dict[str, Any] | None = None,
         origin_delivery_policy: dict[str, Any] | None = None,
+        origin_session_context: dict[str, Any] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -62,6 +63,7 @@ class SubagentManager:
             "session_key": session_key or f"{origin_channel}:{origin_chat_id}",
             "delivery_context": dict(origin_delivery_context or {}),
             "delivery_policy": dict(origin_delivery_policy or {}),
+            "session_context": dict(origin_session_context or {}),
         }
 
         bg_task = asyncio.create_task(
@@ -88,7 +90,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -182,7 +184,7 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
         status: str,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
@@ -206,6 +208,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             metadata={
                 **({"_delivery_context": dict(origin.get("delivery_context") or {})} if origin.get("delivery_context") else {}),
                 **({"_delivery_policy": dict(origin.get("delivery_policy") or {})} if origin.get("delivery_policy") else {}),
+                **({"_session_context": dict(origin.get("session_context") or {})} if origin.get("session_context") else {}),
             },
             session_key_override=str(origin.get("session_key") or ""),
         )

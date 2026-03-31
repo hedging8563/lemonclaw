@@ -36,6 +36,18 @@ async def test_subagent_announce_result_preserves_session_key_override(tmp_path:
                 "mode": "replace",
                 "preserve_message_identity": True,
             },
+            "session_context": {
+                "session_key": "telegram:123:456",
+                "identity": {
+                    "channel": "telegram",
+                    "account": "",
+                    "chat": "123",
+                    "thread": "456",
+                    "topic": "",
+                },
+                "timezone": "Asia/Shanghai",
+                "run_mode": "interactive",
+            },
         },
         status="ok",
     )
@@ -49,6 +61,8 @@ async def test_subagent_announce_result_preserves_session_key_override(tmp_path:
     assert msg.metadata["_delivery_context"]["route"]["message_thread_id"] == 456
     assert msg.metadata["_delivery_policy"]["mode"] == "replace"
     assert msg.metadata["_delivery_policy"]["preserve_message_identity"] is True
+    assert msg.metadata["_session_context"]["identity"]["thread"] == "456"
+    assert msg.metadata["_session_context"]["run_mode"] == "interactive"
 
 
 @pytest.mark.asyncio
@@ -71,6 +85,18 @@ async def test_agent_loop_system_message_uses_session_key_override(make_agent_lo
                 "mode": "replace",
                 "preserve_message_identity": True,
             },
+            "_session_context": {
+                "session_key": "telegram:123:456",
+                "identity": {
+                    "channel": "telegram",
+                    "account": "",
+                    "chat": "123",
+                    "thread": "456",
+                    "topic": "",
+                },
+                "timezone": "Asia/Shanghai",
+                "run_mode": "interactive",
+            },
         },
         session_key_override="telegram:123:456",
     )
@@ -82,3 +108,4 @@ async def test_agent_loop_system_message_uses_session_key_override(make_agent_lo
     assert loop.sessions._load("telegram:123") is None
     assert result.metadata["_delivery_context"]["route"]["message_thread_id"] == 456
     assert result.metadata["_delivery_policy"]["mode"] == "replace"
+    assert result.metadata["_session_context"]["identity"]["thread"] == "456"
