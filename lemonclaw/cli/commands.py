@@ -42,6 +42,9 @@ _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
 
 def _normalize_runtime_delivery_metadata(metadata: dict | None) -> dict:
     normalized = dict(metadata or {})
+    session_context = normalized.get("session_context")
+    if isinstance(session_context, dict) and "_session_context" not in normalized:
+        normalized["_session_context"] = dict(session_context)
     delivery_context = normalized.get("delivery_context")
     if isinstance(delivery_context, dict) and "_delivery_context" not in normalized:
         normalized["_delivery_context"] = dict(delivery_context)

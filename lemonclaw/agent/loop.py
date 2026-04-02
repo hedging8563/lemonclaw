@@ -680,16 +680,16 @@ class AgentLoop:
         dimensions (e.g. ``telegram:123:789``) are preserved instead of being
         reconstructed from *channel* and *chat_id* alone.
         """
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "notify", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name == "message":
+                    if name in {"message", "notify"}:
                         tool.set_context(
                             channel,
                             chat_id,
-                            message_id,
                             delivery_context=dict(delivery_context or {}),
                             delivery_policy=dict(delivery_policy or {}),
+                            **({"message_id": message_id} if name == "message" else {}),
                         )
                     else:
                         tool.set_context(channel, chat_id, session_key=session_key)

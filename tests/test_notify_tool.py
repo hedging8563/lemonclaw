@@ -5,6 +5,7 @@ import pytest
 from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.bus.events import OutboundMessage
+from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY, DELIVERY_POLICY_KEY
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -21,6 +22,37 @@ async def test_notify_channel_uses_outbound_callback():
     assert result["ok"] is True
     assert len(sent) == 1
     assert sent[0].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_notify_channel_carries_delivery_contract_for_same_target():
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = NotifyTool(send_callback=_send)
+    tool.set_context(
+        "telegram",
+        "12345",
+        delivery_context={
+            "source_channel": "telegram",
+            "source_chat_id": "12345",
+            "session_key": "telegram:12345:456",
+            "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+        },
+        delivery_policy={
+            "mode": "replace",
+            "preserve_message_identity": True,
+        },
+    )
+
+    result = await tool.execute(target_type="channel", content="hello")
+
+    assert result["ok"] is True
+    assert len(sent) == 1
+    assert sent[0].metadata[DELIVERY_CONTEXT_KEY]["route"]["message_thread_id"] == 456
+    assert sent[0].metadata[DELIVERY_POLICY_KEY]["mode"] == "replace"
 
 
 @pytest.mark.asyncio
@@ -87,6 +119,42 @@ async def test_notify_prefers_per_call_default_context_over_instance_context():
 
 
 @pytest.mark.asyncio
+async def test_notify_channel_does_not_carry_delivery_contract_for_different_target():
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = NotifyTool(send_callback=_send)
+    tool.set_context(
+        "telegram",
+        "12345",
+        delivery_context={
+            "source_channel": "telegram",
+            "source_chat_id": "12345",
+            "session_key": "telegram:12345:456",
+            "route": {"reply_to_message_id": 321},
+        },
+        delivery_policy={
+            "mode": "final_only",
+            "preserve_message_identity": True,
+        },
+    )
+
+    result = await tool.execute(
+        target_type="channel",
+        content="hello",
+        channel="telegram",
+        chat_id="99999",
+    )
+
+    assert result["ok"] is True
+    assert len(sent) == 1
+    assert DELIVERY_CONTEXT_KEY not in sent[0].metadata
+    assert DELIVERY_POLICY_KEY not in sent[0].metadata
+
+
+@pytest.mark.asyncio
 async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(
@@ -99,6 +167,20 @@ async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
     )
 
     tool = NotifyTool()
+    tool.set_context(
+        "telegram",
+        "123",
+        delivery_context={
+            "source_channel": "telegram",
+            "source_chat_id": "123",
+            "session_key": "telegram:123:456",
+            "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+        },
+        delivery_policy={
+            "mode": "replace",
+            "preserve_message_identity": True,
+        },
+    )
     result = await tool.execute(
         target_type="channel",
         content="hello",
@@ -117,6 +199,8 @@ async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
     assert len(events) == 1
     assert events[0]["effect_type"] == "outbound_message"
     assert events[0]["payload"]["channel"] == "telegram"
+    assert events[0]["payload"]["metadata"][DELIVERY_CONTEXT_KEY]["route"]["message_thread_id"] == 456
+    assert events[0]["payload"]["metadata"][DELIVERY_POLICY_KEY]["mode"] == "replace"
 
 
 @pytest.mark.asyncio

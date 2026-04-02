@@ -355,6 +355,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             retrieval_objects.append(item)
 
         fact_slot_summary = ContextBuilder._build_fact_slot_summary_object(fact_slots=fact_slots)
+        entity_card_summary = ContextBuilder._build_entity_card_summary_object(fact_slots=fact_slots)
+        retrieval_summary = ContextBuilder._build_retrieval_summary_object(
+            entity_card_summary=entity_card_summary,
+            fact_slot_summary=fact_slot_summary,
+        )
         retrieval_surface_summary = ContextBuilder._build_retrieval_surface_summary_object(
             rules=normalized_rules,
             knowledge_hits=normalized_hits,
@@ -375,7 +380,62 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "session_summary": summary_text,
             "fact_slots": fact_slots,
             "fact_slot_summary": fact_slot_summary,
-            "retrieval_objects": [summary_object, retrieval_surface_summary, fact_slot_summary, *retrieval_objects],
+            "entity_card_summary": entity_card_summary,
+            "retrieval_summary": retrieval_summary,
+            "retrieval_objects": [
+                summary_object,
+                retrieval_summary,
+                retrieval_surface_summary,
+                entity_card_summary,
+                fact_slot_summary,
+                *retrieval_objects,
+            ],
+        }
+
+    @staticmethod
+    def _build_entity_card_summary_object(*, fact_slots: list[dict[str, Any]]) -> dict[str, Any]:
+        names: list[str] = []
+        summaries: list[str] = []
+        keywords: list[str] = []
+        seen_keywords: set[str] = set()
+        for item in fact_slots:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if name:
+                names.append(name)
+            if summary:
+                summaries.append(summary)
+            for keyword in list(item.get("keywords") or []):
+                keyword_text = str(keyword or "").strip()
+                if not keyword_text or keyword_text in seen_keywords:
+                    continue
+                seen_keywords.add(keyword_text)
+                keywords.append(keyword_text)
+
+        summary_parts: list[str] = []
+        if names:
+            summary_parts.append(f"{len(names)} entity card(s)")
+            summary_parts.append(", ".join(names[:3]))
+        if summaries:
+            summary_parts.append(" | ".join(summaries[:2]))
+
+        summary = "; ".join(part for part in summary_parts if part).strip()
+        return {
+            "kind": "entity_card_summary",
+            "id": "entity_card_summary",
+            "title": "Entity Card Summary",
+            "source": "memory.entities",
+            "summary": summary,
+            "status": "present" if summary else "empty",
+            "entity_card_count": len(names),
+            "entity_card_names": names[:4],
+            "entity_card_summaries": summaries[:4],
+            "fact_slot_count": len(names),
+            "fact_slot_names": names[:4],
+            "fact_slot_summaries": summaries[:4],
+            "keywords": keywords[:6],
         }
 
     @staticmethod
@@ -418,6 +478,72 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "fact_slot_count": len(names),
             "fact_slot_names": names[:4],
             "fact_slot_summaries": summaries[:4],
+            "keywords": keywords[:6],
+        }
+
+    @staticmethod
+    def _build_retrieval_summary_object(
+        *,
+        entity_card_summary: dict[str, Any],
+        fact_slot_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        def _clean_list(values: Any) -> list[str]:
+            cleaned: list[str] = []
+            for value in list(values or []):
+                text = str(value or "").strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+
+        entity_card_count = int(entity_card_summary.get("entity_card_count") or 0)
+        fact_slot_count = int(fact_slot_summary.get("fact_slot_count") or 0)
+        entity_card_names = _clean_list(entity_card_summary.get("entity_card_names"))
+        fact_slot_names = _clean_list(fact_slot_summary.get("fact_slot_names"))
+        entity_card_summaries = _clean_list(entity_card_summary.get("entity_card_summaries"))
+        fact_slot_summaries = _clean_list(fact_slot_summary.get("fact_slot_summaries"))
+
+        keywords: list[str] = []
+        seen_keywords: set[str] = set()
+        for source_values in (
+            entity_card_summary.get("keywords"),
+            fact_slot_summary.get("keywords"),
+        ):
+            for keyword in list(source_values or []):
+                keyword_text = str(keyword or "").strip()
+                if not keyword_text or keyword_text in seen_keywords:
+                    continue
+                seen_keywords.add(keyword_text)
+                keywords.append(keyword_text)
+
+        summary_parts: list[str] = []
+        if entity_card_count or fact_slot_count:
+            if entity_card_count:
+                summary_parts.append(f"{entity_card_count} entity card(s)")
+            if fact_slot_count:
+                summary_parts.append(f"{fact_slot_count} fact slot(s)")
+            names = entity_card_names or fact_slot_names
+            if names:
+                summary_parts.append(", ".join(names[:3]))
+            snippets = entity_card_summaries or fact_slot_summaries
+            if snippets:
+                summary_parts.append(" | ".join(snippets[:2]))
+
+        summary = "; ".join(part for part in summary_parts if part).strip()
+        return {
+            "kind": "retrieval_summary",
+            "id": "retrieval_summary",
+            "title": "Retrieval Summary",
+            "source": "memory.retrieval",
+            "summary": summary,
+            "status": "present" if summary else "empty",
+            "entity_card_count": entity_card_count,
+            "fact_slot_count": fact_slot_count,
+            "entity_card_names": entity_card_names[:4],
+            "fact_slot_names": fact_slot_names[:4],
+            "entity_card_summaries": entity_card_summaries[:4],
+            "fact_slot_summaries": fact_slot_summaries[:4],
+            "entity_card_summary": str(entity_card_summary.get("summary") or "").strip(),
+            "fact_slot_summary": str(fact_slot_summary.get("summary") or "").strip(),
             "keywords": keywords[:6],
         }
 

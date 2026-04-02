@@ -423,8 +423,15 @@ async def test_context_builder_resolve_retrieval_context_uses_hybrid_trace(tmp_p
     assert meta["card_hits"][0]["preview"].startswith("# Tech")
     assert meta["rule_hits"][0]["lesson"] == "需要 venv"
     assert meta["rule_hits"][0]["source"] == "hybrid"
+    assert meta["structured"]["retrieval_summary"]["kind"] == "retrieval_summary"
+    assert meta["structured"]["retrieval_summary"]["status"] == "present"
+    assert meta["structured"]["entity_card_summary"]["status"] == "present"
     assert meta["structured"]["fact_slot_summary"]["status"] == "present"
-    assert meta["structured"]["retrieval_objects"][2]["kind"] == "fact_slot_summary"
+    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_summary"
+    assert meta["structured"]["retrieval_objects"][1]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][2]["kind"] == "retrieval_surface_summary"
+    assert meta["structured"]["retrieval_objects"][3]["kind"] == "entity_card_summary"
+    assert meta["structured"]["retrieval_objects"][4]["kind"] == "fact_slot_summary"
     assert "hybrid" in meta["hit_sources"]
 
 
@@ -450,14 +457,21 @@ async def test_context_builder_resolve_retrieval_context_falls_back_without_prov
     assert meta["rule_hits"][0]["lesson"] == "需要 venv"
     assert meta["structured"]["retrieval_objects"][0]["kind"] == "session_summary"
     assert meta["structured"]["retrieval_objects"][0]["status"] == "empty"
-    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_surface_summary"
-    assert meta["structured"]["retrieval_objects"][2]["kind"] == "fact_slot_summary"
+    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_summary"
+    assert meta["structured"]["retrieval_objects"][1]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][2]["kind"] == "retrieval_surface_summary"
     assert meta["structured"]["retrieval_objects"][2]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][3]["kind"] == "entity_card_summary"
+    assert meta["structured"]["retrieval_objects"][3]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][4]["kind"] == "fact_slot_summary"
+    assert meta["structured"]["retrieval_objects"][4]["status"] == "present"
+    assert meta["structured"]["entity_card_summary"]["kind"] == "entity_card_summary"
+    assert meta["structured"]["entity_card_summary"]["status"] == "present"
     assert meta["structured"]["fact_slot_summary"]["kind"] == "fact_slot_summary"
     assert meta["structured"]["fact_slot_summary"]["status"] == "present"
-    assert meta["structured"]["retrieval_objects"][1]["status"] == "present"
-    assert meta["structured"]["retrieval_objects"][1]["procedural_rule_count"] == 1
-    assert meta["structured"]["retrieval_objects"][1]["knowledge_hit_count"] == 0
+    assert meta["structured"]["retrieval_summary"]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][2]["procedural_rule_count"] == 1
+    assert meta["structured"]["retrieval_objects"][2]["knowledge_hit_count"] == 0
     assert meta["structured"]["retrieval_objects"][-1]["kind"] == "retrieval_diagnostics"
     assert meta["structured"]["retrieval_objects"][-1]["fallback_count"] == 1
     assert meta["structured"]["retrieval_objects"][-1]["fallbacks"] == ["provider_unbound"]
@@ -516,8 +530,18 @@ async def test_context_builder_structured_memory_is_normalized(tmp_path):
     assert meta["structured"]["retrieval_objects"][0]["kind"] == "session_summary"
     assert meta["structured"]["retrieval_objects"][0]["status"] == "present"
     assert meta["structured"]["retrieval_objects"][0]["summary"] == meta["structured"]["session_summary"]
-    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_surface_summary"
+    assert meta["structured"]["retrieval_summary"]["kind"] == "retrieval_summary"
+    assert meta["structured"]["retrieval_summary"]["status"] == "empty"
+    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_summary"
     assert meta["structured"]["retrieval_objects"][1]["status"] == "empty"
+    assert meta["structured"]["retrieval_objects"][2]["kind"] == "retrieval_surface_summary"
+    assert meta["structured"]["retrieval_objects"][2]["status"] == "empty"
+    assert meta["structured"]["retrieval_objects"][3]["kind"] == "entity_card_summary"
+    assert meta["structured"]["retrieval_objects"][3]["status"] == "empty"
+    assert meta["structured"]["retrieval_objects"][4]["kind"] == "fact_slot_summary"
+    assert meta["structured"]["retrieval_objects"][4]["status"] == "empty"
+    assert meta["structured"]["entity_card_summary"]["status"] == "empty"
+    assert meta["structured"]["fact_slot_summary"]["status"] == "empty"
 
     structured = ctx._build_structured_retrieval_objects(
         cards=[
@@ -563,16 +587,23 @@ async def test_context_builder_structured_memory_is_normalized(tmp_path):
     assert structured["fact_slots"][0]["keywords"] == ["owner"]
     assert structured["retrieval_objects"][0]["kind"] == "session_summary"
     assert structured["retrieval_objects"][0]["status"] == "empty"
-    assert structured["retrieval_objects"][1]["kind"] == "retrieval_surface_summary"
+    assert structured["retrieval_objects"][1]["kind"] == "retrieval_summary"
     assert structured["retrieval_objects"][1]["status"] == "present"
-    assert structured["retrieval_objects"][2]["kind"] == "fact_slot_summary"
+    assert structured["retrieval_objects"][2]["kind"] == "retrieval_surface_summary"
     assert structured["retrieval_objects"][2]["status"] == "present"
-    assert structured["retrieval_objects"][2]["fact_slot_count"] == 2
-    assert structured["retrieval_objects"][1]["procedural_rule_count"] == 2
-    assert structured["retrieval_objects"][1]["knowledge_hit_count"] == 2
+    assert structured["retrieval_objects"][3]["kind"] == "entity_card_summary"
+    assert structured["retrieval_objects"][3]["status"] == "present"
+    assert structured["retrieval_objects"][3]["entity_card_count"] == 2
+    assert structured["retrieval_objects"][4]["kind"] == "fact_slot_summary"
+    assert structured["retrieval_objects"][4]["status"] == "present"
+    assert structured["retrieval_objects"][4]["fact_slot_count"] == 2
+    assert structured["retrieval_objects"][2]["procedural_rule_count"] == 2
+    assert structured["retrieval_objects"][2]["knowledge_hit_count"] == 2
     assert [obj["kind"] for obj in structured["retrieval_objects"]] == [
         "session_summary",
+        "retrieval_summary",
         "retrieval_surface_summary",
+        "entity_card_summary",
         "fact_slot_summary",
         "entity_card",
         "entity_card",
@@ -581,12 +612,14 @@ async def test_context_builder_structured_memory_is_normalized(tmp_path):
         "knowledge_hit",
         "knowledge_hit",
     ]
-    assert structured["retrieval_objects"][1]["summary"] == "2 procedural rule(s); 2 knowledge hit(s)"
-    assert structured["retrieval_objects"][2]["summary"] == "2 fact slot(s); alpha, beta; Alpha detail | Beta detail"
-    assert structured["retrieval_objects"][5]["summary"] == "Keep it compact Dedupe duplicates"
-    assert structured["retrieval_objects"][6]["summary"] == "Prefer stable outputs Sort before emit"
-    assert structured["retrieval_objects"][7]["summary"] == "Alpha reference Alpha detail"
-    assert structured["retrieval_objects"][7]["page_label"] == "p.1"
+    assert structured["retrieval_objects"][1]["summary"] == "2 entity card(s); 2 fact slot(s); alpha, beta; Alpha detail | Beta detail"
+    assert structured["retrieval_objects"][2]["summary"] == "2 procedural rule(s); 2 knowledge hit(s)"
+    assert structured["retrieval_objects"][3]["summary"] == "2 entity card(s); alpha, beta; Alpha detail | Beta detail"
+    assert structured["retrieval_objects"][4]["summary"] == "2 fact slot(s); alpha, beta; Alpha detail | Beta detail"
+    assert structured["retrieval_objects"][7]["summary"] == "Keep it compact Dedupe duplicates"
+    assert structured["retrieval_objects"][8]["summary"] == "Prefer stable outputs Sort before emit"
+    assert structured["retrieval_objects"][9]["summary"] == "Alpha reference Alpha detail"
+    assert structured["retrieval_objects"][9]["page_label"] == "p.1"
 
 
 @pytest.mark.asyncio
@@ -619,10 +652,13 @@ async def test_context_builder_resolve_retrieval_context_fails_soft_per_layer(tm
     assert "knowledge_search_error:RuntimeError" in meta["fallbacks"]
     assert meta["structured"]["fact_slots"][0]["name"] == "tech"
     assert meta["structured"]["retrieval_objects"][0]["kind"] == "session_summary"
-    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_surface_summary"
-    assert meta["structured"]["retrieval_objects"][2]["kind"] == "fact_slot_summary"
-    assert meta["structured"]["retrieval_objects"][2]["status"] == "present"
-    assert meta["structured"]["retrieval_objects"][3]["kind"] == "entity_card"
+    assert meta["structured"]["retrieval_objects"][1]["kind"] == "retrieval_summary"
+    assert meta["structured"]["retrieval_objects"][2]["kind"] == "retrieval_surface_summary"
+    assert meta["structured"]["retrieval_objects"][3]["kind"] == "entity_card_summary"
+    assert meta["structured"]["retrieval_objects"][3]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][4]["kind"] == "fact_slot_summary"
+    assert meta["structured"]["retrieval_objects"][4]["status"] == "present"
+    assert meta["structured"]["retrieval_objects"][5]["kind"] == "entity_card"
     assert meta["structured"]["retrieval_objects"][-1]["kind"] == "retrieval_diagnostics"
     assert meta["structured"]["retrieval_objects"][-1]["status"] == "fail_soft"
     assert "hybrid_retrieval_error:RuntimeError" in meta["structured"]["retrieval_objects"][-1]["fallbacks"]

@@ -22,6 +22,18 @@ def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
 
 def test_normalize_runtime_delivery_metadata_promotes_delivery_contract() -> None:
     metadata = {
+        "session_context": {
+            "session_key": "telegram:123:456",
+            "identity": {
+                "channel": "telegram",
+                "account": "",
+                "chat": "123",
+                "thread": "456",
+                "topic": "",
+            },
+            "timezone": "Asia/Shanghai",
+            "run_mode": "interactive",
+        },
         "delivery_context": {
             "source_channel": "telegram",
             "source_chat_id": "123",
@@ -36,6 +48,7 @@ def test_normalize_runtime_delivery_metadata_promotes_delivery_contract() -> Non
 
     normalized = _normalize_runtime_delivery_metadata(metadata)
 
+    assert normalized["_session_context"]["identity"]["thread"] == "456"
     assert normalized["_delivery_context"]["route"]["message_thread_id"] == 456
     assert normalized["delivery_context"]["session_key"] == "telegram:123:456"
     assert normalized["_delivery_policy"]["mode"] == "replace"
@@ -119,6 +132,18 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
         _default_channel="telegram",
         _default_chat_id="123",
         _session_key="telegram:123:456",
+        _default_session_context={
+            "session_key": "telegram:123:456",
+            "identity": {
+                "channel": "telegram",
+                "account": "",
+                "chat": "123",
+                "thread": "456",
+                "topic": "",
+            },
+            "timezone": "Asia/Shanghai",
+            "run_mode": "interactive",
+        },
         _default_delivery_context={
             "source_channel": "telegram",
             "source_chat_id": "123",
@@ -135,6 +160,8 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
     jobs = service.list_jobs()
     assert len(jobs) == 1
     assert jobs[0].payload.session_key == "telegram:123:456"
+    assert jobs[0].payload.metadata["session_context"]["identity"]["thread"] == "456"
+    assert jobs[0].payload.metadata["session_context"]["run_mode"] == "interactive"
     assert jobs[0].payload.metadata["delivery_context"]["route"]["message_thread_id"] == 456
     assert jobs[0].payload.metadata["delivery_policy"]["mode"] == "replace"
     assert jobs[0].payload.metadata["delivery_policy"]["preserve_message_identity"] is True

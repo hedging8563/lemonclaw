@@ -11,6 +11,7 @@ import httpx
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.web import USER_AGENT, _validate_url
 from lemonclaw.bus.events import OutboundMessage
+from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY, DELIVERY_POLICY_KEY
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -84,10 +85,20 @@ class NotifyTool(Tool):
         self._allow_webhook_domains = allow_webhook_domains or []
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
+        self._default_delivery_context: dict[str, Any] | None = None
+        self._default_delivery_policy: dict[str, Any] | None = None
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        delivery_context: dict[str, Any] | None = None,
+        delivery_policy: dict[str, Any] | None = None,
+    ) -> None:
         self._default_channel = channel
         self._default_chat_id = chat_id
+        self._default_delivery_context = dict(delivery_context or {}) or None
+        self._default_delivery_policy = dict(delivery_policy or {}) or None
 
     @property
     def name(self) -> str:
@@ -158,6 +169,8 @@ class NotifyTool(Tool):
         title: str | None = None,
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
+        _default_delivery_context: dict[str, Any] | None = None,
+        _default_delivery_policy: dict[str, Any] | None = None,
         _outbound_sink: Callable[[OutboundMessage], Awaitable[None]] | None = None,
         _task_id: str | None = None,
         _task_ledger: TaskLedger | None = None,
@@ -168,6 +181,8 @@ class NotifyTool(Tool):
         if target_type == "channel":
             out_channel = channel or _default_channel or self._default_channel
             out_chat = chat_id or _default_chat_id or self._default_chat_id
+            effective_default_delivery_context = _default_delivery_context or self._default_delivery_context
+            effective_default_delivery_policy = _default_delivery_policy or self._default_delivery_policy
             callback = _outbound_sink or self._send_callback
             if not out_channel or not out_chat:
                 return {
@@ -178,6 +193,15 @@ class NotifyTool(Tool):
                     ),
                     "raw": {"channel": out_channel, "chat_id": out_chat},
                 }
+            metadata = {"title": title or ""}
+            same_target = (
+                out_channel == (_default_channel or self._default_channel)
+                and out_chat == (_default_chat_id or self._default_chat_id)
+            )
+            if same_target and effective_default_delivery_context:
+                metadata[DELIVERY_CONTEXT_KEY] = dict(effective_default_delivery_context)
+            if same_target and effective_default_delivery_policy:
+                metadata[DELIVERY_POLICY_KEY] = dict(effective_default_delivery_policy)
             if _outbox_enabled and _task_id and _task_ledger and _step_id:
                 event = _task_ledger.enqueue_outbox(
                     task_id=_task_id,
@@ -188,7 +212,7 @@ class NotifyTool(Tool):
                         "channel": out_channel,
                         "chat_id": out_chat,
                         "content": content,
-                        "metadata": {"title": title or ""},
+                        "metadata": metadata,
                     },
                 )
                 return {
@@ -209,7 +233,7 @@ class NotifyTool(Tool):
                     "summary": "Notification delivery is not configured in this runtime",
                     "raw": {"channel": out_channel},
                 }
-            msg = OutboundMessage(channel=out_channel, chat_id=out_chat, content=content, metadata={"title": title or ""})
+            msg = OutboundMessage(channel=out_channel, chat_id=out_chat, content=content, metadata=metadata)
             await callback(msg)
             return {"ok": True, "summary": f"Notification sent to {out_channel}:{out_chat}", "raw": {"target_type": "channel", "channel": out_channel, "chat_id": out_chat}}
 
