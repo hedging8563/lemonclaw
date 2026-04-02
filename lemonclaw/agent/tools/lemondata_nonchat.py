@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from typing import Any
 
 import httpx
@@ -34,7 +33,6 @@ _ALLOWED_ENDPOINTS = {
     "rerank": {"/v1/rerank"},
     "translation": {"/v1/translations"},
 }
-_SCENE_CACHE_TTL_SECONDS = 30 * 60
 _RETRYABLE_ERROR_CODES = {"all_channels_failed", "upstream_error", "rate_limit_exceeded", "model_unavailable"}
 _RETRYABLE_TRANSPORT_ERRORS = (
     httpx.ConnectError,
@@ -51,7 +49,6 @@ class LemonDataNonChatTool(Tool):
 
     def __init__(self) -> None:
         super().__init__()
-        self._scene_discovery_cache: dict[str, dict[str, Any]] = {}
 
     @property
     def name(self) -> str:
@@ -61,10 +58,10 @@ class LemonDataNonChatTool(Tool):
     def description(self) -> str:
         return (
             "Discover currently available LemonData non-chat models and perform guarded non-chat requests. "
-            "For image, video, music, 3d, tts, stt, embedding, rerank, and translation, this tool can discover "
-            "recommended models from /v1/models?category=...&recommended_for=... and, when model is omitted, "
-            "it automatically picks from the top ready models. It only falls back to another model on transient "
-            "retryable failures."
+            "For image, video, music, 3d, tts, stt, embedding, rerank, and translation, discover reads the "
+            "category catalog from /v1/models?category=... and can optionally overlay recommended_for snapshot metadata. "
+            "When model is omitted for a request, it automatically picks from the top ready recommended models only. "
+            "It only falls back to another model on transient retryable failures."
         )
 
     @property
@@ -75,7 +72,7 @@ class LemonDataNonChatTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": ["discover", "request"],
-                    "description": "discover = list live models for a non-chat category; request = execute a guarded API call",
+                    "description": "discover = list the category catalog with optional recommendation metadata; request = execute a guarded API call",
                 },
                 "category": {
                     "type": "string",
@@ -89,7 +86,7 @@ class LemonDataNonChatTool(Tool):
                 "recommended_for": {
                     "type": "string",
                     "enum": list(_SUPPORTED_CATEGORIES),
-                    "description": "Optional recommendation scene. Defaults to category.",
+                    "description": "Optional recommendation scene. Used for ranking metadata, not as the authoritative existence check.",
                 },
                 "endpoint": {
                     "type": "string",
@@ -145,19 +142,24 @@ class LemonDataNonChatTool(Tool):
                 "supported_recommended_for": list(_SUPPORTED_CATEGORIES),
             }, ensure_ascii=False)
 
-        discovery = await self._discover(category, recommended_for=scene, limit=limit or 12)
+        requested_model = str(model or "").strip()
+        discovery = await self._discover(
+            category,
+            recommended_for=scene,
+            limit=limit or 12,
+            include_recommendations=str(action or "") == "discover" or not requested_model,
+        )
         if str(action or "") == "discover":
             return json.dumps(discovery, ensure_ascii=False)
 
         if not discovery["ok"]:
             return json.dumps({
                 "ok": False,
-                "error": "Fresh LemonData model discovery failed; refusing non-chat request.",
+                "error": "Fresh LemonData category discovery failed; refusing non-chat request.",
                 "category": category,
                 "discovery": discovery,
             }, ensure_ascii=False)
 
-        requested_model = str(model or "").strip()
         resolved_endpoint = str(endpoint or _DEFAULT_ENDPOINTS[category]).strip()
         if resolved_endpoint not in _ALLOWED_ENDPOINTS[category]:
             return json.dumps({
@@ -179,6 +181,13 @@ class LemonDataNonChatTool(Tool):
                 }, ensure_ascii=False)
             attempt_chain = [requested_model]
         else:
+            if discovery.get("recommendation_error"):
+                return json.dumps({
+                    "ok": False,
+                    "error": "Fresh LemonData recommendation snapshot failed; refusing auto-selected non-chat request.",
+                    "category": category,
+                    "discovery": discovery,
+                }, ensure_ascii=False)
             attempt_chain = [
                 str(item["id"])
                 for item in discovery["models"]
@@ -221,6 +230,7 @@ class LemonDataNonChatTool(Tool):
                 "model_count": discovery["model_count"],
                 "requested_model_verified": selected_model in available_models,
                 "recommended_for": scene,
+                "snapshot_at": discovery.get("snapshot_at"),
             }
             request_result["selected_model"] = selected_model
             request_result["attempted_models"] = attempted_models
@@ -243,8 +253,13 @@ class LemonDataNonChatTool(Tool):
 
             fallback_reason = request_result.get("error_code") or request_result.get("error") or "retryable_error"
             if not refreshed_after_failure:
-                self._invalidate_scene_cache(scene)
-                refreshed = await self._discover(category, recommended_for=scene, limit=limit or 12, force_refresh=True)
+                refreshed = await self._discover(
+                    category,
+                    recommended_for=scene,
+                    limit=limit or 12,
+                    include_recommendations=True,
+                    force_refresh=True,
+                )
                 if refreshed.get("ok"):
                     discovery = refreshed
                     available_models = {str(item["id"]) for item in discovery["models"]}
@@ -266,21 +281,70 @@ class LemonDataNonChatTool(Tool):
             "recommendation_context": recommendation_context,
         }, ensure_ascii=False)
 
-    async def _discover(self, category: str, *, recommended_for: str, limit: int, force_refresh: bool = False) -> dict[str, Any]:
-        cache_key = f"{category}:{recommended_for}"
-        if not force_refresh:
-            cached = self._get_cached_discovery(cache_key)
-            if cached is not None:
-                return cached
+    async def _discover(
+        self,
+        category: str,
+        *,
+        recommended_for: str,
+        limit: int,
+        include_recommendations: bool,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        del force_refresh
 
-        response = await self._fetch_json(f"/v1/models?category={category}&recommended_for={recommended_for}")
-        if not response["ok"]:
+        catalog_response = await self._fetch_json(f"/v1/models?category={category}")
+        if not catalog_response["ok"]:
             return {
                 "ok": False,
                 "category": category,
-                "error": response["error"],
+                "error": catalog_response["error"],
             }
-        items = response["body"].get("data") if isinstance(response["body"], dict) else None
+
+        recommendation_models: dict[str, dict[str, Any]] = {}
+        recommendation_error: str | None = None
+        snapshot_at: str | None = None
+
+        if include_recommendations:
+            recommendation_response = await self._fetch_json(
+                f"/v1/models?category={category}&recommended_for={recommended_for}"
+            )
+            if recommendation_response["ok"]:
+                recommendation_items = (
+                    recommendation_response["body"].get("data")
+                    if isinstance(recommendation_response["body"], dict)
+                    else None
+                )
+                if isinstance(recommendation_items, list):
+                    for item in recommendation_items:
+                        if not isinstance(item, dict):
+                            continue
+                        model_id = str(item.get("id") or "").strip()
+                        if not model_id:
+                            continue
+                        lemondata_meta = item.get("lemondata") if isinstance(item.get("lemondata"), dict) else {}
+                        agent_preferences = (
+                            lemondata_meta.get("agent_preferences")
+                            if isinstance(lemondata_meta, dict)
+                            else {}
+                        )
+                        preference = (
+                            agent_preferences.get(recommended_for)
+                            if isinstance(agent_preferences, dict) and isinstance(agent_preferences.get(recommended_for), dict)
+                            else {}
+                        )
+                        recommendation_models[model_id] = {
+                            "preferred_rank": preference.get("preferred_rank"),
+                            "success_rate_24h": preference.get("success_rate_24h"),
+                            "sample_count_24h": preference.get("sample_count_24h", 0),
+                            "status": preference.get("status"),
+                            "updated_at": preference.get("updated_at"),
+                        }
+                        if snapshot_at is None and preference.get("updated_at"):
+                            snapshot_at = str(preference.get("updated_at"))
+            else:
+                recommendation_error = recommendation_response["error"]
+
+        items = catalog_response["body"].get("data") if isinstance(catalog_response["body"], dict) else None
         models = []
         if isinstance(items, list):
             for item in items[:limit]:
@@ -290,11 +354,7 @@ class LemonDataNonChatTool(Tool):
                 if not model_id:
                     continue
                 lemondata_meta = item.get("lemondata") if isinstance(item.get("lemondata"), dict) else {}
-                preference = {}
-                if isinstance(lemondata_meta, dict):
-                    agent_preferences = lemondata_meta.get("agent_preferences")
-                    if isinstance(agent_preferences, dict):
-                        preference = agent_preferences.get(recommended_for) if isinstance(agent_preferences.get(recommended_for), dict) else {}
+                preference = recommendation_models.get(model_id, {})
                 models.append({
                     "id": model_id,
                     "category": str((lemondata_meta or {}).get("category") or category),
@@ -303,31 +363,19 @@ class LemonDataNonChatTool(Tool):
                     "preferred_rank": preference.get("preferred_rank"),
                     "success_rate_24h": preference.get("success_rate_24h"),
                     "sample_count_24h": preference.get("sample_count_24h", 0),
-                    "status": preference.get("status", "insufficient_samples"),
+                    "status": preference.get("status"),
                     "updated_at": preference.get("updated_at"),
+                    "recommended": model_id in recommendation_models,
                 })
-        result = {
+        return {
             "ok": True,
             "category": category,
             "recommended_for": recommended_for,
             "model_count": len(models),
             "models": models,
-            "snapshot_at": None,
+            "snapshot_at": snapshot_at,
+            "recommendation_error": recommendation_error,
         }
-        snapshot_at = None
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            lemondata_meta = item.get("lemondata") if isinstance(item.get("lemondata"), dict) else {}
-            agent_preferences = lemondata_meta.get("agent_preferences") if isinstance(lemondata_meta, dict) else {}
-            if isinstance(agent_preferences, dict):
-                preference = agent_preferences.get(recommended_for)
-                if isinstance(preference, dict) and preference.get("updated_at"):
-                    snapshot_at = preference.get("updated_at")
-                    break
-        result["snapshot_at"] = snapshot_at
-        self._set_cached_discovery(cache_key, result)
-        return result
 
     async def _request(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._fetch_json(endpoint, method="POST", body=payload)
@@ -365,26 +413,6 @@ class LemonDataNonChatTool(Tool):
         if error_code in {"invalid_request", "insufficient_balance"}:
             return False
         return bool(request_result.get("retryable"))
-
-    def _get_cached_discovery(self, cache_key: str) -> dict[str, Any] | None:
-        entry = self._scene_discovery_cache.get(cache_key)
-        if not entry:
-            return None
-        if time.time() - float(entry.get("created_at", 0)) > _SCENE_CACHE_TTL_SECONDS:
-            self._scene_discovery_cache.pop(cache_key, None)
-            return None
-        return dict(entry.get("value") or {})
-
-    def _set_cached_discovery(self, cache_key: str, value: dict[str, Any]) -> None:
-        self._scene_discovery_cache[cache_key] = {
-            "created_at": time.time(),
-            "value": dict(value),
-        }
-
-    def _invalidate_scene_cache(self, scene: str) -> None:
-        keys = [key for key in self._scene_discovery_cache if key.endswith(f":{scene}")]
-        for key in keys:
-            self._scene_discovery_cache.pop(key, None)
 
     async def _fetch_json(
         self,

@@ -10,6 +10,11 @@ Preferred inside LemonClaw runtime:
 lemondata_nonchat(action="discover", category="<category>")
 ```
 
+Meaning:
+- this reads the current category catalog from `/v1/models?category=<category>`
+- if recommendation context is available, the tool may also attach `preferred_rank`, `status`, and `snapshot_at`
+- `snapshot_at` is the recommendation snapshot timestamp, not a guarantee that the full category catalog was regenerated at that same time
+
 Fallback:
 
 ```bash
@@ -40,6 +45,11 @@ Re-read the live category list after:
 ## Recommendation Rule
 
 Only recommend or call a non-chat model that appears in the fresh discovery result.
+
+For "does model X exist?" questions:
+- trust category discovery first
+- treat recommendation metadata as ranking-only context
+- do not infer non-existence just because `recommended_for` metadata is absent
 
 Do not:
 - guess from memory

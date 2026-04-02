@@ -10,42 +10,61 @@ from lemonclaw.agent.tools.lemondata_nonchat import LemonDataNonChatTool
 @pytest.mark.asyncio
 async def test_lemondata_nonchat_discover_returns_live_models(monkeypatch: pytest.MonkeyPatch) -> None:
     tool = LemonDataNonChatTool()
+    calls: list[str] = []
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
-        assert path == "/v1/models?category=video&recommended_for=video"
-        return {
-            "ok": True,
-            "body": {
-                "data": [
-                    {
-                        "id": "sora-2",
-                        "lemondata": {
-                            "category": "video",
-                            "capabilities": ["video"],
-                            "agent_preferences": {
-                                "video": {
-                                    "preferred_rank": 1,
-                                    "success_rate_24h": 0.95,
-                                    "sample_count_24h": 12,
-                                    "status": "ready",
-                                    "updated_at": "2026-03-28T00:00:00.000Z",
-                                }
+        calls.append(path)
+        if path == "/v1/models?category=video":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "seedance-2.0", "lemondata": {"category": "video", "capabilities": ["video", "text-to-video"]}},
+                        {"id": "sora-2", "lemondata": {"category": "video", "capabilities": ["video"]}},
+                    ]
+                },
+            }
+        if path == "/v1/models?category=video&recommended_for=video":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {
+                            "id": "sora-2",
+                            "lemondata": {
+                                "category": "video",
+                                "capabilities": ["video"],
+                                "agent_preferences": {
+                                    "video": {
+                                        "preferred_rank": 1,
+                                        "success_rate_24h": 0.95,
+                                        "sample_count_24h": 12,
+                                        "status": "ready",
+                                        "updated_at": "2026-03-28T00:00:00.000Z",
+                                    }
+                                },
                             },
                         },
-                    },
-                    {"id": "veo3.1", "lemondata": {"category": "video", "capabilities": ["video", "premium"]}},
-                ]
-            },
-        }
+                    ]
+                },
+            }
+        raise AssertionError(path)
 
     monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
     result = json.loads(await tool.execute(action="discover", category="video"))
 
     assert result["ok"] is True
     assert result["model_count"] == 2
-    assert result["models"][0]["id"] == "sora-2"
-    assert result["models"][0]["preferred_rank"] == 1
+    assert result["models"][0]["id"] == "seedance-2.0"
+    assert result["models"][0]["recommended"] is False
+    assert result["models"][1]["id"] == "sora-2"
+    assert result["models"][1]["preferred_rank"] == 1
+    assert result["models"][1]["recommended"] is True
     assert result["snapshot_at"] == "2026-03-28T00:00:00.000Z"
+    assert calls == [
+        "/v1/models?category=video",
+        "/v1/models?category=video&recommended_for=video",
+    ]
 
 
 @pytest.mark.asyncio
@@ -53,7 +72,7 @@ async def test_lemondata_nonchat_request_rejects_model_not_in_live_discovery(mon
     tool = LemonDataNonChatTool()
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
-        assert path == "/v1/models?category=video&recommended_for=video"
+        assert path == "/v1/models?category=video"
         return {
             "ok": True,
             "body": {"data": [{"id": "sora-2", "lemondata": {"category": "video", "agent_preferences": {"video": {"status": "ready"}}}}]},
@@ -81,7 +100,7 @@ async def test_lemondata_nonchat_request_executes_only_after_fresh_discovery(mon
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
         calls.append((method, path))
-        if path == "/v1/models?category=video&recommended_for=video":
+        if path == "/v1/models?category=video":
             return {
                 "ok": True,
                 "body": {"data": [{"id": "sora-2", "lemondata": {"category": "video", "agent_preferences": {"video": {"status": "ready"}}}}]},
@@ -106,7 +125,7 @@ async def test_lemondata_nonchat_request_executes_only_after_fresh_discovery(mon
     assert result["ok"] is True
     assert result["response"]["model"] == "sora-2"
     assert calls == [
-        ("GET", "/v1/models?category=video&recommended_for=video"),
+        ("GET", "/v1/models?category=video"),
         ("POST", "/v1/videos/generations"),
     ]
 
@@ -129,7 +148,47 @@ async def test_lemondata_nonchat_request_refuses_without_fresh_discovery(monkeyp
     )
 
     assert result["ok"] is False
-    assert "Fresh LemonData model discovery failed" in result["error"]
+    assert "Fresh LemonData category discovery failed" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_request_allows_explicit_catalog_model_absent_from_recommendation_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = LemonDataNonChatTool()
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        calls.append((method, path))
+        if path == "/v1/models?category=video":
+            return {
+                "ok": True,
+                "body": {"data": [{"id": "seedance-2.0", "lemondata": {"category": "video"}}]},
+            }
+        if path == "/v1/videos/generations":
+            return {
+                "ok": True,
+                "body": {"id": "task_456", "status": "pending", "model": body["model"]},
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="video",
+            model="seedance-2.0",
+            payload={"prompt": "test"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["selected_model"] == "seedance-2.0"
+    assert result["response"]["model"] == "seedance-2.0"
+    assert calls == [
+        ("GET", "/v1/models?category=video"),
+        ("POST", "/v1/videos/generations"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -139,6 +198,16 @@ async def test_lemondata_nonchat_request_auto_selects_and_falls_back_on_retryabl
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
         calls.append((method, path, body))
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "gemini-2.5-flash-image", "lemondata": {"category": "image"}},
+                        {"id": "imagen-4", "lemondata": {"category": "image"}},
+                    ]
+                },
+            }
         if path == "/v1/models?category=image&recommended_for=image":
             return {
                 "ok": True,
@@ -210,6 +279,18 @@ async def test_lemondata_nonchat_translation_requires_text_and_target_language(m
     tool = LemonDataNonChatTool()
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=translation":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {
+                            "id": "gemini-translation-pro",
+                            "lemondata": {"category": "translation"},
+                        }
+                    ]
+                },
+            }
         if path == "/v1/models?category=translation&recommended_for=translation":
             return {
                 "ok": True,
@@ -245,6 +326,16 @@ async def test_lemondata_nonchat_request_retries_on_transport_error(monkeypatch:
     tool = LemonDataNonChatTool()
 
     async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "model-a", "lemondata": {"category": "image"}},
+                        {"id": "model-b", "lemondata": {"category": "image"}},
+                    ]
+                },
+            }
         if path == "/v1/models?category=image&recommended_for=image":
             return {
                 "ok": True,

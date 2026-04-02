@@ -1,6 +1,6 @@
 ---
 name: lemondata-api
-description: Call LemonData APIs for chat, images, video, music, 3D, TTS, STT, embeddings, and rerank. Use when the user wants LemonData generation or model discovery, especially for non-chat workflows that require live model truth.
+description: Call LemonData APIs for chat, images, video, music, 3D, TTS, STT, embeddings, and rerank. Use when the user wants LemonData generation or model discovery, especially for non-chat workflows that need live category catalog truth plus optional recommendation snapshots.
 metadata: {"lemonclaw":{"always":true,"pattern":"tool-wrapper","requires":{"env":["API_KEY"]}}}
 triggers: "lemondata,画图,生成图片,做视频,生成视频,音乐,歌曲,3D,TTS,STT,embedding,嵌入,rerank,重排,转录,语音识别,remove background,upscale"
 ---
@@ -45,11 +45,21 @@ For chat-style requests:
 For image, video, music, 3D, TTS, STT, embeddings, and rerank:
 - do not trust memory
 - do not recommend models from stale examples
-- read live model truth first
+- read the live category catalog first
 
 Preferred path inside LemonClaw:
 - use `lemondata_nonchat(action="discover", category="...")`
 - then use `lemondata_nonchat(action="request", ...)`
+
+Interpretation rule:
+- `discover` returns the current category catalog from `/v1/models?category=...`
+- if recommendation context is available, it may also attach `preferred_rank`, `status`, and `snapshot_at`
+- `snapshot_at` is the recommendation snapshot timestamp, not proof that the whole category directory was regenerated at that exact moment
+
+When the user asks "does model X exist / support / 上线了吗":
+- use category discovery as the primary truth
+- treat recommendation metadata as ranking-only context
+- never claim a model is absent just because it is missing from `recommended_for`
 
 If the helper is unavailable, read `/v1/models?category=<category>` before suggesting or calling a model.
 
@@ -63,8 +73,9 @@ If a non-chat request returns:
 
 then:
 1. re-read the live category list
-2. re-pick only from the fresh result
-3. explain the switch using the live result
+2. if you are auto-picking, re-read recommendation metadata for ranking
+3. re-pick only from the fresh result
+4. explain the switch using the live result
 
 ## Error Handling
 
