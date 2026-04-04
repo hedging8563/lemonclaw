@@ -112,9 +112,11 @@ class TestHandleStop:
     async def test_stop_cancels_process_direct_task(self):
         loop, bus = _make_loop()
         started = asyncio.Event()
+        task_id_holder = {}
 
         async def _slow_process(msg, **kwargs):
             started.set()
+            task_id_holder["task_id"] = str(msg.metadata["_task_id"])
             await asyncio.sleep(60)
             raise AssertionError("should have been cancelled")
 
@@ -136,6 +138,11 @@ class TestHandleStop:
             await direct
         assert "test:c1" not in loop._active_tasks
         assert "test:c1" not in loop._stop_events
+        task = loop.ledger.read_task(task_id_holder["task_id"])
+        assert task is not None
+        assert task["status"] == "abandoned"
+        assert task["current_stage"] == "cancelled"
+        assert task["error"] == "cancelled"
 
 
 class TestDispatch:

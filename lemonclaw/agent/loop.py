@@ -2590,6 +2590,20 @@ class AgentLoop:
                         session_key=session_key,
                         result_summary=(response.content if response else "")[:500],
                     )
+                except asyncio.CancelledError:
+                    self.ledger.update_task(
+                        str(direct_metadata["_task_id"]),
+                        status="abandoned",
+                        current_stage="cancelled",
+                        error="cancelled",
+                    )
+                    self._finish_trigger_failure(
+                        direct_metadata,
+                        task_id=str(direct_metadata["_task_id"]),
+                        session_key=session_key,
+                        error="cancelled",
+                    )
+                    raise
                 except Exception as exc:
                     self.ledger.update_task(
                         str(direct_metadata["_task_id"]),
