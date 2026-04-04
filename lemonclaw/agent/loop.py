@@ -672,6 +672,7 @@ class AgentLoop:
         message_id: str | None = None,
         delivery_context: dict[str, Any] | None = None,
         delivery_policy: dict[str, Any] | None = None,
+        session_context: dict[str, Any] | None = None,
         session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info.
@@ -689,6 +690,7 @@ class AgentLoop:
                             chat_id,
                             delivery_context=dict(delivery_context or {}),
                             delivery_policy=dict(delivery_policy or {}),
+                            session_context=dict(session_context or {}),
                             **({"message_id": message_id} if name == "message" else {}),
                         )
                     else:
@@ -1830,7 +1832,13 @@ class AgentLoop:
             session_model = self._normalize_session_model(session)
             active_provider = self._provider_for_model(session_model or self.model)
             self.context.memory.set_provider(active_provider)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), session_key=key)
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id"),
+                session_context=dict((msg.metadata or {}).get("_session_context") or {}),
+                session_key=key,
+            )
             history = session.get_history(max_messages=self.memory_window)
             memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
             logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
@@ -1997,6 +2005,7 @@ class AgentLoop:
             msg.metadata.get("message_id"),
             delivery_context=dict((msg.metadata or {}).get("_delivery_context") or {}),
             delivery_policy=get_delivery_policy(msg.metadata),
+            session_context=dict((msg.metadata or {}).get("_session_context") or {}),
             session_key=key,
         )
         message_turn_state: dict[str, Any] | None = None

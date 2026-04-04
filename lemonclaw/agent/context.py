@@ -360,6 +360,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             entity_card_summary=entity_card_summary,
             fact_slot_summary=fact_slot_summary,
         )
+        entity_fact_summary = ContextBuilder._build_entity_fact_summary_object(
+            entity_card_summary=entity_card_summary,
+            fact_slot_summary=fact_slot_summary,
+        )
         retrieval_surface_summary = ContextBuilder._build_retrieval_surface_summary_object(
             rules=normalized_rules,
             knowledge_hits=normalized_hits,
@@ -381,6 +385,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "fact_slots": fact_slots,
             "fact_slot_summary": fact_slot_summary,
             "entity_card_summary": entity_card_summary,
+            "entity_fact_summary": entity_fact_summary,
             "retrieval_summary": retrieval_summary,
             "retrieval_objects": [
                 summary_object,
@@ -388,6 +393,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 retrieval_surface_summary,
                 entity_card_summary,
                 fact_slot_summary,
+                entity_fact_summary,
                 *retrieval_objects,
             ],
         }
@@ -478,6 +484,77 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             "fact_slot_count": len(names),
             "fact_slot_names": names[:4],
             "fact_slot_summaries": summaries[:4],
+            "keywords": keywords[:6],
+        }
+
+    @staticmethod
+    def _build_entity_fact_summary_object(
+        *,
+        entity_card_summary: dict[str, Any],
+        fact_slot_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        def _clean_list(values: Any) -> list[str]:
+            if values is None:
+                return []
+            if isinstance(values, str):
+                values = [values]
+            cleaned: list[str] = []
+            for value in list(values):
+                text = str(value or "").strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+
+        entity_card_count = int(entity_card_summary.get("entity_card_count") or 0)
+        fact_slot_count = int(fact_slot_summary.get("fact_slot_count") or 0)
+        entity_card_names = _clean_list(entity_card_summary.get("entity_card_names"))
+        fact_slot_names = _clean_list(fact_slot_summary.get("fact_slot_names"))
+        entity_card_summaries = _clean_list(entity_card_summary.get("entity_card_summaries"))
+        fact_slot_summaries = _clean_list(fact_slot_summary.get("fact_slot_summaries"))
+
+        keywords: list[str] = []
+        seen_keywords: set[str] = set()
+        for source_values in (
+            entity_card_summary.get("keywords"),
+            fact_slot_summary.get("keywords"),
+        ):
+            if source_values is None:
+                continue
+            if isinstance(source_values, str):
+                source_values = [source_values]
+            for keyword in list(source_values):
+                keyword_text = str(keyword or "").strip()
+                if not keyword_text or keyword_text in seen_keywords:
+                    continue
+                seen_keywords.add(keyword_text)
+                keywords.append(keyword_text)
+
+        summary_parts: list[str] = []
+        if entity_card_count:
+            summary_parts.append(f"{entity_card_count} entity card(s)")
+        if fact_slot_count:
+            summary_parts.append(f"{fact_slot_count} fact slot(s)")
+        names = entity_card_names or fact_slot_names
+        if names:
+            summary_parts.append(", ".join(names[:3]))
+        snippets = entity_card_summaries or fact_slot_summaries
+        if snippets:
+            summary_parts.append(" | ".join(snippets[:2]))
+
+        summary = "; ".join(part for part in summary_parts if part).strip()
+        return {
+            "kind": "entity_fact_summary",
+            "id": "entity_fact_summary",
+            "title": "Entity / Fact Summary",
+            "source": "memory.entities",
+            "summary": summary,
+            "status": "present" if summary else "empty",
+            "entity_card_count": entity_card_count,
+            "fact_slot_count": fact_slot_count,
+            "entity_card_names": entity_card_names[:4],
+            "fact_slot_names": fact_slot_names[:4],
+            "entity_card_summaries": entity_card_summaries[:4],
+            "fact_slot_summaries": fact_slot_summaries[:4],
             "keywords": keywords[:6],
         }
 

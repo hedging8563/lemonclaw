@@ -6,6 +6,7 @@ from lemonclaw.agent.tools.notify import NotifyTool
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY, DELIVERY_POLICY_KEY
+from lemonclaw.channels.session_context import SESSION_CONTEXT_KEY
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -53,6 +54,49 @@ async def test_notify_channel_carries_delivery_contract_for_same_target():
     assert len(sent) == 1
     assert sent[0].metadata[DELIVERY_CONTEXT_KEY]["route"]["message_thread_id"] == 456
     assert sent[0].metadata[DELIVERY_POLICY_KEY]["mode"] == "replace"
+
+
+@pytest.mark.asyncio
+async def test_notify_channel_carries_session_context_for_same_target():
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = NotifyTool(send_callback=_send)
+    tool.set_context(
+        "telegram",
+        "12345",
+        delivery_context={
+            "source_channel": "telegram",
+            "source_chat_id": "12345",
+            "session_key": "telegram:12345:456",
+            "route": {"reply_to_message_id": 321, "message_thread_id": 456},
+        },
+        delivery_policy={
+            "mode": "replace",
+            "preserve_message_identity": True,
+        },
+        session_context={
+            "session_key": "telegram:12345:456",
+            "identity": {
+                "channel": "telegram",
+                "account": "",
+                "chat": "12345",
+                "thread": "456",
+                "topic": "",
+            },
+            "timezone": "Asia/Shanghai",
+            "run_mode": "interactive",
+        },
+    )
+
+    result = await tool.execute(target_type="channel", content="hello")
+
+    assert result["ok"] is True
+    assert len(sent) == 1
+    assert sent[0].metadata[SESSION_CONTEXT_KEY]["identity"]["thread"] == "456"
+    assert sent[0].metadata[SESSION_CONTEXT_KEY]["run_mode"] == "interactive"
 
 
 @pytest.mark.asyncio
@@ -152,6 +196,7 @@ async def test_notify_channel_does_not_carry_delivery_contract_for_different_tar
     assert len(sent) == 1
     assert DELIVERY_CONTEXT_KEY not in sent[0].metadata
     assert DELIVERY_POLICY_KEY not in sent[0].metadata
+    assert SESSION_CONTEXT_KEY not in sent[0].metadata
 
 
 @pytest.mark.asyncio
@@ -180,6 +225,18 @@ async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
             "mode": "replace",
             "preserve_message_identity": True,
         },
+        session_context={
+            "session_key": "telegram:123:456",
+            "identity": {
+                "channel": "telegram",
+                "account": "",
+                "chat": "123",
+                "thread": "456",
+                "topic": "",
+            },
+            "timezone": "Asia/Shanghai",
+            "run_mode": "interactive",
+        },
     )
     result = await tool.execute(
         target_type="channel",
@@ -201,6 +258,7 @@ async def test_notify_channel_enqueues_outbox_when_enabled(tmp_path):
     assert events[0]["payload"]["channel"] == "telegram"
     assert events[0]["payload"]["metadata"][DELIVERY_CONTEXT_KEY]["route"]["message_thread_id"] == 456
     assert events[0]["payload"]["metadata"][DELIVERY_POLICY_KEY]["mode"] == "replace"
+    assert events[0]["payload"]["metadata"][SESSION_CONTEXT_KEY]["identity"]["thread"] == "456"
 
 
 @pytest.mark.asyncio
