@@ -104,6 +104,7 @@ export interface SendMessageReq {
 export interface GetUploadUrlResp {
   upload_param?: string;
   thumb_upload_param?: string;
+  upload_full_url?: string;
 }
 
 export const UploadMediaType = {

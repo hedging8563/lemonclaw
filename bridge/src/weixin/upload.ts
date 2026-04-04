@@ -71,15 +71,18 @@ async function uploadMediaToCdn(params: {
     aeskey: aeskey.toString('hex'),
   });
 
-  if (!uploadUrlResp.upload_param) {
-    throw new Error('getUploadUrl returned no upload_param');
+  const uploadFullUrl = uploadUrlResp.upload_full_url?.trim() || undefined;
+  const uploadParam = uploadUrlResp.upload_param || undefined;
+  if (!uploadFullUrl && !uploadParam) {
+    throw new Error(`getUploadUrl returned no upload URL: ${JSON.stringify(uploadUrlResp)}`);
   }
 
   const { downloadParam } = await uploadBufferToCdn({
     buf: plaintext,
-    uploadParam: uploadUrlResp.upload_param,
-    filekey,
-    cdnBaseUrl: params.cdnBaseUrl,
+    uploadFullUrl,
+    uploadParam,
+    filekey: uploadParam ? filekey : undefined,
+    cdnBaseUrl: uploadParam ? params.cdnBaseUrl : undefined,
     aeskey,
     timeoutMs: uploadTimeoutMs,
   });

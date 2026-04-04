@@ -40,6 +40,35 @@ function installFetchMock() {
   return { sendBodies, fetchMock };
 }
 
+function installFetchMockWithUploadFullUrl() {
+  const sendBodies: any[] = [];
+  const fetchMock = mock.method(globalThis, 'fetch', async (input: any, init?: any) => {
+    const url = String(input);
+    if (url.includes('/ilink/bot/getuploadurl')) {
+      return new Response(JSON.stringify({ upload_full_url: 'https://cdn.weixin.local/upload/full/direct-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes('/upload/full/direct-1')) {
+      return new Response('', {
+        status: 200,
+        headers: { 'x-encrypted-param': 'download-param-direct-1' },
+      });
+    }
+    if (url.includes('/ilink/bot/sendmessage')) {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      sendBodies.push(body);
+      return new Response(JSON.stringify({ ret: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    throw new Error(`unexpected fetch url: ${url}`);
+  });
+  return { sendBodies, fetchMock };
+}
+
 test('uploadFileAttachmentToWeixin rejects empty files', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'weixin-empty-'));
   try {
@@ -155,6 +184,34 @@ test('sendWeixinMediaFiles routes generic files through file attachments with bi
     assert.equal(payload.type, 4);
     assert.equal(payload.file_item.file_name, 'notes.txt');
     assert.equal(payload.file_item.media.aes_key, Buffer.alloc(16, 3).toString('base64'));
+  } finally {
+    fetchMock.mock.restore();
+    randomMock.mock.restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sendWeixinMediaFiles accepts upload_full_url responses from getUploadUrl', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'weixin-upload-full-url-'));
+  const randomMock = mock.method(crypto, 'randomBytes', (size: number) => Buffer.alloc(size, 4));
+  const { sendBodies, fetchMock } = installFetchMockWithUploadFullUrl();
+  try {
+    const imageFile = path.join(dir, 'photo.jpg');
+    writeFileSync(imageFile, 'image-direct-upload');
+
+    await sendWeixinMediaFiles({
+      accountId: 'bot-1',
+      to: 'wx-user',
+      text: 'direct-url',
+      mediaPaths: [imageFile],
+      contextToken: 'ctx-direct',
+      baseUrl: 'https://example.weixin.local',
+      cdnBaseUrl: 'https://cdn.weixin.local',
+    });
+
+    assert.equal(sendBodies.length, 2);
+    assert.equal(sendBodies[1].msg.item_list[0].image_item.media.encrypt_query_param, 'download-param-direct-1');
+    assert.equal(sendBodies[1].msg.item_list[0].image_item.media.aes_key, Buffer.alloc(16, 4).toString('base64'));
   } finally {
     fetchMock.mock.restore();
     randomMock.mock.restore();

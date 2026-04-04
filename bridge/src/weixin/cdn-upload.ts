@@ -5,18 +5,27 @@ const UPLOAD_MAX_RETRIES = 3;
 
 export async function uploadBufferToCdn(params: {
   buf: Buffer;
-  uploadParam: string;
-  filekey: string;
-  cdnBaseUrl: string;
+  uploadParam?: string;
+  uploadFullUrl?: string;
+  filekey?: string;
+  cdnBaseUrl?: string;
   aeskey: Buffer;
   timeoutMs?: number;
 }): Promise<{ downloadParam: string }> {
   const ciphertext = encryptAesEcb(params.buf, params.aeskey);
-  const cdnUrl = buildCdnUploadUrl({
-    cdnBaseUrl: params.cdnBaseUrl,
-    uploadParam: params.uploadParam,
-    filekey: params.filekey,
-  });
+  const cdnUrl = params.uploadFullUrl?.trim()
+    || (
+      params.uploadParam && params.filekey && params.cdnBaseUrl
+        ? buildCdnUploadUrl({
+            cdnBaseUrl: params.cdnBaseUrl,
+            uploadParam: params.uploadParam,
+            filekey: params.filekey,
+          })
+        : ''
+    );
+  if (!cdnUrl) {
+    throw new Error('CDN upload requires uploadFullUrl or uploadParam+filekey+cdnBaseUrl');
+  }
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
