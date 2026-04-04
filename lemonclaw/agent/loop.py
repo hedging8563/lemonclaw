@@ -1794,6 +1794,45 @@ class AgentLoop:
     def _infer_mode(msg: InboundMessage) -> str:
         return infer_mode(msg)
 
+    def _build_tool_context_extra(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        metadata: dict[str, Any],
+        message_turn_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build shared tool execution context for a message turn."""
+        tool_context_extra = {
+            "_task_id": metadata.get("_task_id"),
+            "_mode": metadata.get("_mode", "chat"),
+            "_agent_id": metadata.get("_agent_id", self.agent_id),
+            "_tenant_id": str(metadata.get("_tenant_id", "")),
+            "_actor_identity": str(metadata.get("_actor_identity", self.agent_id)),
+            "_task_ledger": self.ledger,
+            "_outbox_enabled": bool(getattr(self, "outbox_enabled", False)),
+            "_default_channel": channel,
+            "_default_chat_id": chat_id,
+            "_default_message_id": metadata.get("message_id"),
+            "_default_delivery_context": metadata.get("_delivery_context"),
+            "_default_delivery_policy": get_delivery_policy(metadata),
+            "_default_session_context": (
+                dict(metadata.get("_session_context") or {})
+                if isinstance(metadata.get("_session_context"), dict)
+                else {}
+            ),
+            "_message_turn_state": message_turn_state,
+            "_capability_token": self.governance.issue_token(
+                task_id=str(metadata.get("_task_id")),
+                tenant_id=str(metadata.get("_tenant_id", "")),
+                mode=str(metadata.get("_mode", "chat")),
+            ),
+        }
+        outbound_sink = metadata.get("_outbound_sink")
+        if outbound_sink:
+            tool_context_extra["_outbound_sink"] = outbound_sink
+        return tool_context_extra
+
     async def close_mcp(self) -> None:
         """Close MCP connections and tool resources."""
         if self._mcp_stack:
@@ -1854,9 +1893,15 @@ class AgentLoop:
             from lemonclaw.session.compaction import compact, needs_compaction
             if needs_compaction(messages, session_model or self.model):
                 messages = await compact(messages, session_model or self.model, active_provider)
+            metadata = dict(msg.metadata or {})
+            tool_context_extra = self._build_tool_context_extra(
+                channel=channel,
+                chat_id=chat_id,
+                metadata=metadata,
+            )
             final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
                 messages, session_key=key, stop_event=stop_event, session_model=session_model,
-                lang=session_lang(session),
+                lang=session_lang(session), tool_context_extra=tool_context_extra,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             # Record usage for system messages
@@ -2086,30 +2131,12 @@ class AgentLoop:
                 })
 
         metadata = dict(msg.metadata or {})
-        outbound_sink = metadata.get("_outbound_sink")
-        tool_context_extra = {
-            "_task_id": metadata.get("_task_id"),
-            "_mode": metadata.get("_mode", "chat"),
-            "_agent_id": metadata.get("_agent_id", self.agent_id),
-            "_tenant_id": str(metadata.get("_tenant_id", "")),
-            "_actor_identity": str(metadata.get("_actor_identity", self.agent_id)),
-            "_task_ledger": self.ledger,
-            "_outbox_enabled": bool(getattr(self, "outbox_enabled", False)),
-            "_default_channel": msg.channel,
-            "_default_chat_id": msg.chat_id,
-            "_default_message_id": metadata.get("message_id"),
-            "_default_delivery_context": metadata.get("_delivery_context"),
-            "_default_delivery_policy": get_delivery_policy(metadata),
-            "_default_session_context": dict(metadata.get("_session_context") or {}) if isinstance(metadata.get("_session_context"), dict) else {},
-            "_message_turn_state": message_turn_state,
-            "_capability_token": self.governance.issue_token(
-                task_id=str(metadata.get("_task_id")),
-                tenant_id=str(metadata.get("_tenant_id", "")),
-                mode=str(metadata.get("_mode", "chat")),
-            ),
-        }
-        if outbound_sink:
-            tool_context_extra["_outbound_sink"] = outbound_sink
+        tool_context_extra = self._build_tool_context_extra(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            metadata=metadata,
+            message_turn_state=message_turn_state,
+        )
 
         final_content, _, all_msgs, turn_usage = await self._run_agent_loop(
             initial_messages, session_key=key, on_progress=on_progress or _bus_progress,

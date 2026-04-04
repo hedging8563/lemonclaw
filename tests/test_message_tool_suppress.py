@@ -6,10 +6,45 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from lemonclaw.agent.loop import AgentLoop
+from lemonclaw.agent.tools.base import Tool
 from lemonclaw.agent.tools.message import MessageTool
 from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.providers.base import LLMResponse, ToolCallRequest
+
+
+class _GovernanceConfig:
+    enabled = True
+    default_autonomy_cap = "L1"
+    token_ttl_seconds = 60
+    kill_switch_file = ""
+    audit_log_path = ""
+    budgets = type("Budgets", (), {"default_task_usd": None})()
+    capability_overrides: dict[str, dict[str, object]] = {}
+
+
+class _SystemTokenTool(Tool):
+    @property
+    def name(self) -> str:
+        return "system_token_tool"
+
+    @property
+    def description(self) -> str:
+        return "Report whether a capability token reached the tool call."
+
+    @property
+    def parameters(self):
+        return {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string"},
+            },
+            "required": ["value"],
+        }
+
+    async def execute(self, value: str, _capability_token=None, **kwargs):
+        del kwargs
+        return f"{value}:{'token-present' if _capability_token is not None else 'token-missing'}"
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -17,6 +52,23 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10)
+
+
+def _make_governed_loop(tmp_path: Path) -> AgentLoop:
+    cfg = _GovernanceConfig()
+    cfg.kill_switch_file = str(tmp_path / "governance.json")
+    cfg.audit_log_path = str(tmp_path / "audit.jsonl")
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        memory_window=10,
+        governance_config=cfg,
+    )
 
 
 class TestMessageToolSuppressLogic:
@@ -218,6 +270,43 @@ class TestEmptyToolCallGuidance:
             "en",
         )
         assert guidance is None
+
+
+class TestSystemMessageToolContext:
+    @pytest.mark.asyncio
+    async def test_system_messages_provide_capability_token_to_tools(self, tmp_path: Path) -> None:
+        loop = _make_governed_loop(tmp_path)
+        loop.tools.register(_SystemTokenTool())
+
+        calls = iter([
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call-system-1",
+                        name="system_token_tool",
+                        arguments={"value": "system-check"},
+                    )
+                ],
+            ),
+            LLMResponse(content="system-check:token-present", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+
+        msg = InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="weixin:chat123",
+            content="Please verify the tool context.",
+            session_key_override="weixin:chat123",
+        )
+
+        result = await loop._process_message(msg)
+
+        assert result is not None
+        assert result.channel == "weixin"
+        assert result.chat_id == "chat123"
+        assert result.content == "system-check:token-present"
 
     @pytest.mark.asyncio
     async def test_tool_call_preamble_is_not_reused_as_final_reply(self, tmp_path: Path) -> None:
