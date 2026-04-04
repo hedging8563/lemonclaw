@@ -1,7 +1,7 @@
 {
-  "name": "lemonclaw-whatsapp-bridge",
-  "version": "0.1.0",
-  "description": "WhatsApp bridge for lemonclaw using Baileys",
+  "name": "lemonclaw-weixin-bridge",
+  "version": "2.1.6",
+  "description": "Weixin bridge for LemonClaw aligned with official openclaw-weixin 2.1.6",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -24,5 +24,6 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "ilink_appid": "bot"
 }

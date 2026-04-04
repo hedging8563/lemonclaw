@@ -1,3 +1,40 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+interface PackageJson {
+  version?: string;
+  ilink_appid?: string;
+}
+
+function readPackageJson(): PackageJson {
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.resolve(dir, '..', '..', 'package.json');
+    return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as PackageJson;
+  } catch {
+    return {};
+  }
+}
+
+const pkg = readPackageJson();
+const CHANNEL_VERSION = pkg.version ?? 'unknown';
+const ILINK_APP_ID = pkg.ilink_appid ?? '';
+
+function buildClientVersion(version: string): number {
+  const parts = version.split('.').map((part) => Number.parseInt(part, 10));
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const patch = parts[2] ?? 0;
+  return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
+}
+
+const ILINK_APP_CLIENT_VERSION = buildClientVersion(pkg.version ?? '0.0.0');
+
+function buildBaseInfo(): { channel_version: string } {
+  return { channel_version: CHANNEL_VERSION };
+}
+
 export interface WeixinQrStartResponse {
   qrcode: string;
   qrcode_img_content: string;
@@ -139,10 +176,19 @@ const DEFAULT_BOT_TYPE = '3';
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
-const CLIENT_VERSION_HEADER = '1';
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;
+}
+
+function buildCommonHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'iLink-App-ClientVersion': String(ILINK_APP_CLIENT_VERSION),
+  };
+  if (ILINK_APP_ID) {
+    headers['iLink-App-Id'] = ILINK_APP_ID;
+  }
+  return headers;
 }
 
 async function jsonFetch<T>(url: string, options: RequestInit = {}, timeoutMs = DEFAULT_API_TIMEOUT_MS): Promise<T> {
@@ -173,6 +219,7 @@ async function apiPost<T>(
     'Content-Type': 'application/json',
     AuthorizationType: 'ilink_bot_token',
     'X-WECHAT-UIN': randomWechatUin,
+    ...buildCommonHeaders(),
   };
   if (token?.trim()) {
     headers.Authorization = `Bearer ${token.trim()}`;
@@ -199,7 +246,7 @@ export async function pollWeixinQRStatus(baseUrl: string, qrcode: string): Promi
   try {
     const url = new URL(`ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`, ensureTrailingSlash(baseUrl));
     const response = await fetch(url.toString(), {
-      headers: { 'iLink-App-ClientVersion': CLIENT_VERSION_HEADER },
+      headers: buildCommonHeaders(),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -229,7 +276,7 @@ export async function getUpdates(params: {
       'ilink/bot/getupdates',
       {
         get_updates_buf: params.getUpdatesBuf ?? '',
-        base_info: { channel_version: 'lemonclaw-weixin-bridge' },
+        base_info: buildBaseInfo(),
       },
       params.token,
       params.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS,
@@ -251,10 +298,10 @@ export async function sendMessage(params: {
   await apiPost<Record<string, unknown>>(
     params.baseUrl,
     'ilink/bot/sendmessage',
-    {
-      ...params.body,
-      base_info: { channel_version: 'lemonclaw-weixin-bridge' },
-    },
+      {
+        ...params.body,
+        base_info: buildBaseInfo(),
+      },
     params.token,
     params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
   );
@@ -291,7 +338,7 @@ export async function getUploadUrl(params: {
       thumb_filesize: params.thumbFilesize,
       no_need_thumb: params.noNeedThumb,
       aeskey: params.aeskey,
-      base_info: { channel_version: 'lemonclaw-weixin-bridge' },
+      base_info: buildBaseInfo(),
     },
     params.token,
     params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
