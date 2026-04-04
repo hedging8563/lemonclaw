@@ -108,6 +108,35 @@ class TestHandleStop:
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "2 task" in out.content
 
+    @pytest.mark.asyncio
+    async def test_stop_cancels_process_direct_task(self):
+        loop, bus = _make_loop()
+        started = asyncio.Event()
+
+        async def _slow_process(msg, **kwargs):
+            started.set()
+            await asyncio.sleep(60)
+            raise AssertionError("should have been cancelled")
+
+        loop._process_message = _slow_process
+        direct = asyncio.create_task(
+            loop.process_direct(
+                "long job",
+                session_key="test:c1",
+                channel="test",
+                chat_id="c1",
+            )
+        )
+
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        result = await loop.stop_session("test:c1", channel="test", chat_id="c1")
+        assert result["running"] == 0
+
+        with pytest.raises(asyncio.CancelledError):
+            await direct
+        assert "test:c1" not in loop._active_tasks
+        assert "test:c1" not in loop._stop_events
+
 
 class TestDispatch:
     @pytest.mark.asyncio

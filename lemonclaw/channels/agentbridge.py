@@ -81,7 +81,7 @@ class AgentBridgeChannel(BaseChannel):
                 queue.put_nowait(deepcopy(event))
             except asyncio.QueueFull:
                 self._subscribers[session_key].discard(queue)
-        if event["type"] == "outbound":
+        if event["type"] == "outbound" and not bool((msg.metadata or {}).get("_agentbridge_skip_session_persist")):
             self._persist_outbound_message(msg, session_key=session_key)
         return event
 

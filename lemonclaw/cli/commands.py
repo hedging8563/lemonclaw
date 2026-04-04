@@ -673,7 +673,7 @@ def gateway(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
                 content=response or "",
-                metadata=runtime_metadata,
+                metadata={**runtime_metadata, "_agentbridge_skip_session_persist": True},
             ))
         return response
     cron.on_job = on_cron_job
@@ -732,7 +732,14 @@ def gateway(
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=response,
+                metadata={"_agentbridge_skip_session_persist": True},
+            )
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(

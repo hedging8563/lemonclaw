@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from lemonclaw.channels.agentbridge import AgentBridgeChannel
+from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.agent.subagent import SubagentManager
-from lemonclaw.bus.events import InboundMessage
 from lemonclaw.bus.queue import MessageBus
+from lemonclaw.session.manager import SessionManager
 
 
 @pytest.mark.asyncio
@@ -109,3 +112,24 @@ async def test_agent_loop_system_message_uses_session_key_override(make_agent_lo
     assert result.metadata["_delivery_context"]["route"]["message_thread_id"] == 456
     assert result.metadata["_delivery_policy"]["mode"] == "replace"
     assert result.metadata["_session_context"]["identity"]["thread"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_agentbridge_emit_can_skip_duplicate_session_persist(tmp_path: Path):
+    bus = MessageBus()
+    session_manager = SessionManager(tmp_path)
+    channel = AgentBridgeChannel(SimpleNamespace(event_buffer_size=8), bus, session_manager=session_manager)
+
+    event = await channel.emit(
+        OutboundMessage(
+            channel="agentbridge",
+            chat_id="codex:default:dup",
+            content="hello",
+            metadata={"_agentbridge_skip_session_persist": True},
+        ),
+        session_key="agentbridge:codex:default:dup",
+    )
+
+    assert event["type"] == "outbound"
+    session = session_manager.get("agentbridge:codex:default:dup")
+    assert session is None or session.messages == []

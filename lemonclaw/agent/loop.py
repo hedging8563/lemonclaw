@@ -1867,7 +1867,7 @@ class AgentLoop:
                 channel=channel,
                 chat_id=chat_id,
                 content=final_content or t("bg_task_done", session_lang(session)),
-                metadata=dict(msg.metadata or {}),
+                metadata={**dict(msg.metadata or {}), "_agentbridge_skip_session_persist": True},
             )
 
         key = session_key or msg.session_key
@@ -2500,6 +2500,11 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
+        stop_event = asyncio.Event()
+        self._stop_events[session_key] = stop_event
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._active_tasks.setdefault(session_key, []).append(current_task)
         if session_key not in self._session_locks:
             self._session_locks[session_key] = asyncio.Lock()
             if len(self._session_locks) > self._MAX_SESSION_LOCKS:
@@ -2507,65 +2512,80 @@ class AgentLoop:
         if session_key in self._session_lock_order:
             self._session_lock_order.remove(session_key)
         self._session_lock_order.append(session_key)
-        async with self._session_locks[session_key]:
-            direct_metadata = dict(metadata or {})
-            delivery_policy = get_delivery_policy(direct_metadata)
-            direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
-            direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
-            direct_metadata.setdefault("run_mode", self._default_run_mode(channel=channel, mode=str(direct_metadata.get("_mode") or "")))
-            direct_metadata.setdefault("_agent_id", self.agent_id)
-            task_metadata = self._task_trigger_metadata(direct_metadata)
-            self.ledger.ensure_task(
-                task_id=str(direct_metadata["_task_id"]),
-                session_key=session_key,
-                agent_id=self.agent_id,
-                mode=str(direct_metadata["_mode"]),
-                channel=channel,
-                goal=content[:500],
-                current_stage="dispatch",
-                resume_context=build_task_resume_context(
+        try:
+            async with self._session_locks[session_key]:
+                direct_metadata = dict(metadata or {})
+                delivery_policy = get_delivery_policy(direct_metadata)
+                direct_metadata.setdefault("_task_id", f"task_{uuid.uuid4().hex[:12]}")
+                direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
+                direct_metadata.setdefault("run_mode", self._default_run_mode(channel=channel, mode=str(direct_metadata.get("_mode") or "")))
+                direct_metadata.setdefault("_agent_id", self.agent_id)
+                task_metadata = self._task_trigger_metadata(direct_metadata)
+                self.ledger.ensure_task(
+                    task_id=str(direct_metadata["_task_id"]),
+                    session_key=session_key,
+                    agent_id=self.agent_id,
+                    mode=str(direct_metadata["_mode"]),
                     channel=channel,
-                    chat_id=str(chat_id),
-                    sender_id="user",
-                    session_key=session_key,
-                    timezone=str(direct_metadata.get("timezone") or self.default_timezone or ""),
-                    run_mode=str(direct_metadata.get("run_mode") or ""),
-                    session_context=dict(direct_metadata.get("_session_context") or {}) if isinstance(direct_metadata.get("_session_context"), dict) else None,
-                    message_id=str(direct_metadata.get("message_id") or ""),
-                    delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
-                    delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
-                ),
-                metadata=task_metadata or None,
-            )
-            self._link_trigger_task(direct_metadata, str(direct_metadata["_task_id"]), session_key)
-            if outbound_sink:
-                direct_metadata["_outbound_sink"] = outbound_sink
-            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
-                                 metadata=direct_metadata, media=media or [])
-            try:
-                response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, on_chunk=on_chunk)
-                finalize_task(self.ledger, str(direct_metadata["_task_id"]))
-                self._finish_trigger_success(
-                    direct_metadata,
-                    task_id=str(direct_metadata["_task_id"]),
-                    session_key=session_key,
-                    result_summary=(response.content if response else "")[:500],
+                    goal=content[:500],
+                    current_stage="dispatch",
+                    resume_context=build_task_resume_context(
+                        channel=channel,
+                        chat_id=str(chat_id),
+                        sender_id="user",
+                        session_key=session_key,
+                        timezone=str(direct_metadata.get("timezone") or self.default_timezone or ""),
+                        run_mode=str(direct_metadata.get("run_mode") or ""),
+                        session_context=dict(direct_metadata.get("_session_context") or {}) if isinstance(direct_metadata.get("_session_context"), dict) else None,
+                        message_id=str(direct_metadata.get("message_id") or ""),
+                        delivery_context=dict(direct_metadata.get("_delivery_context") or {}),
+                        delivery_policy=dict(delivery_policy) if isinstance(delivery_policy, dict) else None,
+                    ),
+                    metadata=task_metadata or None,
                 )
-            except Exception as exc:
-                self.ledger.update_task(
-                    str(direct_metadata["_task_id"]),
-                    status="failed",
-                    current_stage="error",
-                    error=str(exc)[:500],
-                )
-                self._finish_trigger_failure(
-                    direct_metadata,
-                    task_id=str(direct_metadata["_task_id"]),
-                    session_key=session_key,
-                    error=str(exc),
-                )
-                raise
-        return response.content if response else ""
+                self._link_trigger_task(direct_metadata, str(direct_metadata["_task_id"]), session_key)
+                if outbound_sink:
+                    direct_metadata["_outbound_sink"] = outbound_sink
+                msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,
+                                     metadata=direct_metadata, media=media or [])
+                try:
+                    response = await self._process_message(
+                        msg,
+                        session_key=session_key,
+                        on_progress=on_progress,
+                        on_chunk=on_chunk,
+                        stop_event=stop_event,
+                    )
+                    finalize_task(self.ledger, str(direct_metadata["_task_id"]))
+                    self._finish_trigger_success(
+                        direct_metadata,
+                        task_id=str(direct_metadata["_task_id"]),
+                        session_key=session_key,
+                        result_summary=(response.content if response else "")[:500],
+                    )
+                except Exception as exc:
+                    self.ledger.update_task(
+                        str(direct_metadata["_task_id"]),
+                        status="failed",
+                        current_stage="error",
+                        error=str(exc)[:500],
+                    )
+                    self._finish_trigger_failure(
+                        direct_metadata,
+                        task_id=str(direct_metadata["_task_id"]),
+                        session_key=session_key,
+                        error=str(exc),
+                    )
+                    raise
+            return response.content if response else ""
+        finally:
+            self._stop_events.pop(session_key, None)
+            if current_task is not None:
+                tasks = self._active_tasks.get(session_key, [])
+                if current_task in tasks:
+                    tasks.remove(current_task)
+                if not tasks and session_key in self._active_tasks:
+                    del self._active_tasks[session_key]
 
     @staticmethod
     def _task_trigger_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
