@@ -70,6 +70,25 @@ def test_tasks_api_lists_tasks_and_filters_by_session(tmp_path):
     assert [item["task_id"] for item in tasks] == ["task_a"]
 
 
+def test_tasks_api_accepts_bearer_auth_token(tmp_path):
+    app, ledger = _build_app(tmp_path, auth_token="secret-token")
+    ledger.ensure_task(
+        task_id="task_a",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="alpha",
+        current_stage="dispatch",
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/tasks", headers={"Authorization": "Bearer secret-token"})
+
+    assert resp.status_code == 200
+    assert resp.json()["tasks"][0]["task_id"] == "task_a"
+
+
 def test_tasks_api_returns_materialized_task_detail(tmp_path):
     app, ledger = _build_app(tmp_path)
     ledger.ensure_task(

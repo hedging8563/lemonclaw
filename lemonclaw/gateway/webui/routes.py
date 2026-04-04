@@ -38,7 +38,10 @@ if TYPE_CHECKING:
 def _check_webui_auth(
     request: Request, auth_token: str
 ) -> tuple[bool, str | None]:
-    """Check cookie auth. Returns (valid, refreshed_cookie)."""
+    """Check cookie auth or direct bearer auth. Returns (valid, refreshed_cookie)."""
+    header = str(request.headers.get("authorization") or "")
+    if header.startswith("Bearer ") and verify_token(header[7:].strip(), auth_token):
+        return True, None
     cookie = request.cookies.get(COOKIE_NAME)
     if not cookie:
         return False, None
