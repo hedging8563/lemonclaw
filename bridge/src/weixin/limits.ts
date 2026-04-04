@@ -1,1 +1,1 @@
-export const WEIXIN_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+export const WEIXIN_MEDIA_MAX_BYTES = 100 * 1024 * 1024;
