@@ -48,6 +48,41 @@ function encodeAesKeyHexToBase64(aesKeyHex: string): string {
   return Buffer.from(aesKeyHex, 'hex').toString('base64');
 }
 
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function itemTypeDebugLabel(item: MessageItem): string {
+  switch (item.type) {
+    case MessageItemType.IMAGE:
+      return 'image';
+    case MessageItemType.FILE:
+      return 'file';
+    case MessageItemType.VIDEO:
+      return 'video';
+    case MessageItemType.VOICE:
+      return 'voice';
+    case MessageItemType.TEXT:
+      return 'text';
+    default:
+      return `unknown(${String(item.type ?? 'n/a')})`;
+  }
+}
+
+async function downloadInboundBuffer(params: {
+  encryptedQueryParam?: string;
+  aesKey?: string;
+  cdnBaseUrl: string;
+}): Promise<{ buf: Buffer; contentType: string | null } | null> {
+  if (!params.encryptedQueryParam) {
+    return null;
+  }
+  if (params.aesKey?.trim()) {
+    return downloadAndDecryptBuffer(params.encryptedQueryParam, params.aesKey, params.cdnBaseUrl);
+  }
+  return downloadPlainCdnBuffer(params.encryptedQueryParam, params.cdnBaseUrl);
+}
+
 async function downloadMediaItem(params: {
   accountId: string;
   item: MessageItem;
@@ -65,25 +100,66 @@ async function downloadMediaItem(params: {
     return saveMediaBuffer({ accountId, buf: result.buf, ext: ext === '.bin' ? '.jpg' : ext, prefix: 'image' });
   }
 
-  if (item.type === MessageItemType.FILE && item.file_item?.media?.encrypt_query_param && item.file_item.media.aes_key) {
-    const result = await downloadAndDecryptBuffer(item.file_item.media.encrypt_query_param, item.file_item.media.aes_key, cdnBaseUrl);
-    const ext = path.extname(item.file_item.file_name || '') || getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/file.bin');
-    return saveMediaBuffer({ accountId, buf: result.buf, ext: ext || '.bin', prefix: 'file' });
-  }
-
-  if (item.type === MessageItemType.VIDEO && item.video_item?.media?.encrypt_query_param && item.video_item.media.aes_key) {
-    const result = await downloadAndDecryptBuffer(item.video_item.media.encrypt_query_param, item.video_item.media.aes_key, cdnBaseUrl);
-    const ext = getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/video.mp4');
-    return saveMediaBuffer({ accountId, buf: result.buf, ext: ext === '.bin' ? '.mp4' : ext, prefix: 'video' });
-  }
-
-  if (item.type === MessageItemType.VOICE && item.voice_item?.media?.encrypt_query_param && item.voice_item.media.aes_key) {
-    const result = await downloadAndDecryptBuffer(item.voice_item.media.encrypt_query_param, item.voice_item.media.aes_key, cdnBaseUrl);
-    const wav = await silkToWav(result.buf);
-    if (wav) {
-      return saveMediaBuffer({ accountId, buf: wav, ext: '.wav', prefix: 'voice' });
+  if (item.type === MessageItemType.FILE && item.file_item?.media?.encrypt_query_param) {
+    const result = await downloadInboundBuffer({
+      encryptedQueryParam: item.file_item.media.encrypt_query_param,
+      aesKey: item.file_item.media.aes_key || item.file_item.aeskey,
+      cdnBaseUrl,
+    });
+    if (result) {
+      const ext = path.extname(item.file_item.file_name || '') || getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/file.bin');
+      return saveMediaBuffer({ accountId, buf: result.buf, ext: ext || '.bin', prefix: 'file' });
     }
-    return saveMediaBuffer({ accountId, buf: result.buf, ext: '.silk', prefix: 'voice' });
+  }
+
+  if (item.type === MessageItemType.VIDEO && item.video_item) {
+    const videoItem = item.video_item;
+    try {
+      const result = await downloadInboundBuffer({
+        encryptedQueryParam: videoItem.media?.encrypt_query_param,
+        aesKey: videoItem.media?.aes_key || videoItem.aeskey,
+        cdnBaseUrl,
+      });
+      if (result) {
+        const ext = getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/video.mp4');
+        return saveMediaBuffer({ accountId, buf: result.buf, ext: ext === '.bin' ? '.mp4' : ext, prefix: 'video' });
+      }
+    } catch (error) {
+      console.warn(`[weixin] inbound video download failed, trying thumbnail fallback: ${formatError(error)}`);
+    }
+
+    try {
+      const thumb = await downloadInboundBuffer({
+        encryptedQueryParam: videoItem.thumb_media?.encrypt_query_param,
+        aesKey: videoItem.thumb_media?.aes_key || videoItem.thumb_aeskey,
+        cdnBaseUrl,
+      });
+      if (thumb) {
+        const ext = getExtensionFromContentTypeOrUrl(thumb.contentType, 'https://example.local/video-thumb.jpg');
+        console.warn('[weixin] inbound video main media unavailable, using thumbnail fallback');
+        return saveMediaBuffer({ accountId, buf: thumb.buf, ext: ext === '.bin' ? '.jpg' : ext, prefix: 'image' });
+      }
+    } catch (error) {
+      console.warn(`[weixin] inbound video thumbnail download failed: ${formatError(error)}`);
+    }
+
+    console.warn('[weixin] inbound video message had no downloadable media payload');
+    return null;
+  }
+
+  if (item.type === MessageItemType.VOICE && item.voice_item?.media?.encrypt_query_param) {
+    const result = await downloadInboundBuffer({
+      encryptedQueryParam: item.voice_item.media.encrypt_query_param,
+      aesKey: item.voice_item.media.aes_key || item.voice_item.aeskey,
+      cdnBaseUrl,
+    });
+    if (result) {
+      const wav = await silkToWav(result.buf);
+      if (wav) {
+        return saveMediaBuffer({ accountId, buf: wav, ext: '.wav', prefix: 'voice' });
+      }
+      return saveMediaBuffer({ accountId, buf: result.buf, ext: '.silk', prefix: 'voice' });
+    }
   }
 
   return null;
@@ -100,7 +176,10 @@ export async function extractInboundMediaPaths(params: {
       accountId: params.accountId,
       item,
       cdnBaseUrl: params.cdnBaseUrl,
-    }).catch(() => null);
+    }).catch((error) => {
+      console.warn(`[weixin] failed to process inbound ${itemTypeDebugLabel(item)} item: ${formatError(error)}`);
+      return null;
+    });
     if (localPath) {
       mediaPaths.push(localPath);
     }
@@ -181,7 +260,7 @@ function buildFileMessageItem(
       len: String(fileSize),
       media: {
         encrypt_query_param: downloadEncryptedQueryParam,
-        aes_key: Buffer.from(aeskeyHex).toString('base64'),
+        aes_key: encodeAesKeyHexToBase64(aeskeyHex),
         encrypt_type: 1,
       },
     },
@@ -255,7 +334,7 @@ export async function sendWeixinMediaFiles(params: {
           image_item: {
             media: {
               encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: Buffer.from(uploaded.aeskey).toString('base64'),
+              aes_key: encodeAesKeyHexToBase64(uploaded.aeskey),
               encrypt_type: 1,
             },
             mid_size: uploaded.fileSizeCiphertext,
@@ -288,7 +367,7 @@ export async function sendWeixinMediaFiles(params: {
           video_item: {
             media: {
               encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: Buffer.from(uploaded.aeskey).toString('base64'),
+              aes_key: encodeAesKeyHexToBase64(uploaded.aeskey),
               encrypt_type: 1,
             },
             video_size: uploaded.fileSizeCiphertext,

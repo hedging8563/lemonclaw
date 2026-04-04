@@ -41,8 +41,13 @@ async function fetchCdnBytes(url: string): Promise<{ buf: Buffer; contentType: s
   };
 }
 
-function parseAesKey(aesKeyBase64: string): Buffer {
-  const decoded = Buffer.from(aesKeyBase64, 'base64');
+export function parseAesKey(aesKeyValue: string): Buffer {
+  const trimmed = String(aesKeyValue || '').trim();
+  if (/^[0-9a-fA-F]{32}$/.test(trimmed)) {
+    return Buffer.from(trimmed, 'hex');
+  }
+
+  const decoded = Buffer.from(trimmed, 'base64');
   if (decoded.length === 16) {
     return decoded;
   }

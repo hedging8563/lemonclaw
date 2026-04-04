@@ -17,6 +17,7 @@ export interface TextItem {
 
 export interface VoiceItem {
   media?: CDNMedia;
+  aeskey?: string;
   encode_type?: number;
   bits_per_sample?: number;
   sample_rate?: number;
@@ -42,6 +43,7 @@ export interface ImageItem {
 
 export interface FileItem {
   media?: CDNMedia;
+  aeskey?: string;
   file_name?: string;
   md5?: string;
   len?: string;
@@ -49,10 +51,12 @@ export interface FileItem {
 
 export interface VideoItem {
   media?: CDNMedia;
+  aeskey?: string;
   video_size?: number;
   play_length?: number;
   video_md5?: string;
   thumb_media?: CDNMedia;
+  thumb_aeskey?: string;
   thumb_size?: number;
   thumb_height?: number;
   thumb_width?: number;
