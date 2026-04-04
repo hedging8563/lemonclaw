@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import zipfile
 from pathlib import Path
 
@@ -165,6 +166,24 @@ def test_analyze_image_uses_vision_model(tmp_path: Path) -> None:
     content = provider.calls[0]['messages'][1]['content']
     assert isinstance(content, list)
     assert any(item.get('type') == 'image_url' for item in content if isinstance(item, dict))
+
+
+def test_context_builder_normalizes_gray_alpha_png_for_vision_input(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    image = workspace / 'gray-alpha.png'
+    image.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jKfQAAAAASUVORK5CYII='))
+
+    messages = builder.build_messages(history=[], current_message='看看这张图', media=[str(image)], channel='webui', chat_id='webui')
+
+    content = messages[-1]['content']
+    assert isinstance(content, list)
+    image_item = next(item for item in content if isinstance(item, dict) and item.get('type') == 'image_url')
+    url = image_item['image_url']['url']
+    assert url.startswith('data:image/png;base64,')
+    raw = base64.b64decode(url.split(',', 1)[1])
+    assert raw[:8] == b'\x89PNG\r\n\x1a\n'
+    assert raw[25] == 2  # normalized to RGB PNG
 
 
 def test_read_attachment_supports_xlsx_and_zip(tmp_path: Path) -> None:

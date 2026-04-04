@@ -16,6 +16,7 @@ from lemonclaw.utils.attachments import (
     attachment_metadata,
     attachment_trigger_text,
     format_attachment_inventory,
+    image_bytes_for_model,
 )
 
 
@@ -947,11 +948,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             mime = meta.get("mime")
             if not meta.get("exists") or not mime or not str(mime).startswith("image/"):
                 continue
-            try:
-                b64 = base64.b64encode(resolved.read_bytes()).decode()
-            except OSError:
+            image_bytes, normalized_mime = image_bytes_for_model(resolved, str(mime))
+            if not image_bytes or not normalized_mime:
                 continue
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            b64 = base64.b64encode(image_bytes).decode()
+            images.append({"type": "image_url", "image_url": {"url": f"data:{normalized_mime};base64,{b64}"}})
 
         if not images:
             return text_block

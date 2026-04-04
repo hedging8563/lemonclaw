@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import mimetypes
 import shutil
+import subprocess
 import zipfile
 from io import StringIO
 from pathlib import Path
@@ -80,6 +81,62 @@ def attachment_metadata(path: str | Path) -> dict[str, Any]:
         "size": size,
         "exists": exists,
     }
+
+
+def _png_color_type(data: bytes) -> int | None:
+    if len(data) < 26 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    if data[12:16] != b"IHDR":
+        return None
+    return data[25]
+
+
+def _normalize_png_for_model(path: Path) -> bytes | None:
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(path),
+                "-frames:v",
+                "1",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "png",
+                "-pix_fmt",
+                "rgb24",
+                "pipe:1",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return completed.stdout or None
+
+
+def image_bytes_for_model(path: str | Path, mime: str | None) -> tuple[bytes | None, str | None]:
+    meta = attachment_metadata(path)
+    if not meta.get("exists") or not mime or not str(mime).startswith("image/"):
+        return None, mime
+    resolved = Path(str(meta.get("path") or path))
+    try:
+        raw = resolved.read_bytes()
+    except OSError:
+        return None, mime
+
+    normalized_mime = str(mime)
+    if normalized_mime == "image/png":
+        color_type = _png_color_type(raw)
+        if color_type not in (None, 2, 6):
+            normalized = _normalize_png_for_model(resolved)
+            if normalized:
+                return normalized, "image/png"
+    return raw, normalized_mime
 
 
 def attachment_trigger_text(paths: list[str] | None) -> str:
