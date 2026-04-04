@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
@@ -335,25 +336,47 @@ def get_agentbridge_routes(
 
         _cleanup_uploads()
 
-        try:
-            body = await request.json()
-        except Exception:
-            return _json({"error": "Invalid JSON"}, 400)
+        content_type = str(request.headers.get("content-type") or "").lower()
+        filename = "upload"
 
-        data_url = str(body.get("data") or "")
-        filename = str(body.get("filename") or "upload")
-        if not data_url:
-            return _json({"error": "No data"}, 400)
+        if content_type.startswith("multipart/form-data"):
+            try:
+                form = await request.form()
+            except Exception:
+                return _json({"error": "Invalid multipart form data"}, 400)
 
-        if data_url.startswith("data:"):
-            _header, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
+            upload = form.get("file") or form.get("upload")
+            if not upload:
+                return _json({"error": "No file"}, 400)
+
+            if isinstance(upload, UploadFile):
+                filename = str(upload.filename or form.get("filename") or "upload")
+                raw = await upload.read()
+            elif isinstance(upload, (bytes, bytearray)):
+                filename = str(form.get("filename") or "upload")
+                raw = bytes(upload)
+            else:
+                return _json({"error": "Unsupported multipart upload payload"}, 400)
         else:
-            b64 = data_url
+            try:
+                body = await request.json()
+            except Exception:
+                return _json({"error": "Invalid JSON"}, 400)
 
-        try:
-            raw = base64.b64decode(b64)
-        except Exception:
-            return _json({"error": "Invalid base64"}, 400)
+            data_url = str(body.get("data") or "")
+            filename = str(body.get("filename") or "upload")
+            if not data_url:
+                return _json({"error": "No data"}, 400)
+
+            if data_url.startswith("data:"):
+                _header, b64 = data_url.split(",", 1) if "," in data_url else ("", data_url)
+            else:
+                b64 = data_url
+
+            try:
+                raw = base64.b64decode(b64)
+            except Exception:
+                return _json({"error": "Invalid base64"}, 400)
 
         max_upload_bytes = max(1, int(getattr(channel_manager.config.channels.agentbridge, "max_upload_bytes", 20 * 1024 * 1024) or 20 * 1024 * 1024))
         if len(raw) > max_upload_bytes:

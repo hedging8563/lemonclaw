@@ -303,6 +303,49 @@ class TestAgentBridgeRoutes:
         assert media.status_code == 200
         assert media.content == b"hello agentbridge"
 
+    def test_uploads_accept_multipart_and_preserve_video_kind(self, make_agent_loop):
+        _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+
+        upload = client.post(
+            "/api/agentbridge/uploads",
+            headers=headers,
+            files={"file": ("clip.mp4", b"video-data", "video/mp4")},
+        )
+        assert upload.status_code == 200
+        attachment_id = upload.json()["attachments"][0]["id"]
+
+        chat = client.post(
+            "/api/agentbridge/chat",
+            headers=headers,
+            json={
+                "client_id": "codex",
+                "thread_id": "media-video",
+                "message": "see uploaded video",
+                "attachments": [attachment_id],
+            },
+        )
+        assert chat.status_code == 200
+        session_key = chat.json()["session_key"]
+
+        history = client.get(
+            "/api/agentbridge/messages",
+            headers=headers,
+            params={"client_id": "codex", "thread_id": "media-video"},
+        )
+        assert history.status_code == 200
+        user_message = next(msg for msg in history.json()["messages"] if msg.get("role") == "user")
+        assert user_message["media"][0]["kind"] == "video"
+        media_path = user_message["media"][0]["path"]
+
+        media = client.get(
+            "/api/agentbridge/media",
+            headers=headers,
+            params={"path": media_path, "session_key": session_key},
+        )
+        assert media.status_code == 200
+        assert media.content == b"video-data"
+
     def test_agentbridge_chat_loads_repo_change_memory_sidecar(self, make_agent_loop):
         loop, _manager, client = _make_agentbridge_app(make_agent_loop)
         headers = {"Authorization": "Bearer secret-token"}

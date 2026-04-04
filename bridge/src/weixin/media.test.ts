@@ -132,6 +132,36 @@ test('sendWeixinMediaFiles includes native image and video size fields', async (
   }
 });
 
+test('sendWeixinMediaFiles routes generic files through file attachments with binary aes key payload', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'weixin-file-'));
+  const randomMock = mock.method(crypto, 'randomBytes', (size: number) => Buffer.alloc(size, 3));
+  const { sendBodies, fetchMock } = installFetchMock();
+  try {
+    const filePath = path.join(dir, 'notes.txt');
+    writeFileSync(filePath, 'hello-file');
+
+    await sendWeixinMediaFiles({
+      accountId: 'bot-1',
+      to: 'wx-user',
+      text: '',
+      mediaPaths: [filePath],
+      contextToken: 'ctx-file',
+      baseUrl: 'https://example.weixin.local',
+      cdnBaseUrl: 'https://cdn.weixin.local',
+    });
+
+    assert.equal(sendBodies.length, 1);
+    const payload = sendBodies[0].msg.item_list[0];
+    assert.equal(payload.type, 4);
+    assert.equal(payload.file_item.file_name, 'notes.txt');
+    assert.equal(payload.file_item.media.aes_key, Buffer.alloc(16, 3).toString('base64'));
+  } finally {
+    fetchMock.mock.restore();
+    randomMock.mock.restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('extractInboundMediaPaths falls back to video thumbnail when main media download fails', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-video-'));
   const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;
@@ -224,6 +254,50 @@ test('extractInboundMediaPaths decrypts inbound image with raw hex aeskey', asyn
   }
 });
 
+test('extractInboundMediaPaths decrypts inbound files with root-level raw hex aeskey', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-file-'));
+  const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;
+  process.env.WEIXIN_MEDIA_DIR = path.join(dir, 'weixin-media');
+  const keyHex = '11223344556677889900aabbccddeeff';
+  const plaintext = Buffer.from('file-payload');
+  const ciphertext = encryptAesEcb(plaintext, Buffer.from(keyHex, 'hex'));
+  const fetchMock = mock.method(globalThis, 'fetch', async () => new Response(new Uint8Array(ciphertext), {
+    status: 200,
+    headers: { 'Content-Type': 'application/octet-stream' },
+  }));
+
+  try {
+    const mediaPaths = await extractInboundMediaPaths({
+      accountId: 'bot-1',
+      cdnBaseUrl: 'https://cdn.weixin.local',
+      message: {
+        item_list: [
+          {
+            type: MessageItemType.FILE,
+            file_item: {
+              aeskey: keyHex,
+              file_name: 'sample.bin',
+              media: { encrypt_query_param: 'encrypted-file' },
+            },
+          },
+        ],
+      },
+    });
+
+    assert.equal(mediaPaths.length, 1);
+    assert.match(mediaPaths[0], /file-.*\.bin$/);
+    assert.deepEqual(readFileSync(mediaPaths[0]), plaintext);
+  } finally {
+    fetchMock.mock.restore();
+    if (originalMediaDir == null) {
+      delete process.env.WEIXIN_MEDIA_DIR;
+    } else {
+      process.env.WEIXIN_MEDIA_DIR = originalMediaDir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('extractInboundMediaPaths decrypts inbound video with raw hex aeskey', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-video-hex-'));
   const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;
@@ -256,6 +330,51 @@ test('extractInboundMediaPaths decrypts inbound video with raw hex aeskey', asyn
     assert.equal(mediaPaths.length, 1);
     assert.match(mediaPaths[0], /video-.*\.mp4$/);
     assert.deepEqual(readFileSync(mediaPaths[0]), plaintext);
+  } finally {
+    fetchMock.mock.restore();
+    if (originalMediaDir == null) {
+      delete process.env.WEIXIN_MEDIA_DIR;
+    } else {
+      process.env.WEIXIN_MEDIA_DIR = originalMediaDir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('extractInboundMediaPaths preserves inbound voice bytes when only root-level raw hex aeskey is present', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-voice-'));
+  const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;
+  process.env.WEIXIN_MEDIA_DIR = path.join(dir, 'weixin-media');
+  const keyHex = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
+  const plaintext = Buffer.from('not-a-real-silk-frame');
+  const ciphertext = encryptAesEcb(plaintext, Buffer.from(keyHex, 'hex'));
+  const fetchMock = mock.method(globalThis, 'fetch', async () => new Response(new Uint8Array(ciphertext), {
+    status: 200,
+    headers: { 'Content-Type': 'audio/ogg' },
+  }));
+
+  try {
+    const mediaPaths = await extractInboundMediaPaths({
+      accountId: 'bot-1',
+      cdnBaseUrl: 'https://cdn.weixin.local',
+      message: {
+        item_list: [
+          {
+            type: MessageItemType.VOICE,
+            voice_item: {
+              aeskey: keyHex,
+              media: { encrypt_query_param: 'encrypted-voice' },
+            },
+          },
+        ],
+      },
+    });
+
+    assert.equal(mediaPaths.length, 1);
+    assert.match(mediaPaths[0], /voice-.*\.(wav|silk)$/);
+    if (mediaPaths[0].endsWith('.silk')) {
+      assert.deepEqual(readFileSync(mediaPaths[0]), plaintext);
+    }
   } finally {
     fetchMock.mock.restore();
     if (originalMediaDir == null) {
