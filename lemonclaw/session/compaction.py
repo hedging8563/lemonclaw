@@ -17,6 +17,8 @@ from typing import Any
 
 from loguru import logger
 
+from lemonclaw.providers.litellm_provider import LiteLLMProvider
+
 
 # ============================================================================
 # Configuration
@@ -46,13 +48,13 @@ SUMMARY_SYSTEM_PROMPT = (
 
 
 def count_tokens(messages: list[dict[str, Any]], model: str) -> int:
-    """Count tokens in a message list using litellm.
+    """Count tokens in a message list using provider-aware helpers.
 
     Falls back to rough char-based estimate if litellm doesn't recognize the model.
     """
     try:
-        from litellm import token_counter
-        return token_counter(model=model, messages=messages)
+        provider = LiteLLMProvider()
+        return provider.count_tokens(messages, model)
     except Exception:
         # Rough estimate: ~4 chars per token for English
         total_chars = sum(len(str(m.get("content", ""))) for m in messages)
@@ -62,9 +64,8 @@ def count_tokens(messages: list[dict[str, Any]], model: str) -> int:
 def get_context_window(model: str) -> int:
     """Get the context window size for a model."""
     try:
-        from litellm import get_model_info
-        info = get_model_info(model)
-        return info.get("max_input_tokens") or FALLBACK_CONTEXT_WINDOW
+        provider = LiteLLMProvider()
+        return provider.get_context_window(model)
     except Exception:
         return FALLBACK_CONTEXT_WINDOW
 

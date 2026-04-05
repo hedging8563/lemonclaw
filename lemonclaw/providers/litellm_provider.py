@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 import litellm
-from litellm import acompletion
+from litellm import acompletion, aembedding, get_model_info, token_counter
 from litellm.exceptions import (
     AuthenticationError,
     BadRequestError,
@@ -26,6 +26,8 @@ _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", 
 
 # Keys to redact from error messages to prevent credential leakage in logs.
 _SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "password")
+
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 def _sanitize_error(error: Exception) -> str:
@@ -151,6 +153,41 @@ class LiteLLMProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key)
             resolved = resolved.replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
+
+    def _embedding_model_candidates(self, model: str | None = None) -> list[str]:
+        requested = str(model or "").strip()
+        candidates = [requested] if requested else []
+        for fallback in (
+            DEFAULT_EMBEDDING_MODEL,
+            "text-embedding-005",
+            "text-multilingual-embedding-002",
+            "gemini-embedding-001",
+        ):
+            if fallback and fallback not in candidates:
+                candidates.append(fallback)
+        return candidates
+
+    def _embedding_gateway_for_model(self, model: str) -> "ProviderSpec | None":
+        spec = self._resolve_gateway_for_model(model)
+        if spec is not None:
+            return spec
+        return self._gateway
+
+    def _build_embedding_kwargs(self, model: str, *, gateway: "ProviderSpec | None" = None) -> dict[str, Any]:
+        resolved_gateway = gateway if gateway is not None else self._embedding_gateway_for_model(model)
+        api_base = self.api_base or (resolved_gateway.default_api_base if resolved_gateway else None)
+        api_key = self.api_key or os.environ.get((resolved_gateway.env_key if resolved_gateway else "") or "", "")
+
+        kwargs: dict[str, Any] = {
+            "model": self._resolve_model(model, gateway=resolved_gateway),
+        }
+        if api_base:
+            kwargs["api_base"] = api_base
+        if api_key:
+            kwargs["api_key"] = api_key
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        return kwargs
     
     def _resolve_model(self, model: str, *, gateway: "ProviderSpec | None" = None) -> str:
         """Resolve model name by applying provider/gateway prefixes.
@@ -228,6 +265,43 @@ class LiteLLMProvider(LLMProvider):
         if prefix.lower().replace("-", "_") != spec_name:
             return model
         return f"{canonical_prefix}/{remainder}"
+
+    async def embed(
+        self,
+        texts: list[str],
+        model: str | None = None,
+    ) -> list[list[float]]:
+        """Generate embeddings using the same provider/gateway abstraction as chat."""
+        last_error: Exception | None = None
+        for candidate in self._embedding_model_candidates(model):
+            gateway = self._embedding_gateway_for_model(candidate)
+            kwargs = self._build_embedding_kwargs(candidate, gateway=gateway)
+            try:
+                response = await aembedding(input=texts, **kwargs)
+                return [item["embedding"] for item in response.data]
+            except Exception as exc:
+                last_error = exc
+                logger.debug("Embedding candidate {} failed: {}", candidate, _sanitize_error(exc))
+                continue
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No embedding model candidates available")
+
+    def count_tokens(self, messages: list[dict[str, Any]], model: str) -> int:
+        """Provider-aware token counting helper."""
+        try:
+            return token_counter(model=self._resolve_model(model), messages=messages)
+        except Exception:
+            total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            return total_chars // 4
+
+    def get_context_window(self, model: str) -> int:
+        """Provider-aware context window lookup."""
+        try:
+            info = get_model_info(self._resolve_model(model))
+            return info.get("max_input_tokens") or 128_000
+        except Exception:
+            return 128_000
     
     def _supports_cache_control(self, model: str, *, gateway: "ProviderSpec | None" = None) -> bool:
         """Return True when the provider supports cache_control on content blocks."""

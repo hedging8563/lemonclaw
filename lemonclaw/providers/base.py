@@ -166,6 +166,17 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
+
+    async def embed(
+        self,
+        texts: list[str],
+        model: str | None = None,
+    ) -> list[list[float]]:
+        """Generate embeddings for the given texts.
+
+        Providers that do not support embeddings may raise NotImplementedError.
+        """
+        raise NotImplementedError("This provider does not implement embeddings.")
     
     @abstractmethod
     def get_default_model(self) -> str:

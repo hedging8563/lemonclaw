@@ -14,11 +14,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from lemonclaw.providers.base import LLMProvider
 
-# Default embedding model (via LemonData gateway / LiteLLM)
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
-
-# Schema fields
-_SCHEMA_FIELDS = ["id", "source", "name", "text", "vector"]
 
 
 def _lancedb_available() -> bool:
@@ -50,6 +46,7 @@ class MemorySearchIndex:
         self._last_operation: str = ""
         self._last_updated_ms: int = 0
         self._last_indexed_docs: int = 0
+        self._mode: str = "unavailable"
 
     @property
     def available(self) -> bool:
@@ -58,6 +55,7 @@ class MemorySearchIndex:
     def status(self) -> dict[str, Any]:
         return {
             "available": self.available,
+            "mode": self._mode,
             "db_path": str(self._db_path),
             "db_exists": self._db_path.exists(),
             "last_operation": self._last_operation,
@@ -73,6 +71,9 @@ class MemorySearchIndex:
         if indexed_docs is not None:
             self._last_indexed_docs = max(0, int(indexed_docs))
 
+    def _set_mode(self, mode: str) -> None:
+        self._mode = mode
+
     def _connect(self):
         """Lazy connect to lancedb."""
         if self._db is not None:
@@ -81,34 +82,50 @@ class MemorySearchIndex:
         self._db_path.mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(str(self._db_path))
 
-    def _get_or_create_table(self, data: list[dict] | None = None):
+    def _table_has_vector_column(self) -> bool:
+        if self._table is None:
+            return False
+        try:
+            return "vector" in list(self._table.schema.names)
+        except Exception:
+            return False
+
+    def _get_or_create_table(self, data: list[dict] | None = None, *, with_vectors: bool = True, reset: bool = False):
         """Get existing table or create with initial data."""
         import pyarrow as pa
 
         self._connect()
+        if reset:
+            try:
+                self._db.drop_table("memory")
+            except Exception:
+                pass
+            self._table = None
         try:
             self._table = self._db.open_table("memory")
+            if with_vectors and not self._table_has_vector_column():
+                raise ValueError("memory table missing vector column for hybrid mode")
+            if not with_vectors and self._table_has_vector_column():
+                return
         except Exception:
             if not data:
                 # Create empty table with schema
-                schema = pa.schema([
+                fields = [
                     pa.field("id", pa.string()),
                     pa.field("source", pa.string()),
                     pa.field("name", pa.string()),
                     pa.field("text", pa.string()),
-                    pa.field("vector", pa.list_(pa.float32(), self._embedding_dim)),
-                ])
+                ]
+                if with_vectors:
+                    fields.append(pa.field("vector", pa.list_(pa.float32(), self._embedding_dim)))
+                schema = pa.schema(fields)
                 self._table = self._db.create_table("memory", schema=schema)
             else:
                 self._table = self._db.create_table("memory", data)
 
     async def _embed(self, texts: list[str], provider: LLMProvider, model: str | None = None) -> list[list[float]]:
-        """Get embeddings via litellm (uses the same provider config)."""
-        from litellm import aembedding
-
-        model = model or DEFAULT_EMBEDDING_MODEL
-        response = await aembedding(model=model, input=texts)
-        return [item["embedding"] for item in response.data]
+        """Get embeddings via provider abstraction."""
+        return await provider.embed(texts=texts, model=model or DEFAULT_EMBEDDING_MODEL)
 
     async def rebuild(self, provider: LLMProvider, model: str | None = None) -> int:
         """Rebuild the entire index from current memory files.
@@ -117,6 +134,7 @@ class MemorySearchIndex:
         """
         if not self.available:
             logger.debug("lancedb not available, skipping index rebuild")
+            self._set_mode("keyword_only")
             self._record_status(operation="rebuild", error="lancedb_unavailable", indexed_docs=0)
             return 0
 
@@ -167,23 +185,28 @@ class MemorySearchIndex:
 
         # Get embeddings
         texts = [d["text"] for d in docs]
+        with_vectors = True
         try:
             vectors = await self._embed(texts, provider, model)
+            for doc, vec in zip(docs, vectors):
+                doc["vector"] = vec
+            self._set_mode("hybrid")
         except Exception as e:
-            logger.warning("Embedding failed, index not rebuilt: {}", e)
+            logger.warning("Embedding failed, rebuilding FTS-only index: {}", e)
+            with_vectors = False
+            self._set_mode("fts_only")
             self._record_status(operation="rebuild", error=f"embed_failed:{type(e).__name__}", indexed_docs=0)
-            return 0
-
-        for doc, vec in zip(docs, vectors):
-            doc["vector"] = vec
 
         # Recreate table
         self._connect()
         try:
-            self._db.drop_table("memory")
-        except Exception:
-            logger.warning("Failed to drop old memory table, rebuild may fail")
-        self._table = self._db.create_table("memory", docs)
+            self._table = None
+            self._get_or_create_table(docs, with_vectors=with_vectors, reset=True)
+        except Exception as e:
+            logger.warning("Failed to create memory table: {}", e)
+            self._set_mode("keyword_only")
+            self._record_status(operation="rebuild", error=f"table_create_failed:{type(e).__name__}", indexed_docs=0)
+            return 0
 
         # Create FTS index for BM25
         try:
@@ -210,6 +233,7 @@ class MemorySearchIndex:
         Returns list of dicts with id, source, name, text, _relevance_score.
         """
         if not self.available:
+            self._set_mode("keyword_only")
             self._record_status(operation="search", error="lancedb_unavailable")
             return []
 
@@ -227,16 +251,24 @@ class MemorySearchIndex:
             self._record_status(operation="search", error="count_rows_failed")
             return []
 
-        # Try hybrid search (BM25 + vector)
-        try:
-            query_vec = (await self._embed([query], provider, model))[0]
-            results = (
-                self._table.search(query_vec, query_type="hybrid")
-                .limit(limit)
-                .to_list()
-            )
-        except Exception:
-            # Fallback: BM25 only
+        if self._mode == "hybrid":
+            try:
+                query_vec = (await self._embed([query], provider, model))[0]
+                results = (
+                    self._table.search(query_vec, query_type="hybrid")
+                    .limit(limit)
+                    .to_list()
+                )
+            except Exception as e:
+                logger.debug("Hybrid search failed, falling back to FTS: {}", e)
+                self._set_mode("fts_only")
+                self._record_status(operation="search", error=f"hybrid_failed:{type(e).__name__}")
+                results = (
+                    self._table.search(query, query_type="fts")
+                    .limit(limit)
+                    .to_list()
+                )
+        else:
             try:
                 results = (
                     self._table.search(query, query_type="fts")
@@ -274,6 +306,7 @@ class MemorySearchIndex:
         Returns True on success, False on failure (non-fatal).
         """
         if not self.available:
+            self._set_mode("keyword_only")
             self._record_status(operation="upsert_entity", error="lancedb_unavailable")
             return False
 
@@ -284,14 +317,20 @@ class MemorySearchIndex:
                 return False
 
             text = f"{name}: {body.strip()}"
-            vectors = await self._embed([text], provider, model)
             doc = {
                 "id": f"entity:{name}",
                 "source": "entity",
                 "name": name,
                 "text": text,
-                "vector": vectors[0],
             }
+            if self._mode == "hybrid" and self._table_has_vector_column():
+                try:
+                    vectors = await self._embed([text], provider, model)
+                    doc["vector"] = vectors[0]
+                except Exception as e:
+                    logger.debug("Entity embedding failed, downgrading to FTS-only: {}", e)
+                    self._set_mode("fts_only")
+                    self._get_or_create_table(with_vectors=False, reset=True)
 
             # Delete existing entry if present, then add new one
             try:
