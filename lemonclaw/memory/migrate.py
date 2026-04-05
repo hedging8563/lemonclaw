@@ -156,7 +156,7 @@ def _fallback_migrate(content: str, entity_store: EntityStore) -> None:
         lines = sections.get(name) or []
         if lines:
             body = f"# {title}\n\n" + "\n".join(lines).strip() + "\n"
-        elif name == "preferences":
+        elif name == "preferences" and not _is_noise(content):
             body = f"# Preferences\n\n## Migrated from MEMORY.md\n\n{content}\n"
         else:
             body = f"# {title}\n\n"
@@ -190,9 +190,34 @@ def _bucket_memory_content(content: str) -> dict[str, list[str]]:
                 current = "tech-stack"
             else:
                 current = "preferences"
-            sections.setdefault(current, []).append(stripped)
+            if not _is_noise(stripped):
+                sections.setdefault(current, []).append(stripped)
             continue
 
         normalized = re.sub(r"^\d+\.\s*", "- ", stripped)
-        sections.setdefault(current, []).append(normalized if normalized.startswith("- ") else f"- {normalized}")
+        candidate = normalized if normalized.startswith("- ") else f"- {normalized}"
+        if not _is_noise(candidate[2:] if candidate.startswith("- ") else candidate):
+            sections.setdefault(current, []).append(candidate)
     return sections
+
+
+def _is_noise(text: str) -> bool:
+    normalized = str(text or "").strip()
+    lowered = normalized.casefold()
+    if not normalized:
+        return True
+    if lowered.startswith("# ") and lowered in {
+        "# seed",
+        "# preferences",
+        "# user profile",
+        "# project tracker",
+        "# methodology",
+        "# goals",
+        "# decisions",
+        "# issues",
+        "# tech stack",
+    }:
+        return True
+    if len(normalized) <= 6:
+        return True
+    return False

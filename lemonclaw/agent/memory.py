@@ -255,14 +255,37 @@ class MemoryStore:
 
         return "\n".join(merged).strip() + "\n"
 
-    def _sync_history_to_entities(self, *, max_entries: int = 8) -> int:
-        """Promote stable facts from recent history into structured cards."""
-        if not self.history_file.exists():
-            return 0
-
-        text = self.history_file.read_text(encoding="utf-8")
+    @staticmethod
+    def _history_entries_from_text(text: str, *, max_entries: int) -> list[str]:
         entries = [entry.strip() for entry in text.split("\n\n") if entry.strip()]
-        recent = entries[-max_entries:]
+        return entries[-max_entries:]
+
+    @staticmethod
+    def _is_low_signal_preference(text: str) -> bool:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return True
+        lowered = normalized.casefold()
+        if lowered.startswith("# "):
+            return True
+        if lowered in {
+            "# seed",
+            "# preferences",
+            "# user profile",
+            "# project tracker",
+            "# methodology",
+            "# goals",
+            "# decisions",
+            "# issues",
+        }:
+            return True
+        if len(normalized) <= 6:
+            return True
+        return False
+
+    def _sync_entries_to_entities(self, entries: list[str]) -> int:
+        """Promote a batch of history-like entries into structured cards."""
+        recent = [entry.strip() for entry in entries if str(entry or "").strip()]
         if not recent:
             return 0
 
@@ -301,7 +324,7 @@ class MemoryStore:
             for target in targets:
                 if target in {"project-tracker", "decisions", "issues"}:
                     buckets[target].append(bullet)
-                elif frequency.get(bullet, 0) >= 2:
+                elif frequency.get(bullet, 0) >= 2 and not self._is_low_signal_preference(normalized := bullet[2:].strip()):
                     buckets[target].append(bullet)
 
         updated = 0
@@ -317,6 +340,15 @@ class MemoryStore:
                 self.entities.update_card(name, merged)
                 updated += 1
         return updated
+
+    def _sync_history_to_entities(self, *, max_entries: int = 8) -> int:
+        """Promote stable facts from recent history into structured cards."""
+        if not self.history_file.exists():
+            return 0
+
+        text = self.history_file.read_text(encoding="utf-8")
+        recent = self._history_entries_from_text(text, max_entries=max_entries)
+        return self._sync_entries_to_entities(recent)
 
     def sync_today_to_entities(self, *, max_entries: int = 6) -> int:
         """Promote the freshest daily notes into structured long-term cards."""
@@ -337,21 +369,7 @@ class MemoryStore:
                     break
         if not entries:
             return 0
-
-        synthetic_history = "\n\n".join(entries[-max_entries:])
-        original_history_exists = self.history_file.exists()
-        original_history = self.history_file.read_text(encoding="utf-8") if original_history_exists else ""
-        try:
-            self.history_file.write_text(synthetic_history, encoding="utf-8")
-            return self._sync_history_to_entities(max_entries=max_entries)
-        finally:
-            if original_history_exists:
-                self.history_file.write_text(original_history, encoding="utf-8")
-            else:
-                try:
-                    self.history_file.unlink()
-                except FileNotFoundError:
-                    pass
+        return self._sync_entries_to_entities(entries[-max_entries:])
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
