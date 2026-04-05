@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -66,6 +67,7 @@ class MemoryStore:
 
     def __init__(self, workspace: Path):
         from lemonclaw.memory.entities import EntityStore
+        from lemonclaw.memory.migrate import migrate_memory_to_entities
         from lemonclaw.memory.promote import CorePromoter
         from lemonclaw.memory.reflect import ProceduralMemory
         from lemonclaw.memory.search import MemorySearchIndex
@@ -81,17 +83,44 @@ class MemoryStore:
         # Bionic memory layers
         self.search_index = MemorySearchIndex(self.memory_dir)
         self.entities = EntityStore(self.memory_dir, on_write=self._on_entity_write)
-        self.entities.init_defaults()
         self.today = TodayLog(self.memory_dir)
         self.trigger = MemoryTrigger(self.entities, search_index=self.search_index)
         self.procedural = ProceduralMemory(self.memory_dir)
         self.promoter = CorePromoter(self.memory_dir, self.entities)
+        self._migrate_memory_to_entities = migrate_memory_to_entities
 
         # Get or create a lock for this workspace
         ws_key = str(workspace)
         if ws_key not in MemoryStore._write_locks:
             MemoryStore._write_locks[ws_key] = asyncio.Lock()
         self._lock = MemoryStore._write_locks[ws_key]
+
+        self._bootstrap_entities()
+
+    def _bootstrap_entities(self) -> None:
+        """Populate entity cards from MEMORY.md when possible before defaults.
+
+        This avoids the empty-shell default cards from permanently blocking the
+        one-time MEMORY.md -> entities migration path.
+        """
+        migrated = False
+        try:
+            migrated = asyncio.run(
+                self._migrate_memory_to_entities(
+                    self.memory_dir,
+                    self.entities,
+                )
+            )
+        except RuntimeError:
+            # If a loop is already running (rare during object construction),
+            # fall back to defaults; later sync will still enrich the cards.
+            logger.debug("Entity migration skipped during bootstrap: event loop already running")
+        except Exception:
+            logger.exception("Entity bootstrap migration failed")
+        finally:
+            self.entities.init_defaults()
+            if migrated:
+                self.entities.invalidate_cache()
 
     def _on_entity_write(self, name: str, body: str) -> None:
         """Fire-and-forget search index update when an entity card is written."""
@@ -110,6 +139,219 @@ class MemoryStore:
     def set_provider(self, provider: LLMProvider) -> None:
         """Bind an LLM provider for search index updates."""
         self._provider = provider
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._ensure_search_index())
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    async def _ensure_search_index(self) -> None:
+        """Best-effort bootstrap for vector memory retrieval."""
+        if self._provider is None:
+            return
+        if not self.search_index.available:
+            self.search_index._record_status(operation="rebuild", error="lancedb_unavailable", indexed_docs=0)  # type: ignore[attr-defined]
+            return
+        status = self.search_index.status()
+        if status.get("db_exists"):
+            return
+        try:
+            await self.search_index.rebuild(self._provider)
+        except Exception:
+            logger.debug("Memory search bootstrap rebuild failed", exc_info=True)
+
+    @staticmethod
+    def _extract_memory_sections(content: str) -> dict[str, list[str]]:
+        """Heuristically bucket flat MEMORY.md content into default entity cards."""
+        sections: dict[str, list[str]] = {}
+        current = "preferences"
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            if stripped.startswith("###") or stripped.startswith("##"):
+                header = stripped.lstrip("#").strip().lower()
+                if any(token in header for token in ("需求", "preference", "偏好")):
+                    current = "preferences"
+                elif any(token in header for token in ("进展", "tracker", "项目", "milestone")):
+                    current = "project-tracker"
+                elif any(token in header for token in ("步骤", "流程", "method")):
+                    current = "methodology"
+                elif any(token in header for token in ("目标", "goal", "todo", "下一步")):
+                    current = "goals"
+                elif any(token in header for token in ("决定", "decision", "权衡")):
+                    current = "decisions"
+                else:
+                    current = "preferences"
+                sections.setdefault(current, [])
+                sections[current].append(stripped)
+                continue
+
+            normalized = re.sub(r"^\d+\.\s*", "- ", stripped)
+            sections.setdefault(current, []).append(normalized if normalized.startswith("- ") else f"- {normalized}")
+        return sections
+
+    def sync_long_term_to_entities(self, content: str | None = None) -> int:
+        """Best-effort sync from flat MEMORY.md into structured entity cards."""
+        from lemonclaw.memory.entities import DEFAULT_CARDS
+
+        text = (content if content is not None else self.read_long_term()).strip()
+        if not text:
+            return 0
+
+        sections = self._extract_memory_sections(text)
+        updated = 0
+        for name, lines in sections.items():
+            if name not in DEFAULT_CARDS or not lines:
+                continue
+            info = DEFAULT_CARDS[name]
+            title = name.replace("-", " ").title()
+            body = self._merge_entity_body(
+                title=title,
+                existing_body=(self.entities.get_card(name).body if self.entities.get_card(name) else ""),
+                new_lines=lines,
+            )
+            card = self.entities.get_card(name)
+            if card is None:
+                self.entities.create_card(name, info["type"], info["keywords"], body=body)
+                updated += 1
+                continue
+            existing = str(card.body or "").strip()
+            candidate = body.strip()
+            if existing != candidate:
+                self.entities.update_card(name, body)
+                updated += 1
+        updated += self._sync_history_to_entities()
+        return updated
+
+    @staticmethod
+    def _merge_entity_body(*, title: str, existing_body: str, new_lines: list[str]) -> str:
+        """Append newly discovered bullets while preserving existing curated notes."""
+        existing = str(existing_body or "").splitlines()
+        merged: list[str] = []
+        seen: set[str] = set()
+
+        def _append(line: str) -> None:
+            normalized = line.strip()
+            if not normalized:
+                return
+            key = normalized.casefold()
+            if key in seen:
+                return
+            seen.add(key)
+            merged.append(normalized)
+
+        if existing:
+            for line in existing:
+                _append(line)
+        else:
+            _append(f"# {title}")
+
+        for line in new_lines:
+            _append(line)
+
+        return "\n".join(merged).strip() + "\n"
+
+    def _sync_history_to_entities(self, *, max_entries: int = 8) -> int:
+        """Promote stable facts from recent history into structured cards."""
+        if not self.history_file.exists():
+            return 0
+
+        text = self.history_file.read_text(encoding="utf-8")
+        entries = [entry.strip() for entry in text.split("\n\n") if entry.strip()]
+        recent = entries[-max_entries:]
+        if not recent:
+            return 0
+
+        buckets: dict[str, list[str]] = {
+            "project-tracker": [],
+            "decisions": [],
+            "issues": [],
+            "preferences": [],
+        }
+        frequency: dict[str, int] = {}
+        candidate_targets: dict[str, set[str]] = {}
+        for entry in recent:
+            normalized = re.sub(r"\s+", " ", entry).strip()
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            bullet = f"- {normalized}"
+            targets: set[str] = set()
+            if any(token in lowered for token in ("要求", "希望", "偏好", "喜欢", "单独发", "直接点击")):
+                targets.add("preferences")
+            if any(token in lowered for token in ("决定", "选择", "方案", "最终确定", "改为")):
+                targets.add("decisions")
+            if any(token in lowered for token in ("失败", "超时", "不可用", "错误", "风控", "打不开")):
+                targets.add("issues")
+            if any(token in lowered for token in ("开始", "生成", "完成", "提供", "上传", "重排", "进度", "正在")):
+                targets.add("project-tracker")
+
+            if not targets:
+                continue
+            frequency[bullet] = frequency.get(bullet, 0) + 1
+            candidate_targets.setdefault(bullet, set()).update(targets)
+
+        for bullet, targets in candidate_targets.items():
+            # Writing gate: allow high-signal categories immediately, but require
+            # repeated evidence for softer preference-like facts.
+            for target in targets:
+                if target in {"project-tracker", "decisions", "issues"}:
+                    buckets[target].append(bullet)
+                elif frequency.get(bullet, 0) >= 2:
+                    buckets[target].append(bullet)
+
+        updated = 0
+        for name, lines in buckets.items():
+            if not lines:
+                continue
+            card = self.entities.get_card(name)
+            if card is None:
+                continue
+            title = name.replace("-", " ").title()
+            merged = self._merge_entity_body(title=title, existing_body=card.body, new_lines=lines)
+            if merged.strip() != str(card.body or "").strip():
+                self.entities.update_card(name, merged)
+                updated += 1
+        return updated
+
+    def sync_today_to_entities(self, *, max_entries: int = 6) -> int:
+        """Promote the freshest daily notes into structured long-term cards."""
+        today_text = self.today.read().strip()
+        if not today_text:
+            return 0
+        lines = [line.strip() for line in today_text.splitlines() if line.strip()]
+        entries: list[str] = []
+        for line in lines:
+            if line.startswith("# "):
+                continue
+            if line.startswith("## "):
+                entries.append(line[3:].strip())
+                continue
+            for prefix in ("- ", "* ", "+ ", "• "):
+                if line.startswith(prefix):
+                    entries.append(line[len(prefix):].strip())
+                    break
+        if not entries:
+            return 0
+
+        synthetic_history = "\n\n".join(entries[-max_entries:])
+        original_history_exists = self.history_file.exists()
+        original_history = self.history_file.read_text(encoding="utf-8") if original_history_exists else ""
+        try:
+            self.history_file.write_text(synthetic_history, encoding="utf-8")
+            return self._sync_history_to_entities(max_entries=max_entries)
+        finally:
+            if original_history_exists:
+                self.history_file.write_text(original_history, encoding="utf-8")
+            else:
+                try:
+                    self.history_file.unlink()
+                except FileNotFoundError:
+                    pass
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -258,6 +500,7 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                         update = json.dumps(update, ensure_ascii=False)
                     if update != current_memory:
                         await self._async_write_long_term(update)
+                        await asyncio.to_thread(self.sync_long_term_to_entities, update)
 
                 new_consolidated = 0 if archive_all else len(session.messages) - keep_count
                 session.last_consolidated = new_consolidated

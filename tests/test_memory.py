@@ -196,3 +196,34 @@ class TestMemoryBasics:
         ctx = store.get_memory_context()
         assert "Long-term Memory" in ctx
         assert "Some facts" in ctx
+
+    def test_bootstrap_entities_from_memory_file(self, tmp_path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "MEMORY.md").write_text(
+            "### 用户需求\n- 用户喜欢中文\n### 最新进展\n- 正在做绘本\n",
+            encoding="utf-8",
+        )
+
+        store = MemoryStore(tmp_path)
+        prefs = store.entities.get_card("preferences")
+        tracker = store.entities.get_card("project-tracker")
+
+        assert prefs is not None
+        assert "用户喜欢中文" in prefs.body
+        assert tracker is not None
+        assert "正在做绘本" in tracker.body
+
+    def test_sync_long_term_to_entities_updates_cards(self, store):
+        updated = store.sync_long_term_to_entities(
+            "### 用户需求\n- 偏好中文回复\n### 最新进展\n- 正在整理绘本PDF\n### 图片处理步骤\n1. 抠图\n2. 排版\n"
+        )
+
+        assert updated >= 2
+        prefs = store.entities.get_card("preferences")
+        tracker = store.entities.get_card("project-tracker")
+        methodology = store.entities.get_card("methodology")
+
+        assert prefs is not None and "偏好中文回复" in prefs.body
+        assert tracker is not None and "正在整理绘本PDF" in tracker.body
+        assert methodology is not None and "抠图" in methodology.body

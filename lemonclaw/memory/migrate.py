@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,8 +46,9 @@ async def migrate_memory_to_entities(
     - If LLM available, use it to split content intelligently
     - If LLM unavailable, fallback: dump everything into a single card
     """
-    # Already migrated — skip
-    if entity_store.list_cards():
+    # Already migrated with non-trivial content — skip
+    existing_cards = entity_store.list_cards()
+    if existing_cards and not _cards_look_like_default_shells(existing_cards):
         return False
 
     memory_file = memory_dir / "MEMORY.md"
@@ -74,6 +76,28 @@ async def migrate_memory_to_entities(
     # Fallback: init defaults + dump content into preferences card
     _fallback_migrate(content, entity_store)
     logger.info("Fallback migration complete — content saved to preferences card")
+    return True
+
+
+def _cards_look_like_default_shells(cards: list) -> bool:
+    """Return True when the existing cards are only untouched default shells.
+
+    This lets migration proceed even if init_defaults() ran earlier, as long as
+    those files do not contain meaningful body content yet.
+    """
+    if not cards:
+        return False
+
+    for card in cards:
+        body = str(getattr(card, "body", "") or "").strip()
+        name = str(getattr(card, "name", "") or "").strip()
+        title = name.replace("-", " ").title()
+        shell_variants = {
+            f"# {title}",
+            f"# {title}\n",
+        }
+        if body and body not in shell_variants:
+            return False
     return True
 
 
@@ -125,11 +149,50 @@ async def _llm_migrate(
 
 
 def _fallback_migrate(content: str, entity_store: EntityStore) -> None:
-    """Fallback: init defaults and dump all content into preferences card."""
+    """Fallback: init defaults and bucket content into the default cards."""
+    sections = _bucket_memory_content(content)
     for name, info in DEFAULT_CARDS.items():
-        if name == "preferences":
+        title = name.replace("-", " ").title()
+        lines = sections.get(name) or []
+        if lines:
+            body = f"# {title}\n\n" + "\n".join(lines).strip() + "\n"
+        elif name == "preferences":
             body = f"# Preferences\n\n## Migrated from MEMORY.md\n\n{content}\n"
-            entity_store.create_card(name, info["type"], info["keywords"], body=body)
         else:
-            title = name.replace("-", " ").title()
-            entity_store.create_card(name, info["type"], info["keywords"], body=f"# {title}\n\n")
+            body = f"# {title}\n\n"
+        entity_store.create_card(name, info["type"], info["keywords"], body=body)
+
+
+def _bucket_memory_content(content: str) -> dict[str, list[str]]:
+    """Heuristically split flat MEMORY.md content across default entity cards."""
+    sections: dict[str, list[str]] = {}
+    current = "preferences"
+    for raw_line in content.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("###") or stripped.startswith("##"):
+            header = stripped.lstrip("#").strip().lower()
+            if any(token in header for token in ("需求", "preference", "偏好")):
+                current = "preferences"
+            elif any(token in header for token in ("进展", "tracker", "项目", "milestone")):
+                current = "project-tracker"
+            elif any(token in header for token in ("步骤", "流程", "method")):
+                current = "methodology"
+            elif any(token in header for token in ("目标", "goal", "todo", "下一步")):
+                current = "goals"
+            elif any(token in header for token in ("决定", "decision", "权衡")):
+                current = "decisions"
+            elif any(token in header for token in ("问题", "issue", "bug")):
+                current = "issues"
+            elif any(token in header for token in ("技术", "stack", "框架", "版本")):
+                current = "tech-stack"
+            else:
+                current = "preferences"
+            sections.setdefault(current, []).append(stripped)
+            continue
+
+        normalized = re.sub(r"^\d+\.\s*", "- ", stripped)
+        sections.setdefault(current, []).append(normalized if normalized.startswith("- ") else f"- {normalized}")
+    return sections

@@ -152,3 +152,19 @@ def test_memory_store_entity_write_records_provider_unbound_status(tmp_path):
 
     assert status["last_operation"] == "upsert_entity"
     assert status["last_error"] == "provider_unbound"
+
+
+def test_memory_store_set_provider_bootstraps_index_when_missing(tmp_path):
+    from lemonclaw.agent.memory import MemoryStore
+
+    store = MemoryStore(tmp_path)
+    provider = AsyncMock()
+
+    async def _exercise():
+        with patch("lemonclaw.memory.search._lancedb_available", return_value=True), \
+             patch.object(store.search_index, "rebuild", AsyncMock(return_value=3)) as rebuild:
+            store.set_provider(provider)
+            await asyncio.sleep(0)
+            rebuild.assert_awaited_once_with(provider)
+
+    asyncio.run(_exercise())

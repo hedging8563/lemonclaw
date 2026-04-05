@@ -886,6 +886,30 @@ def test_migrate_idempotent(tmp_path):
     assert len(store.list_cards()) == 1  # Only the existing card
 
 
+def test_migrate_runs_when_only_default_shell_cards_exist(tmp_path):
+    """Default shell cards should not block MEMORY.md migration."""
+    import asyncio
+
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.migrate import migrate_memory_to_entities
+
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "MEMORY.md").write_text(
+        "### 用户需求\n- 喜欢中文\n- 希望结果可直接点击\n",
+        encoding="utf-8",
+    )
+
+    store = EntityStore(memory_dir)
+    store.init_defaults()
+
+    result = asyncio.run(migrate_memory_to_entities(memory_dir, store))
+    assert result is True
+    prefs = store.get_card("preferences")
+    assert prefs is not None
+    assert "喜欢中文" in prefs.body
+
+
 # ── ContextBuilder integration ───────────────────────────────────────────────
 
 
