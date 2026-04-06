@@ -60,6 +60,7 @@ When the user asks "does model X exist / support / 上线了吗":
 - use category discovery as the primary truth
 - treat recommendation metadata as ranking-only context
 - never claim a model is absent just because it is missing from `recommended_for`
+- never treat a truncated display list (for example the first 12/20 rows) as proof that the model does not exist
 
 If the helper is unavailable, read `/v1/models?category=<category>` before suggesting or calling a model.
 

@@ -50,6 +50,7 @@ For "does model X exist?" questions:
 - trust category discovery first
 - treat recommendation metadata as ranking-only context
 - do not infer non-existence just because `recommended_for` metadata is absent
+- do not infer non-existence from a truncated preview list; if the UI or tool only showed the first N items, that is not proof the full category lacks the model
 
 Do not:
 - guess from memory

@@ -65,6 +65,9 @@ async def test_lemondata_nonchat_discover_returns_live_models(monkeypatch: pytes
         "/v1/models?category=video",
         "/v1/models?category=video&recommended_for=video",
     ]
+    assert result["catalog_total"] == 2
+    assert result["returned_model_count"] == 2
+    assert result["truncated"] is False
 
 
 @pytest.mark.asyncio
@@ -189,6 +192,46 @@ async def test_lemondata_nonchat_request_allows_explicit_catalog_model_absent_fr
         ("GET", "/v1/models?category=video"),
         ("POST", "/v1/videos/generations"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_request_allows_explicit_catalog_model_beyond_display_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = LemonDataNonChatTool()
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=video":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "sora-2", "lemondata": {"category": "video"}},
+                        {"id": "seedance-2.0-fast", "lemondata": {"category": "video"}},
+                    ]
+                },
+            }
+        if path == "/v1/videos/generations":
+            return {
+                "ok": True,
+                "body": {"id": "task_789", "status": "pending", "model": body["model"]},
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="video",
+            model="seedance-2.0-fast",
+            limit=1,
+            payload={"prompt": "test"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["selected_model"] == "seedance-2.0-fast"
+    assert result["response"]["model"] == "seedance-2.0-fast"
 
 
 @pytest.mark.asyncio

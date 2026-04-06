@@ -99,9 +99,8 @@ class LemonDataNonChatTool(Tool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of discovered models to return",
+                    "description": "Optional display cap for discovered models. Omit to return the full category catalog.",
                     "minimum": 1,
-                    "maximum": 50,
                 },
             },
             "required": ["action", "category"],
@@ -146,7 +145,7 @@ class LemonDataNonChatTool(Tool):
         discovery = await self._discover(
             category,
             recommended_for=scene,
-            limit=limit or 12,
+            limit=limit,
             include_recommendations=str(action or "") == "discover" or not requested_model,
         )
         if str(action or "") == "discover":
@@ -169,7 +168,9 @@ class LemonDataNonChatTool(Tool):
                 "allowed_endpoints": sorted(_ALLOWED_ENDPOINTS[category]),
             }, ensure_ascii=False)
 
-        available_models = {str(item["id"]) for item in discovery["models"]}
+        available_models = {str(item) for item in discovery.get("all_model_ids") or []}
+        if not available_models:
+            available_models = {str(item["id"]) for item in discovery["models"]}
         if requested_model:
             if requested_model not in available_models:
                 return json.dumps({
@@ -256,13 +257,13 @@ class LemonDataNonChatTool(Tool):
                 refreshed = await self._discover(
                     category,
                     recommended_for=scene,
-                    limit=limit or 12,
+                    limit=limit,
                     include_recommendations=True,
                     force_refresh=True,
                 )
                 if refreshed.get("ok"):
                     discovery = refreshed
-                    available_models = {str(item["id"]) for item in discovery["models"]}
+                    available_models = {str(item) for item in discovery.get("all_model_ids") or []}
                     refreshed_candidates = [
                         str(item["id"])
                         for item in discovery["models"]
@@ -286,7 +287,7 @@ class LemonDataNonChatTool(Tool):
         category: str,
         *,
         recommended_for: str,
-        limit: int,
+        limit: int | None,
         include_recommendations: bool,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
@@ -346,8 +347,17 @@ class LemonDataNonChatTool(Tool):
 
         items = catalog_response["body"].get("data") if isinstance(catalog_response["body"], dict) else None
         models = []
+        all_model_ids: list[str] = []
         if isinstance(items, list):
-            for item in items[:limit]:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                model_id = str(item.get("id") or "").strip()
+                if not model_id:
+                    continue
+                all_model_ids.append(model_id)
+            visible_items = items if limit is None else items[:limit]
+            for item in visible_items:
                 if not isinstance(item, dict):
                     continue
                 model_id = str(item.get("id") or "").strip()
@@ -371,7 +381,11 @@ class LemonDataNonChatTool(Tool):
             "ok": True,
             "category": category,
             "recommended_for": recommended_for,
-            "model_count": len(models),
+            "model_count": len(all_model_ids),
+            "catalog_total": len(all_model_ids),
+            "returned_model_count": len(models),
+            "truncated": len(all_model_ids) > len(models),
+            "all_model_ids": all_model_ids,
             "models": models,
             "snapshot_at": snapshot_at,
             "recommendation_error": recommendation_error,
