@@ -90,7 +90,14 @@ class MemorySearchIndex:
         except Exception:
             return False
 
-    def _get_or_create_table(self, data: list[dict] | None = None, *, with_vectors: bool = True, reset: bool = False):
+    def _get_or_create_table(
+        self,
+        data: list[dict] | None = None,
+        *,
+        with_vectors: bool = True,
+        reset: bool = False,
+        allow_mode_downgrade: bool = False,
+    ):
         """Get existing table or create with initial data."""
         import pyarrow as pa
 
@@ -104,6 +111,9 @@ class MemorySearchIndex:
         try:
             self._table = self._db.open_table("memory")
             if with_vectors and not self._table_has_vector_column():
+                if allow_mode_downgrade:
+                    self._set_mode("fts_only")
+                    return
                 raise ValueError("memory table missing vector column for hybrid mode")
             if not with_vectors and self._table_has_vector_column():
                 return
@@ -237,7 +247,7 @@ class MemorySearchIndex:
             self._record_status(operation="search", error="lancedb_unavailable")
             return []
 
-        self._get_or_create_table()
+        self._get_or_create_table(with_vectors=self._mode == "hybrid", allow_mode_downgrade=True)
         if self._table is None:
             self._record_status(operation="search", error="table_unavailable")
             return []
@@ -311,7 +321,7 @@ class MemorySearchIndex:
             return False
 
         try:
-            self._get_or_create_table()
+            self._get_or_create_table(with_vectors=self._mode == "hybrid", allow_mode_downgrade=True)
             if self._table is None:
                 self._record_status(operation="upsert_entity", error="table_unavailable")
                 return False
