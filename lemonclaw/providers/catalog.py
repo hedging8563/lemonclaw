@@ -62,11 +62,10 @@ _RUNTIME_MODEL_PROFILE_OVERRIDES: dict[str, str] = {}
 _RUNTIME_ALIAS_MAP: dict[str, str] = {}
 _RUNTIME_MEMORY_POLICY: dict[str, Any] = {
     "indexMode": "auto",
-    "preferredEmbeddingModel": "text-embedding-3-small",
+    "preferredEmbeddingModel": "text-embedding-005",
     "fallbackEmbeddingModels": [
-        "text-embedding-005",
-        "text-multilingual-embedding-002",
         "gemini-embedding-001",
+        "text-multilingual-embedding-002",
     ],
 }
 _RUNTIME_POLICY_ACTIVE = False
@@ -100,11 +99,10 @@ def _reset_to_builtin() -> None:
     _RUNTIME_MEMORY_POLICY.clear()
     _RUNTIME_MEMORY_POLICY.update({
         "indexMode": "auto",
-        "preferredEmbeddingModel": "text-embedding-3-small",
+        "preferredEmbeddingModel": "text-embedding-005",
         "fallbackEmbeddingModels": [
-            "text-embedding-005",
-            "text-multilingual-embedding-002",
             "gemini-embedding-001",
+            "text-multilingual-embedding-002",
         ],
     })
     globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
@@ -168,7 +166,7 @@ def get_runtime_default_model(scene: str = 'chat') -> str:
 def get_runtime_memory_policy() -> dict[str, Any]:
     return {
         "indexMode": str(_RUNTIME_MEMORY_POLICY.get("indexMode") or "auto"),
-        "preferredEmbeddingModel": str(_RUNTIME_MEMORY_POLICY.get("preferredEmbeddingModel") or "text-embedding-3-small"),
+        "preferredEmbeddingModel": str(_RUNTIME_MEMORY_POLICY.get("preferredEmbeddingModel") or "text-embedding-005"),
         "fallbackEmbeddingModels": list(_RUNTIME_MEMORY_POLICY.get("fallbackEmbeddingModels") or []),
     }
 
@@ -287,10 +285,10 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
     _RUNTIME_MEMORY_POLICY.clear()
     _RUNTIME_MEMORY_POLICY.update({
         "indexMode": str(raw_internal_memory.get("indexMode") or "auto"),
-        "preferredEmbeddingModel": str(raw_internal_memory.get("preferredEmbeddingModel") or "text-embedding-3-small"),
+        "preferredEmbeddingModel": str(raw_internal_memory.get("preferredEmbeddingModel") or "text-embedding-005"),
         "fallbackEmbeddingModels": [
             str(item)
-            for item in (raw_internal_memory.get("fallbackEmbeddingModels") or ["text-embedding-005", "text-multilingual-embedding-002", "gemini-embedding-001"])
+            for item in (raw_internal_memory.get("fallbackEmbeddingModels") or ["gemini-embedding-001", "text-multilingual-embedding-002"])
             if str(item or "").strip()
         ],
     })

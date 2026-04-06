@@ -14,7 +14,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from lemonclaw.providers.base import LLMProvider
 
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-005"
 SUPPORTED_INDEX_MODES = {"auto", "hybrid", "fts_only", "disabled"}
 
 

@@ -1,4 +1,5 @@
 import shutil
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -133,6 +134,55 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
     resolved = provider._resolve_model("github-copilot/gpt-5.3-codex")
 
     assert resolved == "github_copilot/gpt-5.3-codex"
+
+
+def test_litellm_provider_uses_platform_env_for_embedding_gateway(monkeypatch):
+    monkeypatch.setenv("API_KEY", "sk-platform")
+    monkeypatch.setenv("API_BASE_URL", "https://api.lemondata.cc/v1")
+
+    provider = LiteLLMProvider()
+
+    gateway = provider._embedding_gateway_for_model("text-embedding-005")
+    kwargs = provider._build_embedding_kwargs("text-embedding-005", gateway=gateway)
+
+    assert gateway is not None
+    assert gateway.name == "lemondata"
+    assert kwargs["api_key"] == "sk-platform"
+    assert kwargs["api_base"] == "https://api.lemondata.cc/v1"
+    assert kwargs["model"] == "openai/text-embedding-005"
+
+
+def test_litellm_provider_uses_platform_env_for_gemini_embedding_gateway(monkeypatch):
+    monkeypatch.setenv("API_KEY", "sk-platform")
+    monkeypatch.setenv("API_BASE_URL", "https://api.lemondata.cc/v1")
+
+    provider = LiteLLMProvider()
+
+    gateway = provider._embedding_gateway_for_model("gemini-embedding-001")
+    kwargs = provider._build_embedding_kwargs("gemini-embedding-001", gateway=gateway)
+
+    assert gateway is not None
+    assert gateway.name == "lemondata_gemini"
+    assert kwargs["api_key"] == "sk-platform"
+    assert kwargs["api_base"] == "https://api.lemondata.cc"
+    assert kwargs["model"] == "gemini/gemini-embedding-001"
+
+
+def test_litellm_provider_uses_platform_env_for_chat_requests(monkeypatch):
+    monkeypatch.setenv("API_KEY", "sk-platform")
+    monkeypatch.setenv("API_BASE_URL", "https://api.lemondata.cc/v1")
+
+    provider = LiteLLMProvider()
+
+    async def _exercise():
+        with patch.object(provider, "_chat_with_retry", return_value=LLMResponse(content="ok")) as chat_with_retry:
+            await provider.chat([{"role": "user", "content": "hi"}], model="gpt-5.4")
+            forwarded_kwargs = chat_with_retry.call_args.args[0]
+            assert forwarded_kwargs["api_key"] == "sk-platform"
+            assert forwarded_kwargs["api_base"] == "https://api.lemondata.cc/v1"
+            assert forwarded_kwargs["model"] == "gpt-5.4"
+
+    asyncio.run(_exercise())
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():

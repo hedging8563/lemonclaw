@@ -27,7 +27,7 @@ _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", 
 # Keys to redact from error messages to prevent credential leakage in logs.
 _SENSITIVE_KEYS = ("api_key", "api-key", "authorization", "token", "secret", "password")
 
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-005"
 
 
 def _sanitize_error(error: Exception) -> str:
@@ -111,6 +111,9 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._platform_api_key = str(os.environ.get("API_KEY") or "").strip() or None
+        self._platform_api_base = str(os.environ.get("API_BASE_URL") or "").strip() or None
+        self._platform_gateway = find_gateway(None, self._platform_api_key, self._platform_api_base)
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -129,6 +132,37 @@ class LiteLLMProvider(LLMProvider):
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
+
+    def _active_gateway(self) -> "ProviderSpec | None":
+        return self._gateway or self._platform_gateway
+
+    def _can_use_platform_fallback(self, gateway: "ProviderSpec | None" = None) -> bool:
+        effective_gateway = gateway or self._active_gateway()
+        if not self._platform_api_key:
+            return False
+        if effective_gateway is None:
+            return True
+        return effective_gateway.name.startswith("lemondata")
+
+    def _effective_api_key(self, gateway: "ProviderSpec | None" = None) -> str | None:
+        effective_gateway = gateway or self._active_gateway()
+        if self.api_key:
+            return self.api_key
+        if self._can_use_platform_fallback(effective_gateway):
+            return self._platform_api_key
+        if effective_gateway and effective_gateway.env_key:
+            return os.environ.get(effective_gateway.env_key) or None
+        return None
+
+    def _effective_api_base(self, gateway: "ProviderSpec | None" = None) -> str | None:
+        effective_gateway = gateway or self._active_gateway()
+        if self.api_base:
+            return self.api_base
+        if effective_gateway and effective_gateway.default_api_base:
+            return effective_gateway.default_api_base
+        if self._can_use_platform_fallback(effective_gateway):
+            return self._platform_api_base
+        return None
     
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
@@ -173,12 +207,12 @@ class LiteLLMProvider(LLMProvider):
         spec = self._resolve_gateway_for_model(model)
         if spec is not None:
             return spec
-        return self._gateway
+        return self._active_gateway()
 
     def _build_embedding_kwargs(self, model: str, *, gateway: "ProviderSpec | None" = None) -> dict[str, Any]:
         resolved_gateway = gateway if gateway is not None else self._embedding_gateway_for_model(model)
-        api_base = self.api_base or (resolved_gateway.default_api_base if resolved_gateway else None)
-        api_key = self.api_key or os.environ.get((resolved_gateway.env_key if resolved_gateway else "") or "", "")
+        api_base = self._effective_api_base(resolved_gateway)
+        api_key = self._effective_api_key(resolved_gateway)
 
         kwargs: dict[str, Any] = {
             "model": self._resolve_model(model, gateway=resolved_gateway),
@@ -226,9 +260,10 @@ class LiteLLMProvider(LLMProvider):
 
         Returns None if the current _gateway already matches or no gateway is active.
         """
-        if not self._gateway:
+        base_gateway = self._active_gateway()
+        if not base_gateway:
             return None
-        gw_keywords = self._gateway.keywords
+        gw_keywords = base_gateway.keywords
         model_lower = model.lower()
 
         # If current gateway has keywords and they match this model, keep it.
@@ -243,7 +278,7 @@ class LiteLLMProvider(LLMProvider):
         for spec in PROVIDERS:
             if not spec.is_gateway:
                 continue
-            if spec.name == self._gateway.name:
+            if spec.name == base_gateway.name:
                 continue
             if spec.keywords and any(kw in model_lower for kw in spec.keywords):
                 return spec
@@ -469,11 +504,12 @@ class LiteLLMProvider(LLMProvider):
         self._apply_model_overrides(model, kwargs)
 
         # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
+        effective_api_key = self._effective_api_key(effective_gw)
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
 
         # Pass api_base from the effective gateway
-        effective_base = (effective_gw.default_api_base if effective_gw else None) or self.api_base
+        effective_base = self._effective_api_base(effective_gw)
         if effective_base:
             kwargs["api_base"] = effective_base
 
