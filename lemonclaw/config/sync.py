@@ -269,7 +269,9 @@ def _sync_runtime_model_policy(config: Config) -> bool:
         logger.warning(f"config-sync: runtime policy fetch failed: {exc}")
         return False
 
-    policy = payload.get("policy") if isinstance(payload, dict) else None
+    direct_config = payload.get("config") if isinstance(payload, dict) else None
+    legacy_policy = payload.get("policy") if isinstance(payload, dict) else None
+    policy = direct_config if isinstance(direct_config, dict) else legacy_policy
     changed = False
 
     if isinstance(policy, dict):
@@ -285,6 +287,13 @@ def _sync_runtime_model_policy(config: Config) -> bool:
         apply_runtime_model_policy(policy)
     else:
         return _clear_runtime_model_policy(config, config_dir=config_dir)
+
+    if isinstance(legacy_policy, dict):
+        coding_default = str((legacy_policy.get("defaults") or {}).get("coding") or "").strip()
+        if coding_default and (not config.tools.coding.model or config.tools.coding.model == "claude-sonnet-4-6"):
+            if config.tools.coding.model != coding_default:
+                config.tools.coding.model = coding_default
+                changed = True
 
     managed_default = get_runtime_default_model("chat")
     previous_managed = ""
@@ -507,15 +516,6 @@ def _sync_model_config(config: Config) -> bool:
         if not coding.enabled:
             coding.enabled = True
             changed = True
-
-    # v8: Ensure coding.model follows runtime-aware default policy
-    from lemonclaw.providers.catalog import get_runtime_default_model
-    coding_default = get_runtime_default_model("coding")
-    if not config.tools.coding.model or config.tools.coding.model == "claude-sonnet-4-6":
-        if config.tools.coding.model != coding_default:
-            config.tools.coding.model = coding_default
-            changed = True
-            logger.info(f"config-sync: set coding.model → {coding_default}")
 
     # Ensure LemonData platform config
     if api_key and not config.lemondata.api_base_url:

@@ -1,15 +1,14 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 from lemonclaw.config.schema import Config
-from lemonclaw.providers.catalog import apply_runtime_model_policy, get_runtime_default_model
+from lemonclaw.providers.catalog import apply_runtime_model_policy, get_runtime_default_model, get_runtime_memory_policy
 
 
 def teardown_function():
     apply_runtime_model_policy(None)
 
 
-def test_sync_runtime_model_policy_updates_local_files_and_defaults(monkeypatch, tmp_path: Path):
+def test_sync_runtime_model_policy_prefers_direct_config_payload_and_updates_defaults(monkeypatch, tmp_path: Path):
     from lemonclaw.config.sync import _sync_runtime_model_policy
 
     config = Config()
@@ -21,22 +20,18 @@ def test_sync_runtime_model_policy_updates_local_files_and_defaults(monkeypatch,
     fake_config_path.write_text('{}', encoding='utf-8')
     monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
 
-    policy = {
-        'defaults': {
-            'chat': 'gpt-5.2',
-            'vision': 'gemini-3.1-pro-preview',
-            'fast': 'gpt-4.1-mini',
-            'reasoning': 'claude-opus-4-6',
-            'coding': 'claude-sonnet-4-6',
-            'consolidation': 'llama-3.3-70b-versatile',
+    direct_config = {
+        'chat': {
+            'defaultModel': 'gpt-5.2',
+            'availableModels': ['gpt-5.2', 'gpt-5.4', 'claude-sonnet-4-6'],
         },
-        'catalog': [
-            {'id': 'gpt-5.2', 'label': 'GPT-5.2', 'tier': 'flagship', 'enabled': True, 'visible': True, 'description': 'x', 'capabilities': ['chat']},
-            {'id': 'gpt-4.1-mini', 'label': 'GPT-4.1 Mini', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'y', 'capabilities': ['chat']},
-        ],
-        'profiles': {'standard_chat': ['gpt-5.2', 'gpt-4.1-mini']},
-        'sceneProfiles': {'chat': 'standard_chat'},
-        'modelProfileOverrides': {},
+        'vision': {
+            'chain': ['gemini-3.1-pro-preview', 'gpt-4.1-mini'],
+        },
+        'memory': {
+            'indexMode': 'hybrid',
+            'embeddingOrder': ['text-embedding-005', 'gemini-embedding-001'],
+        },
     }
 
     class FakeResponse:
@@ -44,7 +39,7 @@ def test_sync_runtime_model_policy_updates_local_files_and_defaults(monkeypatch,
             return None
 
         def json(self):
-            return {'policy': policy}
+            return {'config': direct_config}
 
     captured = {}
 
@@ -63,9 +58,47 @@ def test_sync_runtime_model_policy_updates_local_files_and_defaults(monkeypatch,
     assert captured['headers']['Authorization'] == 'Bearer sk-test'
     assert config.agents.defaults.model == 'gpt-5.2'
     assert config.lemondata.default_model == 'gpt-5.2'
-    assert get_runtime_default_model('chat') == 'gpt-5.2'
+    assert get_runtime_default_model('vision') == 'gemini-3.1-pro-preview'
+    assert get_runtime_memory_policy()['embeddingOrder'] == ['text-embedding-005', 'gemini-embedding-001']
     assert (tmp_path / 'runtime-model-policy.json').exists()
     assert (tmp_path / '.managed-runtime-default-model').read_text(encoding='utf-8') == 'gpt-5.2'
+
+
+def test_sync_runtime_model_policy_uses_legacy_policy_to_migrate_coding_model(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import _sync_runtime_model_policy
+
+    config = Config()
+    config.providers.lemondata.api_key = 'sk-test'
+    config.lemondata.api_base_url = 'https://api.lemondata.cc'
+    config.tools.coding.model = 'claude-sonnet-4-6'
+
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'config': {
+                    'chat': {'defaultModel': 'gpt-5.4', 'availableModels': ['gpt-5.4']},
+                    'vision': {'chain': ['gpt-4.1-mini']},
+                    'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
+                },
+                'policy': {
+                    'defaults': {'coding': 'gpt-5.3-codex'},
+                },
+            }
+
+    monkeypatch.setattr('lemonclaw.config.sync.httpx.get', lambda *args, **kwargs: FakeResponse())
+
+    changed = _sync_runtime_model_policy(config)
+
+    assert changed is True
+    assert config.tools.coding.model == 'gpt-5.3-codex'
+
 
 def test_sync_runtime_model_policy_clears_stale_override_without_hosted_credentials(monkeypatch, tmp_path: Path):
     from lemonclaw.config.sync import _sync_runtime_model_policy
@@ -76,16 +109,14 @@ def test_sync_runtime_model_policy_clears_stale_override_without_hosted_credenti
 
     fake_config_path = tmp_path / 'config.json'
     fake_config_path.write_text('{}', encoding='utf-8')
-    (tmp_path / 'runtime-model-policy.json').write_text('{"defaults":{"chat":"gpt-5.2"}}', encoding='utf-8')
+    (tmp_path / 'runtime-model-policy.json').write_text('{"chat":{"defaultModel":"gpt-5.2","availableModels":["gpt-5.2"]}}', encoding='utf-8')
     (tmp_path / '.managed-runtime-default-model').write_text('gpt-5.2', encoding='utf-8')
 
     monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
     apply_runtime_model_policy({
-        'defaults': {'chat': 'gpt-5.2'},
-        'catalog': [{'id': 'gpt-5.2', 'label': 'GPT-5.2', 'tier': 'flagship', 'enabled': True, 'visible': True, 'description': 'x'}],
-        'profiles': {'standard_chat': ['gpt-5.2']},
-        'sceneProfiles': {'chat': 'standard_chat'},
-        'modelProfileOverrides': {},
+        'chat': {'defaultModel': 'gpt-5.2', 'availableModels': ['gpt-5.2']},
+        'vision': {'chain': ['gpt-4.1-mini']},
+        'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
     })
 
     changed = _sync_runtime_model_policy(config)
@@ -124,6 +155,7 @@ def test_sync_model_config_preserves_custom_api_bases(monkeypatch, tmp_path: Pat
     assert config.providers.lemondata_gemini.api_base == 'https://staging.example.com'
     assert config.tools.coding.api_base == 'https://claude-proxy.example.com'
 
+
 def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(monkeypatch, tmp_path: Path):
     from lemonclaw.config.sync import _sync_runtime_model_policy
 
@@ -135,7 +167,7 @@ def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(
 
     fake_config_path = tmp_path / 'config.json'
     fake_config_path.write_text('{}', encoding='utf-8')
-    (tmp_path / 'runtime-model-policy.json').write_text('{"defaults":{"chat":"gpt-5.2"}}', encoding='utf-8')
+    (tmp_path / 'runtime-model-policy.json').write_text('{"chat":{"defaultModel":"gpt-5.2","availableModels":["gpt-5.2"]}}', encoding='utf-8')
     (tmp_path / '.managed-runtime-default-model').write_text('gpt-5.2', encoding='utf-8')
     monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
 
@@ -144,7 +176,7 @@ def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(
             return None
 
         def json(self):
-            return {'policy': None}
+            return {'config': None, 'policy': None}
 
     monkeypatch.setattr('lemonclaw.config.sync.httpx.get', lambda *args, **kwargs: FakeResponse())
 

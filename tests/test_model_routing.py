@@ -102,19 +102,16 @@ class TestFuzzyMatch:
         # Should match one of the opus models (shortest id wins)
         assert "opus" in m.id
 
-    def test_runtime_alias_match(self):
+    def test_runtime_config_keeps_builtin_matching_without_alias_rewrites(self):
         apply_runtime_model_policy({
-            'defaults': {'chat': 'minimax-m2.7'},
-            'catalog': [
-                {'id': 'minimax-m2.7', 'label': 'MiniMax M2.7', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'upgraded', 'capabilities': ['chat'], 'aliases': ['minimax-m2.5']},
-            ],
-            'profiles': {'economy_chat': ['minimax-m2.7']},
-            'sceneProfiles': {'chat': 'economy_chat'},
-            'modelProfileOverrides': {},
+            'chat': {'defaultModel': 'gpt-5.4', 'availableModels': ['gpt-5.4', 'deepseek-v3-2']},
+            'vision': {'chain': ['gpt-4.1-mini']},
+            'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
         })
         try:
-            m = fuzzy_match("minimax-m2.5")
-            assert m is not None and m.id == "minimax-m2.7"
+            m = fuzzy_match("deepseek")
+            assert m is not None and m.id == "deepseek-v3-2"
+            assert fuzzy_match("minimax-m2.5") is None
         finally:
             apply_runtime_model_policy(None)
 
@@ -145,20 +142,17 @@ class TestFormatModelList:
         badge = format_model_runtime_badge("claude-sonnet-4-6")
         assert 'builtin' in badge or 'runtime-policy' in badge
 
-    def test_runtime_aliases_are_listed_as_legacy_hints(self):
+    def test_runtime_model_list_shows_current_builtin_without_legacy_alias_hints(self):
         apply_runtime_model_policy({
-            'defaults': {'chat': 'minimax-m2.7'},
-            'catalog': [
-                {'id': 'minimax-m2.7', 'label': 'MiniMax M2.7', 'tier': 'economy', 'enabled': True, 'visible': True, 'description': 'upgraded', 'capabilities': ['chat'], 'aliases': ['minimax-m2.5']},
-            ],
-            'profiles': {'economy_chat': ['minimax-m2.7']},
-            'sceneProfiles': {'chat': 'economy_chat'},
-            'modelProfileOverrides': {},
+            'chat': {'defaultModel': 'gpt-5.4', 'availableModels': ['gpt-5.4', 'deepseek-v3-2']},
+            'vision': {'chain': ['gpt-4.1-mini']},
+            'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
         })
         try:
-            output = format_model_list("minimax-m2.5")
-            assert "legacy: minimax-m2.5" in output
+            output = format_model_list("deepseek-v3-2")
+            assert "deepseek-v3-2" in output
             assert "← current" in output
+            assert "legacy:" not in output
         finally:
             apply_runtime_model_policy(None)
 

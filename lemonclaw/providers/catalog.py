@@ -1,4 +1,4 @@
-"""Centralized model catalog — baseline defaults + hosted runtime override support."""
+"""Centralized model catalog — builtin metadata plus hosted runtime direct-config overrides."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class ModelEntry:
     label: str
     tier: str
     description: str
-    fallback: str | None = None  # compatibility field derived from active fallback profile
+    fallback: str | None = None
     hidden: bool = False
     source: str = "builtin"
     profile: str | None = None
@@ -45,28 +45,30 @@ _BUILTIN_MODEL_CATALOG: list[ModelEntry] = [
     ModelEntry("deepseek-r1", "DeepSeek R1", "specialist", "Deep reasoning (CoT)", fallback="claude-opus-4-6"),
 ]
 
-MODEL_CATALOG: list[ModelEntry] = list(_BUILTIN_MODEL_CATALOG)
-MODEL_MAP: dict[str, ModelEntry] = {m.id: m for m in MODEL_CATALOG}
-DEFAULT_MODEL: str = "gpt-5.4"
-_RUNTIME_DEFAULTS: dict[str, str] = {
-    "chat": DEFAULT_MODEL,
+_BUILTIN_MODEL_MAP: dict[str, ModelEntry] = {m.id: m for m in _BUILTIN_MODEL_CATALOG}
+_DEFAULT_CHAT_MODELS = [m.id for m in _BUILTIN_MODEL_CATALOG if not m.hidden]
+_DEFAULT_VISION_CHAIN = ["gpt-4.1-mini", "claude-haiku-4-5", "gemini-3.1-pro-preview"]
+_DEFAULT_MEMORY_ORDER = [
+    "text-embedding-005",
+    "gemini-embedding-001",
+    "text-multilingual-embedding-002",
+]
+_DEFAULTS = {
+    "chat": "gpt-5.4",
     "vision": "gpt-4.1-mini",
-    "fast": "gpt-4.1-mini",
-    "reasoning": "claude-opus-4-6",
     "coding": "claude-sonnet-4-6",
     "consolidation": "llama-3.3-70b-versatile",
 }
-_RUNTIME_SCENE_PROFILES: dict[str, str] = {}
-_RUNTIME_PROFILES: dict[str, list[str]] = {}
-_RUNTIME_MODEL_PROFILE_OVERRIDES: dict[str, str] = {}
+
+MODEL_CATALOG: list[ModelEntry] = list(_BUILTIN_MODEL_CATALOG)
+MODEL_MAP: dict[str, ModelEntry] = {m.id: m for m in MODEL_CATALOG}
+DEFAULT_MODEL: str = _DEFAULTS["chat"]
+_RUNTIME_CHAT_MODELS: list[str] = list(_DEFAULT_CHAT_MODELS)
+_RUNTIME_VISION_CHAIN: list[str] = list(_DEFAULT_VISION_CHAIN)
 _RUNTIME_ALIAS_MAP: dict[str, str] = {}
 _RUNTIME_MEMORY_POLICY: dict[str, Any] = {
     "indexMode": "auto",
-    "preferredEmbeddingModel": "text-embedding-005",
-    "fallbackEmbeddingModels": [
-        "gemini-embedding-001",
-        "text-multilingual-embedding-002",
-    ],
+    "embeddingOrder": list(_DEFAULT_MEMORY_ORDER),
 }
 _RUNTIME_POLICY_ACTIVE = False
 _RUNTIME_POLICY_PATH = Path(os.environ.get('LEMONCLAW_RUNTIME_MODEL_POLICY_PATH', str(Path.home() / '.lemonclaw' / 'runtime-model-policy.json')))
@@ -75,48 +77,15 @@ TIER_ORDER: dict[str, int] = {"flagship": 0, "standard": 1, "economy": 2, "speci
 TIER_LABELS: dict[str, str] = {"flagship": "Flagship", "standard": "Standard", "economy": "Economy", "specialist": "Specialist"}
 
 
-def _builtin_defaults() -> dict[str, str]:
-    return {
-        "chat": "gpt-5.4",
-        "vision": "gpt-4.1-mini",
-        "fast": "gpt-4.1-mini",
-        "reasoning": "claude-opus-4-6",
-        "coding": "claude-sonnet-4-6",
-        "consolidation": "llama-3.3-70b-versatile",
-    }
-
-
-def _reset_to_builtin() -> None:
-    MODEL_CATALOG[:] = list(_BUILTIN_MODEL_CATALOG)
-    MODEL_MAP.clear()
-    MODEL_MAP.update({m.id: m for m in MODEL_CATALOG})
-    _RUNTIME_DEFAULTS.clear()
-    _RUNTIME_DEFAULTS.update(_builtin_defaults())
-    _RUNTIME_SCENE_PROFILES.clear()
-    _RUNTIME_PROFILES.clear()
-    _RUNTIME_MODEL_PROFILE_OVERRIDES.clear()
-    _RUNTIME_ALIAS_MAP.clear()
-    _RUNTIME_MEMORY_POLICY.clear()
-    _RUNTIME_MEMORY_POLICY.update({
-        "indexMode": "auto",
-        "preferredEmbeddingModel": "text-embedding-005",
-        "fallbackEmbeddingModels": [
-            "gemini-embedding-001",
-            "text-multilingual-embedding-002",
-        ],
-    })
-    globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
-    globals()['_RUNTIME_POLICY_ACTIVE'] = False
-
-
 def _dedupe(seq: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for item in seq:
-        if not item or item in seen:
+        normalized = str(item or "").strip()
+        if not normalized or normalized in seen:
             continue
-        seen.add(item)
-        out.append(item)
+        seen.add(normalized)
+        out.append(normalized)
     return out
 
 
@@ -124,19 +93,120 @@ def _normalize_model_key(model_id: str | None) -> str:
     return str(model_id or '').strip().lower()
 
 
-def _normalize_aliases(raw_aliases: Any, model_id: str) -> tuple[str, ...]:
-    if not isinstance(raw_aliases, list):
-        return ()
-    aliases: list[str] = []
-    seen: set[str] = set()
-    for raw_alias in raw_aliases:
-        alias = str(raw_alias or '').strip()
-        alias_key = _normalize_model_key(alias)
-        if not alias or alias == model_id or not alias_key or alias_key in seen:
-            continue
-        seen.add(alias_key)
-        aliases.append(alias)
-    return tuple(aliases)
+def _is_builtin_model(model_id: str) -> bool:
+    return model_id in _BUILTIN_MODEL_MAP
+
+
+def _is_vision_capable(model_id: str) -> bool:
+    entry = _BUILTIN_MODEL_MAP.get(model_id)
+    if not entry:
+        return False
+    return model_id in {"gpt-4.1-mini", "claude-haiku-4-5", "gemini-3.1-pro-preview", "claude-sonnet-4-6"}
+
+
+def _reset_to_builtin() -> None:
+    MODEL_CATALOG[:] = list(_BUILTIN_MODEL_CATALOG)
+    MODEL_MAP.clear()
+    MODEL_MAP.update({m.id: m for m in MODEL_CATALOG})
+    _RUNTIME_CHAT_MODELS.clear()
+    _RUNTIME_CHAT_MODELS.extend(_DEFAULT_CHAT_MODELS)
+    _RUNTIME_VISION_CHAIN.clear()
+    _RUNTIME_VISION_CHAIN.extend(_DEFAULT_VISION_CHAIN)
+    _RUNTIME_ALIAS_MAP.clear()
+    _RUNTIME_MEMORY_POLICY.clear()
+    _RUNTIME_MEMORY_POLICY.update({
+        "indexMode": "auto",
+        "embeddingOrder": list(_DEFAULT_MEMORY_ORDER),
+    })
+    globals()['DEFAULT_MODEL'] = _DEFAULTS["chat"]
+    globals()['_RUNTIME_POLICY_ACTIVE'] = False
+
+
+def _coerce_direct_config(policy: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(policy.get("chat"), dict) and isinstance(policy.get("vision"), dict) and isinstance(policy.get("memory"), dict):
+        chat = policy["chat"]
+        vision = policy["vision"]
+        memory = policy["memory"]
+        available_models = [
+            model_id
+            for model_id in _dedupe([str(item) for item in list(chat.get("availableModels") or [])])
+            if _is_builtin_model(model_id)
+        ]
+        default_model = str(chat.get("defaultModel") or "").strip()
+        if not _is_builtin_model(default_model):
+            default_model = _DEFAULTS["chat"]
+        if default_model not in available_models:
+            available_models.insert(0, default_model)
+
+        vision_chain = [
+            model_id
+            for model_id in _dedupe([str(item) for item in list(vision.get("chain") or [])])
+            if _is_builtin_model(model_id) and _is_vision_capable(model_id)
+        ] or list(_DEFAULT_VISION_CHAIN)
+
+        embedding_order = _dedupe([str(item) for item in list(memory.get("embeddingOrder") or [])]) or list(_DEFAULT_MEMORY_ORDER)
+
+        return {
+            "chat": {
+                "defaultModel": default_model,
+                "availableModels": available_models or list(_DEFAULT_CHAT_MODELS),
+            },
+            "vision": {
+                "chain": vision_chain,
+            },
+            "memory": {
+                "indexMode": str(memory.get("indexMode") or "auto").strip().lower() or "auto",
+                "embeddingOrder": embedding_order,
+            },
+        }
+
+    defaults = policy.get("defaults") if isinstance(policy.get("defaults"), dict) else {}
+    catalog = [entry for entry in list(policy.get("catalog") or []) if isinstance(entry, dict)]
+    profiles = policy.get("profiles") if isinstance(policy.get("profiles"), dict) else {}
+    scene_profiles = policy.get("sceneProfiles") if isinstance(policy.get("sceneProfiles"), dict) else {}
+    internal = policy.get("internal") if isinstance(policy.get("internal"), dict) else {}
+    internal_memory = internal.get("memory") if isinstance(internal.get("memory"), dict) else {}
+
+    available_models = [
+        model_id
+        for model_id in _dedupe([
+            str(entry.get("id") or "")
+            for entry in catalog
+            if bool(entry.get("visible", False)) and bool(entry.get("enabled", True))
+        ])
+        if _is_builtin_model(model_id)
+    ]
+    default_model = str(defaults.get("chat") or "").strip()
+    if not _is_builtin_model(default_model):
+        default_model = _DEFAULTS["chat"]
+    if default_model not in available_models:
+        available_models.insert(0, default_model)
+
+    vision_profile_name = str(scene_profiles.get("vision") or "").strip()
+    vision_models = profiles.get(vision_profile_name) if isinstance(profiles.get(vision_profile_name), list) else []
+    vision_chain = [
+        model_id
+        for model_id in _dedupe([str(defaults.get("vision") or ""), *[str(item) for item in vision_models]])
+        if _is_builtin_model(model_id) and _is_vision_capable(model_id)
+    ] or list(_DEFAULT_VISION_CHAIN)
+
+    preferred_embedding_model = str(internal_memory.get("preferredEmbeddingModel") or _DEFAULT_MEMORY_ORDER[0]).strip()
+    fallback_embedding_models = [str(item) for item in list(internal_memory.get("fallbackEmbeddingModels") or _DEFAULT_MEMORY_ORDER[1:])]
+    embedding_order = _dedupe([preferred_embedding_model, *fallback_embedding_models]) or list(_DEFAULT_MEMORY_ORDER)
+
+    return {
+        "chat": {
+            "defaultModel": default_model,
+            "availableModels": available_models or list(_DEFAULT_CHAT_MODELS),
+        },
+        "vision": {
+            "chain": vision_chain,
+        },
+        "memory": {
+            "indexMode": str(internal_memory.get("indexMode") or "auto").strip().lower() or "auto",
+            "embeddingOrder": embedding_order,
+        },
+    }
 
 
 def resolve_model_id(model_id: str | None) -> str | None:
@@ -160,25 +230,39 @@ def resolve_model_id(model_id: str | None) -> str | None:
 
 
 def get_runtime_default_model(scene: str = 'chat') -> str:
-    return _RUNTIME_DEFAULTS.get(scene, _RUNTIME_DEFAULTS['chat'])
+    if scene == "chat":
+        return DEFAULT_MODEL
+    if scene == "vision":
+        return _RUNTIME_VISION_CHAIN[0] if _RUNTIME_VISION_CHAIN else _DEFAULTS["vision"]
+    if scene == "coding":
+        return _DEFAULTS["coding"]
+    if scene == "consolidation":
+        return _DEFAULTS["consolidation"]
+    return DEFAULT_MODEL
 
 
 def get_runtime_memory_policy() -> dict[str, Any]:
+    order = _dedupe([str(item) for item in list(_RUNTIME_MEMORY_POLICY.get("embeddingOrder") or [])]) or list(_DEFAULT_MEMORY_ORDER)
     return {
         "indexMode": str(_RUNTIME_MEMORY_POLICY.get("indexMode") or "auto"),
-        "preferredEmbeddingModel": str(_RUNTIME_MEMORY_POLICY.get("preferredEmbeddingModel") or "text-embedding-005"),
-        "fallbackEmbeddingModels": list(_RUNTIME_MEMORY_POLICY.get("fallbackEmbeddingModels") or []),
+        "embeddingOrder": order,
+        "preferredEmbeddingModel": order[0],
+        "fallbackEmbeddingModels": order[1:],
     }
 
 
 def get_fallback_chain(model_id: str, scene: str = 'chat') -> list[str]:
-    model_id = resolve_model_id(model_id) or model_id
-    profile_name = _RUNTIME_MODEL_PROFILE_OVERRIDES.get(model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
-    if profile_name and profile_name in _RUNTIME_PROFILES:
-        return _dedupe([model_id, *_RUNTIME_PROFILES[profile_name]])
+    resolved_model = resolve_model_id(model_id) or model_id
+    if _RUNTIME_POLICY_ACTIVE:
+        if scene == "vision":
+            if resolved_model in _RUNTIME_VISION_CHAIN:
+                return list(_RUNTIME_VISION_CHAIN[_RUNTIME_VISION_CHAIN.index(resolved_model):])
+            return [resolved_model]
+        return [resolved_model]
+
     chain: list[str] = []
     visited: set[str] = set()
-    current = model_id
+    current = resolved_model
     while current and current not in visited:
         visited.add(current)
         chain.append(current)
@@ -192,107 +276,59 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
         _reset_to_builtin()
         return
 
-    raw_catalog = policy.get('catalog') or []
-    defaults = policy.get('defaults') or {}
-    raw_profiles = policy.get('profiles') or {}
-    raw_scene_profiles = policy.get('sceneProfiles') or {}
-    raw_model_overrides = policy.get('modelProfileOverrides') or {}
-    raw_internal = policy.get('internal') if isinstance(policy.get('internal'), dict) else {}
-    raw_internal_memory = raw_internal.get('memory') if isinstance(raw_internal.get('memory'), dict) else {}
+    config = _coerce_direct_config(policy)
+    chat_ids = config["chat"]["availableModels"]
+    vision_chain = config["vision"]["chain"]
+    memory_policy = config["memory"]
 
-    runtime_rows: list[dict[str, Any]] = []
-    active_model_ids: set[str] = set()
-    for raw in raw_catalog:
-        if not isinstance(raw, dict):
+    visible_entries = []
+    for model_id in chat_ids:
+        builtin = _BUILTIN_MODEL_MAP.get(model_id)
+        if not builtin:
             continue
-        model_id = str(raw.get('id') or '').strip()
-        if not model_id or not bool(raw.get('enabled', True)):
-            continue
-        runtime_rows.append(raw)
-        active_model_ids.add(model_id)
-
-    if not active_model_ids:
-        _reset_to_builtin()
-        return
-
-    profiles: dict[str, list[str]] = {}
-    for key, value in raw_profiles.items():
-        if not isinstance(value, list):
-            continue
-        profile_name = str(key)
-        profiles[profile_name] = [
-            candidate
-            for candidate in _dedupe([str(item) for item in value if item])
-            if candidate in active_model_ids
-        ]
-
-    scene_profiles = {
-        str(key): str(value)
-        for key, value in raw_scene_profiles.items()
-        if isinstance(value, str) and value and str(value) in profiles
-    }
-    model_overrides = {
-        str(key): str(value)
-        for key, value in raw_model_overrides.items()
-        if isinstance(value, str) and value and str(key) in active_model_ids and str(value) in profiles
-    }
-
-    built_entries: list[ModelEntry] = []
-    runtime_alias_map: dict[str, str] = {}
-    for raw in runtime_rows:
-        model_id = str(raw.get('id') or '').strip()
-        profile_name = model_overrides.get(model_id) or scene_profiles.get('chat')
-        chain = _dedupe([model_id, *(profiles.get(profile_name) or [])]) if profile_name else [model_id]
-        fallback = None
-        if model_id in chain:
-            idx = chain.index(model_id)
-            fallback = chain[idx + 1] if idx + 1 < len(chain) else None
-        aliases = _normalize_aliases(raw.get('aliases'), model_id)
-        for alias in aliases:
-            runtime_alias_map[_normalize_model_key(alias)] = model_id
-        built_entries.append(ModelEntry(
-            id=model_id,
-            label=str(raw.get('label') or model_id),
-            tier=str(raw.get('tier') or 'standard'),
-            description=str(raw.get('description') or model_id),
-            fallback=fallback,
-            hidden=not bool(raw.get('visible', True)),
-            source='runtime-policy',
-            profile=profile_name,
-            aliases=aliases,
+        visible_entries.append(ModelEntry(
+            id=builtin.id,
+            label=builtin.label,
+            tier=builtin.tier,
+            description=builtin.description,
+            fallback=None,
+            hidden=False,
+            source="runtime-policy",
+            profile="chat",
+            aliases=(),
         ))
 
-    MODEL_CATALOG[:] = built_entries
+    hidden_entries = []
+    for builtin in _BUILTIN_MODEL_CATALOG:
+        if builtin.id in chat_ids:
+            continue
+        profile = "vision" if builtin.id in vision_chain else None
+        hidden_entries.append(ModelEntry(
+            id=builtin.id,
+            label=builtin.label,
+            tier=builtin.tier,
+            description=builtin.description,
+            fallback=None,
+            hidden=True,
+            source="runtime-policy",
+            profile=profile,
+            aliases=(),
+        ))
+
+    MODEL_CATALOG[:] = [*visible_entries, *hidden_entries]
     MODEL_MAP.clear()
     MODEL_MAP.update({m.id: m for m in MODEL_CATALOG})
-    _RUNTIME_DEFAULTS.clear()
-    _RUNTIME_DEFAULTS.update({
-        **_builtin_defaults(),
-        **{
-            k: str(v)
-            for k, v in defaults.items()
-            if isinstance(v, str) and v and str(v) in active_model_ids
-        },
-    })
-    _RUNTIME_SCENE_PROFILES.clear()
-    _RUNTIME_SCENE_PROFILES.update(scene_profiles)
-    _RUNTIME_PROFILES.clear()
-    _RUNTIME_PROFILES.update(profiles)
-    _RUNTIME_MODEL_PROFILE_OVERRIDES.clear()
-    _RUNTIME_MODEL_PROFILE_OVERRIDES.update(model_overrides)
+    _RUNTIME_CHAT_MODELS.clear()
+    _RUNTIME_CHAT_MODELS.extend(chat_ids)
+    _RUNTIME_VISION_CHAIN.clear()
+    _RUNTIME_VISION_CHAIN.extend(vision_chain)
     _RUNTIME_ALIAS_MAP.clear()
-    _RUNTIME_ALIAS_MAP.update(runtime_alias_map)
     _RUNTIME_MEMORY_POLICY.clear()
     _RUNTIME_MEMORY_POLICY.update({
-        "indexMode": str(raw_internal_memory.get("indexMode") or "auto"),
-        "preferredEmbeddingModel": str(raw_internal_memory.get("preferredEmbeddingModel") or "text-embedding-005"),
-        "fallbackEmbeddingModels": [
-            str(item)
-            for item in (raw_internal_memory.get("fallbackEmbeddingModels") or ["gemini-embedding-001", "text-multilingual-embedding-002"])
-            if str(item or "").strip()
-        ],
+        "indexMode": memory_policy["indexMode"],
+        "embeddingOrder": list(memory_policy["embeddingOrder"]),
     })
-    globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
+    globals()['DEFAULT_MODEL'] = config["chat"]["defaultModel"]
     globals()['_RUNTIME_POLICY_ACTIVE'] = True
 
 
@@ -324,10 +360,12 @@ def get_model_source(model_id: str) -> str:
 
 def get_model_profile(model_id: str, scene: str = 'chat') -> str | None:
     resolved_model_id = resolve_model_id(model_id) or model_id
+    if scene == "chat" and resolved_model_id in _RUNTIME_CHAT_MODELS:
+        return "chat"
+    if scene == "vision" and resolved_model_id in _RUNTIME_VISION_CHAIN:
+        return "vision"
     entry = MODEL_MAP.get(resolved_model_id)
-    if entry and entry.profile:
-        return entry.profile
-    return _RUNTIME_MODEL_PROFILE_OVERRIDES.get(resolved_model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
+    return entry.profile if entry else None
 
 
 def get_model_runtime_meta(model_id: str, scene: str = 'chat') -> dict[str, str | bool | None]:
@@ -343,7 +381,7 @@ def format_model_runtime_badge(model_id: str, scene: str = 'chat') -> str:
     meta = get_model_runtime_meta(model_id, scene)
     bits = ['runtime-policy' if meta['source'] == 'runtime-policy' else 'builtin']
     if isinstance(meta['profile'], str) and meta['profile']:
-        bits.append(f"profile={meta['profile']}")
+        bits.append(f"group={meta['profile']}")
     return ' · '.join(bits)
 
 
@@ -364,15 +402,11 @@ def fuzzy_match(query: str) -> ModelEntry | None:
     for m in visible:
         if _normalize_model_key(m.id) == q:
             return m
-    runtime_alias_hit = _RUNTIME_ALIAS_MAP.get(q)
-    if runtime_alias_hit:
-        entry = MODEL_MAP.get(runtime_alias_hit)
-        if entry and not entry.hidden:
-            return entry
-    from lemonclaw.providers.aliases import resolve_alias
-    alias_hit = resolve_alias(q)
-    if alias_hit:
-        return alias_hit
+    for canonical_id in MODEL_MAP:
+        if _normalize_model_key(canonical_id) == q:
+            entry = MODEL_MAP.get(canonical_id)
+            if entry and not entry.hidden:
+                return entry
     prefix_hits = [m for m in visible if m.id.startswith(q)]
     if len(prefix_hits) == 1:
         return prefix_hits[0]
@@ -401,11 +435,6 @@ def format_model_list(current_model: str | None = None) -> str:
         lines.append(f"\n**{label}**")
         for m in grouped[tier]:
             marker = ' ← current' if resolved_current and m.id == resolved_current else ''
-            alias_hint = f" (legacy: {', '.join(m.aliases)})" if m.aliases else ''
-            lines.append(f"  `{m.id}` — {m.description}{alias_hint}{marker}")
+            lines.append(f"  `{m.id}` — {m.description}{marker}")
     header = 'Available models (use `/model <name>` to switch):\n'
-    footer = '\n\n**Aliases** (use `/model <alias>` to switch):'
-    from lemonclaw.providers.aliases import list_aliases
-    for alias, model_id in list_aliases().items():
-        footer += f"\n  `{alias}` → {model_id}"
-    return header + '\n'.join(lines) + footer
+    return header + '\n'.join(lines)
