@@ -38,3 +38,30 @@ def test_mode_overlay_is_injected(tmp_path):
     prompt = builder.build_system_prompt(mode="cron")
     assert "# Mode Overlay" in prompt
     assert "cron mode" in prompt.lower()
+
+
+def test_builtin_skills_are_not_auto_injected_into_default_system_prompt(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    skill_dir = workspace / "skills" / "demo-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: demo-skill
+description: Demo skill
+always: true
+triggers: "demo"
+---
+
+# Demo Skill
+
+Use the demo flow.
+""",
+        encoding="utf-8",
+    )
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt(mode="chat")
+
+    assert "# Active Skills" not in prompt
+    assert "# Triggered Skills" not in prompt
+    assert "# Skills" not in prompt

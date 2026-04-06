@@ -4,7 +4,7 @@ Use this reference when the task involves image, video, music, 3D, TTS, STT, emb
 
 ## Discovery First
 
-Preferred inside LemonClaw runtime:
+Helpful inside LemonClaw runtime when you want a raw helper:
 
 ```text
 lemondata_nonchat(action="discover", category="<category>")
@@ -12,11 +12,10 @@ lemondata_nonchat(action="discover", category="<category>")
 
 Meaning:
 - this reads the current category catalog from `/v1/models?category=<category>`
-- it also returns `request_guidance`, which is the runtime-owned request shape summary for that category
-- if recommendation context is available, the tool may also attach `preferred_rank`, `status`, and `snapshot_at`
-- `snapshot_at` is the recommendation snapshot timestamp, not a guarantee that the full category catalog was regenerated at that same time
+- it may also attach helper-friendly request guidance and recommendation metadata
+- `snapshot_at` is recommendation metadata, not proof that the full category directory was regenerated at that exact moment
 
-Fallback:
+Primary truth source:
 
 ```bash
 curl -s "https://api.lemondata.cc/v1/models?category=<category>" \
@@ -37,6 +36,7 @@ curl -s "https://api.lemondata.cc/v1/models?category=<category>" \
 
 ## Request Shape Rule
 
+- let runtime/live discovery guide the request first
 - put JSON fields inside `payload`
 - put local upload files inside `files`
 - use `save_to` for binary output when you want a predictable local filename

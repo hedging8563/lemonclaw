@@ -1,4 +1,4 @@
-"""Structured database inspection tool (SQLite-first)."""
+"""Structured database tool (SQLite-first)."""
 
 from __future__ import annotations
 
@@ -10,29 +10,8 @@ from typing import Any
 from lemonclaw.agent.tools.base import Tool
 
 
-def _is_safe_read_query(query: str) -> bool:
-    stripped = query.strip().lower()
-    if not stripped:
-        return False
-    allowed_starts = ("select", "pragma", "explain", "with")
-    blocked = (
-        "insert ",
-        "update ",
-        "delete ",
-        "drop ",
-        "alter ",
-        "create ",
-        "replace ",
-        "truncate ",
-        "attach ",
-        "detach ",
-        "vacuum",
-    )
-    return stripped.startswith(allowed_starts) and not any(token in stripped for token in blocked)
-
-
 class DBTool(Tool):
-    """Read-only database inspection tool."""
+    """Structured database tool."""
 
     def __init__(
         self,
@@ -52,9 +31,9 @@ class DBTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Inspect database state with a read-only query. "
+            "Execute SQL against configured SQLite or PostgreSQL profiles. "
             "Currently supports configured SQLite and PostgreSQL profiles. "
-            "Use this instead of shell database CLIs for structured inspection."
+            "Use this instead of shell database CLIs for structured database access."
         )
 
     @property
@@ -68,7 +47,7 @@ class DBTool(Tool):
                 },
                 "query": {
                     "type": "string",
-                    "description": "Read-only SQL query.",
+                    "description": "SQL query to execute.",
                     "minLength": 1,
                 },
                 "limit": {
@@ -82,12 +61,12 @@ class DBTool(Tool):
         }
 
     def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
-        return "db.read"
+        query = str(params.get("query") or "").strip().lower()
+        if query.startswith(("select", "pragma", "explain", "with")):
+            return "db.read"
+        return "db.write"
 
     async def execute(self, connection_profile: str, query: str, limit: int | None = None, **kwargs: Any) -> dict[str, Any]:
-        if not _is_safe_read_query(query):
-            return {"ok": False, "summary": "Only read-only SELECT/PRAGMA/EXPLAIN/WITH queries are allowed", "raw": {"query": query}}
-
         row_limit = limit or 50
         if connection_profile in self._sqlite_profiles:
             return self._query_sqlite(connection_profile, query, row_limit)
@@ -110,17 +89,19 @@ class DBTool(Tool):
             conn.row_factory = sqlite3.Row
             try:
                 cursor = conn.execute(query)
-                rows = cursor.fetchmany(row_limit)
+                rows = cursor.fetchmany(row_limit) if cursor.description else []
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
+                conn.commit()
             finally:
                 conn.close()
         except Exception as e:
             return {"ok": False, "summary": f"DB query failed: {e}", "raw": {"profile": connection_profile}}
 
         result_rows = [dict(row) for row in rows]
+        operation = query.strip().split(None, 1)[0].upper() if query.strip() else "QUERY"
         return {
             "ok": True,
-            "summary": f"SQLite query returned {len(result_rows)} row(s)",
+            "summary": f"SQLite {operation} completed ({len(result_rows)} row(s) returned)",
             "raw": {
                 "connection_profile": connection_profile,
                 "engine": "sqlite",
@@ -158,17 +139,20 @@ class DBTool(Tool):
             conn = psycopg.connect(**connect_kwargs)
             try:
                 cursor = conn.execute(query)
-                rows = cursor.fetchmany(row_limit)
+                rows = cursor.fetchmany(row_limit) if cursor.description else []
                 columns = [self._column_name(desc) for desc in (cursor.description or [])]
+                if hasattr(conn, "commit"):
+                    conn.commit()
             finally:
                 conn.close()
         except Exception as e:
             return {"ok": False, "summary": f"DB query failed: {e}", "raw": {"profile": connection_profile}}
 
         result_rows = [self._normalize_row(row) for row in rows]
+        operation = query.strip().split(None, 1)[0].upper() if query.strip() else "QUERY"
         return {
             "ok": True,
-            "summary": f"PostgreSQL query returned {len(result_rows)} row(s)",
+            "summary": f"PostgreSQL {operation} completed ({len(result_rows)} row(s) returned)",
             "raw": {
                 "connection_profile": connection_profile,
                 "engine": "postgres",

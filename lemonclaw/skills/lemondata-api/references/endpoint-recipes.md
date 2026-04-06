@@ -1,6 +1,6 @@
 # LemonData Endpoint Recipes
 
-Use these recipes only after the model has been validated against live discovery when the task is non-chat.
+Use these recipes as examples after checking live `/v1/models` truth for non-chat requests.
 
 ## Chat / Responses
 
@@ -20,7 +20,7 @@ curl -s https://api.lemondata.cc/v1/images/generations \
   -d '{"model":"gpt-image-1","prompt":"A cat wearing sunglasses","n":1,"size":"1024x1024"}'
 ```
 
-Tool form:
+Helper form if you explicitly want the raw helper:
 
 ```text
 lemondata_nonchat(
@@ -132,7 +132,7 @@ curl -s https://api.lemondata.cc/v1/audio/speech \
   --output speech.mp3
 ```
 
-Tool form:
+Helper form if you explicitly want the raw helper:
 
 ```text
 lemondata_nonchat(
@@ -156,7 +156,7 @@ curl -s https://api.lemondata.cc/v1/audio/transcriptions \
   -F "file=@audio.mp3"
 ```
 
-Tool form:
+Helper form if you explicitly want the raw helper:
 
 ```text
 lemondata_nonchat(

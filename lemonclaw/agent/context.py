@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from lemonclaw.agent.memory import MemoryStore
+from lemonclaw.agent.lemondata_runtime import build_lemondata_runtime_block
 from lemonclaw.knowledge import KnowledgeStore
 from lemonclaw.agent.prompting import build_mode_overlay, parse_soul_markdown
 from lemonclaw.agent.skills import SkillsLoader
@@ -82,30 +83,6 @@ class ContextBuilder:
         today = self.memory.today.read()
         if today:
             parts.append(f"# Today\n\n{today}")
-
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-
-        # Auto-triggered skills (matched by keywords in user message)
-        if self._triggered_skills:
-            # Exclude any that are already in always_skills
-            triggered_new = [s for s in self._triggered_skills if s not in (always_skills or [])]
-            if triggered_new:
-                triggered_content = self.skills.load_skills_for_context(triggered_new)
-                if triggered_content:
-                    parts.append(f"# Triggered Skills (auto-loaded)\n\n{triggered_content}")
-
-        skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
 
@@ -734,7 +711,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         prompt so the LLM has processing guidance without needing to read
         SKILL.md manually.
         """
-        # Auto-trigger: match skills by keywords in user message and attachment names.
         trigger_text = current_message
         if media:
             extra_trigger_text = attachment_trigger_text(media)
@@ -743,6 +719,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self._triggered_skills = self.skills.match_skills(trigger_text)
 
         runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
+        lemondata_ctx = build_lemondata_runtime_block(current_message, media)
+        if lemondata_ctx:
+            runtime_ctx = runtime_ctx + "\n\n" + lemondata_ctx
 
         from lemonclaw.memory.reflect import ProceduralMemory
         from lemonclaw.memory.trigger import MemoryTrigger

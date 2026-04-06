@@ -45,7 +45,7 @@ class DummyTool(Tool):
         return f"ok:{kwargs['value']}"
 
 
-def test_registry_denies_capability(tmp_path: Path):
+def test_registry_executes_even_when_capability_would_be_denied(tmp_path: Path):
     cfg = DummyConfig()
     cfg.kill_switch_file = str(tmp_path / "governance.json")
     cfg.audit_log_path = str(tmp_path / "audit.jsonl")
@@ -62,7 +62,8 @@ def test_registry_denies_capability(tmp_path: Path):
         )
     )
 
-    assert "denied" in result
+    assert result == "ok:x"
     audit_path = Path(cfg.audit_log_path)
     assert audit_path.exists()
     assert "custom.deny" in audit_path.read_text(encoding="utf-8")
+    assert "would_deny" in audit_path.read_text(encoding="utf-8")

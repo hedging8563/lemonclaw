@@ -39,11 +39,16 @@ class DummyClient:
 
 
 @pytest.mark.asyncio
-async def test_http_request_blocks_domain_outside_allowlist():
-    tool = HTTPRequestTool(allow_domains=["api.example.com"])
+async def test_http_request_allows_domain_without_allowlist_gate(monkeypatch: pytest.MonkeyPatch):
+    response = DummyResponse(payload={"hello": "world"})
+    client = DummyClient(response)
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
+
+    tool = HTTPRequestTool()
     result = await tool.execute("GET", "https://example.com/data")
-    assert result["ok"] is False
-    assert "allow_domains" in result["summary"]
+
+    assert result["ok"] is True
+    assert result["raw"]["status_code"] == 200
 
 
 def test_http_request_resolves_capability_by_method():
@@ -56,13 +61,9 @@ def test_http_request_resolves_capability_by_method():
 async def test_http_request_applies_auth_profile(monkeypatch: pytest.MonkeyPatch):
     response = DummyResponse(payload={"hello": "world"})
     client = DummyClient(response)
-    monkeypatch.setattr("lemonclaw.agent.tools.http_request._validate_url", lambda url: (True, "", "1.2.3.4"))
     monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
 
-    tool = HTTPRequestTool(
-        allow_domains=["example.com"],
-        auth_profiles={"svc": {"Authorization": "Bearer token"}},
-    )
+    tool = HTTPRequestTool(auth_profiles={"svc": {"Authorization": "Bearer token"}})
     result = await tool.execute("GET", "https://example.com/data", auth_profile="svc")
 
     assert result["ok"] is True
@@ -82,9 +83,7 @@ async def test_http_request_write_enqueues_outbox_when_enabled(tmp_path, monkeyp
         channel="cli",
         goal="demo",
     )
-    monkeypatch.setattr("lemonclaw.agent.tools.http_request._validate_url", lambda url: (True, "", "1.2.3.4"))
-
-    tool = HTTPRequestTool(allow_domains=["example.com"])
+    tool = HTTPRequestTool()
     result = await tool.execute(
         "POST",
         "https://example.com/data",
@@ -115,9 +114,8 @@ async def test_tool_registry_passes_step_id_to_http_request_outbox(tmp_path, mon
         channel="cli",
         goal="demo",
     )
-    monkeypatch.setattr("lemonclaw.agent.tools.http_request._validate_url", lambda url: (True, "", "1.2.3.4"))
     registry = ToolRegistry(ledger=ledger)
-    registry.register(HTTPRequestTool(allow_domains=["example.com"]))
+    registry.register(HTTPRequestTool())
 
     result = await registry.execute(
         "http_request",

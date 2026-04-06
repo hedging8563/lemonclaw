@@ -1,11 +1,9 @@
 """Web tools: web_search and web_fetch."""
 
 import html
-import ipaddress
 import json
 import os
 import re
-import socket
 from typing import Any
 from urllib.parse import urlparse
 
@@ -58,51 +56,11 @@ def _infer_search_status(result: SearchResponse) -> str:
     return "empty"
 
 
-def _is_private_ip_addr(ip_str: str) -> bool:
-    """Check if a resolved IP string is private/reserved."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        return (
-            ip.is_private or ip.is_loopback or ip.is_reserved
-            or ip.is_link_local or ip.is_multicast or ip.is_unspecified
-        )
-    except ValueError:
-        return True  # fail-closed
-
-
-def _resolve_to_safe_ip(host: str) -> tuple[str | None, str]:
-    """Resolve hostname to IP and verify it's not private/reserved.
-
-    Returns (ip_str, "") on success, (None, error_msg) on failure.
-
-    DNS rebinding mitigation: we resolve once here and reuse the IP for the
-    actual connection (via httpx transport), so a second DNS lookup cannot
-    return a different (private) address mid-flight.
-    """
-    try:
-        infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-    except (socket.gaierror, OSError):
-        return None, "DNS resolution failed"
-
-    # Check ALL resolved addresses — reject if any is private (fail-closed)
-    for _family, _, _, _, sockaddr in infos:
-        ip_str = sockaddr[0]
-        if _is_private_ip_addr(ip_str):
-            return None, "Access to private/internal addresses is blocked"
-
-    # All IPs are safe, return the first one
-    if infos:
-        return infos[0][4][0], ""
-
-    return None, "No addresses returned by DNS"
-
-
 def _validate_url(url: str) -> tuple[bool, str, str]:
-    """Validate URL: must be http(s) with valid public domain (SSRF-safe).
+    """Validate URL shape.
 
     Returns (is_valid, error_msg, resolved_ip).
-    resolved_ip is the pre-resolved safe IP to use for the actual connection,
-    preventing DNS rebinding between the check and the request.
+    resolved_ip is unused in full-power mode and kept for compatibility.
     """
     try:
         p = urlparse(url)
@@ -113,10 +71,7 @@ def _validate_url(url: str) -> tuple[bool, str, str]:
         hostname = p.hostname or ""
         if not hostname:
             return False, "Missing hostname", ""
-        ip, err = _resolve_to_safe_ip(hostname)
-        if ip is None:
-            return False, err, ""
-        return True, "", ip
+        return True, "", ""
     except Exception as e:
         return False, str(e), ""
 
@@ -222,42 +177,21 @@ class WebFetchTool(Tool):
 
         max_chars = maxChars or self.max_chars
 
-        # Validate URL and pre-resolve DNS to prevent rebinding attacks.
-        # The resolved IP is used to build the transport so httpx connects
-        # directly to the IP we already verified, not a second DNS lookup.
-        is_valid, error_msg, resolved_ip = _validate_url(url)
+        is_valid, error_msg, _resolved_ip = _validate_url(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
-        parsed = urlparse(url)
-        hostname = parsed.hostname or ""
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-
-        # Build a transport that connects to the pre-resolved IP directly,
-        # bypassing any further DNS lookups (DNS rebinding mitigation).
-        transport = httpx.AsyncHTTPTransport(
-            uds=None,
-            local_address=None,
-        )
-
-        # Override the URL to use the resolved IP, keeping Host header for SNI/vhost.
-        # Replace hostname with IP in the URL so httpx never re-resolves.
-        ip_url = url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
-
         try:
             async with httpx.AsyncClient(
-                follow_redirects=False,  # handle redirects manually to re-validate each hop
-                transport=transport,
+                follow_redirects=False,
                 timeout=30.0,
                 verify=True,
             ) as client:
-                # Follow redirects manually, re-validating each destination
                 current_url = url
-                current_ip_url = ip_url
                 for _ in range(MAX_REDIRECTS):
                     r = await client.get(
-                        current_ip_url,
-                        headers={"User-Agent": USER_AGENT, "Host": urlparse(current_url).netloc},
+                        current_url,
+                        headers={"User-Agent": USER_AGENT},
                     )
                     if r.status_code in (301, 302, 303, 307, 308):
                         location = r.headers.get("location", "")
@@ -267,18 +201,10 @@ class WebFetchTool(Tool):
                         if location.startswith("/"):
                             p = urlparse(current_url)
                             location = f"{p.scheme}://{p.netloc}{location}"
-                        # Re-validate redirect target
-                        redir_valid, redir_err, redir_ip = _validate_url(location)
+                        redir_valid, redir_err, _redir_ip = _validate_url(location)
                         if not redir_valid:
                             return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
-                        redir_parsed = urlparse(location)
-                        redir_port = redir_parsed.port or (443 if redir_parsed.scheme == "https" else 80)
                         current_url = location
-                        current_ip_url = location.replace(
-                            f"{redir_parsed.scheme}://{redir_parsed.netloc}",
-                            f"{redir_parsed.scheme}://{redir_ip}:{redir_port}",
-                            1,
-                        )
                         continue
                     break
                 r.raise_for_status()

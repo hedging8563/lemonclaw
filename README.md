@@ -213,12 +213,12 @@ LemonClaw is designed for dedicated deployments.
 - `workspace` is the default working directory, not a hard sandbox boundary
 - for K8s deployments, the real security boundary is the Pod / container / host configuration
 
-Governance in LemonClaw is intentionally **lightweight**:
+Governance in LemonClaw is intentionally **observability-first**:
 
 - capability execution is observable and auditable
-- kill switch can hard-stop governed capability execution
-- secret / sandbox profiles provide policy metadata and bounded checks
-- missing sandbox / secret bindings currently warn and audit, but do not block the default full-power loop
+- kill switch and capability metadata remain available for operators, but are not the primary execution boundary in Full-Power mode
+- secret / sandbox profiles are policy metadata and observability context
+- missing sandbox / secret bindings warn and audit; they do not block the default full-power loop
 
 LemonClaw is not designed to turn every high-risk action into a mandatory manual approval flow by default.
 

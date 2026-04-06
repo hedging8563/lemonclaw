@@ -19,90 +19,68 @@ from lemonclaw.bus.events import InboundMessage
 from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
-# ── 1. SSRF Protection (web.py) ──
+# ── 1. URL shape validation (web.py) ──
 
 
-class TestSSRFProtection:
-    """web_fetch must block access to private/internal addresses."""
+class TestWebValidation:
+    """web_fetch now only validates URL shape in full-power mode."""
 
-    def test_private_ip_detected(self):
-        from lemonclaw.agent.tools.web import _is_private_ip_addr
-        assert _is_private_ip_addr("127.0.0.1") is True
-        assert _is_private_ip_addr("10.0.0.1") is True
-        assert _is_private_ip_addr("172.16.0.1") is True
-        assert _is_private_ip_addr("192.168.1.1") is True
-
-    def test_link_local_blocked(self):
-        from lemonclaw.agent.tools.web import _is_private_ip_addr
-        # Cloud metadata endpoint
-        assert _is_private_ip_addr("169.254.169.254") is True
-
-    def test_public_ip_allowed(self):
-        from lemonclaw.agent.tools.web import _is_private_ip_addr
-        assert _is_private_ip_addr("8.8.8.8") is False
-        assert _is_private_ip_addr("1.1.1.1") is False
-
-    def test_validate_url_blocks_private(self):
+    def test_validate_url_allows_private(self):
         from lemonclaw.agent.tools.web import _validate_url
+
         valid, err, _ip = _validate_url("http://127.0.0.1:8080/secret")
-        assert valid is False
-        assert "private" in err.lower() or "internal" in err.lower()
+        assert valid is True
+        assert err == ""
 
-    def test_validate_url_blocks_metadata(self):
+    def test_validate_url_allows_metadata_host(self):
         from lemonclaw.agent.tools.web import _validate_url
+
         valid, err, _ip = _validate_url("http://169.254.169.254/latest/meta-data/")
-        assert valid is False
+        assert valid is True
+        assert err == ""
 
     def test_validate_url_allows_public(self):
-        from unittest.mock import patch as mock_patch
-
         from lemonclaw.agent.tools.web import _validate_url
-        # Mock DNS to return a known public IP (avoid local DNS proxy interference)
-        fake_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
-        with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", return_value=fake_info):
-            valid, err, _ip = _validate_url("https://example.com")
+
+        valid, err, _ip = _validate_url("https://example.com")
         assert valid is True
+        assert err == ""
 
-    def test_unresolvable_host_blocked(self):
-        import socket
-        from unittest.mock import patch as mock_patch
+    def test_validate_url_still_rejects_non_http_scheme(self):
+        from lemonclaw.agent.tools.web import _validate_url
 
-        from lemonclaw.agent.tools.web import _resolve_to_safe_ip
-        # Simulate DNS resolution failure — fail-closed
-        with mock_patch("lemonclaw.agent.tools.web.socket.getaddrinfo", side_effect=socket.gaierror("not found")):
-            ip, err = _resolve_to_safe_ip("this-domain-does-not-exist-xyz123.invalid")
-            assert ip is None
+        valid, err, _ip = _validate_url("file:///etc/passwd")
+        assert valid is False
+        assert "http/https" in err
 
 
-# ── 2a. Tool Safety (CVE-2026-25253, shell.py deny_patterns) ──
+# ── 2a. Shell behavior in Full Power mode ──
 
 
 class TestToolSafety:
-    """Dangerous commands must be blocked by ExecTool."""
+    """ExecTool no longer blocks commands via app-layer deny patterns."""
 
     @pytest.fixture
     def exec_tool(self):
         return ExecTool(timeout=5)
 
     @pytest.mark.asyncio
-    async def test_rm_rf_blocked(self, exec_tool):
+    async def test_rm_rf_runs(self, exec_tool):
         result = await exec_tool.execute(command="rm -rf /tmp/test")
-        assert "blocked" in result.lower() or "Error" in result
+        assert result == "(no output)"
 
     @pytest.mark.asyncio
-    async def test_dd_blocked(self, exec_tool):
-        result = await exec_tool.execute(command="dd if=/dev/zero of=/tmp/x")
-        assert "blocked" in result.lower() or "Error" in result
+    async def test_dd_runs(self, exec_tool):
+        result = await exec_tool.execute(command="dd if=/dev/zero of=/tmp/x bs=1 count=1")
+        assert "records in" in result or "records out" in result or "(no output)" in result
 
     @pytest.mark.asyncio
-    async def test_shutdown_blocked(self, exec_tool):
-        result = await exec_tool.execute(command="shutdown -h now")
-        assert "blocked" in result.lower() or "Error" in result
+    async def test_shutdown_command_is_not_blocked_by_guard(self, exec_tool):
+        assert exec_tool._guard_command("shutdown -h now", Path("/tmp")) is None
 
     @pytest.mark.asyncio
-    async def test_fork_bomb_blocked(self, exec_tool):
-        result = await exec_tool.execute(command=":(){ :|:& };:")
-        assert "blocked" in result.lower() or "Error" in result
+    async def test_fork_bomb_pattern_not_blocked_by_guard(self, exec_tool):
+        assert exec_tool._guard_command(":(){ :|:& };:", Path("/tmp")) is None
 
     @pytest.mark.asyncio
     async def test_safe_command_allowed(self, exec_tool):
@@ -128,32 +106,24 @@ class TestToolSafety:
         assert "hello" in result
 
     @pytest.mark.asyncio
-    async def test_rm_rf_extra_spaces_blocked(self):
-        """Evasion via extra spaces: 'rm  -rf  /' should still be caught."""
+    async def test_rm_rf_extra_spaces_not_blocked(self):
         tool = ExecTool(timeout=5)
-        result = await tool.execute(command="rm  -rf  /tmp/test")
-        assert "blocked" in result.lower()
+        assert tool._guard_command("rm  -rf  /tmp/test", Path("/tmp")) is None
 
     @pytest.mark.asyncio
-    async def test_rm_quoted_args_blocked(self):
-        """Evasion via quoting: rm '-rf' should still be caught."""
+    async def test_rm_quoted_args_not_blocked(self):
         tool = ExecTool(timeout=5)
-        result = await tool.execute(command="rm '-rf' /tmp/test")
-        assert "blocked" in result.lower()
+        assert tool._guard_command("rm '-rf' /tmp/test", Path("/tmp")) is None
 
     @pytest.mark.asyncio
-    async def test_rm_long_flags_blocked(self):
-        """Long flags like --recursive/--force should also be blocked."""
+    async def test_rm_long_flags_not_blocked(self):
         tool = ExecTool(timeout=5)
-        result = await tool.execute(command="rm --recursive --force /tmp/test")
-        assert "blocked" in result.lower()
+        assert tool._guard_command("rm --recursive --force /tmp/test", Path("/tmp")) is None
 
     @pytest.mark.asyncio
-    async def test_dd_standalone_blocked(self):
-        """dd without if= should still be blocked at token level."""
+    async def test_dd_standalone_not_blocked(self):
         tool = ExecTool(timeout=5)
-        result = await tool.execute(command="dd if=/dev/urandom of=/tmp/x bs=1M count=100")
-        assert "blocked" in result.lower()
+        assert tool._guard_command("dd if=/dev/urandom of=/tmp/x bs=1M count=100", Path("/tmp")) is None
 
     @pytest.mark.asyncio
     async def test_parent_segments_allowed_in_full_power_mode(self, tmp_path):

@@ -315,6 +315,7 @@ def evaluate_skill_benchmark(
         target_marker = f"### Skill: {benchmark.skill}"
 
         for case in benchmark.cases:
+            trigger_text = case.message
             messages = builder.build_messages(
                 [],
                 case.message,
@@ -325,7 +326,8 @@ def evaluate_skill_benchmark(
                 skip_local_retrieval=True,
             )
             system_prompt = str(messages[0]["content"])
-            triggered_skills = list(builder._triggered_skills)
+            triggered_skills = list(builder.skills.match_skills(trigger_text))
+            synthetic_loaded_skills: list[str] = []
             case_score = 0
             case_max_score = 0
             failures: list[str] = []
@@ -348,7 +350,17 @@ def evaluate_skill_benchmark(
                     else benchmark.skill in always_skill_names
                 )
             )
-            target_loaded = target_marker in system_prompt
+            synthetic_loaded_skills.extend(skill for skill in always_skill_names if skill in available_names)
+            synthetic_loaded_skills.extend(triggered_skills)
+            benchmark_prompt = system_prompt
+            if synthetic_loaded_skills:
+                synthetic_prompt = builder.skills.load_skills_for_context(
+                    list(dict.fromkeys(synthetic_loaded_skills))
+                )
+                if synthetic_prompt:
+                    benchmark_prompt = benchmark_prompt + "\n\n# Synthetic Skill Load (benchmark only)\n\n" + synthetic_prompt
+
+            target_loaded = target_marker in benchmark_prompt
             check(
                 target_triggered == case.expect_triggered,
                 (
@@ -385,17 +397,17 @@ def evaluate_skill_benchmark(
                     )
             for snippet in case.prompt_must_contain:
                 check(
-                    snippet in system_prompt,
+                    snippet in benchmark_prompt,
                     f"expected prompt to contain snippet: {snippet!r}",
                 )
             for snippet in case.prompt_must_not_contain:
                 check(
-                    snippet not in system_prompt,
+                    snippet not in benchmark_prompt,
                     f"expected prompt not to contain snippet: {snippet!r}",
                 )
             for pattern in case.prompt_must_match_regex:
                 try:
-                    matched = re.search(pattern, system_prompt, re.MULTILINE) is not None
+                    matched = re.search(pattern, benchmark_prompt, re.MULTILINE) is not None
                 except re.error as exc:
                     raise SkillBenchmarkError(f"invalid regex {pattern!r}: {exc}") from exc
                 check(
@@ -404,7 +416,7 @@ def evaluate_skill_benchmark(
                 )
             for pattern in case.prompt_must_not_match_regex:
                 try:
-                    matched = re.search(pattern, system_prompt, re.MULTILINE) is not None
+                    matched = re.search(pattern, benchmark_prompt, re.MULTILINE) is not None
                 except re.error as exc:
                     raise SkillBenchmarkError(f"invalid regex {pattern!r}: {exc}") from exc
                 check(

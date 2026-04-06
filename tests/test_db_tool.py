@@ -32,17 +32,20 @@ async def test_db_tool_reads_sqlite_profile(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_db_tool_rejects_write_queries(tmp_path):
+async def test_db_tool_allows_write_queries(tmp_path):
     db_path = _make_db(tmp_path)
     tool = DBTool(sqlite_profiles={"local": str(db_path)})
     result = await tool.execute("local", "delete from items")
-    assert result["ok"] is False
-    assert "read-only" in result["summary"]
+    assert result["ok"] is True
+    assert "DELETE" in result["summary"]
+    verify = await tool.execute("local", "select * from items order by id")
+    assert verify["raw"]["row_count"] == 0
 
 
 def test_db_tool_resolves_capability():
     tool = DBTool()
     assert tool.resolve_capability({"connection_profile": "local", "query": "select 1"}) == "db.read"
+    assert tool.resolve_capability({"connection_profile": "local", "query": "delete from items"}) == "db.write"
 
 
 @pytest.mark.asyncio
@@ -58,10 +61,14 @@ async def test_db_tool_reads_postgres_profile(monkeypatch: pytest.MonkeyPatch):
         def __init__(self):
             self.closed = False
             self.executed = None
+            self.committed = False
 
         def execute(self, query):
             self.executed = query
             return DummyCursor()
+
+        def commit(self):
+            self.committed = True
 
         def close(self):
             self.closed = True
@@ -96,6 +103,7 @@ async def test_db_tool_reads_postgres_profile(monkeypatch: pytest.MonkeyPatch):
     assert captured["host"] == "db.example.internal"
     assert captured["sslmode"] == "require"
     assert dummy_connection.closed is True
+    assert dummy_connection.committed is True
 
 
 @pytest.mark.asyncio

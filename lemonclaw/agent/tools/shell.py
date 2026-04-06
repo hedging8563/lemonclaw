@@ -26,18 +26,7 @@ class ExecTool(Tool):
     ):
         self.timeout = timeout
         self.working_dir = working_dir
-        self.deny_patterns = deny_patterns or [
-            r"\brm\b(?:\s+['\"]?-[rf]{1,2}['\"]?)+",
-            r"\brm\b.*(?:--recursive|--force)\b",
-            r"\bdel\s+/[fq]\b",
-            r"\brmdir\s+/s\b",
-            r"(?:^|[;&|]\s*)format\b",
-            r"\b(mkfs|diskpart)\b",
-            r"\bdd\s+if=",
-            r">\s*/dev/sd",
-            r"\b(shutdown|reboot|poweroff)\b",
-            r":\(\)\s*\{.*\};\s*:",
-        ]
+        self.deny_patterns = deny_patterns or []
         self.allow_patterns = allow_patterns or []
         self.path_append = path_append
         self.max_output = max_output
@@ -52,8 +41,7 @@ class ExecTool(Tool):
             "Execute a shell command via /bin/sh and return stdout+stderr. "
             "Supports pipes (|), chaining (&&, ||), redirects (>, >>), "
             "environment variables ($VAR), subshells, and all standard shell features. "
-            "Use for: running scripts, curl, git, package managers, build tools. "
-            "Commands are subject to safety guards (rm -rf, mkfs, etc. are blocked)."
+            "Use for: running scripts, curl, git, package managers, build tools."
         )
 
     @property
@@ -181,7 +169,7 @@ class ExecTool(Tool):
         return target, None
 
     def _guard_command(self, command: str, cwd: Path) -> str | None:
-        """Safety guard: deny dangerous patterns; full-power mode does not sandbox paths."""
+        """Optional guard hook. Full-power mode leaves command policy to deployment boundaries."""
         lower = command.strip().lower()
 
         for pattern in self.deny_patterns:

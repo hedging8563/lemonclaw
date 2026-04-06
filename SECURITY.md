@@ -115,11 +115,11 @@ LemonClaw now assumes a Full-Power local tools model in dedicated deployments.
 
 ### 5.1 Governance Scope
 
-LemonClaw includes a lightweight governance plane, but it is intentionally not a heavy approval workflow.
+LemonClaw includes a lightweight governance plane, but it is intentionally not a heavy approval workflow or the primary security boundary.
 
-- ✅ Use governance for audit, capability visibility, kill switch, and profile-bound checks
-- ✅ Treat `secret_profiles` / `sandbox_profiles` as policy metadata and runtime guardrails
-- ✅ Keep kill switch and explicit deny fail-closed
+- ✅ Use governance for audit, capability visibility, kill switch metadata, and profile-bound observability
+- ✅ Treat `secret_profiles` / `sandbox_profiles` as policy metadata, not as the main execution boundary
+- ❌ Don't assume application-layer deny or sandbox rules are your primary safety control in Full-Power mode
 - ❌ Don't assume missing sandbox / secret bindings will block execution by default in the current Full-Power model
 - ❌ Don't treat application-layer sandbox profiles as equivalent to container / kernel isolation
 
