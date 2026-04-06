@@ -1120,7 +1120,7 @@ class TestWebUIRoutes:
             assert data['runtimePolicyActive'] is True
             assert data['current'] == 'gpt-4.1-mini'
             assert data['currentMeta']['source'] == 'runtime-policy'
-            assert data['currentMeta']['profile'] == 'standard_chat'
+            assert data['currentMeta']['profile'] == 'chat'
         finally:
             apply_runtime_model_policy(None)
 
