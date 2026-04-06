@@ -2505,10 +2505,11 @@ class AgentLoop:
         *,
         should_commit: Callable[[], bool] | None = None,
     ) -> bool:
-        """Delegate to MemoryStore.consolidate(). Uses Groq for speed + cost."""
+        """Delegate to MemoryStore.consolidate() with provider resolved for the consolidation model."""
         from lemonclaw.config.defaults import DEFAULT_CONSOLIDATION_MODEL
+        active_provider = self._provider_for_model(DEFAULT_CONSOLIDATION_MODEL)
         return await self.context.memory.consolidate(
-            session, self.provider, DEFAULT_CONSOLIDATION_MODEL,
+            session, active_provider, DEFAULT_CONSOLIDATION_MODEL,
             archive_all=archive_all, memory_window=self.memory_window,
             should_commit=should_commit,
         )

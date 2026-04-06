@@ -67,6 +67,47 @@ class TestMemoryConsolidationTypeHandling:
         assert "User likes testing." in store.memory_file.read_text()
 
     @pytest.mark.asyncio
+    async def test_json_content_arguments_work(self, tmp_path: Path) -> None:
+        """Primary path: provider returns strict JSON content instead of a tool call."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=LLMResponse(
+                content=json.dumps({
+                    "history_entry": "[2026-01-01] User discussed testing.",
+                    "memory_update": "# Memory\nUser likes testing.",
+                }),
+                tool_calls=[],
+            )
+        )
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+        assert "User discussed testing." in store.history_file.read_text()
+        assert "User likes testing." in store.memory_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_json_content_inside_markdown_fence_is_accepted(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=LLMResponse(
+                content="""```json
+{"history_entry":"[2026-01-01] User discussed testing.","memory_update":"# Memory\\nUser likes testing."}
+```""",
+                tool_calls=[],
+            )
+        )
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+        assert "User discussed testing." in store.history_file.read_text()
+
+    @pytest.mark.asyncio
     async def test_dict_arguments_serialized_to_json(self, tmp_path: Path) -> None:
         """Issue #1042: LLM returns dict instead of string — must not raise TypeError."""
         store = MemoryStore(tmp_path)

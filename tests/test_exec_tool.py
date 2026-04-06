@@ -44,16 +44,15 @@ async def test_exec_honors_working_dir_parameter(tmp_path) -> None:
     assert str(nested) in result
 
 
-@pytest.mark.asyncio
-async def test_exec_blocks_direct_lemondata_nonchat_generation_calls() -> None:
-    tool = ExecTool(timeout=5)
+def test_exec_does_not_special_case_direct_lemondata_nonchat_generation_calls(tmp_path) -> None:
+    tool = ExecTool(timeout=5, working_dir=str(tmp_path))
 
-    result = await tool.execute(
+    result = tool._guard_command(
         'curl -s https://api.lemondata.cc/v1/videos/generations '
         '-H "Authorization: Bearer $API_KEY" '
         '-H "Content-Type: application/json" '
-        '-d \'{"model":"sora-2","prompt":"test"}\''
+        '-d \'{"model":"sora-2","prompt":"test"}\'',
+        tmp_path,
     )
 
-    assert "lemondata_nonchat" in result
-    assert "blocked" in result.lower()
+    assert result is None

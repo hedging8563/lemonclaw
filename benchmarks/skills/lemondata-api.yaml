@@ -1,31 +1,29 @@
 skill: lemondata-api
-expected_always_loaded: true
+expected_always_loaded: false
 cases:
   - name: image-generation
     message: 生成图片，一只戴墨镜的猫。
-    expect_triggered: false
+    expect_triggered: true
     prompt_must_contain:
       - This is a `tool-wrapper` skill.
   - name: embeddings
     message: 我需要嵌入向量，用来做客服工单的语义检索。
-    expect_triggered: false
+    expect_triggered: true
     prompt_must_contain:
-      - use `lemondata_nonchat(action="discover", category="...")`
+      - if it helps, use `lemondata_nonchat(action="discover", category="...")`
   - name: tts
     message: 帮我配音一段产品演示文案。
-    expect_triggered: false
+    expect_triggered: true
     prompt_must_contain:
       - TTS / STT / embeddings / rerank
   - name: rerank
     message: 请重排这批搜索结果，按相关性排序。
-    expect_triggered: false
+    expect_triggered: true
     prompt_must_contain:
       - rerank
   - name: neutral-request
     message: What is the current balance on my account?
     expect_triggered: false
-    prompt_must_contain:
-      - This is a `tool-wrapper` skill.
     forbidden_skills:
       - content-writer
       - frontend-design

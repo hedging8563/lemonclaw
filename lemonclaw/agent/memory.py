@@ -23,32 +23,7 @@ CONSOLIDATION_TIMEOUT = 30  # seconds
 HISTORY_MAX_ENTRIES = 200
 HISTORY_KEEP_ENTRIES = 150
 
-_SAVE_MEMORY_TOOL = [
-    {
-        "type": "function",
-        "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "history_entry": {
-                        "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search. "
-                        "Write in the SAME language as the majority of user messages in the conversation.",
-                    },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
-                    },
-                },
-                "required": ["history_entry", "memory_update"],
-            },
-        },
-    }
-]
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 
 
 class MemoryStore:
@@ -433,10 +408,10 @@ class MemoryStore:
         timeout: float = CONSOLIDATION_TIMEOUT,
         should_commit: Callable[[], bool] | None = None,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+        """Consolidate old messages into MEMORY.md + HISTORY.md via strict JSON output.
 
         Returns True on success (including no-op), False on failure.
-        If the model fails or doesn't call save_memory, it fails closed without
+        If the model fails or doesn't return valid consolidation JSON, it fails closed without
         auto-switching providers or models.
 
         Uses a per-workspace lock to prevent concurrent writes to MEMORY.md/HISTORY.md.
@@ -465,13 +440,19 @@ class MemoryStore:
                 lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
 
             current_memory = self.read_long_term()
-            prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+            prompt = f"""Process this conversation and return exactly one JSON object with your consolidation.
 
 IMPORTANT: Do NOT save information about content refusals, safety warnings, or "I can't discuss that" interactions.
 These are model artifacts, not useful memories. Focus on actual tasks, preferences, and facts.
 
 LANGUAGE: Write history_entry and memory_update in the SAME language as the user's messages. \
 If the user wrote in Chinese, output in Chinese. If in English, output in English.
+
+OUTPUT CONTRACT:
+- Return exactly one JSON object, no markdown fences, no prose
+- Keys must be: history_entry, memory_update
+- history_entry must be a short paragraph starting with [YYYY-MM-DD HH:MM]
+- memory_update must be the full updated long-term memory as markdown
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -480,7 +461,7 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
 {chr(10).join(lines)}"""
 
             messages = [
-                {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                {"role": "system", "content": "You are a memory consolidation agent. Return strict JSON only."},
                 {"role": "user", "content": prompt},
             ]
 
@@ -489,25 +470,18 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
                 response = await asyncio.wait_for(
                     provider.chat(
                         messages=messages,
-                        tools=_SAVE_MEMORY_TOOL,
                         model=current_model,
                     ),
                     timeout=timeout,
                 )
 
-                if not response.has_tool_calls:
-                    logger.warning("Memory consolidation: LLM did not call save_memory, giving up")
+                args = self._extract_consolidation_payload(response)
+                if args is None:
+                    logger.warning("Memory consolidation: LLM did not return valid consolidation JSON, giving up")
                     return False
 
                 if should_commit is not None and not should_commit():
                     logger.info("Memory consolidation superseded before commit, skipping write")
-                    return False
-
-                args = response.tool_calls[0].arguments
-                if isinstance(args, str):
-                    args = json.loads(args)
-                if not isinstance(args, dict):
-                    logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
                     return False
 
                 if entry := args.get("history_entry"):
@@ -542,3 +516,45 @@ If the user wrote in Chinese, output in Chinese. If in English, output in Englis
             except Exception:
                 logger.exception("Memory consolidation failed")
                 return False
+
+    @staticmethod
+    def _strip_json_fence(content: str) -> str:
+        match = _JSON_FENCE_RE.match(str(content or ""))
+        if match:
+            return match.group(1).strip()
+        return str(content or "").strip()
+
+    @classmethod
+    def _extract_consolidation_payload(cls, response) -> dict | None:
+        if getattr(response, "has_tool_calls", False):
+            tool_call = response.tool_calls[0]
+            if getattr(tool_call, "name", "") != "save_memory":
+                logger.warning("Memory consolidation: unexpected tool call {}", getattr(tool_call, "name", ""))
+                return None
+            args = tool_call.arguments
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    logger.warning("Memory consolidation: failed to parse tool-call JSON arguments")
+                    return None
+            if isinstance(args, dict):
+                return args
+            logger.warning("Memory consolidation: unexpected tool-call arguments type {}", type(args).__name__)
+            return None
+
+        raw_content = cls._strip_json_fence(getattr(response, "content", "") or "")
+        if not raw_content:
+            return None
+        try:
+            payload = json.loads(raw_content)
+        except Exception:
+            logger.warning("Memory consolidation: failed to parse JSON content")
+            return None
+        if not isinstance(payload, dict):
+            logger.warning("Memory consolidation: expected JSON object, got {}", type(payload).__name__)
+            return None
+        if "history_entry" not in payload or "memory_update" not in payload:
+            logger.warning("Memory consolidation: missing required JSON keys")
+            return None
+        return payload

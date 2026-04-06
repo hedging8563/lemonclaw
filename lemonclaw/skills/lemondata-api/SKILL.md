@@ -1,13 +1,13 @@
 ---
 name: lemondata-api
 description: Call LemonData APIs for chat, images, video, music, 3D, TTS, STT, embeddings, and rerank. Use when the user wants LemonData generation or model discovery, especially for non-chat workflows that need live category catalog truth plus optional recommendation snapshots.
-metadata: {"lemonclaw":{"always":true,"pattern":"tool-wrapper","requires":{"env":["API_KEY"]}}}
-triggers: "lemondata,画图,生成图片,做视频,生成视频,音乐,歌曲,3D,TTS,STT,embedding,嵌入,rerank,重排,转录,语音识别,remove background,upscale"
+metadata: {"lemonclaw":{"pattern":"tool-wrapper","requires":{"env":["API_KEY"]}}}
+triggers: "lemondata,画图,生成图片,做视频,生成视频,音乐,歌曲,3D,TTS,STT,embedding,嵌入,rerank,重排,转录,语音识别,配音,remove background,upscale"
 ---
 
 # LemonData API
 
-This is a `tool-wrapper` skill. Keep it lean and rely on live API truth.
+This is a `tool-wrapper` skill. Keep it lean and rely on live API truth, but treat `lemondata_nonchat` as a convenience helper rather than a mandatory framework.
 
 Load these references only when needed:
 - [references/nonchat-truth.md](references/nonchat-truth.md) for non-chat discovery and recovery rules
@@ -48,8 +48,9 @@ For image, video, music, 3D, TTS, STT, embeddings, and rerank:
 - read the live category catalog first
 
 Preferred path inside LemonClaw:
-- use `lemondata_nonchat(action="discover", category="...")`
-- then use `lemondata_nonchat(action="request", ...)`
+- if it helps, use `lemondata_nonchat(action="discover", category="...")`
+- if it helps, then use `lemondata_nonchat(action="request", ...)`
+- direct `exec` / `curl` / SDK calls are also allowed when the agent has enough context to construct a correct request safely
 
 Interpretation rule:
 - `discover` returns the current category catalog from `/v1/models?category=...`
@@ -69,7 +70,7 @@ When the user asks "does model X exist / support / 上线了吗":
 - never claim a model is absent just because it is missing from `recommended_for`
 - never treat a truncated display list (for example the first 12/20 rows) as proof that the model does not exist
 
-If the helper is unavailable, read `/v1/models?category=<category>` before suggesting or calling a model.
+If the helper is unavailable or the runtime already has enough direct context, read `/v1/models?category=<category>` before suggesting or calling a model.
 
 ## Non-Chat Recovery
 

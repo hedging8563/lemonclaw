@@ -203,6 +203,18 @@ def test_make_provider_returns_lemondata_response_provider():
     assert isinstance(provider, LemonDataResponsesProvider)
 
 
+def test_make_provider_returns_litellm_provider_for_llama_consolidation_model():
+    from lemonclaw.cli.commands import _make_provider
+
+    config = Config()
+    config.providers.lemondata.api_key = "sk-test"
+    config.providers.lemondata.api_base = "https://api.lemondata.cc/v1"
+
+    provider = _make_provider(config, "llama-3.3-70b-versatile")
+
+    assert isinstance(provider, LiteLLMProvider)
+
+
 def test_channels_status_lists_matrix_and_wecom():
     config = Config()
     config.channels.matrix.enabled = True

@@ -6,6 +6,7 @@ Run: pytest tests/test_memory.py -v
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -90,6 +91,28 @@ class TestConsolidationTimeout:
         assert result is True
         assert store.memory_file.exists()
         assert store.history_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_success_with_strict_json_output(self, store, mock_session):
+        """Primary path: model returns strict JSON content and runtime writes files."""
+        from lemonclaw.providers.base import LLMResponse
+
+        provider = AsyncMock()
+        provider.chat.return_value = LLMResponse(
+            content=json.dumps({
+                "history_entry": "[2026-03-01 10:00] User greeted bot and asked to do something.",
+                "memory_update": "# Memory\nUser likes greetings.",
+            }, ensure_ascii=False)
+        )
+
+        result = await store.consolidate(
+            mock_session, provider, "test-model",
+            memory_window=50,
+        )
+
+        assert result is True
+        assert "User likes greetings." in store.memory_file.read_text()
+        assert "User greeted bot" in store.history_file.read_text()
 
 
 # ── Session truncation after consolidation ────────────────────────────
