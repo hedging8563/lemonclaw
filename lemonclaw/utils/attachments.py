@@ -5,12 +5,14 @@ from __future__ import annotations
 import csv
 import mimetypes
 import shutil
+import struct
 import subprocess
 import zipfile
 from io import StringIO
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
+import zlib
 
 from lemonclaw.utils.helpers import ensure_dir, safe_filename
 from lemonclaw.utils.pdf_extract import preview_pdf
@@ -91,7 +93,53 @@ def _png_color_type(data: bytes) -> int | None:
     return data[25]
 
 
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    if data[12:16] != b"IHDR":
+        return None
+    width = struct.unpack(">I", data[16:20])[0]
+    height = struct.unpack(">I", data[20:24])[0]
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    header = chunk_type + payload
+    return (
+        struct.pack(">I", len(payload))
+        + header
+        + struct.pack(">I", zlib.crc32(header) & 0xFFFFFFFF)
+    )
+
+
+def _encode_rgb_png(rgb: bytes, width: int, height: int) -> bytes:
+    row_bytes = width * 3
+    if len(rgb) != row_bytes * height:
+        raise ValueError("rgb payload length does not match image dimensions")
+    filtered = b"".join(
+        b"\x00" + rgb[offset:offset + row_bytes]
+        for offset in range(0, len(rgb), row_bytes)
+    )
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(filtered, level=9))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
 def _normalize_png_for_model(path: Path) -> bytes | None:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    dimensions = _png_dimensions(raw)
+    if dimensions is None:
+        return None
+    width, height = dimensions
     try:
         completed = subprocess.run(
             [
@@ -102,12 +150,10 @@ def _normalize_png_for_model(path: Path) -> bytes | None:
                 str(path),
                 "-frames:v",
                 "1",
-                "-f",
-                "image2pipe",
-                "-vcodec",
-                "png",
                 "-pix_fmt",
                 "rgb24",
+                "-f",
+                "rawvideo",
                 "pipe:1",
             ],
             check=True,
@@ -116,7 +162,14 @@ def _normalize_png_for_model(path: Path) -> bytes | None:
         )
     except (OSError, subprocess.CalledProcessError):
         return None
-    return completed.stdout or None
+    rgb = completed.stdout or b""
+    expected = width * height * 3
+    if len(rgb) != expected:
+        return None
+    try:
+        return _encode_rgb_png(rgb, width, height)
+    except ValueError:
+        return None
 
 
 def image_bytes_for_model(path: str | Path, mime: str | None) -> tuple[bytes | None, str | None]:
