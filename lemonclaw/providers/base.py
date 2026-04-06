@@ -177,6 +177,14 @@ class LLMProvider(ABC):
         Providers that do not support embeddings may raise NotImplementedError.
         """
         raise NotImplementedError("This provider does not implement embeddings.")
+
+    def count_tokens(self, messages: list[dict[str, Any]], model: str) -> int:
+        """Provider-aware token counting helper."""
+        raise NotImplementedError("This provider does not implement token counting.")
+
+    def get_context_window(self, model: str) -> int:
+        """Provider-aware context-window helper."""
+        raise NotImplementedError("This provider does not implement context-window lookup.")
     
     @abstractmethod
     def get_default_model(self) -> str:

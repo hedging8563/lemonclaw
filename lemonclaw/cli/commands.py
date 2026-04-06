@@ -1688,8 +1688,14 @@ def _login_github_copilot() -> None:
     console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
 
     async def _trigger():
-        from litellm import acompletion
-        await acompletion(model="github_copilot/gpt-4o", messages=[{"role": "user", "content": "hi"}], max_tokens=1)
+        from lemonclaw.providers.litellm_provider import LiteLLMProvider
+
+        provider = LiteLLMProvider(default_model="gpt-4o", provider_name="github_copilot")
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            model="gpt-4o",
+            max_tokens=1,
+        )
 
     try:
         asyncio.run(_trigger())

@@ -104,18 +104,19 @@ class MemoryStore:
         one-time MEMORY.md -> entities migration path.
         """
         migrated = False
+        migration_coro = self._migrate_memory_to_entities(
+            self.memory_dir,
+            self.entities,
+        )
         try:
-            migrated = asyncio.run(
-                self._migrate_memory_to_entities(
-                    self.memory_dir,
-                    self.entities,
-                )
-            )
+            migrated = asyncio.run(migration_coro)
         except RuntimeError:
+            migration_coro.close()
             # If a loop is already running (rare during object construction),
             # fall back to defaults; later sync will still enrich the cards.
             logger.debug("Entity migration skipped during bootstrap: event loop already running")
         except Exception:
+            migration_coro.close()
             logger.exception("Entity bootstrap migration failed")
         finally:
             self.entities.init_defaults()

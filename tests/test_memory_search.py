@@ -1,6 +1,7 @@
 """Tests for memory search index (lancedb hybrid search)."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -166,5 +167,73 @@ def test_memory_store_set_provider_bootstraps_index_when_missing(tmp_path):
             store.set_provider(provider)
             await asyncio.sleep(0)
             rebuild.assert_awaited_once_with(provider)
+
+    asyncio.run(_exercise())
+
+
+def test_search_index_respects_disabled_policy(tmp_path):
+    from lemonclaw.memory.search import MemorySearchIndex
+
+    idx = MemorySearchIndex(tmp_path / "memory")
+
+    with patch("lemonclaw.providers.catalog.get_runtime_memory_policy", return_value={"indexMode": "disabled"}):
+        result = asyncio.run(idx.rebuild(AsyncMock()))
+
+    assert result == 0
+    assert idx.status()["mode"] == "disabled"
+    assert idx.status()["last_error"] == "index_disabled"
+
+
+def test_search_index_builds_fts_only_without_embedding_when_policy_forces_it(tmp_path):
+    from lemonclaw.memory.entities import EntityStore
+    from lemonclaw.memory.search import MemorySearchIndex
+
+    store = EntityStore(tmp_path / "memory")
+    store.create_card("tech", "tech", ["python"], body="# Tech\nPython 3.13\n")
+    idx = MemorySearchIndex(tmp_path / "memory")
+
+    class _DummyTable:
+        def __init__(self):
+            self.schema = SimpleNamespace(names=["id", "source", "name", "text"])
+
+        def create_fts_index(self, *_args, **_kwargs):
+            return None
+
+    dummy_table = _DummyTable()
+
+    async def _exercise():
+        with (
+            patch("lemonclaw.memory.search._lancedb_available", return_value=True),
+            patch("lemonclaw.providers.catalog.get_runtime_memory_policy", return_value={"indexMode": "fts_only"}),
+            patch.object(idx, "_connect", return_value=None),
+            patch.object(idx, "_get_or_create_table", side_effect=lambda *args, **kwargs: setattr(idx, "_table", dummy_table)),
+            patch.object(idx, "_embed", AsyncMock(return_value=[[0.1, 0.2]])) as embed,
+        ):
+            count = await idx.rebuild(AsyncMock())
+            assert count == 1
+            embed.assert_not_awaited()
+
+    asyncio.run(_exercise())
+    assert idx.status()["mode"] == "fts_only"
+
+
+def test_upsert_entity_rebuilds_instead_of_resetting_table_on_embedding_failure(tmp_path):
+    from lemonclaw.memory.search import MemorySearchIndex
+
+    idx = MemorySearchIndex(tmp_path / "memory")
+    idx._mode = "hybrid"
+    idx._table = SimpleNamespace(schema=SimpleNamespace(names=["id", "source", "name", "text", "vector"]))
+
+    async def _exercise():
+        with (
+            patch("lemonclaw.memory.search._lancedb_available", return_value=True),
+            patch.object(idx, "_get_or_create_table", return_value=None),
+            patch.object(idx, "_table_has_vector_column", return_value=True),
+            patch.object(idx, "_embed", AsyncMock(side_effect=RuntimeError("embed down"))),
+            patch.object(idx, "rebuild", AsyncMock(return_value=5)) as rebuild,
+        ):
+            ok = await idx.upsert_entity("tech", "# Tech", AsyncMock())
+            assert ok is True
+            rebuild.assert_awaited_once()
 
     asyncio.run(_exercise())

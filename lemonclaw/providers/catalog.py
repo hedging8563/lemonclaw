@@ -60,6 +60,15 @@ _RUNTIME_SCENE_PROFILES: dict[str, str] = {}
 _RUNTIME_PROFILES: dict[str, list[str]] = {}
 _RUNTIME_MODEL_PROFILE_OVERRIDES: dict[str, str] = {}
 _RUNTIME_ALIAS_MAP: dict[str, str] = {}
+_RUNTIME_MEMORY_POLICY: dict[str, Any] = {
+    "indexMode": "auto",
+    "preferredEmbeddingModel": "text-embedding-3-small",
+    "fallbackEmbeddingModels": [
+        "text-embedding-005",
+        "text-multilingual-embedding-002",
+        "gemini-embedding-001",
+    ],
+}
 _RUNTIME_POLICY_ACTIVE = False
 _RUNTIME_POLICY_PATH = Path(os.environ.get('LEMONCLAW_RUNTIME_MODEL_POLICY_PATH', str(Path.home() / '.lemonclaw' / 'runtime-model-policy.json')))
 
@@ -88,6 +97,16 @@ def _reset_to_builtin() -> None:
     _RUNTIME_PROFILES.clear()
     _RUNTIME_MODEL_PROFILE_OVERRIDES.clear()
     _RUNTIME_ALIAS_MAP.clear()
+    _RUNTIME_MEMORY_POLICY.clear()
+    _RUNTIME_MEMORY_POLICY.update({
+        "indexMode": "auto",
+        "preferredEmbeddingModel": "text-embedding-3-small",
+        "fallbackEmbeddingModels": [
+            "text-embedding-005",
+            "text-multilingual-embedding-002",
+            "gemini-embedding-001",
+        ],
+    })
     globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
     globals()['_RUNTIME_POLICY_ACTIVE'] = False
 
@@ -146,6 +165,14 @@ def get_runtime_default_model(scene: str = 'chat') -> str:
     return _RUNTIME_DEFAULTS.get(scene, _RUNTIME_DEFAULTS['chat'])
 
 
+def get_runtime_memory_policy() -> dict[str, Any]:
+    return {
+        "indexMode": str(_RUNTIME_MEMORY_POLICY.get("indexMode") or "auto"),
+        "preferredEmbeddingModel": str(_RUNTIME_MEMORY_POLICY.get("preferredEmbeddingModel") or "text-embedding-3-small"),
+        "fallbackEmbeddingModels": list(_RUNTIME_MEMORY_POLICY.get("fallbackEmbeddingModels") or []),
+    }
+
+
 def get_fallback_chain(model_id: str, scene: str = 'chat') -> list[str]:
     model_id = resolve_model_id(model_id) or model_id
     profile_name = _RUNTIME_MODEL_PROFILE_OVERRIDES.get(model_id) or _RUNTIME_SCENE_PROFILES.get(scene)
@@ -172,6 +199,8 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
     raw_profiles = policy.get('profiles') or {}
     raw_scene_profiles = policy.get('sceneProfiles') or {}
     raw_model_overrides = policy.get('modelProfileOverrides') or {}
+    raw_internal = policy.get('internal') if isinstance(policy.get('internal'), dict) else {}
+    raw_internal_memory = raw_internal.get('memory') if isinstance(raw_internal.get('memory'), dict) else {}
 
     runtime_rows: list[dict[str, Any]] = []
     active_model_ids: set[str] = set()
@@ -255,6 +284,16 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
     _RUNTIME_MODEL_PROFILE_OVERRIDES.update(model_overrides)
     _RUNTIME_ALIAS_MAP.clear()
     _RUNTIME_ALIAS_MAP.update(runtime_alias_map)
+    _RUNTIME_MEMORY_POLICY.clear()
+    _RUNTIME_MEMORY_POLICY.update({
+        "indexMode": str(raw_internal_memory.get("indexMode") or "auto"),
+        "preferredEmbeddingModel": str(raw_internal_memory.get("preferredEmbeddingModel") or "text-embedding-3-small"),
+        "fallbackEmbeddingModels": [
+            str(item)
+            for item in (raw_internal_memory.get("fallbackEmbeddingModels") or ["text-embedding-005", "text-multilingual-embedding-002", "gemini-embedding-001"])
+            if str(item or "").strip()
+        ],
+    })
     globals()['DEFAULT_MODEL'] = _RUNTIME_DEFAULTS['chat']
     globals()['_RUNTIME_POLICY_ACTIVE'] = True
 

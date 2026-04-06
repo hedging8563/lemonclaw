@@ -89,6 +89,8 @@ def _cards_look_like_default_shells(cards: list) -> bool:
         return False
 
     for card in cards:
+        if str(getattr(card, "name", "") or "").strip() not in DEFAULT_CARDS:
+            return False
         body = str(getattr(card, "body", "") or "").strip()
         name = str(getattr(card, "name", "") or "").strip()
         title = name.replace("-", " ").title()
@@ -196,7 +198,8 @@ def _bucket_memory_content(content: str) -> dict[str, list[str]]:
 
         normalized = re.sub(r"^\d+\.\s*", "- ", stripped)
         candidate = normalized if normalized.startswith("- ") else f"- {normalized}"
-        if not _is_noise(candidate[2:] if candidate.startswith("- ") else candidate):
+        raw_value = candidate[2:] if candidate.startswith("- ") else candidate
+        if not _is_noise(raw_value):
             sections.setdefault(current, []).append(candidate)
     return sections
 
@@ -206,6 +209,9 @@ def _is_noise(text: str) -> bool:
     lowered = normalized.casefold()
     if not normalized:
         return True
+    if normalized.startswith("- "):
+        normalized = normalized[2:].strip()
+        lowered = normalized.casefold()
     if lowered.startswith("# ") and lowered in {
         "# seed",
         "# preferences",
@@ -218,6 +224,8 @@ def _is_noise(text: str) -> bool:
         "# tech stack",
     }:
         return True
-    if len(normalized) <= 6:
+    has_cjk = any("\u4e00" <= char <= "\u9fff" for char in normalized)
+    min_len = 3 if has_cjk else 6
+    if len(normalized) <= min_len:
         return True
     return False

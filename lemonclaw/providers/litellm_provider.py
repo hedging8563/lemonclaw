@@ -155,14 +155,16 @@ class LiteLLMProvider(LLMProvider):
             os.environ.setdefault(env_name, resolved)
 
     def _embedding_model_candidates(self, model: str | None = None) -> list[str]:
+        from lemonclaw.providers.catalog import get_runtime_memory_policy
+
+        policy = get_runtime_memory_policy()
         requested = str(model or "").strip()
         candidates = [requested] if requested else []
-        for fallback in (
-            DEFAULT_EMBEDDING_MODEL,
-            "text-embedding-005",
-            "text-multilingual-embedding-002",
-            "gemini-embedding-001",
-        ):
+        configured = [
+            str(policy.get("preferredEmbeddingModel") or "").strip(),
+            *[str(item).strip() for item in list(policy.get("fallbackEmbeddingModels") or [])],
+        ]
+        for fallback in (*configured, DEFAULT_EMBEDDING_MODEL):
             if fallback and fallback not in candidates:
                 candidates.append(fallback)
         return candidates

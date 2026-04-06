@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from lemonclaw.providers.base import LLMProvider
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+SUPPORTED_INDEX_MODES = {"auto", "hybrid", "fts_only", "disabled"}
 
 
 def _lancedb_available() -> bool:
@@ -73,6 +74,26 @@ class MemorySearchIndex:
 
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
+
+    def _requested_index_mode(self) -> str:
+        from lemonclaw.providers.catalog import get_runtime_memory_policy
+
+        policy = get_runtime_memory_policy()
+        mode = str(policy.get("indexMode") or "auto").strip().lower()
+        return mode if mode in SUPPORTED_INDEX_MODES else "auto"
+
+    def _preferred_vector_mode(self) -> bool:
+        return self._requested_index_mode() in {"auto", "hybrid"}
+
+    def _resolve_table_mode(self) -> str:
+        requested = self._requested_index_mode()
+        if requested == "disabled":
+            return "disabled"
+        if not self.available:
+            return "keyword_only"
+        if self._table_has_vector_column() and requested != "fts_only":
+            return "hybrid"
+        return "fts_only"
 
     def _connect(self):
         """Lazy connect to lancedb."""
@@ -142,6 +163,12 @@ class MemorySearchIndex:
 
         Returns the number of documents indexed.
         """
+        requested_mode = self._requested_index_mode()
+        if requested_mode == "disabled":
+            self._set_mode("disabled")
+            self._record_status(operation="rebuild", error="index_disabled", indexed_docs=0)
+            return 0
+
         if not self.available:
             logger.debug("lancedb not available, skipping index rebuild")
             self._set_mode("keyword_only")
@@ -193,19 +220,23 @@ class MemorySearchIndex:
             self._record_status(operation="rebuild", indexed_docs=0)
             return 0
 
-        # Get embeddings
+        # Get embeddings when policy allows hybrid indexing.
         texts = [d["text"] for d in docs]
-        with_vectors = True
-        try:
-            vectors = await self._embed(texts, provider, model)
-            for doc, vec in zip(docs, vectors):
-                doc["vector"] = vec
-            self._set_mode("hybrid")
-        except Exception as e:
-            logger.warning("Embedding failed, rebuilding FTS-only index: {}", e)
-            with_vectors = False
+        with_vectors = requested_mode in {"auto", "hybrid"}
+        rebuild_error = ""
+        if with_vectors:
+            try:
+                vectors = await self._embed(texts, provider, model)
+                for doc, vec in zip(docs, vectors):
+                    doc["vector"] = vec
+                self._set_mode("hybrid")
+            except Exception as e:
+                logger.warning("Embedding failed, rebuilding FTS-only index: {}", e)
+                with_vectors = False
+                self._set_mode("fts_only")
+                rebuild_error = f"embed_failed:{type(e).__name__}"
+        else:
             self._set_mode("fts_only")
-            self._record_status(operation="rebuild", error=f"embed_failed:{type(e).__name__}", indexed_docs=0)
 
         # Recreate table
         self._connect()
@@ -225,7 +256,7 @@ class MemorySearchIndex:
             logger.warning("FTS index creation failed (BM25 disabled): {}", e)
 
         logger.info("Memory search index rebuilt: {} documents", len(docs))
-        self._record_status(operation="rebuild", indexed_docs=len(docs))
+        self._record_status(operation="rebuild", error=rebuild_error, indexed_docs=len(docs))
         return len(docs)
 
     async def search(
@@ -242,15 +273,22 @@ class MemorySearchIndex:
         Falls back to BM25-only if embedding fails.
         Returns list of dicts with id, source, name, text, _relevance_score.
         """
+        requested_mode = self._requested_index_mode()
+        if requested_mode == "disabled":
+            self._set_mode("disabled")
+            self._record_status(operation="search", error="index_disabled")
+            return []
+
         if not self.available:
             self._set_mode("keyword_only")
             self._record_status(operation="search", error="lancedb_unavailable")
             return []
 
-        self._get_or_create_table(with_vectors=self._mode == "hybrid", allow_mode_downgrade=True)
+        self._get_or_create_table(with_vectors=self._preferred_vector_mode(), allow_mode_downgrade=True)
         if self._table is None:
             self._record_status(operation="search", error="table_unavailable")
             return []
+        self._set_mode(self._resolve_table_mode())
 
         # Check if table has data
         try:
@@ -315,16 +353,23 @@ class MemorySearchIndex:
         Called when an entity card is created or updated, avoiding a full rebuild.
         Returns True on success, False on failure (non-fatal).
         """
+        requested_mode = self._requested_index_mode()
+        if requested_mode == "disabled":
+            self._set_mode("disabled")
+            self._record_status(operation="upsert_entity", error="index_disabled")
+            return False
+
         if not self.available:
             self._set_mode("keyword_only")
             self._record_status(operation="upsert_entity", error="lancedb_unavailable")
             return False
 
         try:
-            self._get_or_create_table(with_vectors=self._mode == "hybrid", allow_mode_downgrade=True)
+            self._get_or_create_table(with_vectors=self._preferred_vector_mode(), allow_mode_downgrade=True)
             if self._table is None:
                 self._record_status(operation="upsert_entity", error="table_unavailable")
                 return False
+            self._set_mode(self._resolve_table_mode())
 
             text = f"{name}: {body.strip()}"
             doc = {
@@ -333,14 +378,17 @@ class MemorySearchIndex:
                 "name": name,
                 "text": text,
             }
+            if requested_mode == "fts_only" and self._table_has_vector_column():
+                logger.debug("Memory index policy switched to FTS-only, rebuilding before entity upsert")
+                return bool(await self.rebuild(provider, model))
+
             if self._mode == "hybrid" and self._table_has_vector_column():
                 try:
                     vectors = await self._embed([text], provider, model)
                     doc["vector"] = vectors[0]
                 except Exception as e:
-                    logger.debug("Entity embedding failed, downgrading to FTS-only: {}", e)
-                    self._set_mode("fts_only")
-                    self._get_or_create_table(with_vectors=False, reset=True)
+                    logger.debug("Entity embedding failed, rebuilding index with fallback mode: {}", e)
+                    return bool(await self.rebuild(provider, model))
 
             # Delete existing entry if present, then add new one
             try:
