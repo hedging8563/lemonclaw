@@ -576,7 +576,7 @@ class AgentLoop:
         self.tools.register(GitTool(working_dir=str(self.workspace)))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
-        self.tools.register(LemonDataNonChatTool())
+        self.tools.register(LemonDataNonChatTool(workspace=self.workspace))
         self.tools.register(KnowledgeSearchTool(workspace=str(self.workspace)))
         if hasattr(self, "db_config") and self.db_config and self.db_config.enabled:
             self.tools.register(DBTool(

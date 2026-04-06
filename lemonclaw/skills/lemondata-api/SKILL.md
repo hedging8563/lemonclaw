@@ -53,8 +53,15 @@ Preferred path inside LemonClaw:
 
 Interpretation rule:
 - `discover` returns the current category catalog from `/v1/models?category=...`
+- `discover` also returns `request_guidance`, which includes concrete payload fields, multipart file fields, and binary-output notes for that category
 - if recommendation context is available, it may also attach `preferred_rank`, `status`, and `snapshot_at`
 - `snapshot_at` is the recommendation snapshot timestamp, not proof that the whole category directory was regenerated at that exact moment
+
+Tool request conventions:
+- JSON requests go in `payload`
+- local multipart files go in `files`
+- binary outputs such as TTS audio should use `save_to` when the caller wants a specific local filename
+- for image generation, local `files.image_path` / `files.image_paths` can be converted to inline data URLs when the endpoint is JSON-only
 
 When the user asks "does model X exist / support / 上线了吗":
 - use category discovery as the primary truth
@@ -105,5 +112,11 @@ Tell the user the task may take time, then poll status until the job reaches a t
 - music generation → non-chat discovery, then async music endpoint
 - 3D generation → non-chat discovery, then async 3D endpoint
 - TTS / STT / embeddings / rerank → non-chat discovery, then the matching endpoint
+
+High-value examples:
+- image edit with local file → `endpoint="/v1/images/edits"` + `payload.prompt` + `files.image_path`
+- image variation with local file → `endpoint="/v1/images/variations"` + `files.image_path`
+- STT with local audio → `endpoint="/v1/audio/transcriptions"` + `files.audio_path`
+- TTS audio file output → `endpoint="/v1/audio/speech"` + `payload.input` + `save_to`
 
 If you need concrete request bodies, load [references/endpoint-recipes.md](references/endpoint-recipes.md).

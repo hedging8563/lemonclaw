@@ -12,6 +12,7 @@ lemondata_nonchat(action="discover", category="<category>")
 
 Meaning:
 - this reads the current category catalog from `/v1/models?category=<category>`
+- it also returns `request_guidance`, which is the runtime-owned request shape summary for that category
 - if recommendation context is available, the tool may also attach `preferred_rank`, `status`, and `snapshot_at`
 - `snapshot_at` is the recommendation snapshot timestamp, not a guarantee that the full category catalog was regenerated at that same time
 
@@ -26,12 +27,20 @@ curl -s "https://api.lemondata.cc/v1/models?category=<category>" \
 
 - `image`
 - `video`
-- `audio`
+- `music`
+- `3d`
 - `tts`
 - `stt`
-- `3d`
 - `embedding`
+- `translation`
 - `rerank`
+
+## Request Shape Rule
+
+- put JSON fields inside `payload`
+- put local upload files inside `files`
+- use `save_to` for binary output when you want a predictable local filename
+- for image-generation JSON endpoints, the tool can convert local image paths into inline data URLs
 
 ## Failures That Require Fresh Discovery
 

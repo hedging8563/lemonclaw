@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -68,6 +69,7 @@ async def test_lemondata_nonchat_discover_returns_live_models(monkeypatch: pytes
     assert result["catalog_total"] == 2
     assert result["returned_model_count"] == 2
     assert result["truncated"] is False
+    assert result["request_guidance"]["default_endpoint"] == "/v1/videos/generations"
 
 
 @pytest.mark.asyncio
@@ -414,3 +416,186 @@ async def test_lemondata_nonchat_request_retries_on_transport_error(monkeypatch:
     assert result["selected_model"] == "model-b"
     assert result["attempted_models"] == ["model-a", "model-b"]
     assert result["fallback_reason"] == "transport_error"
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_image_generation_converts_local_file_to_data_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tool = LemonDataNonChatTool(workspace=tmp_path)
+    source = tmp_path / "source.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    seen_request: dict[str, object] = {}
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {"data": [{"id": "gpt-image-1", "lemondata": {"category": "image"}}]},
+            }
+        if path == "/v1/images/generations":
+            seen_request["body"] = body
+            return {
+                "ok": True,
+                "body": {"id": "img_local", "model": body["model"], "image_url": body.get("image_url")},
+            }
+        raise AssertionError((path, method, body))
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="image",
+            model="gpt-image-1",
+            payload={"prompt": "edit this", "operation": "image-to-image"},
+            files={"image_path": "source.png"},
+        )
+    )
+
+    assert result["ok"] is True
+    body = seen_request["body"]
+    assert isinstance(body, dict)
+    assert str(body["image_url"]).startswith("data:image/png;base64,")
+    assert result["request_mode"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_image_edit_supports_multipart_local_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tool = LemonDataNonChatTool(workspace=tmp_path)
+    image = tmp_path / "edit-source.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\nsource")
+    mask = tmp_path / "edit-mask.png"
+    mask.write_bytes(b"\x89PNG\r\n\x1a\nmask")
+    seen_request: dict[str, object] = {}
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {"data": [{"id": "flux-kontext-pro", "lemondata": {"category": "image"}}]},
+            }
+        raise AssertionError((path, method, body))
+
+    async def _fake_fetch_response(path: str, *, method: str = "GET", body=None, files=None, save_to=None):
+        seen_request["path"] = path
+        seen_request["body"] = body
+        seen_request["files"] = files
+        seen_request["save_to"] = save_to
+        return {
+            "ok": True,
+            "body": {"id": "edit_123", "model": body["model"]},
+            "content_type": "application/json",
+        }
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    monkeypatch.setattr(tool, "_fetch_response", _fake_fetch_response)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="image",
+            endpoint="/v1/images/edits",
+            model="flux-kontext-pro",
+            payload={"prompt": "replace the background"},
+            files={"image_path": "edit-source.png", "mask_path": "edit-mask.png"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["request_mode"] == "multipart"
+    assert seen_request["path"] == "/v1/images/edits"
+    assert seen_request["body"] == {"prompt": "replace the background", "model": "flux-kontext-pro"}
+    assert seen_request["files"] == {"image_path": "edit-source.png", "mask_path": "edit-mask.png"}
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_stt_supports_local_audio_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tool = LemonDataNonChatTool(workspace=tmp_path)
+    audio = tmp_path / "voice.mp3"
+    audio.write_bytes(b"fake-mp3")
+    seen_request: dict[str, object] = {}
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=stt":
+            return {
+                "ok": True,
+                "body": {"data": [{"id": "gpt-4o-mini-transcribe", "lemondata": {"category": "stt"}}]},
+            }
+        raise AssertionError((path, method, body))
+
+    async def _fake_fetch_response(path: str, *, method: str = "GET", body=None, files=None, save_to=None):
+        seen_request["path"] = path
+        seen_request["body"] = body
+        seen_request["files"] = files
+        return {
+            "ok": True,
+            "body": {"text": "hello world"},
+            "content_type": "application/json",
+        }
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    monkeypatch.setattr(tool, "_fetch_response", _fake_fetch_response)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="stt",
+            model="gpt-4o-mini-transcribe",
+            payload={"language": "en"},
+            files={"audio_path": "voice.mp3"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["request_mode"] == "multipart"
+    assert seen_request["path"] == "/v1/audio/transcriptions"
+    assert seen_request["files"] == {"audio_path": "voice.mp3"}
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_tts_binary_request_passes_save_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = LemonDataNonChatTool()
+    seen_request: dict[str, object] = {}
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=tts":
+            return {
+                "ok": True,
+                "body": {"data": [{"id": "gpt-4o-mini-tts", "lemondata": {"category": "tts"}}]},
+            }
+        raise AssertionError((path, method, body))
+
+    async def _fake_fetch_response(path: str, *, method: str = "GET", body=None, files=None, save_to=None):
+        seen_request["path"] = path
+        seen_request["body"] = body
+        seen_request["save_to"] = save_to
+        return {
+            "ok": True,
+            "body": {"saved_to": save_to, "content_type": "audio/mpeg", "size_bytes": 123},
+            "content_type": "audio/mpeg",
+        }
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    monkeypatch.setattr(tool, "_fetch_response", _fake_fetch_response)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="tts",
+            model="gpt-4o-mini-tts",
+            payload={"input": "hello", "voice": "nova"},
+            save_to="outputs/voice.mp3",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["request_mode"] == "json"
+    assert result["content_type"] == "audio/mpeg"
+    assert seen_request["path"] == "/v1/audio/speech"
+    assert seen_request["save_to"] == "outputs/voice.mp3"

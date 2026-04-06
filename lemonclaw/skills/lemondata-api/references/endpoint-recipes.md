@@ -20,6 +20,74 @@ curl -s https://api.lemondata.cc/v1/images/generations \
   -d '{"model":"gpt-image-1","prompt":"A cat wearing sunglasses","n":1,"size":"1024x1024"}'
 ```
 
+Tool form:
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="image",
+  model="gpt-image-1",
+  payload={
+    "prompt":"A cat wearing sunglasses",
+    "n":1,
+    "size":"1024x1024"
+  }
+)
+```
+
+## Image Edit
+
+Local file upload:
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="image",
+  endpoint="/v1/images/edits",
+  model="flux-kontext-pro",
+  payload={
+    "prompt":"Keep the composition, replace the background with a rainy neon alley"
+  },
+  files={
+    "image_path":"attachments/source.png",
+    "mask_path":"attachments/mask.png"
+  }
+)
+```
+
+JSON / remote URL form:
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="image",
+  endpoint="/v1/images/edits",
+  model="gpt-image-1",
+  payload={
+    "prompt":"Add a red umbrella",
+    "image_url":"https://example.com/source.png"
+  }
+)
+```
+
+## Image Variation
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="image",
+  endpoint="/v1/images/variations",
+  model="dall-e-2",
+  payload={
+    "n":1,
+    "size":"1024x1024"
+  },
+  files={
+    "image_path":"attachments/source.png"
+  }
+)
+```
+
 ## Video Generation
 
 ```bash
@@ -64,6 +132,21 @@ curl -s https://api.lemondata.cc/v1/audio/speech \
   --output speech.mp3
 ```
 
+Tool form:
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="tts",
+  model="<live-tts-model>",
+  payload={
+    "input":"Hello world",
+    "voice":"nova"
+  },
+  save_to="outputs/speech.mp3"
+)
+```
+
 ## STT
 
 ```bash
@@ -71,6 +154,22 @@ curl -s https://api.lemondata.cc/v1/audio/transcriptions \
   -H "Authorization: Bearer $API_KEY" \
   -F "model=<live-stt-model>" \
   -F "file=@audio.mp3"
+```
+
+Tool form:
+
+```text
+lemondata_nonchat(
+  action="request",
+  category="stt",
+  model="<live-stt-model>",
+  files={
+    "audio_path":"attachments/audio.mp3"
+  },
+  payload={
+    "language":"en"
+  }
+)
 ```
 
 ## Embeddings
