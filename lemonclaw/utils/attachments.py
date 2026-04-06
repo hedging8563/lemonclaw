@@ -105,6 +105,125 @@ def _png_dimensions(data: bytes) -> tuple[int, int] | None:
     return width, height
 
 
+def _parse_png_ihdr(data: bytes) -> tuple[int, int, int, int, int] | None:
+    if len(data) < 29 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    if data[12:16] != b"IHDR":
+        return None
+    width = struct.unpack(">I", data[16:20])[0]
+    height = struct.unpack(">I", data[20:24])[0]
+    bit_depth = data[24]
+    color_type = data[25]
+    interlace = data[28]
+    if width <= 0 or height <= 0:
+        return None
+    return width, height, bit_depth, color_type, interlace
+
+
+def _png_chunks(data: bytes) -> list[tuple[bytes, bytes]]:
+    chunks: list[tuple[bytes, bytes]] = []
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return chunks
+    offset = 8
+    while offset + 8 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        chunk_type = data[offset + 4:offset + 8]
+        start = offset + 8
+        end = start + length
+        crc_end = end + 4
+        if crc_end > len(data):
+            return []
+        chunks.append((chunk_type, data[start:end]))
+        offset = crc_end
+        if chunk_type == b"IEND":
+            break
+    return chunks
+
+
+def _paeth_predictor(left: int, up: int, up_left: int) -> int:
+    base = left + up - up_left
+    dist_left = abs(base - left)
+    dist_up = abs(base - up)
+    dist_up_left = abs(base - up_left)
+    if dist_left <= dist_up and dist_left <= dist_up_left:
+        return left
+    if dist_up <= dist_up_left:
+        return up
+    return up_left
+
+
+def _unfilter_png_scanlines(raw: bytes, *, width: int, height: int, bytes_per_pixel: int) -> bytes | None:
+    stride = width * bytes_per_pixel
+    expected = height * (stride + 1)
+    if len(raw) != expected:
+        return None
+    out = bytearray(height * stride)
+    src = 0
+    for row in range(height):
+        filter_type = raw[src]
+        src += 1
+        row_start = row * stride
+        row_data = raw[src:src + stride]
+        src += stride
+        if filter_type == 0:
+            out[row_start:row_start + stride] = row_data
+            continue
+        for col in range(stride):
+            left = out[row_start + col - bytes_per_pixel] if col >= bytes_per_pixel else 0
+            up = out[row_start - stride + col] if row > 0 else 0
+            up_left = out[row_start - stride + col - bytes_per_pixel] if row > 0 and col >= bytes_per_pixel else 0
+            value = row_data[col]
+            if filter_type == 1:
+                value = (value + left) & 0xFF
+            elif filter_type == 2:
+                value = (value + up) & 0xFF
+            elif filter_type == 3:
+                value = (value + ((left + up) // 2)) & 0xFF
+            elif filter_type == 4:
+                value = (value + _paeth_predictor(left, up, up_left)) & 0xFF
+            else:
+                return None
+            out[row_start + col] = value
+    return bytes(out)
+
+
+def _normalize_png_without_ffmpeg(data: bytes) -> bytes | None:
+    ihdr = _parse_png_ihdr(data)
+    if ihdr is None:
+        return None
+    width, height, bit_depth, color_type, interlace = ihdr
+    if interlace != 0 or bit_depth != 8 or color_type not in (0, 4):
+        return None
+    chunks = _png_chunks(data)
+    if not chunks:
+        return None
+    idat = b"".join(payload for chunk_type, payload in chunks if chunk_type == b"IDAT")
+    if not idat:
+        return None
+    try:
+        decompressed = zlib.decompress(idat)
+    except zlib.error:
+        return None
+    bytes_per_pixel = 1 if color_type == 0 else 2
+    pixels = _unfilter_png_scanlines(
+        decompressed,
+        width=width,
+        height=height,
+        bytes_per_pixel=bytes_per_pixel,
+    )
+    if pixels is None:
+        return None
+    rgb = bytearray()
+    if color_type == 0:
+        for gray in pixels:
+            rgb.extend((gray, gray, gray))
+    else:
+        for index in range(0, len(pixels), 2):
+            gray = pixels[index]
+            rgb.extend((gray, gray, gray))
+    return _encode_rgb_png(bytes(rgb), width, height)
+
+
 def _png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
     header = chunk_type + payload
     return (
@@ -136,6 +255,9 @@ def _normalize_png_for_model(path: Path) -> bytes | None:
         raw = path.read_bytes()
     except OSError:
         return None
+    normalized = _normalize_png_without_ffmpeg(raw)
+    if normalized is not None:
+        return normalized
     dimensions = _png_dimensions(raw)
     if dimensions is None:
         return None
