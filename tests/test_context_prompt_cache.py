@@ -7,6 +7,7 @@ from pathlib import Path
 import datetime as datetime_module
 
 from lemonclaw.agent.context import ContextBuilder
+from lemonclaw.providers.openai_codex_provider import _convert_messages
 
 
 class _FakeDatetime(real_datetime):
@@ -64,3 +65,25 @@ def test_runtime_context_uses_separate_system_message(tmp_path) -> None:
     assert isinstance(user_content, str)
     assert ContextBuilder._RUNTIME_CONTEXT_TAG not in user_content
     assert user_content == "Return exactly: OK"
+
+
+def test_runtime_context_separate_system_message_converts_back_to_stable_request_shape(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+        mode="chat",
+    )
+
+    system_prompt, input_items = _convert_messages(messages)
+
+    assert "# LemonClaw" in system_prompt
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG not in system_prompt
+    assert len(input_items) == 1
+    text = input_items[0]["content"][0]["text"]
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in text
+    assert text.endswith("Return exactly: OK")

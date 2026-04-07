@@ -124,20 +124,33 @@ def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return converted
 
 
+_RUNTIME_CONTEXT_PREFIX = "[Runtime Context"
+
+
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
-    system_prompt = ""
+    system_parts: list[str] = []
+    deferred_user_prefixes: list[str] = []
     input_items: list[dict[str, Any]] = []
+    first_user_index: int | None = None
 
     for idx, msg in enumerate(messages):
         role = msg.get("role")
         content = msg.get("content")
 
         if role == "system":
-            system_prompt = content if isinstance(content, str) else ""
+            if isinstance(content, str) and content.strip():
+                text = content.strip()
+                if text.startswith(_RUNTIME_CONTEXT_PREFIX):
+                    deferred_user_prefixes.append(text)
+                else:
+                    system_parts.append(text)
             continue
 
         if role == "user":
-            input_items.append(_convert_user_message(content))
+            user_message = _convert_user_message(content)
+            if first_user_index is None:
+                first_user_index = len(input_items)
+            input_items.append(user_message)
             continue
 
         if role == "assistant":
@@ -181,7 +194,29 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             )
             continue
 
+    if deferred_user_prefixes:
+        prefix_text = "\n\n".join(part for part in deferred_user_prefixes if part).strip()
+        if prefix_text:
+            if first_user_index is not None and first_user_index < len(input_items):
+                input_items[first_user_index] = _prepend_text_to_user_message(input_items[first_user_index], prefix_text)
+            else:
+                input_items.insert(0, {"role": "user", "content": [{"type": "input_text", "text": prefix_text}]})
+
+    system_prompt = "\n\n---\n\n".join(part for part in system_parts if part).strip()
     return system_prompt, input_items
+
+
+def _prepend_text_to_user_message(message: dict[str, Any], prefix_text: str) -> dict[str, Any]:
+    if message.get("role") != "user":
+        return message
+    content = list(message.get("content") or [])
+    prefix_item = {"type": "input_text", "text": prefix_text}
+    if content and isinstance(content[0], dict) and content[0].get("type") == "input_text":
+        existing_text = str(content[0].get("text") or "")
+        content[0] = {"type": "input_text", "text": f"{prefix_text}\n\n{existing_text}" if existing_text else prefix_text}
+    else:
+        content = [prefix_item, *content]
+    return {**message, "content": content}
 
 
 def _convert_user_message(content: Any) -> dict[str, Any]:
