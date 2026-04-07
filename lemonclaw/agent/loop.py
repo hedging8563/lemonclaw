@@ -714,6 +714,14 @@ class AgentLoop:
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     @staticmethod
+    def _current_turn_start_index(messages: list[dict[str, Any]], default: int) -> int:
+        """Locate the current user turn even if compaction rewrote earlier indices."""
+        for index, message in enumerate(messages):
+            if isinstance(message.get("_original_text"), str):
+                return index
+        return min(max(default, 0), len(messages))
+
+    @staticmethod
     def _progress_kind(
         *,
         tool_hint: bool = False,
@@ -1322,7 +1330,7 @@ class AgentLoop:
         effective_model = resolve_model_id(session_model or self.model) or session_model or self.model
         active_provider = self._provider_for_model(effective_model)
         messages = initial_messages
-        turn_start_idx = len(initial_messages)
+        turn_start_idx = self._current_turn_start_index(initial_messages, len(initial_messages))
         iteration = 0
         final_content = None
         tools_used: list[str] = []
@@ -1345,6 +1353,7 @@ class AgentLoop:
                 from lemonclaw.session.compaction import compact, needs_compaction
                 if needs_compaction(messages, effective_model):
                     messages = await compact(messages, effective_model, active_provider)
+                    turn_start_idx = self._current_turn_start_index(messages, turn_start_idx)
 
             try:
                 response = await asyncio.wait_for(
@@ -1554,10 +1563,18 @@ class AgentLoop:
                     iteration += 1
                     continue  # Retry instead of returning the refusal
 
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                )
-                final_content = clean
+                if clean:
+                    messages = self.context.add_assistant_message(
+                        messages, clean, reasoning_content=response.reasoning_content,
+                    )
+                    final_content = clean
+                else:
+                    logger.warning(
+                        "LLM returned empty non-tool response (model={} iteration={} session={})",
+                        effective_model,
+                        iteration,
+                        session_key or "-",
+                    )
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -1569,6 +1586,7 @@ class AgentLoop:
         # Only consider assistant content generated during this turn; otherwise we
         # can accidentally replay a stale answer from earlier history.
         if final_content is None:
+            turn_start_idx = self._current_turn_start_index(messages, turn_start_idx)
             for m in reversed(messages[turn_start_idx:]):
                 if m.get("role") == "assistant" and m.get("content") and not m.get("tool_calls"):
                     candidate = self._strip_think(m["content"])
@@ -2471,7 +2489,8 @@ class AgentLoop:
     def _save_turn(self, session: Session, messages: list[dict], skip: int, *, turn_media: list[str] | None = None) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         _media_injected = False
-        for m in messages[skip:]:
+        effective_skip = self._current_turn_start_index(messages, skip)
+        for m in messages[effective_skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             role, content = entry.get("role"), entry.get("content")
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
@@ -2494,6 +2513,16 @@ class AgentLoop:
                 if not _media_injected and turn_media:
                     entry["media"] = turn_media
                     _media_injected = True
+            elif role == "assistant":
+                if (
+                    not entry.get("tool_calls")
+                    and not entry.get("media")
+                    and (
+                        content is None
+                        or (isinstance(content, str) and not content.strip())
+                    )
+                ):
+                    continue
             entry.setdefault("timestamp", datetime.now().isoformat())
             if role in ("user", "assistant", "system"):
                 session.messages.append(serialize_ui_message(entry))

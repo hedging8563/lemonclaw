@@ -736,29 +736,23 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             matched_rules = self.memory.procedural.match_rules(current_message)
             rules_ctx = rules_context_override if rules_context_override is not None else ProceduralMemory.format_for_context(matched_rules)
 
+        contextual_blocks: list[str] = [runtime_ctx]
+        if memory_ctx:
+            contextual_blocks.append(memory_ctx)
+        if rules_ctx:
+            contextual_blocks.append(rules_ctx)
+        context_message = "\n\n".join(block for block in contextual_blocks if block).strip()
+
         user_content = self._build_user_content(current_message, media)
-        # For text-only messages, merge runtime context + memory context into user message.
-        if isinstance(user_content, str):
-            prefix = runtime_ctx
-            if memory_ctx:
-                prefix += "\n\n" + memory_ctx
-            if rules_ctx:
-                prefix += "\n\n" + rules_ctx
-            user_content = prefix + "\n\n" + user_content
-        else:
-            # Multimodal (images): prepend runtime context as first text block.
-            text_prefix = runtime_ctx
-            if memory_ctx:
-                text_prefix += "\n\n" + memory_ctx
-            if rules_ctx:
-                text_prefix += "\n\n" + rules_ctx
-            user_content = [{"type": "text", "text": text_prefix}, *user_content]
         user_msg: dict[str, Any] = {"role": "user", "content": user_content, "_original_text": current_message}
-        return [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.build_system_prompt(skill_names, mode=mode, session_prompt_override=session_prompt_override)},
-            *history,
-            user_msg,
         ]
+        if context_message:
+            messages.append({"role": "system", "content": context_message})
+        messages.extend(history)
+        messages.append(user_msg)
+        return messages
 
     async def resolve_retrieval_context(
         self,

@@ -145,3 +145,24 @@ def test_session_load_repairs_assistant_tool_prelude_blocks(tmp_path: Path) -> N
     assert assistant['content'] == '我先检查一下文件。'
     assert any(block['type'] == 'tool' for block in assistant['blocks'])
     assert not any(block['type'] == 'markdown' for block in assistant['blocks'])
+
+
+def test_session_load_drops_empty_assistant_messages(tmp_path: Path) -> None:
+    mgr = SessionManager(tmp_path)
+    session = mgr.get_or_create('webui:test-empty-assistant')
+    session.messages.append(serialize_ui_message({
+        'role': 'user',
+        'content': '今天深圳天气',
+    }))
+    session.messages.append(serialize_ui_message({
+        'role': 'assistant',
+        'content': '',
+    }))
+    mgr.save(session)
+
+    mgr.invalidate('webui:test-empty-assistant')
+    reloaded = mgr.get_or_create('webui:test-empty-assistant')
+
+    assert len(reloaded.messages) == 1
+    assert reloaded.messages[0]['role'] == 'user'
+    assert reloaded.get_history() == [{'role': 'user', 'content': '今天深圳天气'}]

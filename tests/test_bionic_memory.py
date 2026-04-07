@@ -278,10 +278,12 @@ def test_context_builder_injects_matched_cards(tmp_path):
         channel="cli",
         chat_id="test",
     )
-    # User message should contain matched card content
+    # Retrieval context should stay out of the user turn.
+    runtime_msg = messages[1]["content"]
+    assert "Relevant Memory" in runtime_msg
+    assert "Python 3.13" in runtime_msg
     user_msg = messages[-1]["content"]
-    assert "Relevant Memory" in user_msg
-    assert "Python 3.13" in user_msg
+    assert user_msg == "What python version?"
 
 
 # ── Procedural Memory ────────────────────────────────────────────────────────
@@ -381,9 +383,11 @@ async def test_context_builder_injects_matched_rules(tmp_path):
         channel="cli",
         chat_id="test",
     )
+    runtime_msg = messages[1]["content"]
+    assert "Experience Rules" in runtime_msg
+    assert "需要 venv" in runtime_msg
     user_msg = messages[-1]["content"]
-    assert "Experience Rules" in user_msg
-    assert "需要 venv" in user_msg
+    assert user_msg == "python 部署到服务器"
 
 
 @pytest.mark.asyncio

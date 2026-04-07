@@ -39,8 +39,8 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
-def test_runtime_context_merged_into_user_message(tmp_path) -> None:
-    """Runtime context should be merged into the user message for prompt cache stability."""
+def test_runtime_context_uses_separate_system_message(tmp_path) -> None:
+    """Runtime context should not pollute the user turn."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -53,12 +53,14 @@ def test_runtime_context_merged_into_user_message(tmp_path) -> None:
 
     assert messages[0]["role"] == "system"
     assert "## Current Session" not in messages[0]["content"]
+    assert len(messages) == 3  # system + context-system + user
+    runtime_content = messages[1]["content"]
+    assert isinstance(runtime_content, str)
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime_content
+    assert "Current Time:" in runtime_content
+    assert "Channel: cli" in runtime_content
 
-    # Runtime context is merged into the single user message (not a separate message)
-    assert len(messages) == 2  # system + user
     user_content = messages[-1]["content"]
     assert isinstance(user_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_content
-    assert "Current Time:" in user_content
-    assert "Channel: cli" in user_content
-    assert "Return exactly: OK" in user_content
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG not in user_content
+    assert user_content == "Return exactly: OK"

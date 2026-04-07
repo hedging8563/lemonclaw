@@ -103,3 +103,53 @@ async def test_lemondata_response_provider_surfaces_balance_topup_guidance() -> 
 
     assert response.finish_reason == "error"
     assert response.content == "API balance insufficient. Please top up at https://lemondata.cc/dashboard/billing or switch to a cheaper model."
+
+
+@pytest.mark.asyncio
+async def test_lemondata_response_provider_uses_conservative_kwargs_for_gpt_54() -> None:
+    provider = LemonDataResponsesProvider(api_key="sk-test", api_base="https://api.lemondata.cc/v1", default_model="gpt-5.4")
+    provider._client.responses.create = AsyncMock(return_value=SimpleNamespace(
+        output=[SimpleNamespace(type="message", content=[SimpleNamespace(type="output_text", text="ok")])],
+        usage=None,
+        status="completed",
+    ))
+
+    await provider.chat(
+        messages=[{"role": "system", "content": "You are helpful."}, {"role": "user", "content": "hello"}],
+        tools=[{"type": "function", "function": {"name": "search_knowledge", "parameters": {"type": "object"}}}],
+        model="gpt-5.4",
+        temperature=0.1,
+    )
+
+    kwargs = provider._client.responses.create.await_args.kwargs
+    assert kwargs["model"] == "gpt-5.4"
+    assert kwargs["instructions"] == "You are helpful."
+    assert "temperature" not in kwargs
+    assert "parallel_tool_calls" not in kwargs
+    assert "tool_choice" not in kwargs
+    assert "tools" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_lemondata_response_provider_keeps_full_kwargs_for_non_conservative_models() -> None:
+    provider = LemonDataResponsesProvider(api_key="sk-test", api_base="https://api.lemondata.cc/v1", default_model="gpt-5.4")
+    provider._client.responses.create = AsyncMock(return_value=SimpleNamespace(
+        output=[SimpleNamespace(type="message", content=[SimpleNamespace(type="output_text", text="ok")])],
+        usage=None,
+        status="completed",
+    ))
+
+    await provider.chat(
+        messages=[{"role": "system", "content": "You are helpful."}, {"role": "user", "content": "hello"}],
+        tools=[{"type": "function", "function": {"name": "search_knowledge", "parameters": {"type": "object"}}}],
+        model="claude-opus-4-6",
+        temperature=0.1,
+    )
+
+    kwargs = provider._client.responses.create.await_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-6"
+    assert kwargs["instructions"] == "You are helpful."
+    assert kwargs["temperature"] == 0.1
+    assert kwargs["parallel_tool_calls"] is True
+    assert kwargs["tool_choice"] == "auto"
+    assert "tools" in kwargs

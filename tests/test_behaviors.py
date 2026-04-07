@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -52,6 +52,57 @@ class TestWebValidation:
         valid, err, _ip = _validate_url("file:///etc/passwd")
         assert valid is False
         assert "http/https" in err
+
+
+@pytest.mark.asyncio
+async def test_empty_upstream_reply_does_not_pollute_session_history(make_agent_loop):
+    loop, _bus = make_agent_loop()
+    loop.provider.chat = AsyncMock(return_value=LLMResponse(content=None, tool_calls=[]))
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    msg = InboundMessage(channel="webui", sender_id="user1", chat_id="default", content="今天深圳天气")
+    result = await loop._process_message(msg)
+
+    assert result is not None
+    assert result.content == "处理完成，但没有需要回复的内容。"
+
+    session = loop.sessions.get_or_create(msg.session_key)
+    assert [message.get("role") for message in session.messages] == ["user"]
+    assert session.messages[0].get("content") == "今天深圳天气"
+
+
+@pytest.mark.asyncio
+async def test_compaction_keeps_current_turn_boundary_for_fallback(make_agent_loop):
+    loop, _bus = make_agent_loop()
+    loop.provider.chat = AsyncMock(side_effect=[
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id='tool-1', name='exec', arguments={'command': 'echo hi'})],
+        ),
+        LLMResponse(content=None),
+    ])
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    async def fake_execute(name, params, context=None):
+        return 'ok'
+
+    async def fake_compact(messages, model, provider):
+        return [messages[0], {'role': 'user', 'content': '[Conversation Summary]'}, *messages[-4:]]
+
+    loop.tools.execute = fake_execute  # type: ignore[assignment]
+    initial_messages = [
+        {'role': 'system', 'content': 'sys'},
+        {'role': 'user', 'content': 'older question'},
+        {'role': 'assistant', 'content': 'older answer'},
+        {'role': 'user', 'content': 'prefixed current', '_original_text': 'current question'},
+        {'role': 'assistant', 'content': 'current turn note'},
+    ]
+
+    with patch('lemonclaw.session.compaction.needs_compaction', return_value=True), \
+         patch('lemonclaw.session.compaction.compact', side_effect=fake_compact):
+        final, _tools, _messages, _usage = await loop._run_agent_loop(initial_messages)
+
+    assert final == 'current turn note'
 
 
 # ── 2a. Shell behavior in Full Power mode ──

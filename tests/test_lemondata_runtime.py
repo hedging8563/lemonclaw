@@ -60,7 +60,11 @@ def test_context_builder_injects_lemondata_runtime_block(monkeypatch, tmp_path: 
         chat_id="webui",
     )
 
-    assert len(messages) == 2
+    assert len(messages) == 3
+    assert messages[1]["role"] == "system"
+    runtime_content = messages[1]["content"]
+    assert isinstance(runtime_content, str)
+    assert "focus_model=seedance-2.0" in runtime_content
     user_content = messages[-1]["content"]
     assert isinstance(user_content, str)
-    assert "focus_model=seedance-2.0" in user_content
+    assert "focus_model=seedance-2.0" not in user_content

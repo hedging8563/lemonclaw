@@ -21,6 +21,7 @@ from lemonclaw.utils.attachments import (
 from lemonclaw.utils.helpers import ensure_dir, safe_filename
 
 _UI_PRIMARY_BLOCK_TYPES = frozenset({"markdown", "runtime_context", "transcription", "media"})
+_EMPTY_ASSISTANT_SENTINELS = frozenset({"", "(empty)"})
 
 
 @dataclass
@@ -164,6 +165,20 @@ class Session:
             sanitized.append(cls._clone_llm_message(message))
 
         return sanitized
+
+    @staticmethod
+    def _is_empty_assistant_message(message: dict[str, Any]) -> bool:
+        if str(message.get("role") or "") != "assistant":
+            return False
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            return False
+        content = message.get("content")
+        if content is None:
+            return True
+        if isinstance(content, str) and content.strip() in _EMPTY_ASSISTANT_SENTINELS:
+            return True
+        return False
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -311,6 +326,9 @@ class SessionManager:
                 repaired.append(message)
                 continue
             next_message = dict(message)
+            if Session._is_empty_assistant_message(next_message):
+                changed = True
+                continue
             blocks = next_message.get("blocks")
             tool_calls = next_message.get("tool_calls")
             if (
