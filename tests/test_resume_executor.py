@@ -57,8 +57,9 @@ async def test_agent_loop_execute_safe_resume_runs_replayable_resume(make_agent_
     assert outbound.content == "resumed ok"
 
     session = loop.sessions.get_or_create("telegram:123")
-    assert [msg["role"] for msg in session.messages] == ["assistant"]
-    assert session.messages[0]["content"] == "resumed ok"
+    assert [msg["role"] for msg in session.messages] == ["user", "assistant"]
+    assert "System resume request: continue an interrupted task." in session.messages[0]["content"]
+    assert session.messages[1]["content"] == "resumed ok"
 
 
 @pytest.mark.asyncio
