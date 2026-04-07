@@ -1322,6 +1322,7 @@ class AgentLoop:
         effective_model = resolve_model_id(session_model or self.model) or session_model or self.model
         active_provider = self._provider_for_model(effective_model)
         messages = initial_messages
+        turn_start_idx = len(initial_messages)
         iteration = 0
         final_content = None
         tools_used: list[str] = []
@@ -1564,9 +1565,11 @@ class AgentLoop:
             final_content = t("max_iterations", _lang, n=self.max_iterations)
 
         # Fallback: extract last assistant text from messages if loop ended
-        # without setting final_content (e.g. last iteration was tool_calls only)
+        # without setting final_content (e.g. last iteration was tool_calls only).
+        # Only consider assistant content generated during this turn; otherwise we
+        # can accidentally replay a stale answer from earlier history.
         if final_content is None:
-            for m in reversed(messages):
+            for m in reversed(messages[turn_start_idx:]):
                 if m.get("role") == "assistant" and m.get("content") and not m.get("tool_calls"):
                     candidate = self._strip_think(m["content"])
                     if candidate:

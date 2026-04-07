@@ -610,3 +610,32 @@ class TestSubagentCancellation:
             {'role': 'user', 'content': 'test'}
         ], stop_event=stop_event)
         assert final == '⏹ Task stopped.'
+
+    @pytest.mark.asyncio
+    async def test_tool_only_turn_does_not_reuse_previous_assistant_answer(self):
+        from lemonclaw.providers.base import LLMResponse, ToolCallRequest
+
+        loop, _bus = _make_loop()
+
+        loop.provider.chat = AsyncMock(side_effect=[
+            LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id='tool-1', name='exec', arguments={'command': 'echo hi'})],
+            ),
+            LLMResponse(content=None),
+        ])
+
+        async def fake_execute(name, params, context=None):
+            return 'ok'
+
+        loop.tools.execute = fake_execute  # type: ignore[assignment]
+        final, _tools, messages, _usage = await loop._run_agent_loop([
+            {'role': 'assistant', 'content': 'old answer'},
+            {'role': 'user', 'content': 'new question'},
+        ])
+
+        assert final is None
+        assert all(
+            not (msg.get('role') == 'assistant' and msg.get('content') == 'old answer')
+            for msg in messages[2:]
+        )
