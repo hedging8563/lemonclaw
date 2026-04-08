@@ -42,6 +42,11 @@ from lemonclaw.config.schema import Config
 
 # Type alias for sync operation functions
 _SyncFn = Callable[[Config], bool]
+_MANAGED_CODING_MODELS = {
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "gpt-5.4",
+}
 
 
 # ============================================================================
@@ -290,7 +295,8 @@ def _sync_runtime_model_policy(config: Config) -> bool:
 
     if isinstance(legacy_policy, dict):
         coding_default = str((legacy_policy.get("defaults") or {}).get("coding") or "").strip()
-        if coding_default and (not config.tools.coding.model or config.tools.coding.model == "claude-sonnet-4-6"):
+        current_coding_model = str(config.tools.coding.model or "").strip()
+        if coding_default and (not current_coding_model or current_coding_model in _MANAGED_CODING_MODELS):
             if config.tools.coding.model != coding_default:
                 config.tools.coding.model = coding_default
                 changed = True

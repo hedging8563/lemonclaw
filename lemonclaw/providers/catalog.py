@@ -56,7 +56,7 @@ _DEFAULT_MEMORY_ORDER = [
 _DEFAULTS = {
     "chat": "gpt-5.4",
     "vision": "gpt-4.1-mini",
-    "coding": "claude-sonnet-4-6",
+    "coding": "claude-opus-4-6",
     "consolidation": "llama-3.3-70b-versatile",
 }
 

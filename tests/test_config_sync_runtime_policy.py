@@ -100,6 +100,42 @@ def test_sync_runtime_model_policy_uses_legacy_policy_to_migrate_coding_model(mo
     assert config.tools.coding.model == 'gpt-5.3-codex'
 
 
+def test_sync_runtime_model_policy_repairs_managed_bad_coding_model(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import _sync_runtime_model_policy
+
+    config = Config()
+    config.providers.lemondata.api_key = 'sk-test'
+    config.lemondata.api_base_url = 'https://api.lemondata.cc'
+    config.tools.coding.model = 'gpt-5.4'
+
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'config': {
+                    'chat': {'defaultModel': 'gpt-5.4', 'availableModels': ['gpt-5.4']},
+                    'vision': {'chain': ['gpt-4.1-mini']},
+                    'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
+                },
+                'policy': {
+                    'defaults': {'coding': 'claude-opus-4-6'},
+                },
+            }
+
+    monkeypatch.setattr('lemonclaw.config.sync.httpx.get', lambda *args, **kwargs: FakeResponse())
+
+    changed = _sync_runtime_model_policy(config)
+
+    assert changed is True
+    assert config.tools.coding.model == 'claude-opus-4-6'
+
+
 def test_sync_runtime_model_policy_clears_stale_override_without_hosted_credentials(monkeypatch, tmp_path: Path):
     from lemonclaw.config.sync import _sync_runtime_model_policy
 
