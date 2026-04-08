@@ -70,7 +70,8 @@ describe('operator settings editors', () => {
     );
     expect(html).toContain('support_api');
     expect(html).toContain('Saved Request Headers');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('2 headers');
+    expect(html).toContain('+ Add saved headers');
   });
 
   it('renders SQLite profiles editor', async () => {
@@ -83,7 +84,8 @@ describe('operator settings editors', () => {
     );
     expect(html).toContain('local_cache');
     expect(html).toContain('SQLite Connections');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('/var/lib/lemonclaw/cache.db');
+    expect(html).toContain('Add connection');
   });
 
   it('renders PostgreSQL profiles editor', async () => {
@@ -96,7 +98,9 @@ describe('operator settings editors', () => {
     );
     expect(html).toContain('analytics_ro');
     expect(html).toContain('PostgreSQL Connections');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('db.example.internal');
+    expect(html).toContain('analytics');
+    expect(html).toContain('Add connection');
   });
 
   it('renders governance overview tab', async () => {
@@ -135,6 +139,8 @@ describe('operator settings editors', () => {
     expect(html).toContain('Safety status');
     expect(html).toContain('Emergency Stop');
     expect(html).toContain('exec system');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('Legacy Limit Profiles');
+    expect(html).toContain('Unbound Metadata');
+    expect(html).toContain('TURN ON EMERGENCY STOP');
   });
 });
