@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -78,10 +79,70 @@ async def test_git_apply_patch_updates_file(tmp_path):
     assert (tmp_path / "file.txt").read_text(encoding="utf-8") == "world\n"
 
 
+@pytest.mark.asyncio
+async def test_git_push_to_local_remote(tmp_path):
+    worktree = tmp_path / "repo"
+    worktree.mkdir()
+    _init_repo(worktree)
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+
+    (worktree / "file.txt").write_text("hello", encoding="utf-8")
+    subprocess.run(["git", "add", "file.txt"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=worktree, check=True, capture_output=True)
+    branch = subprocess.run(["git", "branch", "--show-current"], cwd=worktree, check=True, capture_output=True, text=True).stdout.strip()
+
+    tool = GitTool(working_dir=str(worktree))
+    result = await tool.execute("push", remote="origin", target=branch)
+
+    assert result["ok"] is True
+    pushed = subprocess.run(["git", "--git-dir", str(remote), "log", "--oneline", "-1"], check=True, capture_output=True, text=True)
+    assert "init" in pushed.stdout
+
+
+@pytest.mark.asyncio
+async def test_git_push_uses_auth_profile_without_putting_token_in_args(monkeypatch, tmp_path):
+    _init_repo(tmp_path)
+    tool = GitTool(
+        working_dir=str(tmp_path),
+        auth_profiles={"origin": {"username": "x-access-token", "password": "super-secret-token"}},
+    )
+    captured: dict[str, object] = {}
+
+    async def _fake_run_action(*, cwd, action, args, stdin=None, env=None):
+        del cwd, stdin
+        if action == "remote_get_url":
+            return {
+                "ok": True,
+                "summary": "git remote_get_url -> exit 0",
+                "raw": {"stdout": "https://github.com/example/repo.git", "stderr": "", "exit_code": 0, "body": ""},
+            }
+        if action == "push":
+            captured["args"] = args
+            captured["env"] = env
+            captured["askpass"] = env["GIT_ASKPASS"] if env else ""
+            return {
+                "ok": True,
+                "summary": "git push -> exit 0",
+                "raw": {"stdout": "ok", "stderr": "", "exit_code": 0, "body": "ok"},
+            }
+        raise AssertionError(f"unexpected action {action}")
+
+    monkeypatch.setattr(tool, "_run_action", _fake_run_action)
+    result = await tool.execute("push", remote="origin", target="main", auth_profile="origin")
+
+    assert result["ok"] is True
+    assert captured["env"]["LC_GIT_PASSWORD"] == "super-secret-token"
+    assert "super-secret-token" not in " ".join(captured["args"])
+    assert not Path(str(captured["askpass"])).exists()
+
+
 def test_git_resolves_write_capability():
     tool = GitTool()
     assert tool.resolve_capability({"action": "status"}) == "git.read"
     assert tool.resolve_capability({"action": "commit"}) == "git.write.local"
+    assert tool.resolve_capability({"action": "push"}) == "git.write.remote"
 
 
 def test_governance_marks_git_write_local_as_local_mutation(tmp_path):

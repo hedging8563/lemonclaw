@@ -15,6 +15,15 @@ from pathlib import Path
 
 from loguru import logger
 
+from lemonclaw.governance.redaction import redact_sensitive_text
+
+
+def _patch_log_record(record: dict) -> None:
+    """Redact likely secrets from every log line before formatting."""
+    message = record.get("message")
+    if isinstance(message, str) and message:
+        record["message"] = redact_sensitive_text(message, aggressive=True)
+
 
 def setup_logging(log_dir: Path | None = None) -> None:
     """Configure loguru based on LOG_TARGET environment variable.
@@ -24,6 +33,7 @@ def setup_logging(log_dir: Path | None = None) -> None:
     """
     # Remove default loguru handler
     logger.remove()
+    logger.configure(patcher=_patch_log_record)
 
     target = os.environ.get("LOG_TARGET", "stdout").lower()
     level = os.environ.get("LOG_LEVEL", "INFO").upper()

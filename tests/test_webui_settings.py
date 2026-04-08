@@ -4,7 +4,7 @@ from starlette.testclient import TestClient
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import load_config, save_config
-from lemonclaw.config.schema import Config, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
+from lemonclaw.config.schema import Config, GitAuthProfileConfig, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 from lemonclaw.governance import GovernanceRuntime
@@ -439,6 +439,11 @@ def test_patch_settings_accepts_operator_tool_paths(tmp_path):
             'allow_domains': ['api.example.com'],
             'auth_profiles': {'svc': {'Authorization': 'Bearer token'}},
         },
+        'tools.git': {
+            'timeout': 30,
+            'max_output': 60000,
+            'auth_profiles': {'origin': {'username': 'x-access-token', 'password': 'secret'}},
+        },
         'tools.k8s.default_namespace': 'claw',
         'tools.k8s.allowed_namespaces': ['claw'],
         'tools.db': {
@@ -563,18 +568,19 @@ def test_apply_settings_marks_operator_tools_as_restart_required(monkeypatch, tm
     client = TestClient(app)
 
     resp = client.post('/api/settings/apply', json={
-        'changed_paths': ['tools.http', 'tools.db', 'tools.k8s', 'tools.notify'],
+        'changed_paths': ['tools.http', 'tools.git', 'tools.db', 'tools.k8s', 'tools.notify'],
     })
 
     assert resp.status_code == 200
     body = resp.json()
     assert body['reloaded'] is True
     assert body['restart_required'] is True
-    assert body['restart_fields'] == ['tools.http', 'tools.db', 'tools.k8s', 'tools.notify']
+    assert body['restart_fields'] == ['tools.http', 'tools.git', 'tools.db', 'tools.k8s', 'tools.notify']
 
 
 def test_restart_regex_includes_operator_tools():
     assert _RESTART_FIELDS.match('tools.http')
+    assert _RESTART_FIELDS.match('tools.git')
     assert _RESTART_FIELDS.match('tools.notify')
     assert _RESTART_FIELDS.match('tools.db')
     assert _RESTART_FIELDS.match('tools.k8s')
@@ -616,3 +622,36 @@ def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):
     assert updated.tools.http.timeout == 45
     assert updated.tools.http.auth_profiles['svc']['Authorization'] == 'Bearer super-secret-token'
     assert updated.tools.http.auth_profiles['svc']['X-API-Key'] == 'abc123456789'
+
+
+def test_settings_masks_git_auth_profiles_and_preserves_on_patch(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.tools.git.auth_profiles = {
+        'origin': GitAuthProfileConfig(username='x-access-token', password='github_pat_super_secret_123456789')
+    }
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    git_settings = resp.json()['settings']['tools']['git']
+    assert git_settings['auth_profiles']['origin']['username'] == 'x-access-token'
+    assert git_settings['auth_profiles']['origin']['password'] == 'gith****6789'
+
+    resp = client.patch('/api/settings', json={
+        'tools.git': {
+            'timeout': 45,
+            'max_output': 70000,
+            'auth_profiles': git_settings['auth_profiles'],
+        }
+    })
+    assert resp.status_code == 200
+
+    updated = load_config(config_path)
+    assert updated.tools.git.timeout == 45
+    assert updated.tools.git.max_output == 70000
+    assert updated.tools.git.auth_profiles['origin'].username == 'x-access-token'
+    assert updated.tools.git.auth_profiles['origin'].password == 'github_pat_super_secret_123456789'

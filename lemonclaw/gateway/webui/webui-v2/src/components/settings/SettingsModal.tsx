@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
+import { GitAuthProfilesEditor } from './GitAuthProfilesEditor';
 import { HTTPAuthProfilesEditor } from './HTTPAuthProfilesEditor';
 import { GovernanceTab } from './GovernanceTab';
 import { MCPServersEditor } from './MCPServersEditor';
@@ -298,6 +299,7 @@ const FIELD_HELP_KEYS: Record<string, string> = {
   'tools.web.search.max_results': 'settings_help_search_max_results',
   'tools.http.allow_domains': 'settings_help_http_allow_domains',
   'tools.http.auth_profiles': 'settings_help_http_auth_profiles',
+  'tools.git.auth_profiles': 'settings_help_git_auth_profiles',
   'tools.notify.allow_webhook_domains': 'settings_help_notify_allow_webhook_domains',
   'tools.db.sqlite_profiles': 'settings_help_db_sqlite_profiles',
   'tools.k8s.default_namespace': 'settings_help_k8s_default_namespace',
@@ -1008,6 +1010,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         );
       }
 
+      if (fullPath === 'tools.git.auth_profiles' && isGroup(v)) {
+        return (
+          <GitAuthProfilesEditor key={fullPath} profiles={v as Record<string, Record<string, string>>} onChange={(newVal) => handleChange(currentPath, newVal)} />
+        );
+      }
+
       if (fullPath === 'tools.db.sqlite_profiles' && isGroup(v)) {
         return (
           <SQLiteProfilesEditor key={fullPath} profiles={v as Record<string, string>} onChange={(newVal) => handleChange(currentPath, newVal)} />
@@ -1099,6 +1107,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {path[0] === 'channels' && renderChannelPairingCard(displayKey)}
             {path[0] === 'tools' && displayKey === 'web.search' && renderNotice(t('web_search_provider_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'http' && renderNotice(t('http_tool_note'), 'info')}
+            {path[0] === 'tools' && displayKey === 'git' && renderNotice(t('git_tool_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'notify' && renderNotice(t('notify_tool_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'db' && renderNotice(t('db_tool_note'), 'info')}
             {path[0] === 'tools' && displayKey === 'k8s' && renderNotice(t('k8s_tool_note'), 'warning')}

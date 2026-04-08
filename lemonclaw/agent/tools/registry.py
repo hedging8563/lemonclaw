@@ -8,6 +8,7 @@ from loguru import logger
 
 from lemonclaw.agent.tools.base import Tool
 from lemonclaw.governance import GovernanceRuntime
+from lemonclaw.governance.redaction import redact_sensitive_text, redact_sensitive_value
 from lemonclaw.ledger.runtime import TaskLedger
 
 _TOOL_ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
@@ -94,7 +95,7 @@ class ToolRegistry:
             tenant_id = str(call_context.get("_tenant_id") or "")
             actor_identity = str(call_context.get("_actor_identity") or call_context.get("_agent_id") or "agent")
             if self._ledger and task_id:
-                summary = json.dumps(params, ensure_ascii=False)[:500]
+                summary = json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500]
                 replayable = tool.is_replayable(capability_id)
                 step = self._ledger.start_step(
                     task_id, step_type="tool_call", name=name,
@@ -123,6 +124,10 @@ class ToolRegistry:
                     governance_warnings.append(f"would_block:{sandbox_reason}")
 
             result = await tool.execute(**params, **call_context)
+            if isinstance(result, str):
+                result = redact_sensitive_text(result)
+            else:
+                result = redact_sensitive_value(result)
             normalized = tool.normalize_result(result)
             ended_at_ms = int(time.time() * 1000)
             if step:
@@ -130,7 +135,7 @@ class ToolRegistry:
                 self._ledger.finish_step(
                     step,
                     status=step_status,
-                    error=None if normalized.get("ok") else str(normalized.get("summary", ""))[:500],
+                    error=None if normalized.get("ok") else redact_sensitive_text(str(normalized.get("summary", "")))[:500],
                 )
             else:
                 step_status = str(normalized.get("step_status") or ("completed" if normalized.get("ok") else "failed"))
@@ -145,8 +150,8 @@ class ToolRegistry:
                     "replayable": tool.is_replayable(capability_id),
                     "started_at_ms": started_at_ms,
                     "ended_at_ms": ended_at_ms,
-                    "params_summary": json.dumps(params, ensure_ascii=False)[:500],
-                    "result_summary": str(normalized.get("summary") or "")[:500],
+                    "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
+                    "result_summary": redact_sensitive_text(str(normalized.get("summary") or ""))[:500],
                     "warnings": governance_warnings,
                 },
             )
@@ -177,12 +182,13 @@ class ToolRegistry:
                 return json.dumps(normalized, ensure_ascii=False)
             return result
         except Exception as e:
-            logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, e)
+            safe_error = redact_sensitive_text(str(e), aggressive=True)
+            logger.warning("Tool '{}' raised {}: {}", name, type(e).__name__, safe_error)
             if self._ledger and task_id:
                 if step is not None:
-                    self._ledger.finish_step(step, status="failed", error=str(e)[:500])
+                    self._ledger.finish_step(step, status="failed", error=safe_error[:500])
                 else:
-                    summary = json.dumps(params, ensure_ascii=False)[:500]
+                    summary = json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500]
                     replayable = tool.is_replayable(capability_id) if capability_id else True
                     fallback_step = self._ledger.start_step(
                         task_id,
@@ -204,8 +210,8 @@ class ToolRegistry:
                     "replayable": tool.is_replayable(capability_id) if capability_id else True,
                     "started_at_ms": int(started_at * 1000) if "started_at" in locals() else int(time.time() * 1000),
                     "ended_at_ms": int(time.time() * 1000),
-                    "params_summary": json.dumps(params, ensure_ascii=False)[:500],
-                    "result_summary": str(e)[:500],
+                    "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
+                    "result_summary": safe_error[:500],
                     "warnings": governance_warnings,
                 },
             )
@@ -222,7 +228,7 @@ class ToolRegistry:
                     result_status="error",
                     warnings=governance_warnings,
                 )
-            return f"Error executing {name}: {str(e)}" + _TOOL_ERROR_HINT
+            return f"Error executing {name}: {safe_error}" + _TOOL_ERROR_HINT
 
     @property
     def tool_names(self) -> list[str]:

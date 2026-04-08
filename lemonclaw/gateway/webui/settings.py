@@ -58,6 +58,10 @@ _WRITABLE_PATHS: set[str] = {
     "tools.http.allow_domains",
     "tools.http.auth_profiles",
     "tools.http",
+    "tools.git.timeout",
+    "tools.git.max_output",
+    "tools.git.auth_profiles",
+    "tools.git",
     "tools.notify.enabled",
     "tools.notify.timeout",
     "tools.notify.allow_webhook_domains",
@@ -117,11 +121,11 @@ for _p in _PROVIDER_NAMES:
 # Fields that require restart (not hot-reloadable)
 _RESTART_FIELDS = re.compile(
     r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding|browser|exec|http|notify|db|k8s))"
+    r"|tools\.(mcp_servers|coding|browser|exec|http|git|notify|db|k8s))"
 )
 
 # Sensitive field names — values masked in GET response
-_SENSITIVE_KEYS = {"api_key", "token", "secret", "app_secret", "encoding_aes_key",
+_SENSITIVE_KEYS = {"api_key", "token", "secret", "password", "app_secret", "encoding_aes_key",
                    "bridge_token", "bot_token", "app_token", "access_token",
                    "client_secret", "imap_password", "smtp_password", "claw_token",
                    "encrypt_key", "verification_token"}
@@ -166,8 +170,15 @@ def _mask_dict(d: dict, depth: int = 0, path: tuple[str, ...] = ()) -> dict:
         return d
     out = {}
     for k, v in d.items():
+        nested_dict: dict[str, Any] | None = None
         if isinstance(v, dict):
-            out[k] = _mask_dict(v, depth + 1, (*path, k))
+            nested_dict = v
+        elif hasattr(v, "model_dump"):
+            dumped = v.model_dump(by_alias=True, exclude_none=False)
+            if isinstance(dumped, dict):
+                nested_dict = dumped
+        if nested_dict is not None:
+            out[k] = _mask_dict(nested_dict, depth + 1, (*path, k))
         elif _should_mask(path, k, v):
             out[k] = _mask(v)
         else:

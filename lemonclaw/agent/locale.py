@@ -72,6 +72,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
             "/model — List or switch models\n"
+            "/git-auth — Manage saved Git push credentials\n"
             "/usage — Show token usage\n"
             "/help — Show available commands"
         ),
@@ -83,6 +84,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
             "/model — 查看或切换模型\n"
+            "/git-auth — 管理 Git 远端推送凭证\n"
             "/usage — 查看 Token 用量\n"
             "/help — 显示可用命令"
         ),
@@ -118,6 +120,68 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "unknown_command": {
         "en": "Unknown command `{cmd}`. Use `/help` to see available commands.",
         "zh": "未知命令 `{cmd}`，使用 `/help` 查看可用命令。",
+    },
+    "git_auth_usage": {
+        "en": (
+            "Git auth commands:\n"
+            "/git-auth list — List saved Git credential profiles\n"
+            "/git-auth show <name> — Show one profile (password stays masked)\n"
+            "/git-auth set <name> :: <token> — Save a profile with username x-access-token\n"
+            "/git-auth set <name> :: <username> :: <token> — Save a profile with a custom username\n"
+            "/git-auth delete <name> — Remove one profile"
+        ),
+        "zh": (
+            "Git 凭证命令：\n"
+            "/git-auth list — 列出已保存的 Git 凭证配置\n"
+            "/git-auth show <name> — 查看单个配置（密码保持脱敏）\n"
+            "/git-auth set <name> :: <token> — 保存一个默认用户名为 x-access-token 的配置\n"
+            "/git-auth set <name> :: <username> :: <token> — 保存一个自定义用户名的配置\n"
+            "/git-auth delete <name> — 删除一个配置"
+        ),
+    },
+    "git_auth_list_empty": {
+        "en": "No saved Git auth profiles yet.",
+        "zh": "当前还没有已保存的 Git 凭证配置。",
+    },
+    "git_auth_list_header": {
+        "en": "Saved Git auth profiles:",
+        "zh": "已保存的 Git 凭证配置：",
+    },
+    "git_auth_list_item": {
+        "en": "- {name} (username={username}, status={status})",
+        "zh": "- {name}（username={username}，状态={status}）",
+    },
+    "git_auth_status_ready": {
+        "en": "ready",
+        "zh": "已就绪",
+    },
+    "git_auth_status_missing": {
+        "en": "missing password",
+        "zh": "缺少密码",
+    },
+    "git_auth_not_found": {
+        "en": "Git auth profile `{name}` was not found.",
+        "zh": "没有找到 Git 凭证配置 `{name}`。",
+    },
+    "git_auth_saved": {
+        "en": "Saved Git auth profile `{name}` for username `{username}`. Future remote pushes can use auth_profile=`{name}`.",
+        "zh": "已保存 Git 凭证配置 `{name}`，用户名为 `{username}`。之后远端 push 可以使用 auth_profile=`{name}`。",
+    },
+    "git_auth_deleted": {
+        "en": "Deleted Git auth profile `{name}`.",
+        "zh": "已删除 Git 凭证配置 `{name}`。",
+    },
+    "git_auth_show": {
+        "en": "Git auth profile `{name}`\nusername: {username}\npassword: {password}",
+        "zh": "Git 凭证配置 `{name}`\nusername: {username}\npassword: {password}",
+    },
+    "git_auth_invalid_name": {
+        "en": "Invalid Git auth profile name `{name}`. Use letters, numbers, dots, underscores, or dashes.",
+        "zh": "Git 凭证配置名称 `{name}` 无效。请只使用字母、数字、点、下划线或连字符。",
+    },
+    "git_auth_save_failed": {
+        "en": "Failed to update Git auth profile: {error}",
+        "zh": "更新 Git 凭证配置失败：{error}",
     },
     "kb_usage": {
         "en": (

@@ -48,6 +48,10 @@ from lemonclaw.bus.events import InboundMessage, OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.delivery_context import get_delivery_policy
 from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+from lemonclaw.governance.redaction import (
+    redact_sensitive_text,
+    redact_sensitive_value,
+)
 from lemonclaw.providers.base import LLMProvider
 from lemonclaw.providers.catalog import format_model_list, fuzzy_match, resolve_model_id
 from lemonclaw.providers.registry import provider_family_for_model
@@ -70,6 +74,7 @@ if TYPE_CHECKING:
         CodingToolConfig,
         DBToolConfig,
         ExecToolConfig,
+        GitToolConfig,
         HTTPRequestToolConfig,
         K8sToolConfig,
         NotifyToolConfig,
@@ -107,6 +112,7 @@ _BUILTIN_TOOL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "web_search": ("query",),
     "write_file": ("path", "content"),
 }
+_GIT_AUTH_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 class AgentLoop:
@@ -150,6 +156,7 @@ class AgentLoop:
         coding_config: CodingToolConfig | None = None,
         browser_config: BrowserToolConfig | None = None,
         http_config: HTTPRequestToolConfig | None = None,
+        git_config: GitToolConfig | None = None,
         notify_config: NotifyToolConfig | None = None,
         db_config: DBToolConfig | None = None,
         k8s_config: K8sToolConfig | None = None,
@@ -179,6 +186,7 @@ class AgentLoop:
         self.coding_config = coding_config
         self.browser_config = browser_config
         self.http_config = http_config
+        self.git_config = git_config
         self.notify_config = notify_config
         self.db_config = db_config
         self.k8s_config = k8s_config
@@ -573,7 +581,15 @@ class AgentLoop:
         ))
         self.tools.register(GrepTool(workspace=self.workspace))
         self.tools.register(GlobTool(workspace=self.workspace))
-        self.tools.register(GitTool(working_dir=str(self.workspace)))
+        self.tools.register(GitTool(
+            working_dir=str(self.workspace),
+            timeout=self.git_config.timeout if self.git_config else 20,
+            max_output=self.git_config.max_output if self.git_config else 50_000,
+            auth_profiles={
+                name: profile.model_dump(by_alias=False)
+                for name, profile in dict(self.git_config.auth_profiles or {}).items()
+            } if self.git_config else {},
+        ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(LemonDataNonChatTool(workspace=self.workspace))
@@ -710,8 +726,14 @@ class AgentLoop:
             val = next(iter(tc.arguments.values()), None) if tc.arguments else None
             if not isinstance(val, str):
                 return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            safe_val = redact_sensitive_text(val)
+            return f'{tc.name}("{safe_val[:40]}…")' if len(safe_val) > 40 else f'{tc.name}("{safe_val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    @staticmethod
+    def _redact_preview(text: str, *, limit: int) -> str:
+        safe = redact_sensitive_text(text, aggressive=True)
+        return safe[:limit] + "..." if len(safe) > limit else safe
 
     @staticmethod
     def _current_turn_start_index(messages: list[dict[str, Any]], default: int) -> int:
@@ -1421,11 +1443,12 @@ class AgentLoop:
                         # Log and send tool_start events for all calls
                         for tc in response.tool_calls:
                             tools_used.append(tc.name)
-                            args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                            redacted_args = redact_sensitive_value(tc.arguments)
+                            args_str = json.dumps(redacted_args, ensure_ascii=False)
                             logger.info("Tool call (parallel): {}({})", tc.name, args_str[:200])
                             if on_progress:
                                 await on_progress(json.dumps({
-                                    "name": tc.name, "arguments": tc.arguments,
+                                    "name": tc.name, "arguments": redacted_args,
                                 }, ensure_ascii=False), tool_start=True)
 
                         # Execute all in parallel
@@ -1449,7 +1472,7 @@ class AgentLoop:
                             )
 
                             if on_progress:
-                                result_preview = str(result)[:500] if result else ""
+                                result_preview = self._redact_preview(str(result) if result else "", limit=500)
                                 is_error = isinstance(result, str) and result.startswith("Error")
                                 await on_progress(json.dumps({
                                     "name": tc.name, "result": result_preview, "error": is_error,
@@ -1488,13 +1511,14 @@ class AgentLoop:
                                 break
 
                             tools_used.append(tool_call.name)
-                            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                            redacted_args = redact_sensitive_value(tool_call.arguments)
+                            args_str = json.dumps(redacted_args, ensure_ascii=False)
                             logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
 
                             if on_progress:
                                 await on_progress(json.dumps({
                                     "name": tool_call.name,
-                                    "arguments": tool_call.arguments,
+                                    "arguments": redacted_args,
                                 }, ensure_ascii=False), tool_start=True)
 
                             result = await self.tools.execute(
@@ -1511,7 +1535,7 @@ class AgentLoop:
                             )
 
                             if on_progress:
-                                result_preview = str(result)[:500] if result else ""
+                                result_preview = self._redact_preview(str(result) if result else "", limit=500)
                                 is_error = isinstance(result, str) and result.startswith("Error")
                                 await on_progress(json.dumps({
                                     "name": tool_call.name,
@@ -1948,19 +1972,6 @@ class AgentLoop:
         if msg.media:
             msg.content, msg.media = self._persist_inbound_media(key, msg.content, list(msg.media or []))
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
-
-        if msg.channel != "webui" and self.activity_bus and not resume_internal:
-            await self.activity_bus.broadcast({
-                "type": "message",
-                "session_key": key,
-                "channel": msg.channel,
-                "role": "user",
-                "content": msg.content,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-
         session = self.sessions.get_or_create(key)
         session_model = self._normalize_session_model(session)
         active_provider = self._provider_for_model(session_model or self.model)
@@ -1971,6 +1982,23 @@ class AgentLoop:
             session.metadata["lang"] = detect_lang(msg.content)
 
         lang = session_lang(session)
+        safe_user_content = redact_sensitive_text(msg.content)
+        logger.info(
+            "Processing message from {}:{}: {}",
+            msg.channel,
+            msg.sender_id,
+            self._redact_preview(msg.content, limit=80),
+        )
+
+        if msg.channel != "webui" and self.activity_bus and not resume_internal:
+            await self.activity_bus.broadcast({
+                "type": "message",
+                "session_key": key,
+                "channel": msg.channel,
+                "role": "user",
+                "content": safe_user_content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
         # Empty message guard — don't waste tokens on blank input
         if not msg.content.strip():
@@ -2028,9 +2056,13 @@ class AgentLoop:
             reply = self._handle_model_command(msg, session, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="model_list")
             return reply
+        if cmd == "/git-auth" or cmd.startswith("/git-auth "):
+            reply = self._handle_git_auth_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="git_auth")
+            return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/kb", "/model", "/stop")
+            known = ("/new", "/usage", "/help", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2196,8 +2228,12 @@ class AgentLoop:
             self.sessions.save(session)
             return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info(
+            "Response to {}:{}: {}",
+            msg.channel,
+            msg.sender_id,
+            self._redact_preview(final_content, limit=120),
+        )
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
@@ -2247,6 +2283,28 @@ class AgentLoop:
         reply_key = "model_switched_new_context" if reset_context else "model_switched"
         return self._command_reply(msg, t(reply_key, lang, label=match.label, id=match.id, desc=match.description), kind="model_switched", extra_meta={"_command": "model_switched", "_current_model": match.id})
 
+    def _handle_git_auth_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[9:].strip()
+        if not raw:
+            return self._command_reply(msg, t("git_auth_usage", lang), kind="git_auth_help", level="warning")
+
+        lowered = raw.lower()
+        if lowered == "list" or lowered.startswith("list "):
+            return self._command_reply(msg, self._git_auth_list_sync(lang=lang), kind="git_auth_list")
+        if lowered.startswith("show "):
+            payload = raw[5:].strip()
+            result, level = self._git_auth_show_sync(payload, lang=lang)
+            return self._command_reply(msg, result, kind="git_auth_show", level=level)
+        if lowered.startswith("delete ") or lowered.startswith("remove "):
+            payload = raw.split(" ", 1)[1].strip() if " " in raw else ""
+            result, level = self._git_auth_delete_sync(payload, lang=lang)
+            return self._command_reply(msg, result, kind="git_auth_delete", level=level)
+        if lowered.startswith("set ") or lowered.startswith("save ") or lowered.startswith("add "):
+            payload = raw.split(" ", 1)[1].strip() if " " in raw else ""
+            result, level = self._git_auth_set_sync(payload, lang=lang)
+            return self._command_reply(msg, result, kind="git_auth_set", level=level)
+        return self._command_reply(msg, t("git_auth_usage", lang), kind="git_auth_help", level="warning")
+
     def _handle_kb_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[3:].strip()
         if not raw:
@@ -2295,6 +2353,110 @@ class AgentLoop:
         if result.startswith("No knowledge hits"):
             return self._command_reply(msg, t("kb_empty", lang, query=raw), kind="kb_search", level="warning")
         return self._command_reply(msg, result, kind="kb_search")
+
+    def _git_auth_list_sync(self, *, lang: str = "en") -> str:
+        profiles = dict((self.git_config.auth_profiles if self.git_config else {}) or {})
+        if not profiles:
+            return t("git_auth_list_empty", lang)
+        lines = [t("git_auth_list_header", lang)]
+        for name, profile in sorted(profiles.items()):
+            username = str(getattr(profile, "username", "") or (profile.get("username") if isinstance(profile, dict) else "") or "x-access-token")
+            has_password = bool(getattr(profile, "password", "") or (profile.get("password") if isinstance(profile, dict) else ""))
+            lines.append(
+                t(
+                    "git_auth_list_item",
+                    lang,
+                    name=name,
+                    username=username,
+                    status=t("git_auth_status_ready", lang) if has_password else t("git_auth_status_missing", lang),
+                )
+            )
+        return "\n".join(lines)
+
+    def _git_auth_show_sync(self, payload: str, *, lang: str = "en") -> tuple[str, str]:
+        profile_name = str(payload or "").strip()
+        if not profile_name:
+            return t("git_auth_usage", lang), "warning"
+        profiles = dict((self.git_config.auth_profiles if self.git_config else {}) or {})
+        profile = profiles.get(profile_name)
+        if not profile:
+            return t("git_auth_not_found", lang, name=profile_name), "warning"
+        username = str(getattr(profile, "username", "") or (profile.get("username") if isinstance(profile, dict) else "") or "x-access-token")
+        password = str(getattr(profile, "password", "") or (profile.get("password") if isinstance(profile, dict) else "") or "")
+        password_status = redact_sensitive_text(password) if password else t("git_auth_status_missing", lang)
+        return t("git_auth_show", lang, name=profile_name, username=username, password=password_status), "info"
+
+    def _git_auth_delete_sync(self, payload: str, *, lang: str = "en") -> tuple[str, str]:
+        profile_name = str(payload or "").strip()
+        if not profile_name:
+            return t("git_auth_usage", lang), "warning"
+        profiles = dict((self.git_config.auth_profiles if self.git_config else {}) or {})
+        if profile_name not in profiles:
+            return t("git_auth_not_found", lang, name=profile_name), "warning"
+        try:
+            config = self._load_runtime_config()
+            profiles = dict(config.tools.git.auth_profiles or {})
+            profiles.pop(profile_name, None)
+            config.tools.git.auth_profiles = profiles
+            self._save_runtime_config(config)
+            self._refresh_git_tool_from_config(config.tools.git)
+        except Exception as exc:
+            return t("git_auth_save_failed", lang, error=str(exc)[:160]), "warning"
+        return t("git_auth_deleted", lang, name=profile_name), "info"
+
+    def _git_auth_set_sync(self, payload: str, *, lang: str = "en") -> tuple[str, str]:
+        parts = [part.strip() for part in payload.split("::")]
+        if len(parts) == 2:
+            profile_name, password = parts
+            username = "x-access-token"
+        elif len(parts) == 3:
+            profile_name, username, password = parts
+        else:
+            return t("git_auth_usage", lang), "warning"
+        if not profile_name or not password:
+            return t("git_auth_usage", lang), "warning"
+        if not _GIT_AUTH_PROFILE_NAME_RE.match(profile_name):
+            return t("git_auth_invalid_name", lang, name=profile_name), "warning"
+        if not username:
+            username = "x-access-token"
+        try:
+            from lemonclaw.config.schema import GitAuthProfileConfig
+
+            config = self._load_runtime_config()
+            profiles = dict(config.tools.git.auth_profiles or {})
+            profiles[profile_name] = GitAuthProfileConfig(username=username, password=password)
+            config.tools.git.auth_profiles = profiles
+            self._save_runtime_config(config)
+            self._refresh_git_tool_from_config(config.tools.git)
+        except Exception as exc:
+            return t("git_auth_save_failed", lang, error=str(exc)[:160]), "warning"
+        return t("git_auth_saved", lang, name=profile_name, username=username), "info"
+
+    @staticmethod
+    def _load_runtime_config():
+        from lemonclaw.config import get_config_path, load_config
+
+        return load_config(get_config_path())
+
+    @staticmethod
+    def _save_runtime_config(config: Any) -> None:
+        from lemonclaw.config import get_config_path
+        from lemonclaw.config.loader import save_config
+
+        save_config(config, get_config_path())
+
+    def _refresh_git_tool_from_config(self, git_config: Any | None) -> None:
+        self.git_config = git_config
+        self.tools.unregister("git")
+        self.tools.register(GitTool(
+            working_dir=str(self.workspace),
+            timeout=self.git_config.timeout if self.git_config else 20,
+            max_output=self.git_config.max_output if self.git_config else 50_000,
+            auth_profiles={
+                name: profile.model_dump(by_alias=False)
+                for name, profile in dict(self.git_config.auth_profiles or {}).items()
+            } if self.git_config else {},
+        ))
 
     def _knowledge_search_sync(self, query: str) -> str:
         from lemonclaw.knowledge import KnowledgeStore

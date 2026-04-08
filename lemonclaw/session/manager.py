@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -12,6 +13,7 @@ from typing import Any
 
 from loguru import logger
 
+from lemonclaw.governance.redaction import redact_sensitive_text, redact_sensitive_value
 from lemonclaw.utils.attachments import (
     append_attachment_inventory,
     persist_session_attachments,
@@ -22,6 +24,79 @@ from lemonclaw.utils.helpers import ensure_dir, safe_filename
 
 _UI_PRIMARY_BLOCK_TYPES = frozenset({"markdown", "runtime_context", "transcription", "media"})
 _EMPTY_ASSISTANT_SENTINELS = frozenset({"", "(empty)"})
+_BLOCK_TEXT_KEYS = frozenset({"text", "detail"})
+
+
+def _sanitize_tool_calls_for_storage(tool_calls: Any) -> Any:
+    if not isinstance(tool_calls, list):
+        return tool_calls
+    sanitized: list[Any] = []
+    for item in tool_calls:
+        if not isinstance(item, dict):
+            sanitized.append(item)
+            continue
+        next_item = dict(item)
+        function = next_item.get("function")
+        if isinstance(function, dict):
+            next_function = dict(function)
+            arguments = next_function.get("arguments")
+            if isinstance(arguments, str):
+                next_function["arguments"] = redact_sensitive_text(arguments)
+            else:
+                next_function["arguments"] = redact_sensitive_value(arguments)
+            next_item["function"] = next_function
+        result = next_item.get("result")
+        if result is not None:
+            next_item["result"] = redact_sensitive_value(result)
+        sanitized.append(next_item)
+    return sanitized
+
+
+def _sanitize_blocks_for_storage(blocks: Any) -> Any:
+    if not isinstance(blocks, list):
+        return blocks
+    sanitized: list[Any] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            sanitized.append(block)
+            continue
+        next_block = dict(block)
+        for key in _BLOCK_TEXT_KEYS:
+            value = next_block.get(key)
+            if isinstance(value, str):
+                next_block[key] = redact_sensitive_text(value)
+        if "result" in next_block:
+            next_block["result"] = redact_sensitive_value(next_block.get("result"))
+        sanitized.append(next_block)
+    return sanitized
+
+
+def _sanitize_message_for_storage(message: dict[str, Any]) -> dict[str, Any]:
+    sanitized = copy.deepcopy(message)
+    content = sanitized.get("content")
+    if isinstance(content, str):
+        sanitized["content"] = redact_sensitive_text(content)
+    elif isinstance(content, list):
+        sanitized["content"] = redact_sensitive_value(content)
+
+    if "thinking" in sanitized and isinstance(sanitized.get("thinking"), str):
+        sanitized["thinking"] = redact_sensitive_text(str(sanitized["thinking"]))
+    if "error" in sanitized and isinstance(sanitized.get("error"), str):
+        sanitized["error"] = redact_sensitive_text(str(sanitized["error"]))
+
+    blocks = sanitized.get("blocks")
+    if isinstance(blocks, list):
+        sanitized["blocks"] = _sanitize_blocks_for_storage(blocks)
+
+    tool_calls = sanitized.get("tool_calls")
+    if isinstance(tool_calls, list):
+        sanitized["tool_calls"] = _sanitize_tool_calls_for_storage(tool_calls)
+
+    metadata = sanitized.get("metadata")
+    if isinstance(metadata, dict):
+        sanitized["metadata"] = redact_sensitive_value(metadata)
+
+    return sanitized
 
 
 @dataclass
@@ -373,15 +448,17 @@ class SessionManager:
                 "last_consolidated": session.last_consolidated,
                 "version": session.version,
             }
-            file_handle.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+            file_handle.write(json.dumps(redact_sensitive_value(metadata_line), ensure_ascii=False) + "\n")
             for message in session.messages:
-                file_handle.write(json.dumps(message, ensure_ascii=False) + "\n")
+                file_handle.write(json.dumps(_sanitize_message_for_storage(message), ensure_ascii=False) + "\n")
             file_handle.flush()
             os.fsync(file_handle.fileno())
         os.rename(str(tmp_path), str(path))
 
     def save(self, session: Session) -> None:
         session.version += 1
+        session.messages = [_sanitize_message_for_storage(message) for message in session.messages]
+        session.metadata = redact_sensitive_value(session.metadata)
         path = self._get_session_path(session.key)
         self._atomic_save(path, session)
         self._cache[session.key] = session

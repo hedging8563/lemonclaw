@@ -380,6 +380,21 @@ class HTTPRequestToolConfig(Base):
     auth_profiles: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
+class GitAuthProfileConfig(Base):
+    """Named git credential profile for remote operations."""
+
+    username: str = "x-access-token"
+    password: str = ""
+
+
+class GitToolConfig(Base):
+    """Structured git tool configuration."""
+
+    timeout: int = 20
+    max_output: int = 50_000
+    auth_profiles: dict[str, GitAuthProfileConfig] = Field(default_factory=dict)
+
+
 class NotifyToolConfig(Base):
     """Notification tool configuration."""
 
@@ -480,6 +495,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     http: HTTPRequestToolConfig = Field(default_factory=HTTPRequestToolConfig)
+    git: GitToolConfig = Field(default_factory=GitToolConfig)
     notify: NotifyToolConfig = Field(default_factory=NotifyToolConfig)
     db: DBToolConfig = Field(default_factory=DBToolConfig)
     k8s: K8sToolConfig = Field(default_factory=K8sToolConfig)
