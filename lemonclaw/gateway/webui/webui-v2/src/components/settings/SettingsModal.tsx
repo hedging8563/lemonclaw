@@ -333,7 +333,7 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
   'tools.k8s.context': 'claw-prod',
   'tools.browser.allowed_domains': '*.example.com, api.example.com',
   'tools.coding.api_base': 'https://api.example.com',
-  'tools.exec.path_append': '/usr/local/bin:/usr/bin:/home/lemonclaw/.local/bin',
+  'tools.exec.path_append': '/opt/bin:/usr/local/bin:/usr/bin:/home/lemonclaw/.local/bin',
 };
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
