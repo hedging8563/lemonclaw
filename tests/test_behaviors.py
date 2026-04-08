@@ -16,6 +16,7 @@ import pytest
 
 from lemonclaw.agent.tools.shell import ExecTool
 from lemonclaw.bus.events import InboundMessage
+from lemonclaw.config.schema import Config, GitAuthProfileConfig
 from lemonclaw.providers.base import LLMResponse, ToolCallRequest
 from lemonclaw.telemetry.usage import TurnUsage, UsageTracker
 
@@ -1450,3 +1451,29 @@ def test_conductor_plans_expose_swarm_handoff_snapshot(tmp_path):
     assert current['subtasks'][0]['artifact_count'] == 1
     assert current['subtasks'][1]['state_bucket'] == 'ready'
     assert current['subtasks'][1]['dependency_descriptions'] == ['Audit the current funnel and summarize the risks']
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_refresh_runtime_config_reloads_git_and_http_tools(make_agent_loop):
+    loop, _bus = make_agent_loop()
+    config = Config()
+    config.tools.git.auth_profiles = {
+        "github": GitAuthProfileConfig(username="x-access-token", password="secret"),
+    }
+    config.tools.http.enabled = True
+    config.tools.http.timeout = 45
+    config.tools.http.allow_domains = ["api.example.com"]
+    config.tools.http.auth_profiles = {
+        "svc": {"Authorization": "Bearer abc"},
+    }
+
+    result = await loop.refresh_runtime_config(config, changed_paths=["tools.git", "tools.http"])
+
+    git_tool = loop.tools.get("git")
+    http_tool = loop.tools.get("http_request")
+    assert result["git"]["status"] == "reloaded"
+    assert result["http"]["status"] == "reloaded"
+    assert git_tool is not None
+    assert http_tool is not None
+    assert git_tool.auth_profiles["github"]["password"] == "secret"
+    assert http_tool._timeout == 45

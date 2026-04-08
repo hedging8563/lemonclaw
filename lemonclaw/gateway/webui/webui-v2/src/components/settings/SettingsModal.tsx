@@ -437,8 +437,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ changed_paths: Array.from(changedPaths) }),
       });
       const applyData = await applyRes.json();
+      if (applyData.runtime_status === 'failed') {
+        const details = Array.isArray(applyData.runtime_errors) ? applyData.runtime_errors.join('; ') : '';
+        setSaveError(details || t('settings_apply_runtime_failed'));
+        return;
+      }
       if (applyData.restart_required) {
         console.log('Backend is restarting to apply changes.');
+        if (typeof window !== 'undefined') {
+          window.alert(t('settings_apply_restarting'));
+        }
       }
       onClose();
     } catch (e: any) {

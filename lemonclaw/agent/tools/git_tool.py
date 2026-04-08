@@ -41,7 +41,7 @@ class GitTool(Tool):
         return (
             "Inspect or safely mutate local git state using structured subcommands. "
             "Supports status, diff, show, log, branch, commit, apply_patch, and push. "
-            "Use auth_profile for remote push instead of embedding tokens in shell commands. "
+            "Use auth_profile for remote push instead of embedding tokens in shell commands or probing GITHUB_TOKEN/GITHUB_USERNAME. "
             "Use this instead of shell git for common repository work."
         )
 

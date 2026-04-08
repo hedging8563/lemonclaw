@@ -97,8 +97,9 @@ async def test_connect_mcp_servers_uses_workspace_cwd(monkeypatch: pytest.Monkey
     assert registry.has("mcp_filesystem_ping")
 
 
-def test_exec_settings_require_restart() -> None:
-    assert _RESTART_FIELDS.match("tools.exec")
+def test_only_mcp_settings_require_restart() -> None:
+    assert _RESTART_FIELDS.match("tools.mcp_servers")
+    assert not _RESTART_FIELDS.match("tools.exec")
 
 
 @pytest.mark.asyncio

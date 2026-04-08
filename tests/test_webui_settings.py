@@ -608,10 +608,36 @@ def test_apply_settings_marks_operator_tools_as_restart_required(monkeypatch, tm
     config_path = tmp_path / 'config.json'
     save_config(Config(), config_path)
 
+    class FakeAgentLoop:
+        def __init__(self) -> None:
+            self.refresh_calls = []
+            self.defaults_calls = []
+
+        async def refresh_runtime_config(self, config, *, changed_paths):
+            self.refresh_calls.append(list(changed_paths))
+            return {
+                'http': {'status': 'reloaded', 'enabled': True},
+                'git': {'status': 'reloaded', 'enabled': True},
+                'db': {'status': 'disabled', 'enabled': False},
+            }
+
+        def update_defaults(self, **kwargs):
+            self.defaults_calls.append(kwargs)
+
+    class FakeChannelManager:
+        def __init__(self) -> None:
+            self.refresh_calls = []
+
+        async def refresh_channels_from_config(self, config, *, changed_paths, source='settings_apply'):
+            self.refresh_calls.append((list(changed_paths), source))
+            return {}
+
     kill_calls = []
     monkeypatch.setattr('os.kill', lambda pid, sig: kill_calls.append((pid, sig)))
+    fake_loop = FakeAgentLoop()
+    fake_channels = FakeChannelManager()
 
-    app = create_app(config_path=config_path, auth_token=None)
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=fake_loop, channel_manager=fake_channels)
     client = TestClient(app)
 
     resp = client.post('/api/settings/apply', json={
@@ -621,16 +647,44 @@ def test_apply_settings_marks_operator_tools_as_restart_required(monkeypatch, tm
     assert resp.status_code == 200
     body = resp.json()
     assert body['reloaded'] is True
-    assert body['restart_required'] is True
-    assert body['restart_fields'] == ['tools.http', 'tools.git', 'tools.db', 'tools.k8s', 'tools.notify']
+    assert body['restart_required'] is False
+    assert body['runtime_status'] == 'healthy'
+    assert body['runtime_errors'] == []
+    assert body['tool_updates']['http']['status'] == 'reloaded'
+    assert body['tool_updates']['git']['status'] == 'reloaded'
+    assert fake_loop.refresh_calls == [['tools.http', 'tools.git', 'tools.db', 'tools.k8s', 'tools.notify']]
+    assert fake_channels.refresh_calls == [(['tools.http', 'tools.git', 'tools.db', 'tools.k8s', 'tools.notify'], 'settings_apply')]
+    assert kill_calls == []
 
 
 def test_restart_regex_includes_operator_tools():
-    assert _RESTART_FIELDS.match('tools.http')
-    assert _RESTART_FIELDS.match('tools.git')
-    assert _RESTART_FIELDS.match('tools.notify')
-    assert _RESTART_FIELDS.match('tools.db')
-    assert _RESTART_FIELDS.match('tools.k8s')
+    assert _RESTART_FIELDS.match('tools.mcp_servers')
+    assert not _RESTART_FIELDS.match('tools.http')
+    assert not _RESTART_FIELDS.match('tools.git')
+    assert not _RESTART_FIELDS.match('tools.notify')
+    assert not _RESTART_FIELDS.match('tools.db')
+    assert not _RESTART_FIELDS.match('tools.k8s')
+
+
+def test_apply_settings_marks_mcp_servers_as_restart_required(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    kill_calls = []
+    monkeypatch.setattr('os.kill', lambda pid, sig: kill_calls.append((pid, sig)))
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.mcp_servers'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['restart_required'] is True
+    assert body['restart_fields'] == ['tools.mcp_servers']
+    assert body['runtime_status'] == 'restarting'
 
 
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):

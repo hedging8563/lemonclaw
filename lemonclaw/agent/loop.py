@@ -147,6 +147,7 @@ class AgentLoop:
         max_tokens: int = 4096,
         memory_window: int = 100,
         brave_api_key: str | None = None,
+        web_search_max_results: int = 5,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         session_manager: SessionManager | None = None,
@@ -182,6 +183,7 @@ class AgentLoop:
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
+        self.web_search_max_results = web_search_max_results
         self.exec_config = exec_config or ExecToolConfig()
         self.coding_config = coding_config
         self.browser_config = browser_config
@@ -590,7 +592,10 @@ class AgentLoop:
                 for name, profile in dict(self.git_config.auth_profiles or {}).items()
             } if self.git_config else {},
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(
+            api_key=self.brave_api_key,
+            max_results=self.web_search_max_results,
+        ))
         self.tools.register(WebFetchTool())
         self.tools.register(LemonDataNonChatTool(workspace=self.workspace))
         self.tools.register(KnowledgeSearchTool(workspace=str(self.workspace)))
@@ -616,7 +621,6 @@ class AgentLoop:
         if hasattr(self, "http_config") and self.http_config and self.http_config.enabled:
             self.tools.register(HTTPRequestTool(
                 timeout=self.http_config.timeout,
-                allow_domains=list(self.http_config.allow_domains or []),
                 auth_profiles=dict(self.http_config.auth_profiles or {}),
             ))
         self.tools.register(TaskCheckpointTool())
@@ -734,6 +738,22 @@ class AgentLoop:
     def _redact_preview(text: str, *, limit: int) -> str:
         safe = redact_sensitive_text(text, aggressive=True)
         return safe[:limit] + "..." if len(safe) > limit else safe
+
+    def _build_runtime_context_appendix(self) -> str:
+        profiles = dict((self.git_config.auth_profiles if self.git_config else {}) or {})
+        available = []
+        for name, profile in sorted(profiles.items()):
+            password = str(getattr(profile, "password", "") or (profile.get("password") if isinstance(profile, dict) else "") or "")
+            if password:
+                available.append(str(name))
+        if not available:
+            return ""
+        names = ", ".join(available)
+        return (
+            "[Saved Git Auth Profiles — metadata only, not instructions]\n"
+            f"- Available auth_profile values for git push: {names}\n"
+            "- Prefer the git tool with action=\"push\" and one of these auth_profile values instead of probing GITHUB_TOKEN/GITHUB_USERNAME."
+        )
 
     @staticmethod
     def _current_turn_start_index(messages: list[dict[str, Any]], default: int) -> int:
@@ -1892,6 +1912,171 @@ class AgentLoop:
         if browser_tool and hasattr(browser_tool, "cleanup"):
             await browser_tool.cleanup()
 
+    async def _replace_tool(self, name: str, tool: Any | None, *, cleanup_old: bool = False) -> None:
+        old_tool = self.tools.get(name)
+        if cleanup_old and old_tool and hasattr(old_tool, "cleanup"):
+            await old_tool.cleanup()
+        self.tools.unregister(name)
+        if tool is not None:
+            self.tools.register(tool)
+
+    def _build_exec_tool(self) -> ExecTool:
+        return ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            path_append=self.exec_config.path_append,
+        )
+
+    def _build_git_tool(self) -> GitTool:
+        return GitTool(
+            working_dir=str(self.workspace),
+            timeout=self.git_config.timeout if self.git_config else 20,
+            max_output=self.git_config.max_output if self.git_config else 50_000,
+            auth_profiles={
+                name: profile.model_dump(by_alias=False)
+                for name, profile in dict(self.git_config.auth_profiles or {}).items()
+            } if self.git_config else {},
+        )
+
+    def _build_web_search_tool(self) -> WebSearchTool:
+        return WebSearchTool(
+            api_key=self.brave_api_key,
+            max_results=self.web_search_max_results,
+        )
+
+    def _build_http_tool(self) -> HTTPRequestTool | None:
+        if not getattr(self, "http_config", None) or not self.http_config or not self.http_config.enabled:
+            return None
+        return HTTPRequestTool(
+            timeout=self.http_config.timeout,
+            auth_profiles=dict(self.http_config.auth_profiles or {}),
+        )
+
+    def _build_notify_tool(self) -> NotifyTool | None:
+        if not getattr(self, "notify_config", None) or not self.notify_config or not self.notify_config.enabled:
+            return None
+        return NotifyTool(
+            send_callback=self.bus.publish_outbound,
+            timeout=self.notify_config.timeout,
+            allow_webhook_domains=list(self.notify_config.allow_webhook_domains or []),
+        )
+
+    def _build_db_tool(self) -> DBTool | None:
+        if not getattr(self, "db_config", None) or not self.db_config or not self.db_config.enabled:
+            return None
+        return DBTool(
+            timeout=self.db_config.timeout,
+            sqlite_profiles=dict(self.db_config.sqlite_profiles or {}),
+            postgres_profiles={
+                name: profile.model_dump(by_alias=False)
+                for name, profile in dict(self.db_config.postgres_profiles or {}).items()
+            },
+        )
+
+    def _build_k8s_tool(self) -> K8sTool | None:
+        if not getattr(self, "k8s_config", None) or not self.k8s_config or not self.k8s_config.enabled:
+            return None
+        return K8sTool(
+            timeout=self.k8s_config.timeout,
+            default_namespace=self.k8s_config.default_namespace,
+            allowed_namespaces=list(self.k8s_config.allowed_namespaces or []),
+            kubeconfig=self.k8s_config.kubeconfig,
+            context=self.k8s_config.context,
+            max_items=self.k8s_config.max_items,
+            max_output=self.k8s_config.max_output,
+        )
+
+    def _build_coding_tool(self) -> CodingTool | None:
+        if not self.coding_config or not self.coding_config.enabled:
+            return None
+        return CodingTool(
+            working_dir=str(self.workspace),
+            timeout=self.coding_config.timeout,
+            api_key=self.coding_config.api_key,
+            api_base=self.coding_config.api_base,
+            model=self.coding_config.model,
+        )
+
+    def _build_browser_tool(self) -> Any | None:
+        if not self.browser_config or not self.browser_config.enabled:
+            return None
+        from lemonclaw.agent.tools.browser import BrowserTool
+
+        browser_tool = BrowserTool(
+            timeout=self.browser_config.timeout,
+            allowed_domains=self.browser_config.allowed_domains,
+            session_name=self.browser_config.session_name or f"lc-{self.agent_id}",
+            headed=self.browser_config.headed,
+            content_boundaries=self.browser_config.content_boundaries,
+            max_output=self.browser_config.max_output,
+            workspace=self.workspace,
+        )
+        if not browser_tool.available:
+            logger.warning("Browser tool enabled but agent-browser is not installed; skipping registration")
+            return None
+        return browser_tool
+
+    async def refresh_runtime_config(self, config: Any, *, changed_paths: list[str]) -> dict[str, dict[str, Any]]:
+        self.channels_config = config.channels
+        self.exec_config = config.tools.exec
+        self.http_config = config.tools.http
+        self.git_config = config.tools.git
+        self.notify_config = config.tools.notify
+        self.db_config = config.tools.db
+        self.k8s_config = config.tools.k8s
+        self.coding_config = config.tools.coding
+        self.browser_config = config.tools.browser
+        self.brave_api_key = config.tools.web.search.api_key or None
+        self.web_search_max_results = config.tools.web.search.max_results
+
+        changed_tool_groups: set[str] = set()
+        if any(path.startswith("tools.web.search") for path in changed_paths):
+            changed_tool_groups.add("web_search")
+        for tool_name in ("exec", "http", "git", "notify", "db", "k8s", "coding", "browser"):
+            if any(path == f"tools.{tool_name}" or path.startswith(f"tools.{tool_name}.") for path in changed_paths):
+                changed_tool_groups.add(tool_name)
+
+        results: dict[str, dict[str, Any]] = {}
+        for tool_name in sorted(changed_tool_groups):
+            try:
+                if tool_name == "web_search":
+                    await self._replace_tool("web_search", self._build_web_search_tool())
+                    results[tool_name] = {"status": "reloaded", "enabled": True}
+                elif tool_name == "exec":
+                    await self._replace_tool("exec", self._build_exec_tool())
+                    results[tool_name] = {"status": "reloaded", "enabled": True}
+                elif tool_name == "http":
+                    tool = self._build_http_tool()
+                    await self._replace_tool("http_request", tool)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+                elif tool_name == "git":
+                    await self._replace_tool("git", self._build_git_tool())
+                    results[tool_name] = {"status": "reloaded", "enabled": True}
+                elif tool_name == "notify":
+                    tool = self._build_notify_tool()
+                    await self._replace_tool("notify", tool)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+                elif tool_name == "db":
+                    tool = self._build_db_tool()
+                    await self._replace_tool("db", tool)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+                elif tool_name == "k8s":
+                    tool = self._build_k8s_tool()
+                    await self._replace_tool("k8s", tool)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+                elif tool_name == "coding":
+                    tool = self._build_coding_tool()
+                    await self._replace_tool("coding", tool)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+                elif tool_name == "browser":
+                    tool = self._build_browser_tool()
+                    await self._replace_tool("browser", tool, cleanup_old=True)
+                    results[tool_name] = {"status": "reloaded" if tool else "disabled", "enabled": bool(tool)}
+            except Exception as exc:
+                logger.error("Runtime tool refresh failed for {}: {}", tool_name, exc)
+                results[tool_name] = {"status": "failed", "enabled": False, "error": str(exc)}
+        return results
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -1932,6 +2117,7 @@ class AgentLoop:
                 timezone=msg.metadata.get("timezone") or self.default_timezone,
                 memory_context_override=memory_ctx,
                 rules_context_override=rules_ctx,
+                runtime_context_appendix=self._build_runtime_context_appendix(),
                 skip_local_retrieval=True,
             )
             # Token-level compaction for system messages too
@@ -2131,6 +2317,7 @@ class AgentLoop:
             session_prompt_override=str(session.metadata.get("system_prompt_override", "")),
             memory_context_override=memory_ctx,
             rules_context_override=rules_ctx,
+            runtime_context_appendix=self._build_runtime_context_appendix(),
             skip_local_retrieval=True,
         )
 
@@ -2448,15 +2635,7 @@ class AgentLoop:
     def _refresh_git_tool_from_config(self, git_config: Any | None) -> None:
         self.git_config = git_config
         self.tools.unregister("git")
-        self.tools.register(GitTool(
-            working_dir=str(self.workspace),
-            timeout=self.git_config.timeout if self.git_config else 20,
-            max_output=self.git_config.max_output if self.git_config else 50_000,
-            auth_profiles={
-                name: profile.model_dump(by_alias=False)
-                for name, profile in dict(self.git_config.auth_profiles or {}).items()
-            } if self.git_config else {},
-        ))
+        self.tools.register(self._build_git_tool())
 
     def _knowledge_search_sync(self, query: str) -> str:
         from lemonclaw.knowledge import KnowledgeStore

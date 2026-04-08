@@ -174,3 +174,51 @@ async def test_channel_manager_ensure_channel_enables_auto_pairing() -> None:
 
     assert fake.auto_pairing_enabled is True
     await fake.stop()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_refresh_channels_from_config_restarts_only_changed_channel(monkeypatch) -> None:
+    config = Config()
+    config.channels.telegram.enabled = True
+    config.channels.telegram.token = "token-1"
+    config.channels.discord.enabled = True
+    config.channels.discord.token = "discord-1"
+
+    manager = ChannelManager(config, MessageBus())
+    telegram_old = _FakeChannel()
+    discord_old = _FakeChannel()
+    manager.channels = {"telegram": telegram_old, "discord": discord_old}
+    manager._channel_status["telegram"].update({"configured_enabled": True, "registered": True, "available": True})
+    manager._channel_status["discord"].update({"configured_enabled": True, "registered": True, "available": True})
+    manager._spawn_channel_task("telegram", telegram_old)
+    manager._spawn_channel_task("discord", discord_old)
+    await asyncio.sleep(0.05)
+
+    built: dict[str, _FakeChannel] = {}
+
+    def _fake_build(name: str):
+        channel = _FakeChannel()
+        built[name] = channel
+        return channel
+
+    monkeypatch.setattr(manager, "_build_channel", _fake_build)
+    monkeypatch.setattr(manager, "_enable_pairing_if_needed", lambda name, channel: None)
+
+    next_config = Config()
+    next_config.channels.telegram.enabled = True
+    next_config.channels.telegram.token = "token-2"
+    next_config.channels.discord.enabled = True
+    next_config.channels.discord.token = "discord-1"
+
+    result = await manager.refresh_channels_from_config(next_config, changed_paths=["channels.telegram.token"])
+    await asyncio.sleep(0.05)
+
+    assert list(result.keys()) == ["telegram"]
+    assert result["telegram"]["refreshed"] is True
+    assert telegram_old.stop_calls == 1
+    assert discord_old.stop_calls == 0
+    assert manager.channels["telegram"] is built["telegram"]
+    assert manager.channels["discord"] is discord_old
+
+    await built["telegram"].stop()
+    await discord_old.stop()

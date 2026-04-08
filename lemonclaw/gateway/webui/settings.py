@@ -118,11 +118,8 @@ _PROVIDER_NAMES = {
 for _p in _PROVIDER_NAMES:
     _WRITABLE_PATHS.add(f"providers.{_p}")
 
-# Fields that require restart (not hot-reloadable)
-_RESTART_FIELDS = re.compile(
-    r"^(channels\.(telegram|discord|whatsapp|slack|feishu|dingtalk|email|wecom|qq|mochat|matrix)"
-    r"|tools\.(mcp_servers|coding|browser|exec|http|git|notify|db|k8s))"
-)
+# Fields that still require full process restart because there is no runtime refresh path yet.
+_RESTART_FIELDS = re.compile(r"^tools\.mcp_servers(?:\.|$)")
 
 # Sensitive field names — values masked in GET response
 _SENSITIVE_KEYS = {"api_key", "token", "secret", "password", "app_secret", "encoding_aes_key",
@@ -808,9 +805,53 @@ def get_settings_routes(
                 restart_required = True
                 restart_fields.append(path)
 
+        runtime_status = "healthy"
+        runtime_errors: list[str] = []
+        tool_updates: dict[str, Any] = {}
+        channel_updates: dict[str, Any] = {}
+
         # Hot-reload provider credentials (API keys, api_base) + agent defaults
         if config_watcher:
             config_watcher.reload_now()
+
+        from lemonclaw.config.loader import load_config
+        try:
+            runtime_config = load_config(config_path)
+        except Exception as exc:
+            logger.error("Settings apply: failed to reload runtime config: {}", exc)
+            runtime_config = None
+            runtime_status = "failed"
+            runtime_errors.append("runtime config reload failed")
+
+        if agent_loop and runtime_config and changed_paths:
+            try:
+                tool_updates = await agent_loop.refresh_runtime_config(runtime_config, changed_paths=changed_paths)
+            except Exception as exc:
+                logger.error("Settings apply: runtime tool refresh failed: {}", exc)
+                runtime_status = "failed"
+                runtime_errors.append(f"tool refresh failed: {exc}")
+
+        if channel_manager and runtime_config and changed_paths:
+            try:
+                channel_updates = await channel_manager.refresh_channels_from_config(
+                    runtime_config,
+                    changed_paths=changed_paths,
+                    source="settings_apply",
+                )
+            except Exception as exc:
+                logger.error("Settings apply: channel refresh failed: {}", exc)
+                runtime_status = "failed"
+                runtime_errors.append(f"channel refresh failed: {exc}")
+
+        if runtime_status == "healthy":
+            failed_tools = sorted(name for name, result in tool_updates.items() if str((result or {}).get("status") or "") == "failed")
+            failed_channels = sorted(name for name, result in channel_updates.items() if (result or {}).get("error"))
+            if failed_tools or failed_channels:
+                runtime_status = "failed"
+                if failed_tools:
+                    runtime_errors.append(f"failed tools: {', '.join(failed_tools)}")
+                if failed_channels:
+                    runtime_errors.append(f"failed channels: {', '.join(failed_channels)}")
 
         # After watcher reload, re-apply agent defaults from config.json directly
         # (without env overlay) so WebUI-saved values aren't overridden by
@@ -846,12 +887,18 @@ def get_settings_routes(
                 logger.warning("Settings apply: failed to read config.json for direct update")
 
         if restart_required:
+            if runtime_status != "failed":
+                runtime_status = "restarting"
             logger.info("Settings apply: restart required for {}", restart_fields)
             # Return response first, then exit — K8s/systemd will restart
             resp = _json({
                 "reloaded": True,
                 "restart_required": True,
                 "restart_fields": restart_fields,
+                "runtime_status": runtime_status,
+                "runtime_errors": runtime_errors,
+                "tool_updates": tool_updates,
+                "channel_updates": channel_updates,
             })
             # Schedule graceful shutdown after response is sent (SIGTERM triggers drain sequence)
             import os
@@ -859,7 +906,14 @@ def get_settings_routes(
             asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
             return resp
 
-        return _maybe_refresh(request, _json({"reloaded": True, "restart_required": False}))
+        return _maybe_refresh(request, _json({
+            "reloaded": runtime_status == "healthy",
+            "restart_required": False,
+            "runtime_status": runtime_status,
+            "runtime_errors": runtime_errors,
+            "tool_updates": tool_updates,
+            "channel_updates": channel_updates,
+        }))
 
     # ── POST /api/runtime-policy/reload ───────────────────────────────
 

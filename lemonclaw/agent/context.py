@@ -111,7 +111,10 @@ Your workspace is at: {workspace_path}
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
-- NEVER fabricate, guess, or hardcode API keys or secrets. Always use environment variables (e.g. $API_KEY) or saved tool auth profiles. If unsure which variable to use, check with `env | grep -i key` first.
+- NEVER fabricate, guess, or hardcode API keys or secrets.
+- Prefer saved tool auth profiles over environment-variable probing when the runtime already exposes a first-class credential surface.
+- For Git remote operations, prefer the `git` tool with `auth_profile` from `tools.git.auth_profiles`. Do NOT probe generic variables like `GITHUB_TOKEN` / `GITHUB_USERNAME` unless the user explicitly asks about environment state.
+- Use environment variables only when there is no saved runtime credential surface for that capability.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.
 
@@ -120,7 +123,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 - When asked "who are you", always say you are LemonClaw, a personal AI assistant powered by LemonData."""
 
     @staticmethod
-    def _build_runtime_context(channel: str | None, chat_id: str | None, tz_name: str | None = None) -> str:
+    def _build_runtime_context(
+        channel: str | None,
+        chat_id: str | None,
+        tz_name: str | None = None,
+        runtime_context_appendix: str | None = None,
+    ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         try:
             zi = ZoneInfo(tz_name) if tz_name else None
@@ -132,7 +140,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+        block = ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+        appendix = str(runtime_context_appendix or "").strip()
+        if appendix:
+            block += "\n\n" + appendix
+        return block
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
@@ -696,6 +708,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         session_prompt_override: str = "",
         memory_context_override: str | None = None,
         rules_context_override: str | None = None,
+        runtime_context_appendix: str | None = None,
         skip_local_retrieval: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
@@ -718,7 +731,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 trigger_text = f"{current_message}\n{extra_trigger_text}"
         self._triggered_skills = self.skills.match_skills(trigger_text)
 
-        runtime_ctx = self._build_runtime_context(channel, chat_id, timezone)
+        runtime_ctx = self._build_runtime_context(
+            channel,
+            chat_id,
+            timezone,
+            runtime_context_appendix=runtime_context_appendix,
+        )
         lemondata_ctx = build_lemondata_runtime_block(current_message, media)
         if lemondata_ctx:
             runtime_ctx = runtime_ctx + "\n\n" + lemondata_ctx
