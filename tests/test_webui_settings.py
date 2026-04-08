@@ -282,6 +282,53 @@ def test_settings_exposes_dicloak_runtime_without_credentials(tmp_path):
     assert runtime['last_close']['ok'] is False
 
 
+def test_settings_exposes_runtime_inventory(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    monkeypatch.setattr(
+        'lemonclaw.gateway.webui.settings._read_mount_info_text',
+        lambda: "\n".join([
+            "overlay /home/lemonclaw overlay rw,relatime 0 0",
+            "overlay /tmp overlay rw,relatime 0 0",
+            "overlay /var overlay rw,relatime 0 0",
+            "overlay /usr overlay rw,relatime 0 0",
+            "overlay /opt overlay rw,relatime 0 0",
+        ]),
+    )
+
+    binaries = {
+        'agent-browser': '/usr/local/bin/agent-browser',
+        'claude': '/usr/local/bin/claude',
+        'ssh': '/usr/bin/ssh',
+        'rsync': '/usr/bin/rsync',
+        'kubectl': '/usr/local/bin/kubectl',
+        'rg': '/usr/bin/rg',
+        'jq': '/usr/bin/jq',
+    }
+    monkeypatch.setattr('shutil.which', lambda cmd: binaries.get(cmd))
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+    resp = client.get('/api/settings')
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    inventory = payload['runtime_inventory']
+    assert [item['path'] for item in inventory['persistent_prefixes']] == [
+        '/home/lemonclaw',
+        '/tmp',
+        '/var',
+        '/usr',
+        '/opt',
+    ]
+    assert all(item['mounted'] is True for item in inventory['persistent_prefixes'])
+    assert inventory['binary_inventory']['ssh']['binary'] == '/usr/bin/ssh'
+    assert inventory['binary_inventory']['kubectl']['binary'] == '/usr/local/bin/kubectl'
+    assert payload['tool_status']['browser']['binary'] == '/usr/local/bin/agent-browser'
+    assert payload['tool_status']['coding']['binary'] == '/usr/local/bin/claude'
+
+
 def test_save_config_strips_env_injected_lemondata_response_key(monkeypatch, tmp_path):
     config_path = tmp_path / 'config.json'
     save_config(Config(), config_path)

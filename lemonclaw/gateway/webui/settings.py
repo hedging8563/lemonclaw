@@ -139,6 +139,22 @@ _VISIBLE_SENSITIVE_PATHS = {
     "channels.feishu.encrypt_key",
     "channels.feishu.verification_token",
 }
+_RUNTIME_PERSISTENT_PREFIXES = (
+    "/home/lemonclaw",
+    "/tmp",
+    "/var",
+    "/usr",
+    "/opt",
+)
+_RUNTIME_BINARY_COMMANDS = {
+    "browser": "agent-browser",
+    "coding": "claude",
+    "ssh": "ssh",
+    "rsync": "rsync",
+    "kubectl": "kubectl",
+    "rg": "rg",
+    "jq": "jq",
+}
 
 
 def _should_mask(path: tuple[str, ...], key: str, value: Any) -> bool:
@@ -391,6 +407,69 @@ def _derive_dicloak_runtime(agent_loop: Any | None) -> dict[str, object] | None:
     return status if isinstance(status, dict) else None
 
 
+def _read_mount_info_text() -> str:
+    try:
+        return Path("/proc/self/mounts").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _decode_mount_field(value: str) -> str:
+    return (
+        value
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+    )
+
+
+def _derive_runtime_inventory() -> dict[str, object]:
+    import shutil as _shutil
+
+    mounts: dict[str, dict[str, str]] = {}
+    for raw_line in _read_mount_info_text().splitlines():
+        parts = raw_line.split()
+        if len(parts) < 3:
+            continue
+        source, target, fs_type = parts[:3]
+        mounts[_decode_mount_field(target)] = {
+            "source": _decode_mount_field(source),
+            "fs_type": _decode_mount_field(fs_type),
+        }
+
+    persistent_prefixes: list[dict[str, object]] = []
+    for path in _RUNTIME_PERSISTENT_PREFIXES:
+        mount_info = mounts.get(path)
+        persistent_prefixes.append({
+            "path": path,
+            "expected": True,
+            "mounted": bool(mount_info),
+            "fs_type": mount_info.get("fs_type") if mount_info else None,
+            "source": mount_info.get("source") if mount_info else None,
+        })
+
+    binary_inventory: dict[str, dict[str, object]] = {}
+    for key, command in _RUNTIME_BINARY_COMMANDS.items():
+        binary = _shutil.which(command) or ""
+        binary_inventory[key] = {
+            "command": command,
+            "installed": bool(binary),
+            "binary": binary or None,
+        }
+
+    return {
+        "persistent_prefixes": persistent_prefixes,
+        "binary_inventory": binary_inventory,
+        "cache_env": {
+            "XDG_CACHE_HOME": (Path.home() / ".cache").as_posix(),
+            "XDG_CONFIG_HOME": (Path.home() / ".config").as_posix(),
+            "PIP_CACHE_DIR": str((Path.home() / ".cache" / "pip").as_posix()),
+            "NPM_CONFIG_CACHE": str((Path.home() / ".cache" / "npm").as_posix()),
+        },
+    }
+
+
 def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
     """Ensure Feishu subscription tokens exist before serving settings UI."""
     import fcntl
@@ -544,17 +623,25 @@ def get_settings_routes(
 
         # Include the effective (runtime) model so frontend can show both
         effective_model = agent_loop.model if agent_loop and hasattr(agent_loop, "model") else None
-        import shutil as _shutil
-        browser_bin = _shutil.which("agent-browser") or ""
-        coding_bin = _shutil.which("claude") or ""
+        runtime_inventory = _derive_runtime_inventory()
+        binary_inventory = runtime_inventory.get("binary_inventory", {}) if isinstance(runtime_inventory, dict) else {}
+        browser_status = binary_inventory.get("browser", {}) if isinstance(binary_inventory, dict) else {}
+        coding_status = binary_inventory.get("coding", {}) if isinstance(binary_inventory, dict) else {}
         result = {
             "settings": _mask_dict(data),
             "channel_runtime": _derive_channel_runtime(config),
             "group_runtime": _derive_group_runtime(config),
             "dicloak_runtime": _derive_dicloak_runtime(agent_loop),
+            "runtime_inventory": runtime_inventory,
             "tool_status": {
-                "browser": {"installed": bool(browser_bin), "binary": browser_bin},
-                "coding": {"installed": bool(coding_bin), "binary": coding_bin},
+                "browser": {
+                    "installed": bool(browser_status.get("installed")),
+                    "binary": browser_status.get("binary"),
+                },
+                "coding": {
+                    "installed": bool(coding_status.get("installed")),
+                    "binary": coding_status.get("binary"),
+                },
             },
         }
         if channel_manager is not None and hasattr(channel_manager, "get_channel_status"):
