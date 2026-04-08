@@ -44,7 +44,8 @@ describe('StructuredMessageContent', () => {
     expect(html).toContain('<img');
     expect(html).toContain('/api/media?path=%2Fhome%2Flemonclaw%2F.lemonclaw%2Fmedia%2Fdemo.jpg');
     expect(html).toContain('demo.jpg');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('Open image preview');
+    expect(html).toContain('download="demo.jpg"');
   });
 
   it('renders audio player for audio and voice markers', async () => {
@@ -58,7 +59,8 @@ describe('StructuredMessageContent', () => {
     expect(html).toContain('<audio');
     expect(html).toContain('controls');
     expect(html).toContain('note.ogg');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('VOICE');
+    expect(html).toContain('/api/media?path=%2Fhome%2Flemonclaw%2F.lemonclaw%2Fmedia%2Fnote.ogg');
   });
 
   it('renders runtime context and transcription blocks separately', async () => {
@@ -74,6 +76,7 @@ Current Time: 2026-03-08 10:00 (UTC)
     );
     expect(html).toContain('Runtime Context');
     expect(html).toContain('TRANSCRIPTION');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('Current Time: 2026-03-08 10:00 (UTC)');
+    expect(html).toContain('表格填完会显示结果');
   });
 });

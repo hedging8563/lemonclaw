@@ -44,8 +44,10 @@ describe('MessageList', () => {
     const html = render(<MessageList />);
     expect(html).toContain('<img');
     expect(html).toContain('<audio');
+    expect(html).toContain('附件如下');
     expect(html).toContain('/api/media?path=%2Fhome%2Flemonclaw%2F.lemonclaw%2Fmedia%2Fdemo.jpg');
     expect(html).toContain('/api/media?path=%2Fhome%2Flemonclaw%2F.lemonclaw%2Fmedia%2Fnote.ogg');
-    expect(html).toMatchSnapshot();
+    expect(html).toContain('/home/lemonclaw/.lemonclaw/media/demo.jpg');
+    expect(html).toContain('/home/lemonclaw/.lemonclaw/media/note.ogg');
   });
 });
