@@ -409,6 +409,66 @@ class TestSlashCommands:
         assert "tools.mcp_servers" in response.content
 
     @pytest.mark.asyncio
+    async def test_runtime_command_can_show_recovery_pack(self, make_agent_loop, monkeypatch):
+        from lemonclaw.gateway.runtime_state import mark_restart_requested
+
+        loop, _bus = make_agent_loop()
+        loop.config_path = loop.workspace / "config.json"
+        loop.config_path.write_text(json.dumps({
+            "channels": {
+                "autoPairing": True,
+                "telegram": {"enabled": True},
+            }
+        }), encoding="utf-8")
+        loop.watchdog = MagicMock()
+        loop.watchdog.snapshot.return_value = {
+            "running": True,
+            "state": {
+                "recent_error_count": 1,
+                "total_soft_recoveries": 2,
+                "total_hard_restarts": 0,
+            },
+            "task_stuck": {"count": 0, "task_ids": []},
+            "channels": {
+                "telegram": {"enabled": True, "available": True, "running": True, "error": ""},
+            },
+        }
+        mark_restart_requested(
+            loop.config_path,
+            restart_fields=["tools.mcp_servers"],
+            runtime_errors=[],
+        )
+        loop.ledger.ensure_task(
+            task_id="task_recovery",
+            session_key="test:c1",
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="recovery demo",
+            status="waiting",
+            current_stage="verify",
+        )
+        pairing_dir = loop.workspace / "pairing"
+        pairing_dir.mkdir(parents=True, exist_ok=True)
+        (pairing_dir / "telegram.json").write_text(json.dumps({
+            "owner": "1234567890|alice",
+            "owner_notify_target": "1234567890",
+            "approved": ["1234567890|alice"],
+            "pending": {"user-2": {"display_name": "User 2", "notify_target": "user-2"}},
+        }), encoding="utf-8")
+        monkeypatch.setenv("HOME", str(loop.workspace))
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/runtime recovery")
+        )
+
+        assert response is not None
+        assert "Runtime recovery pack" in response.content
+        assert "task_recovery" in response.content
+        assert "Pairing telegram" in response.content
+        assert "tools.mcp_servers" in response.content
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(

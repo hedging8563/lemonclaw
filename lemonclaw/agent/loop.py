@@ -2647,7 +2647,7 @@ class AgentLoop:
     def _handle_runtime_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[8:].strip().lower()
         mode = raw or "summary"
-        if mode not in {"summary", "inventory", "mcp", "health"}:
+        if mode not in {"summary", "inventory", "mcp", "health", "recovery"}:
             return self._command_reply(msg, t("runtime_usage", lang), kind="runtime_help", level="warning")
 
         lines: list[str] = []
@@ -2722,8 +2722,9 @@ class AgentLoop:
                     lines.append(t("runtime_mcp_server_line", lang, name=name, mode=mode_name))
                 lines.append(t("runtime_mcp_tool_line", lang, tools=", ".join(mcp_tools) if mcp_tools else "none"))
 
-        if mode in {"summary", "health"}:
+        if mode in {"summary", "health", "recovery"}:
             from lemonclaw.config.loader import get_config_path
+            from lemonclaw.config.loader import load_config
             from lemonclaw.gateway.runtime_state import load_runtime_state
 
             watchdog = getattr(self, "watchdog", None)
@@ -2731,6 +2732,12 @@ class AgentLoop:
             snapshot = watchdog.snapshot() if watchdog and hasattr(watchdog, "snapshot") else {}
             config_path = getattr(self, "config_path", None) or get_config_path()
             restart_state = load_runtime_state(config_path)
+            runtime_config = None
+            if mode == "recovery":
+                try:
+                    runtime_config = load_config(config_path)
+                except Exception:
+                    runtime_config = None
             channels = {}
             if isinstance(snapshot.get("channels"), dict):
                 channels = dict(snapshot.get("channels") or {})
@@ -2769,7 +2776,7 @@ class AgentLoop:
                             result=str(restart_state.get("last_restart_result") or "unknown"),
                         )
                     )
-            else:
+            elif mode == "health":
                 lines.append(t("runtime_health_detail_header", lang))
                 lines.append(
                     t(
@@ -2809,6 +2816,72 @@ class AgentLoop:
                             error=str(item.get("error") or "none"),
                         )
                     )
+            else:
+                from lemonclaw.gateway.webui.settings import _derive_channel_runtime
+
+                lines.append(t("runtime_recovery_header", lang))
+                lines.append(
+                    t(
+                        "runtime_health_summary",
+                        lang,
+                        watchdog="yes" if watchdog_running else "no",
+                        stale_tasks=stale_tasks,
+                        recent_errors=int(state.get("recent_error_count") or 0),
+                        soft=int(state.get("total_soft_recoveries") or 0),
+                        hard=int(state.get("total_hard_restarts") or 0),
+                        running=running_channels,
+                        total=total_channels,
+                        blocked=blocked_channels,
+                    )
+                )
+                if restart_state:
+                    lines.append(
+                        t(
+                            "runtime_restart_summary",
+                            lang,
+                            status=str(restart_state.get("status") or "unknown"),
+                            fields=", ".join(restart_state.get("restart_fields") or []) if restart_state.get("restart_fields") else "none",
+                            requested_at=str(restart_state.get("last_restart_requested_at_ms") or "n/a"),
+                            completed_at=str(restart_state.get("last_restart_completed_at_ms") or "n/a"),
+                            result=str(restart_state.get("last_restart_result") or "unknown"),
+                        )
+                    )
+
+                for task in self.ledger.list_tasks(limit=3, session_key=msg.session_key):
+                    task_id = str(task.get("task_id") or "")
+                    if not task_id:
+                        continue
+                    candidate = self.ledger.build_resume_candidate(task_id) or {}
+                    reason = str(candidate.get("reason") or "no recovery hint")
+                    if len(reason) > 120:
+                        reason = reason[:117] + "..."
+                    lines.append(
+                        t(
+                            "runtime_recovery_task_line",
+                            lang,
+                            task_id=task_id,
+                            status=str(task.get("status") or "unknown"),
+                            stage=str(task.get("current_stage") or "unknown"),
+                            action=str(candidate.get("recommended_action") or "manual_review"),
+                            safe="yes" if candidate.get("safe_to_execute") else "no",
+                            reason=reason,
+                        )
+                    )
+
+                if runtime_config is not None:
+                    for channel_name, entry in sorted(_derive_channel_runtime(runtime_config).items()):
+                        if str(entry.get("effective_dm_policy") or "") != "pairing":
+                            continue
+                        lines.append(
+                            t(
+                                "runtime_recovery_pairing_line",
+                                lang,
+                                channel=channel_name,
+                                approved=str(entry.get("approved_count") or 0),
+                                pending=str(entry.get("pending_count") or 0),
+                                owner=str(entry.get("owner") or "none"),
+                            )
+                        )
 
         return self._command_reply(msg, "\n".join(lines), kind="runtime")
 

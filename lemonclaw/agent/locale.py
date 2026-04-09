@@ -70,7 +70,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — Stop the current task\n"
             "/tasks [limit] — Show recent tasks and recovery hints\n"
             "/resume [task_id] — Run the safest available resume action\n"
-            "/runtime [inventory|mcp|health] — Show runtime, MCP, and health status\n"
+            "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
@@ -85,7 +85,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — 停止当前任务\n"
             "/tasks [数量] — 查看最近任务与恢复建议\n"
             "/resume [task_id] — 执行当前最安全的恢复动作\n"
-            "/runtime [inventory|mcp|health] — 查看运行时、MCP 与健康状态\n"
+            "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
@@ -168,8 +168,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "恢复 `{task_id}` 失败：{error}",
     },
     "runtime_usage": {
-        "en": "Use `/runtime`, `/runtime inventory`, `/runtime mcp`, or `/runtime health`.",
-        "zh": "使用 `/runtime`、`/runtime inventory`、`/runtime mcp` 或 `/runtime health`。",
+        "en": "Use `/runtime`, `/runtime inventory`, `/runtime mcp`, `/runtime health`, or `/runtime recovery`.",
+        "zh": "使用 `/runtime`、`/runtime inventory`、`/runtime mcp`、`/runtime health` 或 `/runtime recovery`。",
     },
     "runtime_summary_header": {
         "en": "Runtime summary:",
@@ -222,6 +222,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "runtime_restart_summary": {
         "en": "- Restart state: status={status}, fields={fields}, requested_at={requested_at}, completed_at={completed_at}, last_result={result}",
         "zh": "- 重启状态：status={status}，fields={fields}，requested_at={requested_at}，completed_at={completed_at}，last_result={result}",
+    },
+    "runtime_recovery_header": {
+        "en": "Runtime recovery pack:",
+        "zh": "运行时恢复包：",
+    },
+    "runtime_recovery_task_line": {
+        "en": "- Task {task_id}: status={status}, stage={stage}, next={action}, safe={safe}, reason={reason}",
+        "zh": "- 任务 {task_id}：状态={status}，阶段={stage}，下一步={action}，可自动执行={safe}，原因={reason}",
+    },
+    "runtime_recovery_pairing_line": {
+        "en": "- Pairing {channel}: approved={approved}, pending={pending}, owner={owner}",
+        "zh": "- 配对 {channel}：approved={approved}，pending={pending}，owner={owner}",
     },
     "git_auth_usage": {
         "en": (

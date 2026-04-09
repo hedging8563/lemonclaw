@@ -73,8 +73,12 @@ Generated runtime data lives under:
 | `lemonclaw doctor` | Pre-flight diagnostics |
 | `lemonclaw doctor --fix` | Auto-fix common issues |
 | `lemonclaw status` | Show runtime status |
+| `/runtime [inventory|mcp|health|recovery]` | Show bot-facing runtime, MCP, health, and recovery truth |
 | `/tasks` | Show recent task and recovery hints in chat |
 | `/resume [task_id]` | Execute the safest available resume action in chat |
+| `/pairing status` | Show current pairing state in chat |
+| `/pairing pending` | Show pending pairing requests in chat (owner only) |
+| `/pairing transfer <user_id>` | Transfer owner role in chat (owner only) |
 | `lemonclaw cron add/list/remove` | Scheduled tasks |
 | `lemonclaw channels login` | Link WhatsApp (QR scan) |
 | `lemonclaw channels status` | Show channel status |
