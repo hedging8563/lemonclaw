@@ -6,6 +6,7 @@ export interface ActiveWeixinLogin {
   sessionKey: string;
   qrcode: string;
   qrcodeUrl: string;
+  baseUrl: string;
   startedAt: number;
   status: 'wait' | 'scaned' | 'confirmed' | 'expired';
 }
@@ -57,6 +58,7 @@ export async function startWeixinLoginWithQr(params: {
     sessionKey,
     qrcode: qr.qrcode,
     qrcodeUrl: qr.qrcode_img_content,
+    baseUrl: params.baseUrl,
     startedAt: Date.now(),
     status: 'wait',
   });
@@ -70,7 +72,7 @@ export async function startWeixinLoginWithQr(params: {
 
 export async function waitForWeixinLogin(params: {
   sessionKey: string;
-  baseUrl: string;
+  baseUrl?: string;
   timeoutMs?: number;
 }): Promise<WeixinQrWaitResult> {
   const login = activeLogins.get(params.sessionKey);
@@ -80,7 +82,11 @@ export async function waitForWeixinLogin(params: {
 
   const deadline = Date.now() + Math.max(params.timeoutMs ?? 2_000, 1_000);
   while (Date.now() < deadline) {
-    const status = await pollWeixinQRStatus(params.baseUrl, login.qrcode);
+    const pollBaseUrl = login.baseUrl || params.baseUrl;
+    if (!pollBaseUrl) {
+      return { connected: false, message: '当前微信登录缺少基础地址。', status: 'missing' };
+    }
+    const status = await pollWeixinQRStatus(pollBaseUrl, login.qrcode);
     login.status = status.status;
     if (status.status === 'confirmed' && status.bot_token && status.ilink_bot_id) {
       activeLogins.delete(params.sessionKey);
@@ -89,7 +95,7 @@ export async function waitForWeixinLogin(params: {
         message: '微信连接成功。',
         botToken: status.bot_token,
         accountId: status.ilink_bot_id,
-        baseUrl: status.baseurl || params.baseUrl,
+        baseUrl: status.baseurl || pollBaseUrl,
         userId: status.ilink_user_id,
         status: status.status,
       };

@@ -143,6 +143,7 @@ export class WeixinBridgeServer {
       accounts: listWeixinAccounts(),
       activeLogins: listActiveWeixinLogins().map((item) => ({
         sessionKey: item.sessionKey,
+        baseUrl: item.baseUrl,
         status: item.status,
         startedAt: item.startedAt,
       })),
@@ -158,7 +159,6 @@ export class WeixinBridgeServer {
         if (!active) break;
         const result = await waitForWeixinLogin({
           sessionKey,
-          baseUrl: this.baseUrl,
           timeoutMs: 2_000,
         });
         if (result.connected && result.botToken && result.accountId) {
@@ -166,7 +166,7 @@ export class WeixinBridgeServer {
           const account = saveWeixinAccount(accountId, {
             accountId,
             token: result.botToken,
-            baseUrl: result.baseUrl || this.baseUrl,
+            baseUrl: result.baseUrl || active.baseUrl || this.baseUrl,
             cdnBaseUrl: this.cdnBaseUrl || DEFAULT_WEIXIN_CDN_BASE_URL,
             userId: result.userId,
             lastError: '',
@@ -270,8 +270,9 @@ export class WeixinBridgeServer {
 
       if (request.method === 'POST' && url.pathname === '/login/start') {
         const body = await parseJsonBody(request);
+        const baseUrl = String(body.baseUrl || this.baseUrl || DEFAULT_WEIXIN_BASE_URL);
         const result = await startWeixinLoginWithQr({
-          baseUrl: String(body.baseUrl || this.baseUrl || DEFAULT_WEIXIN_BASE_URL),
+          baseUrl,
           accountId: typeof body.accountId === 'string' ? body.accountId : undefined,
           force: Boolean(body.force),
         });
