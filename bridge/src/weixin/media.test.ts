@@ -268,6 +268,71 @@ test('extractInboundMediaPaths falls back to video thumbnail when main media dow
   }
 });
 
+test('extractInboundMediaPaths skips a hanging inbound item and keeps processing later media', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-timeout-'));
+  const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;
+  process.env.WEIXIN_MEDIA_DIR = path.join(dir, 'weixin-media');
+  const fetchMock = mock.method(globalThis, 'fetch', async (input: any, init?: any) => {
+    const url = String(input);
+    if (url.includes('slow-image')) {
+      const signal: AbortSignal | undefined = init?.signal;
+      await new Promise<never>((_resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new Error('already aborted'));
+          return;
+        }
+        signal?.addEventListener('abort', () => reject(new Error('slow-image aborted')), { once: true });
+      });
+    }
+    if (url.includes('fast-file')) {
+      return new Response(Buffer.from('file-bytes'), {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+    }
+    throw new Error(`unexpected fetch url: ${url}`);
+  });
+
+  const started = Date.now();
+  try {
+    const mediaPaths = await extractInboundMediaPaths({
+      accountId: 'bot-1',
+      cdnBaseUrl: 'https://cdn.weixin.local',
+      timeoutMs: 50,
+      message: {
+        item_list: [
+          {
+            type: MessageItemType.IMAGE,
+            image_item: {
+              media: { encrypt_query_param: 'slow-image' },
+            },
+          },
+          {
+            type: MessageItemType.FILE,
+            file_item: {
+              file_name: 'report.txt',
+              media: { encrypt_query_param: 'fast-file' },
+            },
+          },
+        ],
+      },
+    });
+
+    assert.ok(Date.now() - started < 1000);
+    assert.equal(mediaPaths.length, 1);
+    assert.match(mediaPaths[0], /file-.*\.txt$/);
+    assert.deepEqual(readFileSync(mediaPaths[0]), Buffer.from('file-bytes'));
+  } finally {
+    fetchMock.mock.restore();
+    if (originalMediaDir == null) {
+      delete process.env.WEIXIN_MEDIA_DIR;
+    } else {
+      process.env.WEIXIN_MEDIA_DIR = originalMediaDir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('extractInboundMediaPaths decrypts inbound image with raw hex aeskey', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'weixin-inbound-image-'));
   const originalMediaDir = process.env.WEIXIN_MEDIA_DIR;

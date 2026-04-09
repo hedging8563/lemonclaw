@@ -26,6 +26,8 @@ import { PersistentWeixinEventQueue } from './event-queue.js';
 import { filterWeixinMarkdown } from './markdown-filter.js';
 import { extractInboundMediaPaths, sendWeixinMediaFiles } from './media.js';
 
+const DEFAULT_MONITOR_MEDIA_DOWNLOAD_TIMEOUT_MS = 10_000;
+
 export interface WeixinBridgeEvent {
   id: number;
   type: 'message';
@@ -108,6 +110,7 @@ async function eventFromMessage(
     accountId: normalizedAccountId,
     message,
     cdnBaseUrl: account.cdnBaseUrl || DEFAULT_WEIXIN_CDN_BASE_URL,
+    timeoutMs: DEFAULT_MONITOR_MEDIA_DOWNLOAD_TIMEOUT_MS,
   });
   return {
     id: 0,

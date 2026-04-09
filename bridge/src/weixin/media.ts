@@ -23,6 +23,8 @@ import {
 } from './upload.js';
 import { WEIXIN_MEDIA_MAX_BYTES } from './limits.js';
 
+const DEFAULT_INBOUND_MEDIA_DOWNLOAD_TIMEOUT_MS = 10_000;
+
 function ensureAccountMediaDir(accountId: string): string {
   const dir = path.join(mediaDir(), accountId);
   mkdirSync(dir, { recursive: true });
@@ -73,29 +75,36 @@ async function downloadInboundBuffer(params: {
   encryptedQueryParam?: string;
   aesKey?: string;
   cdnBaseUrl: string;
+  timeoutMs?: number;
 }): Promise<{ buf: Buffer; contentType: string | null } | null> {
   if (!params.encryptedQueryParam) {
     return null;
   }
   if (params.aesKey?.trim()) {
-    return downloadAndDecryptBuffer(params.encryptedQueryParam, params.aesKey, params.cdnBaseUrl);
+    return downloadAndDecryptBuffer(
+      params.encryptedQueryParam,
+      params.aesKey,
+      params.cdnBaseUrl,
+      params.timeoutMs,
+    );
   }
-  return downloadPlainCdnBuffer(params.encryptedQueryParam, params.cdnBaseUrl);
+  return downloadPlainCdnBuffer(params.encryptedQueryParam, params.cdnBaseUrl, params.timeoutMs);
 }
 
 async function downloadMediaItem(params: {
   accountId: string;
   item: MessageItem;
   cdnBaseUrl: string;
+  timeoutMs?: number;
 }): Promise<string | null> {
-  const { accountId, item, cdnBaseUrl } = params;
+  const { accountId, item, cdnBaseUrl, timeoutMs } = params;
   if (item.type === MessageItemType.IMAGE && item.image_item?.media?.encrypt_query_param) {
     const key = item.image_item.aeskey
       ? encodeAesKeyHexToBase64(item.image_item.aeskey)
       : item.image_item.media.aes_key;
     const result = key
-      ? await downloadAndDecryptBuffer(item.image_item.media.encrypt_query_param, key, cdnBaseUrl)
-      : await downloadPlainCdnBuffer(item.image_item.media.encrypt_query_param, cdnBaseUrl);
+      ? await downloadAndDecryptBuffer(item.image_item.media.encrypt_query_param, key, cdnBaseUrl, timeoutMs)
+      : await downloadPlainCdnBuffer(item.image_item.media.encrypt_query_param, cdnBaseUrl, timeoutMs);
     const ext = getExtensionFromContentTypeOrUrl(result.contentType, `https://example.local/fallback.jpg`);
     return saveMediaBuffer({ accountId, buf: result.buf, ext: ext === '.bin' ? '.jpg' : ext, prefix: 'image' });
   }
@@ -105,6 +114,7 @@ async function downloadMediaItem(params: {
       encryptedQueryParam: item.file_item.media.encrypt_query_param,
       aesKey: item.file_item.media.aes_key || item.file_item.aeskey,
       cdnBaseUrl,
+      timeoutMs,
     });
     if (result) {
       const ext = path.extname(item.file_item.file_name || '') || getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/file.bin');
@@ -119,6 +129,7 @@ async function downloadMediaItem(params: {
         encryptedQueryParam: videoItem.media?.encrypt_query_param,
         aesKey: videoItem.media?.aes_key || videoItem.aeskey,
         cdnBaseUrl,
+        timeoutMs,
       });
       if (result) {
         const ext = getExtensionFromContentTypeOrUrl(result.contentType, 'https://example.local/video.mp4');
@@ -133,6 +144,7 @@ async function downloadMediaItem(params: {
         encryptedQueryParam: videoItem.thumb_media?.encrypt_query_param,
         aesKey: videoItem.thumb_media?.aes_key || videoItem.thumb_aeskey,
         cdnBaseUrl,
+        timeoutMs,
       });
       if (thumb) {
         const ext = getExtensionFromContentTypeOrUrl(thumb.contentType, 'https://example.local/video-thumb.jpg');
@@ -152,6 +164,7 @@ async function downloadMediaItem(params: {
       encryptedQueryParam: item.voice_item.media.encrypt_query_param,
       aesKey: item.voice_item.media.aes_key || item.voice_item.aeskey,
       cdnBaseUrl,
+      timeoutMs,
     });
     if (result) {
       const wav = await silkToWav(result.buf);
@@ -169,13 +182,16 @@ export async function extractInboundMediaPaths(params: {
   accountId: string;
   message: WeixinMessage;
   cdnBaseUrl: string;
+  timeoutMs?: number;
 }): Promise<string[]> {
   const mediaPaths: string[] = [];
+  const timeoutMs = Math.max(1, Math.floor(params.timeoutMs ?? DEFAULT_INBOUND_MEDIA_DOWNLOAD_TIMEOUT_MS));
   for (const item of params.message.item_list || []) {
     const localPath = await downloadMediaItem({
       accountId: params.accountId,
       item,
       cdnBaseUrl: params.cdnBaseUrl,
+      timeoutMs,
     }).catch((error) => {
       console.warn(`[weixin] failed to process inbound ${itemTypeDebugLabel(item)} item: ${formatError(error)}`);
       return null;
