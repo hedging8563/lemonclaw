@@ -347,12 +347,18 @@ class BaseChannel(ABC):
             state = str(summary.get("state") or "unknown")
             if state == "owner":
                 pending_ids = list(summary.get("pending_ids") or [])
+                break_glass = self._pairing.get_break_glass_metadata()
                 suffix = f"\nPending requests: {', '.join(pending_ids)}" if pending_ids else "\nPending requests: none"
+                recovery_line = "\nRecovery code: none active"
+                if break_glass.get("active"):
+                    ttl_remaining = int(break_glass.get("ttl_remaining_s") or 0)
+                    recovery_line = f"\nRecovery code: active ({ttl_remaining}s remaining)"
                 return (
                     f"You are the current owner on this channel.\n"
                     f"Approved users: {summary.get('approved_count', 0)}\n"
                     f"Pending requests: {summary.get('pending_count', 0)}"
                     f"{suffix}"
+                    f"{recovery_line}"
                 )
             if state == "approved":
                 return "You are approved to use this bot on this channel."
@@ -384,12 +390,30 @@ class BaseChannel(ABC):
                 return "Break-glass recovery succeeded."
             return "Invalid or expired break-glass recovery code."
 
+        if content.startswith("/pairing recovery-code"):
+            if not is_owner:
+                return "Only the current owner can issue a break-glass recovery code."
+            parts = content.split(maxsplit=2)
+            ttl_s = 600
+            if len(parts) == 3:
+                try:
+                    ttl_s = int(parts[2].strip())
+                except ValueError:
+                    return "Usage: /pairing recovery-code [ttl_seconds]"
+            issued = self._pairing.issue_break_glass_code(ttl_s=ttl_s)
+            return (
+                "Break-glass recovery code issued.\n"
+                f"Code: {issued['code']}\n"
+                f"TTL: {issued['ttl_s']}s\n"
+                "Store it safely. Anyone with this code can claim channel ownership once."
+            )
+
         if not is_owner:
             return "Only the current owner can approve, deny, transfer, or inspect pending pairing requests."
 
         parts = content.split(maxsplit=1)
         if len(parts) < 2:
-            return "Usage: /approve <user_id>, /deny <user_id>, /pairing pending, /pairing transfer <user_id>, or /pairing break-glass <code>"
+            return "Usage: /approve <user_id>, /deny <user_id>, /pairing pending, /pairing transfer <user_id>, /pairing recovery-code [ttl_seconds], or /pairing break-glass <code>"
 
         cmd, target = parts[0].lower(), parts[1].strip()
 
@@ -437,7 +461,10 @@ class BaseChannel(ABC):
                 if not payload:
                     return "Usage: /pairing break-glass <code>"
                 return await self._handle_pairing_command(sender_id, f"/pairing break-glass {payload}", notify_target=notify_target)
-            return "Usage: /pairing status, /pairing pending, or /pairing transfer <user_id>"
+            if action == "recovery-code":
+                suffix = f" {payload}" if payload else ""
+                return await self._handle_pairing_command(sender_id, f"/pairing recovery-code{suffix}", notify_target=notify_target)
+            return "Usage: /pairing status, /pairing pending, /pairing transfer <user_id>, /pairing recovery-code [ttl_seconds], or /pairing break-glass <code>"
         return None
     
     @property

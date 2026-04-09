@@ -85,6 +85,7 @@ Generated runtime data lives under:
 | `/pairing status` | Show current pairing state in chat |
 | `/pairing pending` | Show pending pairing requests in chat (owner only) |
 | `/pairing transfer <user_id>` | Transfer owner role in chat (owner only) |
+| `/pairing recovery-code [ttl_seconds]` | Issue a one-time owner recovery code directly from chat (owner only) |
 | `lemonclaw cron add/list/remove` | Scheduled tasks |
 | `lemonclaw channels login` | Link WhatsApp (QR scan) |
 | `lemonclaw channels status` | Show channel status |

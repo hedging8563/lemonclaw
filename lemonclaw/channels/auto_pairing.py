@@ -139,11 +139,15 @@ class AutoPairing:
         if expires_at_ms and expires_at_ms < _now_ms():
             self._state.pop("break_glass", None)
             self._save()
-            return {"active": False, "expires_at_ms": None}
+            return {"active": False, "expires_at_ms": None, "ttl_remaining_s": None}
+        ttl_remaining_s = None
+        if expires_at_ms > 0:
+            ttl_remaining_s = max(0, (expires_at_ms - _now_ms()) // 1000)
         return {
             "active": bool(payload.get("code_hash")) and expires_at_ms > 0,
             "expires_at_ms": expires_at_ms or None,
             "issued_at_ms": int(payload.get("issued_at_ms") or 0) or None,
+            "ttl_remaining_s": ttl_remaining_s,
         }
 
     def issue_break_glass_code(self, *, ttl_s: int = 600) -> dict[str, Any]:

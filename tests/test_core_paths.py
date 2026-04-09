@@ -128,6 +128,7 @@ class TestAutoPairing:
         assert pairing.owner == 'new-owner|desktop'
         assert pairing.owner_notify_target == 'dm-new'
         assert pairing.get_break_glass_metadata()["active"] is False
+        assert pairing.get_break_glass_metadata()["ttl_remaining_s"] is None
 
     @pytest.mark.asyncio
     async def test_pairing_mode_does_not_log_empty_allow_from_warning(self, tmp_path: Path):
@@ -454,6 +455,128 @@ class TestAutoPairing:
         ) is False
         assert ch._pairing.owner == 'new-owner|desktop'
         assert any(msg.chat_id == 'dm-new' and 'break-glass recovery succeeded' in (msg.content or '').lower() for msg in outbound)
+
+    @pytest.mark.asyncio
+    async def test_owner_can_issue_recovery_code_from_pairing_command(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'telegram'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('telegram', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        outbound.clear()
+
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='/pairing recovery-code 900',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == 'dm-owner' and 'break-glass recovery code issued' in (msg.content or '').lower() for msg in outbound)
+        active = ch._pairing.get_break_glass_metadata()
+        assert active["active"] is True
+        assert int(active["ttl_remaining_s"] or 0) <= 900
+        assert int(active["ttl_remaining_s"] or 0) > 0
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='/pairing status',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == 'dm-owner' and 'recovery code: active' in (msg.content or '').lower() for msg in outbound)
+
+    @pytest.mark.asyncio
+    async def test_non_owner_cannot_issue_recovery_code(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'telegram'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('telegram', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        outbound.clear()
+
+        assert await ch._run_pairing_flow(
+            sender_id='user-2',
+            notify_target='dm-2',
+            content='/pairing recovery-code',
+            display_name='User 2',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == 'dm-2' and 'only the current owner can issue' in (msg.content or '').lower() for msg in outbound)
 
     @pytest.mark.asyncio
     async def test_pairing_flow_surfaces_disabled_and_allowlist_denials(self):
