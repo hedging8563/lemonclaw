@@ -77,6 +77,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/bundle [task_id] [md|json] — Show a compact summary or the full task bundle artifact\n"
             "/postmortem [task_id] [md|json] — Show a concise summary or the full postmortem artifact\n"
             "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
+            "/channel status [name] — Show channel status in chat\n"
+            "/channel restart <name> — Restart a channel from chat\n"
+            "/channel repair <name> — Run channel repair from chat (currently includes WhatsApp)\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
@@ -98,6 +101,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/bundle [task_id] [md|json] — 查看紧凑摘要或完整 task bundle 产物\n"
             "/postmortem [task_id] [md|json] — 查看简要摘要或完整 postmortem 产物\n"
             "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
+            "/channel status [name] — 查看渠道状态\n"
+            "/channel restart <name> — 在聊天中重启渠道\n"
+            "/channel repair <name> — 在聊天中执行渠道修复（当前包含 WhatsApp）\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
@@ -290,6 +296,50 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "runtime_usage": {
         "en": "Use `/runtime`, `/runtime inventory`, `/runtime mcp`, `/runtime health`, or `/runtime recovery`.",
         "zh": "使用 `/runtime`、`/runtime inventory`、`/runtime mcp`、`/runtime health` 或 `/runtime recovery`。",
+    },
+    "channel_usage": {
+        "en": "Use `/channel status [name]`, `/channel restart <name>`, or `/channel repair <name>`.",
+        "zh": "使用 `/channel status [name]`、`/channel restart <name>` 或 `/channel repair <name>`。",
+    },
+    "channel_unavailable": {
+        "en": "Channel manager is not available in this runtime.",
+        "zh": "当前运行时没有可用的 channel manager。",
+    },
+    "channel_not_found": {
+        "en": "Channel `{channel}` is not registered in this runtime.",
+        "zh": "当前运行时没有注册渠道 `{channel}`。",
+    },
+    "channel_none_configured": {
+        "en": "- no configured channels",
+        "zh": "- 当前没有已配置的渠道",
+    },
+    "channel_status_all_header": {
+        "en": "Configured channel status:",
+        "zh": "已配置渠道状态：",
+    },
+    "channel_status_header": {
+        "en": "Channel `{channel}` status:",
+        "zh": "渠道 `{channel}` 状态：",
+    },
+    "channel_status_line": {
+        "en": "- {channel}: enabled={enabled}, available={available}, running={running}, error={error}",
+        "zh": "- {channel}：enabled={enabled}，available={available}，running={running}，error={error}",
+    },
+    "channel_restart_done": {
+        "en": "Restarted `{channel}`. result={status}, running={running}",
+        "zh": "已重启 `{channel}`。result={status}，running={running}",
+    },
+    "channel_restart_failed": {
+        "en": "Failed to restart `{channel}`: {error}",
+        "zh": "重启 `{channel}` 失败：{error}",
+    },
+    "channel_repair_done": {
+        "en": "Repaired `{channel}`. status={status}, running={running}",
+        "zh": "已修复 `{channel}`。status={status}，running={running}",
+    },
+    "channel_repair_failed": {
+        "en": "Failed to repair `{channel}`: {error}",
+        "zh": "修复 `{channel}` 失败：{error}",
     },
     "runtime_summary_header": {
         "en": "Runtime summary:",

@@ -29,6 +29,7 @@ from lemonclaw.gateway.health import liveness, readiness, set_context
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
 from lemonclaw.gateway.runtime_state import load_runtime_state
 from lemonclaw.gateway.runtime_state import mark_runtime_healthy
+from lemonclaw.gateway.webui.auth import GatewayAuthState
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 
 
 def _build_status_handler(
-    auth_token: str | None,
+    auth_state: GatewayAuthState | None,
     runtime: GatewayRuntimeContext,
 ):
     """Return a handler for GET /api/status (token-protected)."""
@@ -71,6 +72,7 @@ def _build_status_handler(
         return enabled
 
     async def status_handler(request: Request) -> JSONResponse:
+        auth_token = auth_state.token if auth_state else None
         if auth_token:
             header = request.headers.get("authorization", "")
             if not hmac.compare_digest(header, f"Bearer {auth_token}"):
@@ -105,12 +107,13 @@ def _build_status_handler(
 
 
 def _build_usage_handler(
-    auth_token: str | None,
+    auth_state: GatewayAuthState | None,
     runtime: GatewayRuntimeContext,
 ):
     """Return a handler for GET /api/usage (token-protected)."""
 
     async def usage_handler(request: Request) -> JSONResponse:
+        auth_token = auth_state.token if auth_state else None
         if auth_token:
             header = request.headers.get("authorization", "")
             if not hmac.compare_digest(header, f"Bearer {auth_token}"):
@@ -163,12 +166,13 @@ def _build_usage_handler(
 
 
 def _build_chat_handler(
-    auth_token: str | None,
+    auth_state: GatewayAuthState | None,
     runtime: GatewayRuntimeContext,
 ):
     """Return a handler for POST /api/chat (token-protected, for testing)."""
 
     async def chat_handler(request: Request) -> JSONResponse:
+        auth_token = auth_state.token if auth_state else None
         if auth_token:
             header = request.headers.get("authorization", "")
             if not hmac.compare_digest(header, f"Bearer {auth_token}"):
@@ -330,13 +334,17 @@ def create_app(
         channel_manager=runtime.channel_manager,
         config_path=runtime.config_path,
     )
+    if auth_token:
+        auth_state = GatewayAuthState.load(Path(runtime.config_path) if runtime.config_path else None, fallback_token=auth_token)
+    else:
+        auth_state = GatewayAuthState(None, Path(runtime.config_path) if runtime.config_path else None)
 
     routes = [
         Route("/health", liveness, methods=["GET"]),
         Route("/readyz", readiness, methods=["GET"]),
-        Route("/api/status", _build_status_handler(auth_token, runtime), methods=["GET"]),
-        Route("/api/usage", _build_usage_handler(auth_token, runtime), methods=["GET"]),
-        Route("/api/chat", _build_chat_handler(auth_token, runtime), methods=["POST"]),
+        Route("/api/status", _build_status_handler(auth_state, runtime), methods=["GET"]),
+        Route("/api/usage", _build_usage_handler(auth_state, runtime), methods=["GET"]),
+        Route("/api/chat", _build_chat_handler(auth_state, runtime), methods=["POST"]),
     ]
 
     # WeCom webhook routes (no auth_token — WeCom uses its own signature verification)
@@ -351,7 +359,7 @@ def create_app(
         routes.extend(get_activity_routes(
             activity_bus=runtime.activity_bus,
             session_manager=runtime.session_manager,
-            auth_token=auth_token,
+            auth_state=auth_state,
         ))
 
     # AgentBridge runtime routes (HTTP/SSE, token-protected)
@@ -360,7 +368,7 @@ def create_app(
 
         routes.extend(
             get_agentbridge_routes(
-                auth_token=auth_token,
+                auth_state=auth_state,
                 runtime=runtime,
             )
         )
@@ -370,14 +378,14 @@ def create_app(
     routes.extend(get_conductor_routes(
         orchestrator=runtime.orchestrator,
         registry=runtime.registry,
-        auth_token=auth_token,
+        auth_state=auth_state,
     ))
 
     # Settings API routes (before WebUI catch-all)
     if runtime.config_path:
         from lemonclaw.gateway.webui.settings import get_settings_routes
         routes.extend(get_settings_routes(
-            auth_token=auth_token,
+            auth_state=auth_state,
             config_path=runtime.config_path,
             config_watcher=runtime.config_watcher,
             agent_loop=runtime.agent_loop,
@@ -385,7 +393,7 @@ def create_app(
         ))
         from lemonclaw.gateway.weixin_pairing import get_weixin_pairing_routes
         routes.extend(get_weixin_pairing_routes(
-            auth_token=auth_token,
+            auth_state=auth_state,
             config_path=runtime.config_path,
             runtime=runtime,
         ))
@@ -400,7 +408,7 @@ def create_app(
         from lemonclaw.gateway.webui.routes import get_webui_routes
 
         routes.extend(get_webui_routes(
-            auth_token=auth_token,
+            auth_state=auth_state,
             runtime=runtime,
         ))
 

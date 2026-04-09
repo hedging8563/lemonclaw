@@ -31,7 +31,7 @@ from lemonclaw.gateway.runtime_state import (
     mark_runtime_failed,
 )
 from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
-from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
+from lemonclaw.gateway.webui.auth import COOKIE_NAME, GatewayAuthState, create_session_cookie, verify_session_cookie
 
 if TYPE_CHECKING:
     from lemonclaw.config.watcher import ConfigWatcher
@@ -572,7 +572,7 @@ def _ensure_feishu_subscription_tokens(config_path: Path) -> None:
 
 def get_settings_routes(
     *,
-    auth_token: str | None,
+    auth_state: GatewayAuthState | None,
     config_path: Path,
     config_watcher: ConfigWatcher | None = None,
     agent_loop: Any | None = None,
@@ -586,13 +586,17 @@ def get_settings_routes(
     # Serialize load→modify→save to prevent lost updates
     _config_lock = asyncio.Lock()
 
+    def _auth_token() -> str | None:
+        return auth_state.token if auth_state else None
+
     def _require_auth(request: Request) -> tuple[bool, Response | None]:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True, None
         cookie = request.cookies.get(COOKIE_NAME)
         if not cookie:
             return False, _json({"error": "Unauthorized"}, 401)
-        valid, refreshed = verify_session_cookie(cookie, auth_token)
+        valid, refreshed = verify_session_cookie(cookie, token)
         if not valid:
             return False, _json({"error": "Unauthorized"}, 401)
         # Store refreshed cookie for _maybe_refresh to set on response
@@ -600,27 +604,63 @@ def get_settings_routes(
         return True, None
 
     def _require_bearer_auth(request: Request) -> tuple[bool, Response | None]:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True, None
         header = request.headers.get("authorization", "")
-        if not hmac.compare_digest(header, f"Bearer {auth_token}"):
+        if not hmac.compare_digest(header, f"Bearer {token}"):
             return False, _json({"error": "Unauthorized"}, 401)
         return True, None
+
+    def _is_secure(request: Request) -> bool:
+        if request.url.scheme == "https":
+            return True
+        return request.headers.get("x-forwarded-proto", "") == "https"
+
+    def _set_cookie(response: Response, cookie_value: str, *, secure: bool = False) -> None:
+        response.set_cookie(
+            COOKIE_NAME,
+            cookie_value,
+            httponly=True,
+            samesite="strict",
+            secure=secure,
+            path="/",
+        )
 
     def _maybe_refresh(request: Request, response: Response) -> Response:
         """Set refreshed session cookie on response if available."""
         cookie = getattr(request.state, "refreshed_cookie", None)
         if cookie:
-            secure = request.url.scheme == "https"
-            response.set_cookie(
-                COOKIE_NAME, cookie,
-                httponly=True, samesite="strict", secure=secure, path="/",
-            )
+            _set_cookie(response, cookie, secure=_is_secure(request))
         return response
 
     def _get_governance_runtime():
         governance = getattr(agent_loop, "governance", None) if agent_loop is not None else None
         return governance
+
+    def _write_gateway_auth_config(new_token: str) -> bool:
+        """Best-effort mirror of the live token into config.json for auditability."""
+        from lemonclaw.config.loader import load_config, save_config
+
+        try:
+            config = load_config(config_path)
+            config.gateway.auth_token = new_token
+            save_config(config, config_path)
+            return True
+        except Exception as exc:
+            logger.warning("Failed to persist gateway auth token to config: {}", exc)
+            return False
+
+    def _gateway_auth_payload() -> dict[str, Any]:
+        return auth_state.snapshot() if auth_state else {
+            "enabled": False,
+            "token_fingerprint": None,
+            "rotation_count": 0,
+            "last_rotated_at_ms": None,
+            "last_rotation_reason": None,
+            "recovery": {"active": False, "issued_at_ms": None, "expires_at_ms": None, "ttl_remaining_s": None},
+            "source": "disabled",
+        }
 
     # ── GET /api/settings ─────────────────────────────────────────────
 
@@ -711,6 +751,135 @@ def get_settings_routes(
             result["effective_model"] = effective_model
 
         return _maybe_refresh(request, _json(result))
+
+    # ── GET /api/settings/gateway/auth-token-state ─────────────────────
+
+    async def get_gateway_auth_state(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        payload = {
+            "gateway_auth": _gateway_auth_payload(),
+            "config_persisted": config_path.exists(),
+        }
+        return _maybe_refresh(request, _json(payload))
+
+    # ── POST /api/settings/gateway/auth-token/recovery-code ────────────
+
+    async def issue_gateway_auth_recovery_code(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if not auth_state:
+            return _json({"error": "Gateway auth state not available"}, 503)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ttl_s = 600
+        if isinstance(body, dict) and body.get("ttl_s") is not None:
+            try:
+                ttl_s = int(body.get("ttl_s"))
+            except (TypeError, ValueError):
+                return _json({"error": "ttl_s must be an integer"}, 400)
+        issued = auth_state.issue_recovery_code(ttl_s=ttl_s)
+        payload = {
+            "gateway_auth": _gateway_auth_payload(),
+            "recovery": issued,
+        }
+        return _maybe_refresh(request, _json(payload))
+
+    # ── POST /api/settings/gateway/auth-token/rotate ───────────────────
+
+    async def rotate_gateway_auth_token(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+        if not auth_state:
+            return _json({"error": "Gateway auth state not available"}, 503)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        reason = "manual-rotate"
+        ttl_s = 600
+        if isinstance(body, dict):
+            if body.get("reason"):
+                reason = str(body.get("reason"))[:80]
+            if body.get("recovery_ttl_s") is not None:
+                try:
+                    ttl_s = int(body.get("recovery_ttl_s"))
+                except (TypeError, ValueError):
+                    return _json({"error": "recovery_ttl_s must be an integer"}, 400)
+
+        new_token = secrets.token_hex(32)
+        auth_state.rotate(new_token, reason=reason)
+        persisted = _write_gateway_auth_config(new_token)
+        recovery = auth_state.issue_recovery_code(ttl_s=ttl_s, purpose="gateway-token-rotate")
+        resp = _json({
+            "rotated": True,
+            "token": new_token,
+            "token_fingerprint": auth_state.snapshot().get("token_fingerprint"),
+            "persisted_to_config": persisted,
+            "gateway_auth": _gateway_auth_payload(),
+            "recovery": recovery,
+        })
+        resp.set_cookie(
+            COOKIE_NAME,
+            create_session_cookie(new_token),
+            httponly=True,
+            samesite="strict",
+            secure=_is_secure(request),
+            path="/",
+        )
+        return resp
+
+    # ── POST /api/settings/gateway/auth-token/recover ──────────────────
+
+    async def recover_gateway_auth_token(request: Request) -> Response:
+        if not auth_state:
+            return _json({"error": "Gateway auth state not available"}, 503)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        if not isinstance(body, dict):
+            return _json({"error": "Expected object body"}, 400)
+        recovery_code = str(body.get("recovery_code") or body.get("code") or "").strip()
+        if not recovery_code:
+            return _json({"error": "recovery_code is required"}, 400)
+        if not auth_state.consume_recovery_code(recovery_code):
+            return _json({"error": "Invalid or expired recovery code"}, 401)
+
+        reason = str(body.get("reason") or "recovery").strip()[:80] or "recovery"
+        ttl_s = 600
+        if body.get("recovery_ttl_s") is not None:
+            try:
+                ttl_s = int(body.get("recovery_ttl_s"))
+            except (TypeError, ValueError):
+                return _json({"error": "recovery_ttl_s must be an integer"}, 400)
+
+        new_token = secrets.token_hex(32)
+        auth_state.rotate(new_token, reason=reason)
+        persisted = _write_gateway_auth_config(new_token)
+        recovery = auth_state.issue_recovery_code(ttl_s=ttl_s, purpose="gateway-token-recovery")
+        resp = _json({
+            "recovered": True,
+            "token": new_token,
+            "token_fingerprint": auth_state.snapshot().get("token_fingerprint"),
+            "persisted_to_config": persisted,
+            "gateway_auth": _gateway_auth_payload(),
+            "recovery": recovery,
+        })
+        resp.set_cookie(
+            COOKIE_NAME,
+            create_session_cookie(new_token),
+            httponly=True,
+            samesite="strict",
+            secure=_is_secure(request),
+            path="/",
+        )
+        return resp
 
     # ── GET /api/governance* — runtime governance views ───────────────
 
@@ -1528,6 +1697,10 @@ def get_settings_routes(
         Route("/api/settings/channels/{channel_name:str}/pairing-state", get_pairing_state, methods=["GET"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-recovery-code", issue_pairing_recovery_code, methods=["POST"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-break-glass", break_glass_pairing_owner, methods=["POST"]),
+        Route("/api/settings/gateway/auth-token-state", get_gateway_auth_state, methods=["GET"]),
+        Route("/api/settings/gateway/auth-token/recovery-code", issue_gateway_auth_recovery_code, methods=["POST"]),
+        Route("/api/settings/gateway/auth-token/rotate", rotate_gateway_auth_token, methods=["POST"]),
+        Route("/api/settings/gateway/auth-token/recover", recover_gateway_auth_token, methods=["POST"]),
         Route("/api/governance", get_governance, methods=["GET"]),
         Route("/api/governance/capabilities", get_governance_capabilities, methods=["GET"]),
         Route("/api/governance/audit", get_governance_audit, methods=["GET"]),

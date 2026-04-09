@@ -2278,6 +2278,10 @@ class AgentLoop:
             reply = self._handle_runtime_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="runtime")
             return reply
+        if cmd == "/channel" or cmd.startswith("/channel "):
+            reply = await self._handle_channel_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="channel")
+            return reply
         if cmd == "/tasks" or cmd.startswith("/tasks "):
             reply = self._handle_tasks_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="tasks")
@@ -2324,7 +2328,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/export", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/channel", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/export", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -3000,6 +3004,112 @@ class AgentLoop:
             ),
         ]
         return self._command_reply(msg, "\n".join(lines), kind="postmortem")
+
+    async def _handle_channel_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[8:].strip()
+        if not raw or raw.lower() == "help":
+            return self._command_reply(msg, t("channel_usage", lang), kind="channel_help", level="warning")
+
+        parts = raw.split()
+        action = parts[0].lower()
+        channel_name = parts[1].lower() if len(parts) > 1 else ""
+        channel_manager = getattr(self, "channel_manager", None)
+
+        if action == "status":
+            if channel_manager is None or not hasattr(channel_manager, "get_channel_status"):
+                return self._command_reply(msg, t("channel_unavailable", lang), kind="channel", level="warning")
+            statuses = dict(channel_manager.get_channel_status() or {})
+            if channel_name:
+                status = dict(statuses.get(channel_name) or {})
+                if not status:
+                    return self._command_reply(msg, t("channel_not_found", lang, channel=channel_name), kind="channel", level="warning")
+                lines = [
+                    t("channel_status_header", lang, channel=channel_name),
+                    t(
+                        "channel_status_line",
+                        lang,
+                        channel=channel_name,
+                        enabled="yes" if status.get("configured_enabled") else "no",
+                        available="yes" if status.get("available") else "no",
+                        running="yes" if status.get("running") else "no",
+                        error=str(status.get("error") or "none"),
+                    ),
+                ]
+                return self._command_reply(msg, "\n".join(lines), kind="channel")
+            lines = [t("channel_status_all_header", lang)]
+            for name, status in sorted(statuses.items()):
+                if not status.get("configured_enabled"):
+                    continue
+                lines.append(
+                    t(
+                        "channel_status_line",
+                        lang,
+                        channel=name,
+                        enabled="yes" if status.get("configured_enabled") else "no",
+                        available="yes" if status.get("available") else "no",
+                        running="yes" if status.get("running") else "no",
+                        error=str(status.get("error") or "none"),
+                    )
+                )
+            if len(lines) == 1:
+                lines.append(t("channel_none_configured", lang))
+            return self._command_reply(msg, "\n".join(lines), kind="channel")
+
+        if action not in {"restart", "repair"} or not channel_name:
+            return self._command_reply(msg, t("channel_usage", lang), kind="channel_help", level="warning")
+
+        if action == "repair" and channel_name == "whatsapp":
+            try:
+                from lemonclaw.channels.whatsapp_bridge_runtime import restart_whatsapp_pairing
+                from lemonclaw.config.loader import get_config_path, load_config
+            except Exception as exc:
+                return self._command_reply(msg, t("channel_repair_failed", lang, channel=channel_name, error=str(exc)[:200]), kind="channel", level="warning")
+
+            config_path = getattr(self, "config_path", None) or get_config_path()
+            try:
+                runtime_config = load_config(config_path)
+                state = await asyncio.to_thread(restart_whatsapp_pairing, runtime_config.channels.whatsapp, wait_timeout=20.0)
+            except Exception as exc:
+                return self._command_reply(msg, t("channel_repair_failed", lang, channel=channel_name, error=str(exc)[:200]), kind="channel", level="warning")
+            return self._command_reply(
+                msg,
+                t(
+                    "channel_repair_done",
+                    lang,
+                    channel=channel_name,
+                    status=str(state.get("status") or "unknown"),
+                    running="yes" if state.get("running") else "no",
+                ),
+                kind="channel",
+            )
+
+        if channel_manager is None or not hasattr(channel_manager, "restart_channel"):
+            return self._command_reply(msg, t("channel_unavailable", lang), kind="channel", level="warning")
+
+        try:
+            result = await channel_manager.restart_channel(
+                channel_name,
+                reason=f"chat command {action}",
+                source=f"chat_command_{action}",
+            )
+        except KeyError:
+            return self._command_reply(msg, t("channel_not_found", lang, channel=channel_name), kind="channel", level="warning")
+        except Exception as exc:
+            key = "channel_restart_failed" if action == "restart" else "channel_repair_failed"
+            return self._command_reply(msg, t(key, lang, channel=channel_name, error=str(exc)[:200]), kind="channel", level="warning")
+
+        key = "channel_restart_done" if action == "restart" else "channel_repair_done"
+        return self._command_reply(
+            msg,
+            t(
+                key,
+                lang,
+                channel=channel_name,
+                status=str(result.get("last_restart_result") or result.get("running") or "unknown"),
+                running="yes" if result.get("running") else "no",
+            ),
+            kind="channel",
+        )
 
     def _handle_runtime_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[8:].strip().lower()

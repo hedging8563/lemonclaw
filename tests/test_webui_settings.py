@@ -8,6 +8,7 @@ from lemonclaw.config.schema import Config, GitAuthProfileConfig, GovernanceSand
 from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice, maybe_broadcast_startup_restart_notice
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.runtime_state import load_runtime_state, mark_runtime_healthy
+from lemonclaw.gateway.webui.auth import create_session_cookie
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.session.manager import SessionManager
@@ -513,6 +514,82 @@ def test_pairing_recovery_code_route_issues_one_time_code(monkeypatch, tmp_path)
     assert body['break_glass']['active'] is True
     assert body['break_glass']['code'].startswith('lc_recovery_')
     assert body['pairing']['break_glass']['active'] is True
+
+
+def test_gateway_auth_token_rotate_and_recover_flow(tmp_path):
+    from lemonclaw.config.loader import load_config
+
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.gateway.auth_token = 'secret-token'
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token='secret-token')
+    client = TestClient(app)
+    client.cookies.set('lc_session', create_session_cookie('secret-token'))
+
+    state_resp = client.get('/api/settings/gateway/auth-token-state')
+    assert state_resp.status_code == 200
+    state = state_resp.json()['gateway_auth']
+    assert state['enabled'] is True
+    assert state['token_fingerprint']
+
+    rotate_resp = client.post('/api/settings/gateway/auth-token/rotate', json={
+        'reason': 'manual test rotation',
+        'recovery_ttl_s': 120,
+    })
+    assert rotate_resp.status_code == 200
+    rotate_body = rotate_resp.json()
+    assert rotate_body['rotated'] is True
+    assert rotate_body['token'] != 'secret-token'
+    assert rotate_body['recovery']['code'].startswith('lc_recovery_')
+    assert rotate_body['gateway_auth']['recovery']['active'] is True
+    assert rotate_body['persisted_to_config'] is True
+
+    persisted = load_config(config_path)
+    assert persisted.gateway.auth_token == rotate_body['token']
+
+    old_client = TestClient(app)
+    old_client.cookies.set('lc_session', create_session_cookie('secret-token'))
+    old_state = old_client.get('/api/settings/gateway/auth-token-state')
+    assert old_state.status_code == 401
+
+    recover_client = TestClient(app)
+    recover_resp = recover_client.post('/api/settings/gateway/auth-token/recover', json={
+        'recovery_code': rotate_body['recovery']['code'],
+        'reason': 'lost token recovery',
+        'recovery_ttl_s': 120,
+    })
+    assert recover_resp.status_code == 200
+    recover_body = recover_resp.json()
+    assert recover_body['recovered'] is True
+    assert recover_body['token'] != rotate_body['token']
+    assert recover_body['recovery']['code'].startswith('lc_recovery_')
+
+    recovered = load_config(config_path)
+    assert recovered.gateway.auth_token == recover_body['token']
+
+    recover_client.cookies.set('lc_session', recover_resp.cookies.get('lc_session'))
+    final_state = recover_client.get('/api/settings/gateway/auth-token-state')
+    assert final_state.status_code == 200
+    assert final_state.json()['gateway_auth']['token_fingerprint']
+
+
+def test_gateway_auth_recovery_code_issue_only(tmp_path):
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.gateway.auth_token = 'secret-token'
+    save_config(cfg, config_path)
+
+    app = create_app(config_path=config_path, auth_token='secret-token')
+    client = TestClient(app)
+    client.cookies.set('lc_session', create_session_cookie('secret-token'))
+
+    resp = client.post('/api/settings/gateway/auth-token/recovery-code', json={'ttl_s': 120})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['recovery']['code'].startswith('lc_recovery_')
+    assert body['gateway_auth']['recovery']['active'] is True
 
 
 def test_settings_exposes_qq_group_runtime_state(tmp_path):

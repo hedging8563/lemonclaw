@@ -731,6 +731,79 @@ class TestSlashCommands:
         assert "tools.mcp_servers" in response.content
 
     @pytest.mark.asyncio
+    async def test_channel_command_shows_channel_status(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        loop.channel_manager = MagicMock()
+        loop.channel_manager.get_channel_status.return_value = {
+            "telegram": {
+                "configured_enabled": True,
+                "available": True,
+                "running": True,
+                "error": "",
+            },
+            "wecom": {
+                "configured_enabled": True,
+                "available": False,
+                "running": False,
+                "error": "missing dependency",
+            },
+        }
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/channel status")
+        )
+
+        assert response is not None
+        assert "Configured channel status" in response.content
+        assert "telegram" in response.content
+        assert "wecom" in response.content
+
+    @pytest.mark.asyncio
+    async def test_channel_restart_command_restarts_channel(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        loop.channel_manager = MagicMock()
+        loop.channel_manager.restart_channel = AsyncMock(return_value={
+            "channel": "telegram",
+            "running": True,
+            "last_restart_result": "running",
+        })
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/channel restart telegram")
+        )
+
+        assert response is not None
+        assert "telegram" in response.content
+        loop.channel_manager.restart_channel.assert_awaited_once_with(
+            "telegram",
+            reason="chat command restart",
+            source="chat_command_restart",
+        )
+
+    @pytest.mark.asyncio
+    async def test_channel_repair_whatsapp_uses_bridge_helper(self, make_agent_loop, monkeypatch):
+        from lemonclaw.config.loader import save_config
+        from lemonclaw.config.schema import Config
+
+        loop, _bus = make_agent_loop()
+        loop.config_path = loop.workspace / "config.json"
+        cfg = Config()
+        cfg.channels.whatsapp.enabled = True
+        save_config(cfg, loop.config_path)
+        monkeypatch.setattr(
+            "lemonclaw.channels.whatsapp_bridge_runtime.restart_whatsapp_pairing",
+            lambda config, wait_timeout=20.0: {"status": "qr", "running": True, "account": None},
+        )
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/channel repair whatsapp")
+        )
+
+        assert response is not None
+        assert "whatsapp" in response.content.lower()
+        assert "status=qr" in response.content.lower()
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(

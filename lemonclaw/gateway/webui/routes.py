@@ -21,6 +21,7 @@ from starlette.websockets import WebSocket
 
 from lemonclaw.gateway.webui.auth import (
     COOKIE_NAME,
+    GatewayAuthState,
     create_session_cookie,
     verify_session_cookie,
     verify_token,
@@ -144,10 +145,10 @@ def _visible_ui_messages(session, *, session_key: str | None = None) -> list[dic
 
 def get_webui_routes(
     *,
-    auth_token: str | None,
+    auth_state: GatewayAuthState | None,
     runtime: GatewayRuntimeContext,
 ) -> list[Route]:
-    """Build WebUI routes. auth_token=None disables auth (localhost mode)."""
+    """Build WebUI routes. auth_state.token=None disables auth (localhost mode)."""
     agent_loop = runtime.agent_loop
     session_manager = runtime.session_manager
     channel_manager = runtime.channel_manager
@@ -174,6 +175,9 @@ def get_webui_routes(
         if request.url.scheme == "https":
             return True
         return request.headers.get("x-forwarded-proto", "") == "https"
+
+    def _auth_token() -> str | None:
+        return auth_state.token if auth_state else None
 
     # ── GET / — serve SPA ────────────────────────────────────────────────
 
@@ -215,7 +219,8 @@ def get_webui_routes(
     # ── POST /api/auth — login ───────────────────────────────────────────
 
     async def auth_login(request: Request) -> Response:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return _json({"ok": True, "auth_required": False})
 
         try:
@@ -224,10 +229,10 @@ def get_webui_routes(
             return _json({"error": "Invalid JSON"}, 400)
 
         provided = body.get("token", "")
-        if not provided or not verify_token(provided, auth_token):
+        if not provided or not verify_token(provided, token):
             return _json({"error": "Invalid token"}, 401)
 
-        cookie = create_session_cookie(auth_token)
+        cookie = create_session_cookie(token)
         resp = _json({"ok": True})
         _set_cookie(resp, cookie, secure=_is_secure(request))
         return resp
@@ -242,12 +247,13 @@ def get_webui_routes(
     # ── GET /api/auth/check — probe auth state ────────────────────────
 
     async def auth_check(request: Request) -> Response:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return _json({"ok": True, "auth_required": False})
         cookie = request.cookies.get(COOKIE_NAME)
         if not cookie:
             return _json({"ok": False, "auth_required": True}, 401)
-        valid, _ = verify_session_cookie(cookie, auth_token)
+        valid, _ = verify_session_cookie(cookie, token)
         if valid:
             return _json({"ok": True, "auth_required": True})
         return _json({"ok": False, "auth_required": True}, 401)
@@ -256,9 +262,10 @@ def get_webui_routes(
 
     def _require_auth(request: Request) -> tuple[bool, Response | None]:
         """Returns (ok, error_response). On success, ok=True and response=None."""
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True, None
-        valid, refreshed = _check_webui_auth(request, auth_token)
+        valid, refreshed = _check_webui_auth(request, token)
         if not valid:
             return False, _json({"error": "Unauthorized"}, 401)
         # Store refreshed cookie for the handler to set
@@ -847,9 +854,10 @@ def get_webui_routes(
     # ── WebSocket: /ws/session ─────────────────────────────────────────────
 
     async def ws_session(websocket: WebSocket) -> None:
-        if auth_token:
+        token = _auth_token()
+        if token:
             cookie = websocket.cookies.get(COOKIE_NAME, "")
-            valid, _ = verify_session_cookie(cookie, auth_token)
+            valid, _ = verify_session_cookie(cookie, token)
             if not valid:
                 await websocket.close(code=4001, reason="Unauthorized")
                 return
