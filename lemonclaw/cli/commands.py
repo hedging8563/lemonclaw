@@ -633,6 +633,7 @@ def gateway(
         trigger_runtime=trigger_runtime,
         provider_factory=provider_factory,
     )
+    agent.config_path = get_config_path()
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -945,6 +946,7 @@ def agent(
         governance_config=config.governance,
         provider_factory=provider_factory,
     )
+    agent_loop.config_path = get_config_path()
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
@@ -1426,6 +1428,7 @@ def cron_run(
         governance_config=config.governance,
         provider_factory=provider_factory,
     )
+    agent_loop.config_path = get_config_path()
 
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path, task_ledger=TaskLedger(config.workspace_path))

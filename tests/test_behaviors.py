@@ -372,7 +372,11 @@ class TestSlashCommands:
 
     @pytest.mark.asyncio
     async def test_runtime_command_can_show_health_detail(self, make_agent_loop):
+        from lemonclaw.gateway.runtime_state import mark_restart_requested
+
         loop, _bus = make_agent_loop()
+        loop.config_path = loop.workspace / "config.json"
+        loop.config_path.write_text("{}", encoding="utf-8")
         loop.watchdog = MagicMock()
         loop.watchdog.snapshot.return_value = {
             "running": True,
@@ -387,6 +391,11 @@ class TestSlashCommands:
                 "wecom": {"enabled": True, "available": False, "running": False, "error": "missing dependency"},
             },
         }
+        mark_restart_requested(
+            loop.config_path,
+            restart_fields=["tools.mcp_servers"],
+            runtime_errors=[],
+        )
 
         response = await loop._process_message(
             InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/runtime health")
@@ -397,6 +406,7 @@ class TestSlashCommands:
         assert "stale_tasks=1" in response.content
         assert "telegram" in response.content
         assert "wecom" in response.content
+        assert "tools.mcp_servers" in response.content
 
     @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):

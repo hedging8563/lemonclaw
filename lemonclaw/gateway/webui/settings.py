@@ -22,6 +22,7 @@ from lemonclaw.channels.whatsapp_bridge_runtime import (
     get_whatsapp_pairing_state,
     restart_whatsapp_pairing,
 )
+from lemonclaw.gateway.runtime_state import load_runtime_state, mark_restart_requested
 from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 
 if TYPE_CHECKING:
@@ -630,6 +631,7 @@ def get_settings_routes(
             "group_runtime": _derive_group_runtime(config),
             "dicloak_runtime": _derive_dicloak_runtime(agent_loop),
             "runtime_inventory": runtime_inventory,
+            "restart_status": load_runtime_state(config_path),
             "tool_status": {
                 "browser": {
                     "installed": bool(browser_status.get("installed")),
@@ -890,6 +892,11 @@ def get_settings_routes(
             if runtime_status != "failed":
                 runtime_status = "restarting"
             logger.info("Settings apply: restart required for {}", restart_fields)
+            restart_state = mark_restart_requested(
+                config_path,
+                restart_fields=restart_fields,
+                runtime_errors=runtime_errors,
+            )
             # Return response first, then exit — K8s/systemd will restart
             resp = _json({
                 "reloaded": True,
@@ -899,6 +906,7 @@ def get_settings_routes(
                 "runtime_errors": runtime_errors,
                 "tool_updates": tool_updates,
                 "channel_updates": channel_updates,
+                "restart_state": restart_state,
             })
             # Schedule graceful shutdown after response is sent (SIGTERM triggers drain sequence)
             import os
@@ -913,6 +921,7 @@ def get_settings_routes(
             "runtime_errors": runtime_errors,
             "tool_updates": tool_updates,
             "channel_updates": channel_updates,
+            "restart_state": load_runtime_state(config_path),
         }))
 
     # ── POST /api/runtime-policy/reload ───────────────────────────────

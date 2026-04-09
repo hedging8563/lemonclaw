@@ -27,6 +27,7 @@ from starlette.staticfiles import StaticFiles
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
+from lemonclaw.gateway.runtime_state import mark_runtime_healthy
 
 if TYPE_CHECKING:
     from lemonclaw.agent.loop import AgentLoop
@@ -257,6 +258,12 @@ def create_app(
         config_path=config_path,
         config_watcher=config_watcher,
     )
+    if runtime.agent_loop is not None and runtime.config_path is not None:
+        setattr(runtime.agent_loop, "config_path", Path(runtime.config_path))
+        if runtime.channel_manager is not None:
+            setattr(runtime.agent_loop, "channel_manager", runtime.channel_manager)
+        if runtime.watchdog is not None:
+            setattr(runtime.agent_loop, "watchdog", runtime.watchdog)
     if runtime.session_manager:
         try:
             repair_stats = runtime.session_manager.repair_ui_histories()
@@ -268,6 +275,16 @@ def create_app(
                 )
         except Exception:
             logger.exception("Session UI history repair failed")
+    if runtime.config_path:
+        try:
+            mark_runtime_healthy(
+                Path(runtime.config_path),
+                version=runtime.version,
+                model=runtime.model,
+                instance_id=runtime.instance_id,
+            )
+        except Exception:
+            logger.exception("Failed to update runtime healthy state")
     set_context(version=runtime.version, channel_manager=runtime.channel_manager)
 
     routes = [

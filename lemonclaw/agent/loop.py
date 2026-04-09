@@ -2723,9 +2723,14 @@ class AgentLoop:
                 lines.append(t("runtime_mcp_tool_line", lang, tools=", ".join(mcp_tools) if mcp_tools else "none"))
 
         if mode in {"summary", "health"}:
+            from lemonclaw.config.loader import get_config_path
+            from lemonclaw.gateway.runtime_state import load_runtime_state
+
             watchdog = getattr(self, "watchdog", None)
             channel_manager = getattr(self, "channel_manager", None)
             snapshot = watchdog.snapshot() if watchdog and hasattr(watchdog, "snapshot") else {}
+            config_path = getattr(self, "config_path", None) or get_config_path()
+            restart_state = load_runtime_state(config_path)
             channels = {}
             if isinstance(snapshot.get("channels"), dict):
                 channels = dict(snapshot.get("channels") or {})
@@ -2752,6 +2757,18 @@ class AgentLoop:
                         blocked=blocked_channels,
                     )
                 )
+                if restart_state:
+                    lines.append(
+                        t(
+                            "runtime_restart_summary",
+                            lang,
+                            status=str(restart_state.get("status") or "unknown"),
+                            fields=", ".join(restart_state.get("restart_fields") or []) if restart_state.get("restart_fields") else "none",
+                            requested_at=str(restart_state.get("last_restart_requested_at_ms") or "n/a"),
+                            completed_at=str(restart_state.get("last_restart_completed_at_ms") or "n/a"),
+                            result=str(restart_state.get("last_restart_result") or "unknown"),
+                        )
+                    )
             else:
                 lines.append(t("runtime_health_detail_header", lang))
                 lines.append(
@@ -2768,6 +2785,18 @@ class AgentLoop:
                         blocked=blocked_channels,
                     )
                 )
+                if restart_state:
+                    lines.append(
+                        t(
+                            "runtime_restart_summary",
+                            lang,
+                            status=str(restart_state.get("status") or "unknown"),
+                            fields=", ".join(restart_state.get("restart_fields") or []) if restart_state.get("restart_fields") else "none",
+                            requested_at=str(restart_state.get("last_restart_requested_at_ms") or "n/a"),
+                            completed_at=str(restart_state.get("last_restart_completed_at_ms") or "n/a"),
+                            result=str(restart_state.get("last_restart_result") or "unknown"),
+                        )
+                    )
                 for name, item in sorted(channels.items()):
                     lines.append(
                         t(

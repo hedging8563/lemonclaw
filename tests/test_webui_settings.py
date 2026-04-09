@@ -6,6 +6,7 @@ from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import load_config, save_config
 from lemonclaw.config.schema import Config, GitAuthProfileConfig, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
 from lemonclaw.gateway.server import create_app
+from lemonclaw.gateway.runtime_state import load_runtime_state
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.session.manager import SessionManager
@@ -327,6 +328,7 @@ def test_settings_exposes_runtime_inventory(monkeypatch, tmp_path):
     assert inventory['binary_inventory']['kubectl']['binary'] == '/usr/local/bin/kubectl'
     assert payload['tool_status']['browser']['binary'] == '/usr/local/bin/agent-browser'
     assert payload['tool_status']['coding']['binary'] == '/usr/local/bin/claude'
+    assert payload['restart_status']['status'] == 'healthy'
 
 
 def test_save_config_strips_env_injected_lemondata_response_key(monkeypatch, tmp_path):
@@ -685,6 +687,12 @@ def test_apply_settings_marks_mcp_servers_as_restart_required(monkeypatch, tmp_p
     assert body['restart_required'] is True
     assert body['restart_fields'] == ['tools.mcp_servers']
     assert body['runtime_status'] == 'restarting'
+    assert body['restart_state']['status'] == 'restarting'
+    assert body['restart_state']['restart_fields'] == ['tools.mcp_servers']
+
+    state = load_runtime_state(config_path)
+    assert state['status'] == 'restarting'
+    assert state['restart_fields'] == ['tools.mcp_servers']
 
 
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):

@@ -219,6 +219,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "- Channel {name}: enabled={enabled}, available={available}, running={running}, error={error}",
         "zh": "- 渠道 {name}：enabled={enabled}，available={available}，running={running}，error={error}",
     },
+    "runtime_restart_summary": {
+        "en": "- Restart state: status={status}, fields={fields}, requested_at={requested_at}, completed_at={completed_at}, last_result={result}",
+        "zh": "- 重启状态：status={status}，fields={fields}，requested_at={requested_at}，completed_at={completed_at}，last_result={result}",
+    },
     "git_auth_usage": {
         "en": (
             "Git auth commands:\n"
