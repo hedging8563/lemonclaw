@@ -187,6 +187,54 @@ def test_cron_service_round_trips_session_key_from_json(tmp_path) -> None:
     assert jobs[0].payload.metadata["delivery_context"]["session_key"] == "telegram:123:456"
 
 
+@pytest.mark.asyncio
+async def test_cron_service_recovers_prefix_jobs_from_corrupt_tail(tmp_path) -> None:
+    path = tmp_path / "cron" / "jobs.json"
+    service = CronService(path)
+    first = service.add_job(
+        name="first job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello first",
+    )
+    second = service.add_job(
+        name="second job",
+        schedule=CronSchedule(kind="every", every_ms=2000),
+        message="hello second",
+    )
+
+    text = path.read_text(encoding="utf-8")
+    cut_at = text.index(f'"id": "{second.id}"')
+    path.write_text(text[:cut_at] + "\n{\"broken\": ", encoding="utf-8")
+
+    reloaded = CronService(path)
+    jobs = reloaded.list_jobs(include_disabled=True)
+
+    assert [job.id for job in jobs] == [first.id]
+    assert jobs[0].name == "first job"
+
+    await reloaded.start()
+    reloaded.stop()
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert [job["id"] for job in persisted["jobs"]] == [first.id]
+
+
+@pytest.mark.asyncio
+async def test_cron_service_does_not_overwrite_unrecoverable_corrupt_store(tmp_path) -> None:
+    path = tmp_path / "cron" / "jobs.json"
+    original_text = '{"version": 1, "jobs": [\n'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(original_text, encoding="utf-8")
+
+    service = CronService(path)
+    assert service.list_jobs(include_disabled=True) == []
+
+    await service.start()
+    service.stop()
+
+    assert path.read_text(encoding="utf-8") == original_text
+
+
 def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

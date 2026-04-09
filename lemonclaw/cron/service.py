@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import json
+import re
 import time
 import uuid
 from datetime import datetime
@@ -63,6 +64,50 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
+def _extract_complete_json_value(text: str, start: int) -> tuple[str, int] | None:
+    """Extract one complete JSON object/array from text starting at *start*.
+
+    This is intentionally small and local to the cron store loader so we can
+    recover valid prefix data from partially-written files without changing the
+    on-disk schema.
+    """
+    if start >= len(text) or text[start] not in "{[":
+        return None
+
+    closing_stack = ["}" if text[start] == "{" else "]"]
+    in_string = False
+    escaped = False
+
+    for index in range(start + 1, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            closing_stack.append("}")
+            continue
+        if char == "[":
+            closing_stack.append("]")
+            continue
+        if char in "}]":
+            if not closing_stack or char != closing_stack[-1]:
+                return None
+            closing_stack.pop()
+            if not closing_stack:
+                return text[start : index + 1], index + 1
+
+    return None
+
+
 class CronService:
     """Service for managing and executing scheduled jobs."""
     
@@ -75,6 +120,7 @@ class CronService:
         self.store_path = store_path
         self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
+        self._store_load_failed = False
         self._timer_task: asyncio.Task | None = None
         self._running = False
         self._task_ledger = task_ledger
@@ -83,52 +129,128 @@ class CronService:
         """Load jobs from disk."""
         if self._store:
             return self._store
-        
+
+        self._store_load_failed = False
         if self.store_path.exists():
             try:
-                data = json.loads(self.store_path.read_text(encoding="utf-8"))
-                jobs = []
-                for j in data.get("jobs", []):
-                    jobs.append(CronJob(
-                        id=j["id"],
-                        name=j["name"],
-                        enabled=j.get("enabled", True),
-                        schedule=CronSchedule(
-                            kind=j["schedule"]["kind"],
-                            at_ms=j["schedule"].get("atMs"),
-                            every_ms=j["schedule"].get("everyMs"),
-                            expr=j["schedule"].get("expr"),
-                            tz=j["schedule"].get("tz"),
-                        ),
-                        payload=CronPayload(
-                            kind=j["payload"].get("kind", "agent_turn"),
-                            message=j["payload"].get("message", ""),
-                            deliver=j["payload"].get("deliver", False),
-                            channel=j["payload"].get("channel"),
-                            to=j["payload"].get("to"),
-                            # On disk we keep camelCase sessionKey for backward
-                            # compatibility with the existing cron JSON schema.
-                            session_key=j["payload"].get("sessionKey"),
-                            metadata=dict(j["payload"].get("metadata", {}) or {}),
-                        ),
-                        state=CronJobState(
-                            next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
-                            last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
-                            last_status=j.get("state", {}).get("lastStatus"),
-                            last_error=j.get("state", {}).get("lastError"),
-                        ),
-                        created_at_ms=j.get("createdAtMs", 0),
-                        updated_at_ms=j.get("updatedAtMs", 0),
-                        delete_after_run=j.get("deleteAfterRun", False),
-                    ))
-                self._store = CronStore(jobs=jobs)
+                text = self.store_path.read_text(encoding="utf-8")
+                store, recovered = self._parse_store_text(text)
+                if store is None:
+                    raise ValueError("unable to recover cron store prefix")
+                self._store = store
+                if recovered:
+                    logger.warning("Recovered cron store {} from a truncated tail", self.store_path)
+                    self._store_load_failed = False
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
+                self._store_load_failed = True
         else:
             self._store = CronStore()
         
         return self._store
+
+    def _parse_store_text(self, text: str) -> tuple[CronStore | None, bool]:
+        """Parse a cron store, salvaging valid prefix data when possible."""
+        decoder = json.JSONDecoder()
+        stripped = text.lstrip()
+        if not stripped:
+            return None, False
+
+        try:
+            data, end = decoder.raw_decode(stripped)
+        except json.JSONDecodeError:
+            data = None
+        else:
+            if isinstance(data, dict):
+                recovered = bool(stripped[end:].strip())
+                store = self._store_from_data(data)
+                if store is not None:
+                    return store, recovered
+
+        return self._recover_store_prefix(text)
+
+    def _recover_store_prefix(self, text: str) -> tuple[CronStore | None, bool]:
+        version_match = re.search(r'"version"\s*:\s*(\d+)', text)
+        version = int(version_match.group(1)) if version_match else 1
+        jobs_match = re.search(r'"jobs"\s*:\s*\[', text)
+        if not jobs_match:
+            return None, False
+
+        jobs: list[CronJob] = []
+        index = jobs_match.end()
+        while index < len(text):
+            while index < len(text) and text[index] in " \t\r\n,":
+                index += 1
+            if index >= len(text):
+                break
+            if text[index] == "]":
+                return CronStore(version=version, jobs=jobs), bool(text[index + 1 :].strip())
+            extracted = _extract_complete_json_value(text, index)
+            if extracted is None:
+                break
+            raw_job, next_index = extracted
+            job = self._job_from_data(json.loads(raw_job))
+            if job is None:
+                break
+            jobs.append(job)
+            index = next_index
+
+        if not jobs:
+            return None, False
+        return CronStore(version=version, jobs=jobs), True
+
+    def _store_from_data(self, data: dict[str, Any]) -> CronStore | None:
+        jobs_data = data.get("jobs", [])
+        if not isinstance(jobs_data, list):
+            return None
+        jobs: list[CronJob] = []
+        for item in jobs_data:
+            job = self._job_from_data(item)
+            if job is None:
+                return None
+            jobs.append(job)
+        version = data.get("version", 1)
+        return CronStore(version=int(version) if isinstance(version, int) else 1, jobs=jobs)
+
+    @staticmethod
+    def _job_from_data(item: Any) -> CronJob | None:
+        if not isinstance(item, dict):
+            return None
+        schedule_data = item.get("schedule")
+        payload_data = item.get("payload")
+        if not isinstance(schedule_data, dict) or not isinstance(payload_data, dict):
+            return None
+        return CronJob(
+            id=str(item["id"]),
+            name=str(item["name"]),
+            enabled=bool(item.get("enabled", True)),
+            schedule=CronSchedule(
+                kind=str(schedule_data["kind"]),
+                at_ms=schedule_data.get("atMs"),
+                every_ms=schedule_data.get("everyMs"),
+                expr=schedule_data.get("expr"),
+                tz=schedule_data.get("tz"),
+            ),
+            payload=CronPayload(
+                kind=str(payload_data.get("kind", "agent_turn")),
+                message=str(payload_data.get("message", "")),
+                deliver=bool(payload_data.get("deliver", False)),
+                channel=payload_data.get("channel"),
+                to=payload_data.get("to"),
+                session_key=payload_data.get("sessionKey"),
+                metadata=dict(payload_data.get("metadata", {}) or {}),
+            ),
+            state=CronJobState(
+                next_run_at_ms=(item.get("state") or {}).get("nextRunAtMs"),
+                last_run_at_ms=(item.get("state") or {}).get("lastRunAtMs"),
+                last_status=(item.get("state") or {}).get("lastStatus"),
+                last_error=(item.get("state") or {}).get("lastError"),
+            ),
+            created_at_ms=int(item.get("createdAtMs", 0) or 0),
+            updated_at_ms=int(item.get("updatedAtMs", 0) or 0),
+            delete_after_run=bool(item.get("deleteAfterRun", False)),
+        )
     
     def _save_store(self) -> None:
         """Save jobs to disk."""
@@ -185,7 +307,8 @@ class CronService:
         self._running = True
         self._load_store()
         self._recompute_next_runs()
-        self._save_store()
+        if not self._store_load_failed:
+            self._save_store()
         self._arm_timer()
         logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
     

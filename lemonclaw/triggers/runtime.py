@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from lemonclaw.governance.redaction import redact_sensitive_value
 
 _SAFE_TRIGGER_ID = re.compile(r"^tr_[A-Za-z0-9_-]{1,64}$")
@@ -224,11 +226,20 @@ class TriggerRuntime:
     def _read_events_unlocked(self) -> list[dict[str, Any]]:
         if not self._path.exists():
             return []
-        return [
-            json.loads(line)
-            for line in self._path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        records: list[dict[str, Any]] = []
+        for line_number, line in enumerate(self._path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Trigger ledger {}: truncating corrupt line {} (partial write)",
+                    self._path,
+                    line_number,
+                )
+                break
+        return records
 
     def _append_jsonl(self, payload: dict[str, Any]) -> None:
         self._state_dir.mkdir(parents=True, exist_ok=True)

@@ -51,6 +51,39 @@ def test_trigger_runtime_roundtrip(tmp_path: Path):
     assert summary["by_status"]["completed"] == 1
 
 
+def test_trigger_runtime_ignores_corrupt_tail_without_losing_prefix(tmp_path: Path):
+    runtime = TriggerRuntime(tmp_path)
+    first = runtime.record_trigger(
+        source="cron",
+        kind="agent_turn",
+        payload_summary="first",
+        session_key="cron:job-1",
+        channel="cli",
+        chat_id="direct",
+    )
+    second = runtime.record_trigger(
+        source="webhook.wecom",
+        kind="wecom.event.subscribe",
+        payload_summary="second",
+        session_key="wecom:user-1",
+        channel="wecom",
+        chat_id="bot|user",
+    )
+
+    path = tmp_path / ".lemonclaw-state" / "triggers.jsonl"
+    path.write_text(path.read_text(encoding="utf-8") + '{"trigger_id": "tr_broken"', encoding="utf-8")
+
+    reloaded = TriggerRuntime(tmp_path)
+    records = reloaded.list_triggers(limit=10)
+    summary = reloaded.summarize_triggers(limit=10)
+
+    assert [record["trigger_id"] for record in records] == [second["trigger_id"], first["trigger_id"]]
+    assert summary["by_source"]["cron"] == 1
+    assert summary["by_source"]["webhook.wecom"] == 1
+    assert summary["by_family"]["scheduled"] == 1
+    assert summary["by_family"]["webhook"] == 1
+
+
 def test_agent_loop_process_direct_links_trigger_to_task(tmp_path: Path, echo_provider) -> None:
     trigger_runtime = TriggerRuntime(tmp_path)
     bus = MessageBus()
