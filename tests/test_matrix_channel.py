@@ -200,7 +200,8 @@ async def test_matrix_dm_pairing_routes_pending_and_approval(tmp_path) -> None:
     pending_event = SimpleNamespace(sender='@bob:matrix.org', body='hello', event_id='$pending', source={'content': {}})
     await channel._on_message(pending_room, pending_event)
     assert len(inbound) == 1
-    assert outbound[-1].chat_id == '!owner:matrix.org'
+    assert any(msg.chat_id == '!owner:matrix.org' and 'approve' in (msg.content or '').lower() for msg in outbound)
+    assert any(msg.chat_id == '!pending:matrix.org' and 'pending owner approval' in (msg.content or '').lower() for msg in outbound)
 
     approve_event = SimpleNamespace(sender='@alice:matrix.org', body='/approve @bob:matrix.org', event_id='$approve', source={'content': {}})
     await channel._on_message(owner_room, approve_event)

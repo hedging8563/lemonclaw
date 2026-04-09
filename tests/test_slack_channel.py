@@ -27,7 +27,8 @@ async def test_slack_dm_pairing_routes_pending_and_approval(tmp_path):
 
     assert await channel._run_pairing_flow(sender_id='U1', notify_target='D1', content='hello', display_name='U1') is True
     assert await channel._run_pairing_flow(sender_id='U2', notify_target='D2', content='hello', display_name='U2') is False
-    assert outbound[-1].chat_id == 'D1'
+    assert any(msg.chat_id == 'D1' and 'approve' in (msg.content or '').lower() for msg in outbound)
+    assert any(msg.chat_id == 'D2' and 'pending owner approval' in (msg.content or '').lower() for msg in outbound)
 
     assert await channel._run_pairing_flow(sender_id='U1', notify_target='D1', content='/approve U2', display_name='U1') is False
     assert any(msg.chat_id == 'D2' and 'approved' in (msg.content or '').lower() for msg in outbound)

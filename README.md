@@ -73,6 +73,8 @@ Generated runtime data lives under:
 | `lemonclaw doctor` | Pre-flight diagnostics |
 | `lemonclaw doctor --fix` | Auto-fix common issues |
 | `lemonclaw status` | Show runtime status |
+| `/tasks` | Show recent task and recovery hints in chat |
+| `/resume [task_id]` | Execute the safest available resume action in chat |
 | `lemonclaw cron add/list/remove` | Scheduled tasks |
 | `lemonclaw channels login` | Link WhatsApp (QR scan) |
 | `lemonclaw channels status` | Show channel status |

@@ -239,6 +239,77 @@ class TestSlashCommands:
         assert refreshed.metadata.get("current_model") is None
 
     @pytest.mark.asyncio
+    async def test_tasks_command_lists_recent_session_tasks(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/tasks")
+        loop.ledger.ensure_task(
+            task_id="task_1",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="demo",
+        )
+        loop.ledger.update_task("task_1", status="waiting", current_stage="verify")
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_1" in response.content
+        assert "recheck" in response.content
+
+    @pytest.mark.asyncio
+    async def test_resume_command_executes_safe_resume_for_latest_session_task(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/resume")
+        loop.ledger.ensure_task(
+            task_id="task_resume",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="resume demo",
+        )
+        loop.ledger.update_task("task_resume", status="waiting", current_stage="verify")
+        loop.execute_safe_resume = AsyncMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_resume",
+            "recommended_action": "recheck",
+            "reason": "task can be safely rechecked through CompletionGate",
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_resume" in response.content
+        assert "recheck" in response.content
+        loop.execute_safe_resume.assert_awaited_once_with("task_resume", source="chat_command_resume")
+
+    @pytest.mark.asyncio
+    async def test_resume_command_explains_unsafe_candidate(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/resume task_manual")
+        loop.ledger.ensure_task(
+            task_id="task_manual",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="manual demo",
+        )
+        loop.ledger.build_resume_candidate = MagicMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_manual",
+            "recommended_action": "manual_resume",
+            "safe_to_execute": False,
+            "reason": "manual intervention required",
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_manual" in response.content
+        assert "manual_resume" in response.content
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(

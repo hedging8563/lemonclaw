@@ -132,6 +132,140 @@ class TestAutoPairing:
         assert allowed is True
         warning.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_pairing_flow_surfaces_pending_repeat_and_non_owner_feedback(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'slack'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('slack', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+
+        ch = _Channel()
+
+        assert await ch._run_pairing_flow(
+            sender_id='U1',
+            notify_target='D1',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        assert await ch._run_pairing_flow(
+            sender_id='U2',
+            notify_target='D2',
+            content='hello',
+            display_name='Requester',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == 'D1' and 'approve u2' in (msg.content or '').lower() for msg in outbound)
+        assert any(msg.chat_id == 'D2' and 'pending owner approval' in (msg.content or '').lower() for msg in outbound)
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='U2',
+            notify_target='D2',
+            content='hello again',
+            display_name='Requester',
+            policy='pairing',
+        ) is False
+        assert len(outbound) == 1
+        assert outbound[0].chat_id == 'D2'
+        assert 'still pending owner approval' in (outbound[0].content or '').lower()
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='U2',
+            notify_target='D2',
+            content='/approve U2',
+            display_name='Requester',
+            policy='pairing',
+        ) is False
+        assert len(outbound) == 1
+        assert outbound[0].chat_id == 'D2'
+        assert 'only the current owner' in (outbound[0].content or '').lower()
+
+    @pytest.mark.asyncio
+    async def test_owner_deny_notifies_requester(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'matrix'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('matrix', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='@owner:matrix.org',
+            notify_target='!owner:matrix.org',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        assert await ch._run_pairing_flow(
+            sender_id='@user:matrix.org',
+            notify_target='!user:matrix.org',
+            content='hello',
+            display_name='User',
+            policy='pairing',
+        ) is False
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='@owner:matrix.org',
+            notify_target='!owner:matrix.org',
+            content='/deny @user:matrix.org',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == '!user:matrix.org' and 'access denied' in (msg.content or '').lower() for msg in outbound)
+        assert any(msg.chat_id == '!owner:matrix.org' and 'denied: @user:matrix.org' in (msg.content or '').lower() for msg in outbound)
+
 
 # ── 2. Session Manager LRU ──────────────────────────────────────────────
 

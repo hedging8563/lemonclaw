@@ -217,6 +217,23 @@ class BaseChannel(ABC):
                     chat_id=str(owner_target),
                     content=f"New user wants access: {sender_id}\nReply /approve {sender_id} or /deny {sender_id}",
                 ))
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=self.name,
+                chat_id=str(notify_target),
+                content=(
+                    "Your access request is pending owner approval.\n"
+                    f"Ask the current owner to reply /approve {sender_id} or /deny {sender_id} from their linked chat."
+                ),
+            ))
+        if result == "already_pending":
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=self.name,
+                chat_id=str(notify_target),
+                content=(
+                    "Your access request is still pending owner approval.\n"
+                    f"Ask the current owner to reply /approve {sender_id} or /deny {sender_id} from their linked chat."
+                ),
+            ))
         return False
 
     async def _handle_message(
@@ -286,7 +303,7 @@ class BaseChannel(ABC):
         if not is_owner and "|" in sid:
             is_owner = any(p == owner for p in sid.split("|") if p)
         if not is_owner:
-            return None  # silently ignore non-owner pairing commands
+            return "Only the current owner can approve or deny pairing requests."
 
         parts = content.split(maxsplit=1)
         if len(parts) < 2:
@@ -307,6 +324,11 @@ class BaseChannel(ABC):
         elif cmd == "/deny":
             notify_target = self._pairing.deny(target)
             if notify_target:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name,
+                    chat_id=str(notify_target),
+                    content="❌ Access denied. Ask the current owner to re-approve if this was a mistake.",
+                ))
                 return f"Denied: {target}"
             return f"No pending request from: {target}"
         return None

@@ -2267,6 +2267,14 @@ class AgentLoop:
             reply = self._command_reply(msg, t("help", lang), kind="help")
             self._persist_simple_reply(session, msg.content, reply, kind="help")
             return reply
+        if cmd == "/tasks" or cmd.startswith("/tasks "):
+            reply = self._handle_tasks_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="tasks")
+            return reply
+        if cmd == "/resume" or cmd.startswith("/resume "):
+            reply = await self._handle_resume_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="resume")
+            return reply
         if cmd == "/kb" or cmd.startswith("/kb "):
             reply = self._handle_kb_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="kb_search")
@@ -2281,7 +2289,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/tasks", "/resume", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2524,6 +2532,113 @@ class AgentLoop:
             result, level = self._git_auth_set_sync(payload, lang=lang)
             return self._command_reply(msg, result, kind="git_auth_set", level=level)
         return self._command_reply(msg, t("git_auth_usage", lang), kind="git_auth_help", level="warning")
+
+    def _handle_tasks_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[6:].strip()
+        limit = 5
+        if raw:
+            try:
+                limit = min(max(int(raw), 1), 10)
+            except ValueError:
+                return self._command_reply(msg, t("tasks_usage", lang), kind="tasks_help", level="warning")
+
+        tasks = self.ledger.list_tasks(limit=20, session_key=msg.session_key)
+        if not tasks:
+            return self._command_reply(msg, t("tasks_empty", lang), kind="tasks", level="warning")
+
+        lines = [t("tasks_header", lang)]
+        for task in tasks[:limit]:
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            candidate = self.ledger.build_resume_candidate(task_id) or {}
+            reason = str(candidate.get("reason") or "no recovery hint")
+            if len(reason) > 120:
+                reason = reason[:117] + "..."
+            lines.append(
+                t(
+                    "tasks_item",
+                    lang,
+                    task_id=task_id,
+                    status=str(task.get("status") or "unknown"),
+                    stage=str(task.get("current_stage") or "unknown"),
+                    action=str(candidate.get("recommended_action") or "manual_review"),
+                    safe="yes" if candidate.get("safe_to_execute") else "no",
+                    reason=reason,
+                )
+            )
+        return self._command_reply(msg, "\n".join(lines), kind="tasks")
+
+    async def _handle_resume_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[7:].strip()
+        task_id = raw or ""
+        if task_id and any(ch.isspace() for ch in task_id):
+            task_id = task_id.split()[0]
+        if task_id.lower() == "help":
+            return self._command_reply(msg, t("resume_usage", lang), kind="resume_help", level="warning")
+
+        if not task_id or task_id.lower() == "latest":
+            task_id = ""
+            for task in self.ledger.list_tasks(limit=20, session_key=msg.session_key):
+                candidate = self.ledger.build_resume_candidate(str(task.get("task_id") or ""))
+                if candidate:
+                    task_id = str(task.get("task_id") or "")
+                    break
+
+        task = self.ledger.read_task(task_id) if task_id else None
+        if not task or str(task.get("session_key") or "") != msg.session_key:
+            return self._command_reply(
+                msg,
+                t("resume_not_found", lang, task_id=task_id or "latest"),
+                kind="resume",
+                level="warning",
+            )
+
+        candidate = self.ledger.build_resume_candidate(task_id)
+        if not candidate:
+            return self._command_reply(
+                msg,
+                t("resume_not_found", lang, task_id=task_id),
+                kind="resume",
+                level="warning",
+            )
+        if not candidate.get("safe_to_execute"):
+            return self._command_reply(
+                msg,
+                t(
+                    "resume_unsafe",
+                    lang,
+                    task_id=task_id,
+                    action=str(candidate.get("recommended_action") or "manual_resume"),
+                    reason=str(candidate.get("reason") or "manual intervention required"),
+                ),
+                kind="resume",
+                level="warning",
+            )
+
+        try:
+            result = await self.execute_safe_resume(task_id, source="chat_command_resume")
+        except Exception as exc:
+            return self._command_reply(
+                msg,
+                t("resume_failed", lang, task_id=task_id, error=str(exc)[:200]),
+                kind="resume",
+                level="warning",
+            )
+
+        payload = result or candidate
+        key = "resume_scheduled" if payload.get("scheduled") else "resume_executed"
+        return self._command_reply(
+            msg,
+            t(
+                key,
+                lang,
+                task_id=task_id,
+                action=str(payload.get("recommended_action") or candidate.get("recommended_action") or "resume"),
+                reason=str(payload.get("reason") or candidate.get("reason") or ""),
+            ),
+            kind="resume",
+        )
 
     def _handle_kb_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[3:].strip()

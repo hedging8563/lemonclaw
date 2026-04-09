@@ -68,6 +68,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "🍋 LemonClaw commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/tasks [limit] — Show recent tasks and recovery hints\n"
+            "/resume [task_id] — Run the safest available resume action\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
@@ -80,6 +82,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "🍋 LemonClaw 命令：\n"
             "/new — 开始新会话\n"
             "/stop — 停止当前任务\n"
+            "/tasks [数量] — 查看最近任务与恢复建议\n"
+            "/resume [task_id] — 执行当前最安全的恢复动作\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
@@ -120,6 +124,46 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "unknown_command": {
         "en": "Unknown command `{cmd}`. Use `/help` to see available commands.",
         "zh": "未知命令 `{cmd}`，使用 `/help` 查看可用命令。",
+    },
+    "tasks_usage": {
+        "en": "Use `/tasks` or `/tasks <limit>` to inspect recent tasks for this chat session.",
+        "zh": "使用 `/tasks` 或 `/tasks <数量>` 查看当前聊天会话的最近任务。",
+    },
+    "tasks_empty": {
+        "en": "No recent tasks were found for this chat session.",
+        "zh": "当前聊天会话没有最近任务。",
+    },
+    "tasks_header": {
+        "en": "Recent tasks for this chat session:",
+        "zh": "当前聊天会话的最近任务：",
+    },
+    "tasks_item": {
+        "en": "- {task_id}: status={status}, stage={stage}, next={action}, safe={safe}, reason={reason}",
+        "zh": "- {task_id}：状态={status}，阶段={stage}，下一步={action}，可自动执行={safe}，原因={reason}",
+    },
+    "resume_usage": {
+        "en": "Use `/resume` to resume the latest task, or `/resume <task_id>` to target a specific task from `/tasks`.",
+        "zh": "使用 `/resume` 恢复最近任务，或使用 `/resume <task_id>` 恢复 `/tasks` 中的指定任务。",
+    },
+    "resume_not_found": {
+        "en": "No resumable task matching `{task_id}` was found for this chat session.",
+        "zh": "当前聊天会话没有找到匹配 `{task_id}` 的可恢复任务。",
+    },
+    "resume_unsafe": {
+        "en": "Task `{task_id}` is not safe to resume automatically. Recommended action: {action}. Reason: {reason}",
+        "zh": "任务 `{task_id}` 当前不适合自动恢复。建议动作：{action}。原因：{reason}",
+    },
+    "resume_executed": {
+        "en": "Executed safe resume for `{task_id}`. Action: {action}. Reason: {reason}",
+        "zh": "已对 `{task_id}` 执行安全恢复。动作：{action}。原因：{reason}",
+    },
+    "resume_scheduled": {
+        "en": "Scheduled safe resume for `{task_id}` in the background. Action: {action}. Reason: {reason}",
+        "zh": "已在后台为 `{task_id}` 安排安全恢复。动作：{action}。原因：{reason}",
+    },
+    "resume_failed": {
+        "en": "Failed to resume `{task_id}`: {error}",
+        "zh": "恢复 `{task_id}` 失败：{error}",
     },
     "git_auth_usage": {
         "en": (
