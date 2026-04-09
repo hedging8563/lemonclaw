@@ -72,6 +72,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/resume [task_id] — Run the safest available resume action\n"
             "/retry-outbox [task_id] — Retry failed outbox delivery when safe\n"
             "/recheck [task_id] — Re-run completion/recovery checks when safe\n"
+            "/abandon [task_id] — Abandon the latest active outbox event for a task\n"
+            "/bundle [task_id] — Show a compact task bundle summary\n"
             "/postmortem [task_id] — Show a concise failure and recovery summary\n"
             "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
             "/kb <query> — Search ingested knowledge\n"
@@ -90,6 +92,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/resume [task_id] — 执行当前最安全的恢复动作\n"
             "/retry-outbox [task_id] — 在安全前提下重试失败的 outbox 投递\n"
             "/recheck [task_id] — 在安全前提下重新执行完成/恢复检查\n"
+            "/abandon [task_id] — 放弃任务最近的活跃 outbox 事件\n"
+            "/bundle [task_id] — 查看紧凑版任务 bundle 摘要\n"
             "/postmortem [task_id] — 查看简要失败与恢复摘要\n"
             "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
             "/kb <查询> — 搜索已入库知识\n"
@@ -196,6 +200,50 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "recheck_done": {
         "en": "Rechecked `{task_id}`. Reason: {reason}",
         "zh": "已为 `{task_id}` 执行 recheck。原因：{reason}",
+    },
+    "abandon_usage": {
+        "en": "Use `/abandon` to target the latest task, or `/abandon <task_id>` for a specific task from `/tasks`.",
+        "zh": "使用 `/abandon` 放弃最近任务，或 `/abandon <task_id>` 放弃 `/tasks` 中的指定任务。",
+    },
+    "abandon_not_found": {
+        "en": "No active outbox event is available to abandon for `{task_id}` in this chat session.",
+        "zh": "当前聊天会话中没有可为 `{task_id}` 放弃的活跃 outbox 事件。",
+    },
+    "abandon_done": {
+        "en": "Abandoned outbox event `{event_id}` for `{task_id}`. Reason: {reason}",
+        "zh": "已为 `{task_id}` 放弃 outbox 事件 `{event_id}`。原因：{reason}",
+    },
+    "bundle_usage": {
+        "en": "Use `/bundle` to inspect the latest task, or `/bundle <task_id>` for a specific task from `/tasks`.",
+        "zh": "使用 `/bundle` 查看最近任务，或 `/bundle <task_id>` 查看 `/tasks` 中的指定任务。",
+    },
+    "bundle_not_found": {
+        "en": "No bundle is available for `{task_id}` in this chat session.",
+        "zh": "当前聊天会话中没有 `{task_id}` 的 bundle。",
+    },
+    "bundle_header": {
+        "en": "Bundle for `{task_id}`:",
+        "zh": "`{task_id}` 的 bundle：",
+    },
+    "bundle_state": {
+        "en": "- status={status}, stage={stage}, display={display}, next={action}, safe={safe}",
+        "zh": "- 状态={status}，阶段={stage}，展示={display}，下一步={action}，可自动执行={safe}",
+    },
+    "bundle_verification": {
+        "en": "- verification={verification_status}, evidence={evidence_count}",
+        "zh": "- verification={verification_status}，证据数={evidence_count}",
+    },
+    "bundle_retrieval": {
+        "en": "- retrieval strategy={strategy}, cards={cards}, rules={rules}, knowledge={knowledge}",
+        "zh": "- retrieval strategy={strategy}，cards={cards}，rules={rules}，knowledge={knowledge}",
+    },
+    "bundle_outbox": {
+        "en": "- outbox total={total}, active={active}, terminal={terminal}, failed={failed}",
+        "zh": "- outbox total={total}，active={active}，terminal={terminal}，failed={failed}",
+    },
+    "bundle_conductor": {
+        "en": "- conductor template={template}, subtasks={subtasks}, accepted={accepted}, failed={failed}",
+        "zh": "- conductor template={template}，subtasks={subtasks}，accepted={accepted}，failed={failed}",
     },
     "postmortem_usage": {
         "en": "Use `/postmortem` to inspect the latest task, or `/postmortem <task_id>` for a specific task from `/tasks`.",

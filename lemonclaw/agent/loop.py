@@ -2287,6 +2287,14 @@ class AgentLoop:
             reply = await self._handle_recheck_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="recheck")
             return reply
+        if cmd == "/abandon" or cmd.startswith("/abandon "):
+            reply = self._handle_abandon_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="abandon")
+            return reply
+        if cmd == "/bundle" or cmd.startswith("/bundle "):
+            reply = self._handle_bundle_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="bundle")
+            return reply
         if cmd == "/postmortem" or cmd.startswith("/postmortem "):
             reply = self._handle_postmortem_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="postmortem")
@@ -2305,7 +2313,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2723,6 +2731,105 @@ class AgentLoop:
             t("recheck_done", lang, task_id=task_id, reason=str(payload.get("reason") or candidate.get("reason") or "")),
             kind="recheck",
         )
+
+    def _handle_abandon_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        from lemonclaw.ledger.types import OUTBOX_TERMINAL_STATUSES
+
+        raw = msg.content.strip()[8:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("abandon_usage", lang), kind="abandon_help", level="warning")
+        task_id, task, _candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id:
+            return self._command_reply(msg, t("abandon_not_found", lang, task_id=raw or "latest"), kind="abandon", level="warning")
+
+        event_id = ""
+        for event in reversed(self.ledger.materialize_outbox_events_for_task(task_id)):
+            if str(event.get("status") or "") in OUTBOX_TERMINAL_STATUSES:
+                continue
+            event_id = str(event.get("event_id") or "")
+            if event_id:
+                break
+        if not event_id:
+            return self._command_reply(msg, t("abandon_not_found", lang, task_id=task_id), kind="abandon", level="warning")
+
+        updated = self.ledger.abandon_outbox_event(
+            event_id,
+            source="chat_command_abandon",
+            reason="chat command abandon",
+        )
+        return self._command_reply(
+            msg,
+            t(
+                "abandon_done",
+                lang,
+                task_id=task_id,
+                event_id=str((updated or {}).get("event_id") or event_id),
+                reason=str((updated or {}).get("error") or "chat command abandon"),
+            ),
+            kind="abandon",
+        )
+
+    def _handle_bundle_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[7:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("bundle_usage", lang), kind="bundle_help", level="warning")
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id:
+            return self._command_reply(msg, t("bundle_not_found", lang, task_id=raw or "latest"), kind="bundle", level="warning")
+        export_view = self.ledger.build_task_export_view(task_id)
+        if not export_view:
+            return self._command_reply(msg, t("bundle_not_found", lang, task_id=task_id), kind="bundle", level="warning")
+
+        summary = dict(export_view.get("summary") or {})
+        display_state = dict(summary.get("display_state") or {})
+        verification = dict(summary.get("verification") or {})
+        retrieval = dict(summary.get("retrieval") or {})
+        conductor = dict(export_view.get("conductor") or {})
+        outbox_events = list(export_view.get("outbox_events") or [])
+
+        lines = [
+            t("bundle_header", lang, task_id=task_id),
+            t(
+                "bundle_state",
+                lang,
+                status=str(task.get("status") or "unknown"),
+                stage=str(task.get("current_stage") or "unknown"),
+                display=str(display_state.get("key") or "unknown"),
+                action=str((candidate or {}).get("recommended_action") or "manual_resume"),
+                safe="yes" if (candidate or {}).get("safe_to_execute") else "no",
+            ),
+            t(
+                "bundle_verification",
+                lang,
+                verification_status=str(verification.get("status") or "none"),
+                evidence_count=int(verification.get("evidence_count") or 0),
+            ),
+            t(
+                "bundle_retrieval",
+                lang,
+                strategy=str(retrieval.get("strategy") or "none"),
+                cards=int(retrieval.get("card_count") or 0),
+                rules=int(retrieval.get("rule_count") or 0),
+                knowledge=int(retrieval.get("knowledge_count") or 0),
+            ),
+            t(
+                "bundle_outbox",
+                lang,
+                total=len(outbox_events),
+                active=int((summary.get("outbox_active_count") or 0)),
+                terminal=int((summary.get("outbox_terminal_count") or 0)),
+                failed=int((candidate or {}).get("failed_outbox_count") or 0),
+            ),
+            t(
+                "bundle_conductor",
+                lang,
+                template=str(conductor.get("swarm_template_id") or "none"),
+                subtasks=int(conductor.get("subtask_count") or 0),
+                accepted=int(conductor.get("accepted_count") or 0),
+                failed=int(conductor.get("failed_count") or 0),
+            ),
+        ]
+        return self._command_reply(msg, "\n".join(lines), kind="bundle")
 
     def _handle_postmortem_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[11:].strip()

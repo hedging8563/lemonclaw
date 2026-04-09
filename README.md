@@ -78,6 +78,8 @@ Generated runtime data lives under:
 | `/resume [task_id]` | Execute the safest available resume action in chat |
 | `/retry-outbox [task_id]` | Retry failed outbox delivery in chat when it is safe |
 | `/recheck [task_id]` | Re-run completion/recovery checks in chat when it is safe |
+| `/abandon [task_id]` | Abandon the latest active outbox event for a task in chat |
+| `/bundle [task_id]` | Show a compact task bundle summary in chat |
 | `/postmortem [task_id]` | Show a concise failure/recovery summary in chat |
 | `/pairing status` | Show current pairing state in chat |
 | `/pairing pending` | Show pending pairing requests in chat (owner only) |
