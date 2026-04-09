@@ -40,6 +40,7 @@ class BaseChannel(ABC):
         self._rate_limit_window_s = 30.0
         self._rate_limit_max_messages = 12
         self._rate_limit_hits: dict[str, deque[float]] = {}
+        self._rate_limit_notice_at: dict[str, float] = {}
     
     @abstractmethod
     async def start(self) -> None:
@@ -117,6 +118,23 @@ class BaseChannel(ABC):
         dq.append(now)
         return False
 
+    async def _publish_feedback(self, chat_id: str, content: str) -> None:
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel=self.name,
+                chat_id=str(chat_id),
+                content=content,
+            )
+        )
+
+    def _should_send_rate_limit_notice(self, sender_id: str) -> bool:
+        now = time.monotonic()
+        last_notice = self._rate_limit_notice_at.get(str(sender_id), 0.0)
+        if now - last_notice < self._rate_limit_window_s:
+            return False
+        self._rate_limit_notice_at[str(sender_id)] = now
+        return True
+
     def enable_auto_pairing(self, data_dir: Path) -> None:
         """Enable auto-pairing for this channel."""
         from lemonclaw.channels.auto_pairing import AutoPairing
@@ -175,9 +193,19 @@ class BaseChannel(ABC):
         if effective_policy == "open":
             return True
         if effective_policy == "disabled":
+            await self._publish_feedback(
+                notify_target,
+                "Direct messages are disabled for this bot on this channel.",
+            )
             return False
         if effective_policy == "allowlist":
-            return self.is_allowed(sender_id)
+            if self.is_allowed(sender_id):
+                return True
+            await self._publish_feedback(
+                notify_target,
+                "Access denied. This bot only accepts messages from approved senders on this channel.",
+            )
+            return False
 
         if self._pairing and stripped.startswith(("/approve ", "/deny ")):
             reply = await self._handle_pairing_command(sender_id, stripped)
@@ -196,6 +224,10 @@ class BaseChannel(ABC):
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
                 sender_id, self.name,
+            )
+            await self._publish_feedback(
+                notify_target,
+                "Access denied. Ask the current owner to add you to the allow list or enable pairing for this channel.",
             )
             return False
 
@@ -255,6 +287,11 @@ class BaseChannel(ABC):
         stripped = content.strip()
         is_group_message = bool((metadata or {}).get("is_group"))
         if not stripped.startswith(("/approve ", "/deny ")) and self._is_rate_limited(str(sender_id)):
+            if self._should_send_rate_limit_notice(str(sender_id)):
+                await self._publish_feedback(
+                    chat_id,
+                    "Too many messages too quickly. Please wait a moment and try again.",
+                )
             return
 
         # Group ingress is governed by group_policy / group_allow_from upstream in the

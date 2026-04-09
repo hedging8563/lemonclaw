@@ -266,6 +266,151 @@ class TestAutoPairing:
         assert any(msg.chat_id == '!user:matrix.org' and 'access denied' in (msg.content or '').lower() for msg in outbound)
         assert any(msg.chat_id == '!owner:matrix.org' and 'denied: @user:matrix.org' in (msg.content or '').lower() for msg in outbound)
 
+    @pytest.mark.asyncio
+    async def test_pairing_flow_surfaces_disabled_and_allowlist_denials(self):
+        from lemonclaw.channels.base import BaseChannel
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            def __init__(self, allow_from: list[str]):
+                self.allow_from = allow_from
+
+        class _Channel:
+            def __init__(self, allow_from: list[str]):
+                self.config = _Cfg(allow_from)
+                self.name = 'discord'
+                self.bus = _Bus()
+                self._pairing = None
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        disabled = _Channel(["*"])
+        assert await disabled._run_pairing_flow(
+            sender_id='U1',
+            notify_target='DM1',
+            content='hello',
+            display_name='User',
+            policy='disabled',
+        ) is False
+        assert outbound[-1].chat_id == 'DM1'
+        assert 'direct messages are disabled' in (outbound[-1].content or '').lower()
+
+        outbound.clear()
+        allowlist = _Channel(['owner'])
+        assert await allowlist._run_pairing_flow(
+            sender_id='U2',
+            notify_target='DM2',
+            content='hello',
+            display_name='User',
+            policy='allowlist',
+        ) is False
+        assert outbound[-1].chat_id == 'DM2'
+        assert 'access denied' in (outbound[-1].content or '').lower()
+
+    @pytest.mark.asyncio
+    async def test_handle_message_surfaces_access_denied_without_pairing(self):
+        from lemonclaw.channels.base import BaseChannel
+
+        inbound = []
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                inbound.append(msg)
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from = ['owner']
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'telegram'
+                self.bus = _Bus()
+                self._pairing = None
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_message = BaseChannel._handle_message
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        ch = _Channel()
+        await ch._handle_message(sender_id='guest', chat_id='chat-1', content='hello')
+
+        assert inbound == []
+        assert len(outbound) == 1
+        assert outbound[0].chat_id == 'chat-1'
+        assert 'ask the current owner' in (outbound[0].content or '').lower()
+
+    @pytest.mark.asyncio
+    async def test_handle_message_surfaces_rate_limit_once_per_window(self):
+        from lemonclaw.channels.base import BaseChannel
+
+        inbound = []
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                inbound.append(msg)
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from = ['*']
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'qq'
+                self.bus = _Bus()
+                self._pairing = None
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 1
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_message = BaseChannel._handle_message
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        ch = _Channel()
+        await ch._handle_message(sender_id='user-1', chat_id='chat-1', content='first')
+        await ch._handle_message(sender_id='user-1', chat_id='chat-1', content='second')
+        await ch._handle_message(sender_id='user-1', chat_id='chat-1', content='third')
+
+        assert len(inbound) == 1
+        assert len(outbound) == 1
+        assert outbound[0].chat_id == 'chat-1'
+        assert 'too many messages' in (outbound[0].content or '').lower()
+
 
 # ── 2. Session Manager LRU ──────────────────────────────────────────────
 
@@ -615,11 +760,14 @@ async def test_base_channel_rate_limits_repeated_messages():
             self._rate_limit_window_s = 30.0
             self._rate_limit_max_messages = 3
             self._rate_limit_hits = {}
+            self._rate_limit_notice_at = {}
 
         is_allowed = BaseChannel.is_allowed
         _is_rate_limited = BaseChannel._is_rate_limited
         _run_pairing_flow = BaseChannel._run_pairing_flow
         _handle_message = BaseChannel._handle_message
+        _publish_feedback = BaseChannel._publish_feedback
+        _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
 
     ch = _Channel()
     for i in range(5):
