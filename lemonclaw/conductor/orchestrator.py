@@ -570,6 +570,7 @@ class Orchestrator:
             logger.info("Orchestrator: executing '{}' on agent '{}'", subtask.id, agent_id)
             self._registry.update_status(agent_id, AgentStatus.THINKING)
             started_at_ms = self._now_ms()
+            step = None
 
             try:
                 step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500]) if self._ledger and task_id else None
@@ -673,8 +674,14 @@ class Orchestrator:
                 logger.warning("Orchestrator: subtask '{}' attempt {} failed: {}",
                                subtask.id, attempt + 1, e)
                 if self._ledger and task_id:
-                    failed_step = self._ledger.start_step(task_id, step_type="subtask", name=subtask.id, input_summary=subtask.description[:500])
-                    self._ledger.finish_step(failed_step, status="failed", error=str(e)[:500])
+                    if step is None:
+                        step = self._ledger.start_step(
+                            task_id,
+                            step_type="subtask",
+                            name=subtask.id,
+                            input_summary=subtask.description[:500],
+                        )
+                    self._ledger.finish_step(step, status="failed", error=str(e)[:500])
 
         # All retries exhausted
         logger.error("Orchestrator: subtask '{}' failed after {} attempts: {}",

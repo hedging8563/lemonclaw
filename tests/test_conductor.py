@@ -323,3 +323,48 @@ async def test_execute_subtask_uses_swarm_role_prompt_and_handoff(tmp_path):
     assert messages[0]["content"] == "You are the maker role."
     assert "Dependency handoff" in messages[1]["content"]
     assert "requirements ready" in messages[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_execute_subtask_failure_finishes_original_ledger_step(tmp_path):
+    from lemonclaw.agent.registry import AgentRegistry
+    from lemonclaw.bus.queue import MessageBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
+    from lemonclaw.ledger.runtime import TaskLedger
+
+    provider = MagicMock()
+    provider.chat = AsyncMock(side_effect=RuntimeError("boom"))
+    bus = MessageBus()
+    registry = AgentRegistry(bus, tmp_path)
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_orch_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="orchestrate",
+    )
+
+    orch = Orchestrator(provider, bus, registry, model="gpt-5.4", max_retries=0, ledger=ledger)
+    plan = OrchestrationPlan(
+        request_id="plan3",
+        original_message="Ship a concrete deliverable",
+        intent=IntentAnalysis(complexity=TaskComplexity.MODERATE, summary="Ship deliverable"),
+        subtasks=[
+            SubTask(
+                id="t_fail",
+                description="Produce the final artifact",
+                status=SubTaskStatus.RUNNING,
+            ),
+        ],
+        metadata={"_ledger_task_id": "task_orch_1"},
+    )
+
+    result = await orch._execute_subtask(plan, plan.subtasks[0])
+
+    assert result is None
+    steps = ledger.materialize_steps("task_orch_1")
+    assert len(steps) == 1
+    assert steps[0]["name"] == "t_fail"
+    assert steps[0]["status"] == "failed"
