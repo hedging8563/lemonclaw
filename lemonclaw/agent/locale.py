@@ -73,8 +73,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/retry-outbox [task_id] — Retry failed outbox delivery when safe\n"
             "/recheck [task_id] — Re-run completion/recovery checks when safe\n"
             "/abandon [task_id] — Abandon the latest active outbox event for a task\n"
-            "/bundle [task_id] — Show a compact task bundle summary\n"
-            "/postmortem [task_id] — Show a concise failure and recovery summary\n"
+            "/export [task_id] [md|json] — Render the full task export artifact in chat\n"
+            "/bundle [task_id] [md|json] — Show a compact summary or the full task bundle artifact\n"
+            "/postmortem [task_id] [md|json] — Show a concise summary or the full postmortem artifact\n"
             "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
@@ -93,8 +94,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/retry-outbox [task_id] — 在安全前提下重试失败的 outbox 投递\n"
             "/recheck [task_id] — 在安全前提下重新执行完成/恢复检查\n"
             "/abandon [task_id] — 放弃任务最近的活跃 outbox 事件\n"
-            "/bundle [task_id] — 查看紧凑版任务 bundle 摘要\n"
-            "/postmortem [task_id] — 查看简要失败与恢复摘要\n"
+            "/export [task_id] [md|json] — 在聊天中渲染完整任务导出产物\n"
+            "/bundle [task_id] [md|json] — 查看紧凑摘要或完整 task bundle 产物\n"
+            "/postmortem [task_id] [md|json] — 查看简要摘要或完整 postmortem 产物\n"
             "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
@@ -213,9 +215,21 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Abandoned outbox event `{event_id}` for `{task_id}`. Reason: {reason}",
         "zh": "已为 `{task_id}` 放弃 outbox 事件 `{event_id}`。原因：{reason}",
     },
+    "export_usage": {
+        "en": "Use `/export` to render the latest task export in chat, `/export <task_id>` for a specific task, or append `md` / `json` to choose the output format.",
+        "zh": "使用 `/export` 在聊天中渲染最近任务的 export，使用 `/export <task_id>` 指定任务，并可追加 `md` / `json` 选择输出格式。",
+    },
+    "export_not_found": {
+        "en": "No export artifact is available for `{task_id}` in this chat session.",
+        "zh": "当前聊天会话中没有 `{task_id}` 的 export 产物。",
+    },
+    "artifact_exported": {
+        "en": "Rendered `{artifact}` for `{task_id}` as `{format}`.",
+        "zh": "已将 `{task_id}` 的 `{artifact}` 以 `{format}` 形式渲染出来。",
+    },
     "bundle_usage": {
-        "en": "Use `/bundle` to inspect the latest task, or `/bundle <task_id>` for a specific task from `/tasks`.",
-        "zh": "使用 `/bundle` 查看最近任务，或 `/bundle <task_id>` 查看 `/tasks` 中的指定任务。",
+        "en": "Use `/bundle` to inspect the latest task, `/bundle <task_id>` for a specific task, or append `md` / `json` to render the full bundle artifact in chat.",
+        "zh": "使用 `/bundle` 查看最近任务，使用 `/bundle <task_id>` 指定任务，并可追加 `md` / `json` 在聊天中渲染完整 bundle 产物。",
     },
     "bundle_not_found": {
         "en": "No bundle is available for `{task_id}` in this chat session.",
@@ -246,8 +260,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "- conductor template={template}，subtasks={subtasks}，accepted={accepted}，failed={failed}",
     },
     "postmortem_usage": {
-        "en": "Use `/postmortem` to inspect the latest task, or `/postmortem <task_id>` for a specific task from `/tasks`.",
-        "zh": "使用 `/postmortem` 查看最近任务，或 `/postmortem <task_id>` 查看 `/tasks` 中的指定任务。",
+        "en": "Use `/postmortem` to inspect the latest task, `/postmortem <task_id>` for a specific task, or append `md` / `json` to render the full postmortem artifact in chat.",
+        "zh": "使用 `/postmortem` 查看最近任务，使用 `/postmortem <task_id>` 指定任务，并可追加 `md` / `json` 在聊天中渲染完整 postmortem 产物。",
     },
     "postmortem_not_found": {
         "en": "No postmortem is available for `{task_id}` in this chat session.",

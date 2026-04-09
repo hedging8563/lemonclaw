@@ -79,8 +79,9 @@ Generated runtime data lives under:
 | `/retry-outbox [task_id]` | Retry failed outbox delivery in chat when it is safe |
 | `/recheck [task_id]` | Re-run completion/recovery checks in chat when it is safe |
 | `/abandon [task_id]` | Abandon the latest active outbox event for a task in chat |
-| `/bundle [task_id]` | Show a compact task bundle summary in chat |
-| `/postmortem [task_id]` | Show a concise failure/recovery summary in chat |
+| `/export [task_id] [md|json]` | Render the full task export artifact in chat |
+| `/bundle [task_id] [md|json]` | Show a compact summary or the full task bundle artifact in chat |
+| `/postmortem [task_id] [md|json]` | Show a concise summary or the full postmortem artifact in chat |
 | `/pairing status` | Show current pairing state in chat |
 | `/pairing pending` | Show pending pairing requests in chat (owner only) |
 | `/pairing transfer <user_id>` | Transfer owner role in chat (owner only) |
@@ -158,7 +159,7 @@ The current WebUI is not just a chat shell. It includes:
 - a right-side inspector for notes, task recovery, current work, and knowledge
 - knowledge source management with ingestion, pinning, search, detail, and retrieval previews
 - knowledge governance controls for retrying failed ingests, ingesting pending sources, refreshing due sources, and reingesting all
-- task export / bundle / postmortem surfaces for operator review
+- task export / bundle / postmortem surfaces for operator review and chat-native artifact rendering
 - settings split into `Basic` / `Advanced`
 
 `Basic` shows the settings most users actually change. `Advanced` adds budgets, timeouts, proxies, bridge settings, MCP, and shell/runtime controls.

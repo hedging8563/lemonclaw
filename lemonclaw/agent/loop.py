@@ -63,6 +63,13 @@ from lemonclaw.memory.repo_change import load_repo_change_memory
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
+from lemonclaw.ledger.task_exports import (
+    attach_trigger_context,
+    build_task_bundle,
+    render_task_bundle_markdown,
+    render_task_export_markdown,
+    render_task_postmortem_markdown,
+)
 from lemonclaw.triggers import TriggerRuntime
 
 if TYPE_CHECKING:
@@ -2291,6 +2298,10 @@ class AgentLoop:
             reply = self._handle_abandon_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="abandon")
             return reply
+        if cmd == "/export" or cmd.startswith("/export "):
+            reply = self._handle_export_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="export")
+            return reply
         if cmd == "/bundle" or cmd.startswith("/bundle "):
             reply = self._handle_bundle_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="bundle")
@@ -2313,7 +2324,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/export", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2618,6 +2629,62 @@ class AgentLoop:
             return task_id, task, self.ledger.build_resume_candidate(task_id)
         return None, None, None
 
+    @staticmethod
+    def _parse_task_artifact_args(raw: str) -> tuple[str, str | None]:
+        payload = raw.strip()
+        if not payload:
+            return "", None
+        parts = payload.split()
+        export_format: str | None = None
+        if parts and parts[-1].lower() in {"md", "json"}:
+            export_format = parts.pop().lower()
+        return " ".join(parts).strip(), export_format
+
+    def _render_task_artifact(
+        self,
+        *,
+        task_id: str,
+        payload: dict[str, Any],
+        artifact: str,
+        export_format: str,
+    ) -> str:
+        if artifact == "export":
+            if export_format == "json":
+                return json.dumps(payload, ensure_ascii=False, indent=2)
+            return render_task_export_markdown(payload, task_id)
+        if artifact == "bundle":
+            if export_format == "json":
+                return json.dumps(payload, ensure_ascii=False, indent=2)
+            return render_task_bundle_markdown(payload, task_id)
+        if export_format == "json":
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        return render_task_postmortem_markdown(payload, task_id)
+
+    def _format_task_artifact_for_chat(
+        self,
+        *,
+        task_id: str,
+        payload: dict[str, Any],
+        artifact: str,
+        export_format: str,
+        lang: str,
+    ) -> str:
+        rendered = self._render_task_artifact(
+            task_id=task_id,
+            payload=payload,
+            artifact=artifact,
+            export_format=export_format,
+        )
+        if export_format == "json":
+            return t(
+                "artifact_exported",
+                lang,
+                artifact=artifact,
+                task_id=task_id,
+                format=export_format,
+            ) + f"\n```json\n{rendered}\n```"
+        return rendered
+
     async def _handle_resume_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[7:].strip()
         if raw.lower() == "help":
@@ -2769,16 +2836,57 @@ class AgentLoop:
             kind="abandon",
         )
 
+    def _handle_export_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[7:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("export_usage", lang), kind="export_help", level="warning")
+        raw_task_id, export_format = self._parse_task_artifact_args(raw)
+        task_id, task, _candidate = self._resolve_session_task(msg, raw_task_id=raw_task_id)
+        if not task or not task_id:
+            return self._command_reply(msg, t("export_not_found", lang, task_id=raw_task_id or "latest"), kind="export", level="warning")
+        export_view = self.ledger.build_task_export_view(task_id)
+        if not export_view:
+            return self._command_reply(msg, t("export_not_found", lang, task_id=task_id), kind="export", level="warning")
+        chosen_format = export_format or "md"
+        export_view = attach_trigger_context(export_view, self.trigger_runtime)
+        return self._command_reply(
+            msg,
+            self._format_task_artifact_for_chat(
+                task_id=task_id,
+                payload=export_view,
+                artifact="export",
+                export_format=chosen_format,
+                lang=lang,
+            ),
+            kind="export",
+        )
+
     def _handle_bundle_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[7:].strip()
         if raw.lower() == "help":
             return self._command_reply(msg, t("bundle_usage", lang), kind="bundle_help", level="warning")
-        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        raw_task_id, export_format = self._parse_task_artifact_args(raw)
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw_task_id)
         if not task or not task_id:
-            return self._command_reply(msg, t("bundle_not_found", lang, task_id=raw or "latest"), kind="bundle", level="warning")
+            return self._command_reply(msg, t("bundle_not_found", lang, task_id=raw_task_id or "latest"), kind="bundle", level="warning")
         export_view = self.ledger.build_task_export_view(task_id)
         if not export_view:
             return self._command_reply(msg, t("bundle_not_found", lang, task_id=task_id), kind="bundle", level="warning")
+        if export_format:
+            bundle = build_task_bundle(self.ledger, task_id, trigger_runtime=self.trigger_runtime)
+            if not bundle:
+                return self._command_reply(msg, t("bundle_not_found", lang, task_id=task_id), kind="bundle", level="warning")
+            return self._command_reply(
+                msg,
+                self._format_task_artifact_for_chat(
+                    task_id=task_id,
+                    payload=bundle,
+                    artifact="bundle",
+                    export_format=export_format,
+                    lang=lang,
+                ),
+                kind="bundle",
+            )
 
         summary = dict(export_view.get("summary") or {})
         display_state = dict(summary.get("display_state") or {})
@@ -2835,12 +2943,26 @@ class AgentLoop:
         raw = msg.content.strip()[11:].strip()
         if raw.lower() == "help":
             return self._command_reply(msg, t("postmortem_usage", lang), kind="postmortem_help", level="warning")
-        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        raw_task_id, export_format = self._parse_task_artifact_args(raw)
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw_task_id)
         if not task or not task_id:
-            return self._command_reply(msg, t("postmortem_not_found", lang, task_id=raw or "latest"), kind="postmortem", level="warning")
+            return self._command_reply(msg, t("postmortem_not_found", lang, task_id=raw_task_id or "latest"), kind="postmortem", level="warning")
         postmortem = self.ledger.build_task_postmortem_view(task_id)
         if not postmortem:
             return self._command_reply(msg, t("postmortem_not_found", lang, task_id=task_id), kind="postmortem", level="warning")
+        if export_format:
+            postmortem = attach_trigger_context(postmortem, self.trigger_runtime)
+            return self._command_reply(
+                msg,
+                self._format_task_artifact_for_chat(
+                    task_id=task_id,
+                    payload=postmortem,
+                    artifact="postmortem",
+                    export_format=export_format,
+                    lang=lang,
+                ),
+                kind="postmortem",
+            )
         summary = dict(postmortem.get("summary") or {})
         display_state = dict(summary.get("display_state") or {})
         recovery = dict(summary.get("recovery") or {})

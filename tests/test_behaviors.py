@@ -203,6 +203,7 @@ class TestSlashCommands:
         response = await loop._process_message(msg)
         assert response is not None
         assert "LemonClaw" in response.content
+        assert "/export" in response.content
 
     @pytest.mark.asyncio
     async def test_usage_contains_token(self, make_agent_loop):
@@ -447,6 +448,66 @@ class TestSlashCommands:
         assert "total=1" in response.content
 
     @pytest.mark.asyncio
+    async def test_export_command_renders_full_export_artifact(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/export json")
+        loop.ledger.ensure_task(
+            task_id="task_export",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="export demo",
+            status="waiting",
+            current_stage="verify",
+        )
+        loop.ledger.build_task_export_view = MagicMock(return_value={  # type: ignore[method-assign]
+            "task": {"task_id": "task_export", "goal": "export demo", "status": "waiting", "current_stage": "verify"},
+            "summary": {},
+            "candidate": {"recommended_action": "recheck", "safe_to_execute": True},
+            "postmortem": {"outbox": {"lifecycle": {"terminal_count": 0}}},
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Rendered `export` for `task_export` as `json`." in response.content
+        assert '"task_id": "task_export"' in response.content
+        assert "```json" in response.content
+
+    @pytest.mark.asyncio
+    async def test_bundle_command_can_render_full_bundle_artifact(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/bundle md")
+        loop.ledger.ensure_task(
+            task_id="task_bundle_full",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="bundle artifact demo",
+            status="waiting",
+            current_stage="verify",
+        )
+        loop.ledger.build_task_export_view = MagicMock(return_value={  # type: ignore[method-assign]
+            "task": {"task_id": "task_bundle_full", "goal": "bundle artifact demo", "status": "waiting", "current_stage": "verify"},
+            "summary": {},
+            "candidate": {"recommended_action": "recheck", "safe_to_execute": True},
+            "conductor": {},
+        })
+        loop.ledger.build_task_postmortem_view = MagicMock(return_value={  # type: ignore[method-assign]
+            "task": {"task_id": "task_bundle_full", "goal": "bundle artifact demo", "status": "waiting", "current_stage": "verify"},
+            "summary": {},
+            "outbox": {"events": [], "lifecycle": {"active_count": 0, "terminal_count": 0}},
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "# Task Bundle: task_bundle_full" in response.content
+        assert "## Postmortem" in response.content
+
+    @pytest.mark.asyncio
     async def test_postmortem_command_summarizes_failure_state(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/postmortem")
@@ -482,6 +543,33 @@ class TestSlashCommands:
         assert "Postmortem for `task_pm`" in response.content
         assert "watchdog_soft_recovery" in response.content
         assert "failed=1" in response.content
+
+    @pytest.mark.asyncio
+    async def test_postmortem_command_can_render_full_postmortem_artifact(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/postmortem json")
+        loop.ledger.ensure_task(
+            task_id="task_pm_full",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="pm artifact demo",
+            status="failed",
+            current_stage="execute",
+        )
+        loop.ledger.build_task_postmortem_view = MagicMock(return_value={  # type: ignore[method-assign]
+            "task": {"task_id": "task_pm_full", "goal": "pm artifact demo", "status": "failed", "current_stage": "execute"},
+            "summary": {"recovery": {"source": "watchdog_soft_recovery"}},
+            "outbox": {"events": [], "lifecycle": {"active_count": 0, "terminal_count": 1}},
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Rendered `postmortem` for `task_pm_full` as `json`." in response.content
+        assert '"task_id": "task_pm_full"' in response.content
+        assert "```json" in response.content
 
     @pytest.mark.asyncio
     async def test_runtime_command_summarizes_inventory_and_mcp(self, make_agent_loop, monkeypatch):
