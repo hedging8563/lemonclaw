@@ -317,6 +317,8 @@ class KnowledgeStore:
                 target["last_error"] = str(exc)[:500]
                 target["metadata"] = {}
                 target["updated_at_ms"] = _now_ms()
+                self._delete_chunks_unlocked(doc_id)
+                self._delete_facts_unlocked(doc_id)
                 self._write_manifest_unlocked(data)
                 raise
             try:
@@ -359,6 +361,8 @@ class KnowledgeStore:
                 target["last_error"] = str(exc)[:500]
                 target["metadata"] = {}
                 target["updated_at_ms"] = _now_ms()
+                self._delete_chunks_unlocked(doc_id)
+                self._delete_facts_unlocked(doc_id)
                 self._write_manifest_unlocked(data)
                 raise
 
@@ -485,12 +489,18 @@ class KnowledgeStore:
         with self._lock:
             chunks = self._read_chunks_unlocked()
             facts = self._read_facts_unlocked()
-            documents = {item["doc_id"]: item for item in self._read_manifest_unlocked()["documents"]}
+            documents = {
+                item["doc_id"]: item
+                for item in self._read_manifest_unlocked()["documents"]
+                if self._is_searchable_document(item)
+            }
 
         ranked: list[tuple[int, dict[str, Any]]] = []
         for chunk in chunks:
             text = str(chunk.get("text") or "")
             doc = documents.get(str(chunk.get("doc_id") or ""), {})
+            if not doc:
+                continue
             score = self._score_search_candidate(
                 query=query,
                 tokens=tokens,
@@ -511,6 +521,8 @@ class KnowledgeStore:
         for fact in facts:
             claim = str(fact.get("claim") or "")
             doc = documents.get(str(fact.get("doc_id") or ""), {})
+            if not doc:
+                continue
             score = self._score_search_candidate(
                 query=query,
                 tokens=tokens,
@@ -675,6 +687,10 @@ class KnowledgeStore:
         if interval <= 0 or next_refresh <= 0:
             return False
         return next_refresh <= (now_ms if now_ms is not None else _now_ms())
+
+    @staticmethod
+    def _is_searchable_document(document: dict[str, Any]) -> bool:
+        return str(document.get("status") or "") == "ingested" and not bool(document.get("archived"))
 
     @staticmethod
     def format_for_context(results: list[dict[str, Any]]) -> str:
