@@ -275,6 +275,17 @@ def mark_runtime_notification_sent(
     return _write_runtime_state(config_path, payload)
 
 
+def set_runtime_notify_targets(
+    config_path: Path,
+    *,
+    notify_targets: list[dict[str, str]],
+) -> dict[str, Any]:
+    payload = load_runtime_state(config_path)
+    payload["notify_targets"] = list(notify_targets)
+    payload["updated_at_ms"] = int(time.time() * 1000)
+    return _write_runtime_state(config_path, payload)
+
+
 def mark_runtime_healthy(
     config_path: Path,
     *,

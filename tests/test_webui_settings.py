@@ -5,9 +5,9 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import load_config, save_config
 from lemonclaw.config.schema import Config, GitAuthProfileConfig, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
-from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
+from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice, maybe_broadcast_startup_restart_notice
 from lemonclaw.gateway.server import create_app
-from lemonclaw.gateway.runtime_state import load_runtime_state
+from lemonclaw.gateway.runtime_state import load_runtime_state, mark_runtime_healthy
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
 from lemonclaw.governance import GovernanceRuntime
 from lemonclaw.session.manager import SessionManager
@@ -925,6 +925,42 @@ async def test_broadcast_restart_notice_publishes_to_recent_session(tmp_path):
     assert outbound.channel == 'telegram'
     assert outbound.chat_id == '123'
     assert '重启已提交' in outbound.content
+
+
+@pytest.mark.asyncio
+async def test_startup_runtime_notice_derives_pairing_owner_targets(monkeypatch, tmp_path):
+    from lemonclaw.channels.auto_pairing import AutoPairing
+
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.auto_pairing = True
+    cfg.channels.telegram.enabled = True
+    save_config(cfg, config_path)
+
+    monkeypatch.setattr('lemonclaw.utils.helpers.get_data_path', lambda: tmp_path)
+    pairing = AutoPairing('telegram', tmp_path)
+    assert pairing.check_or_pair('owner|phone', notify_target='owner-dm') == 'paired'
+
+    sessions = SessionManager(tmp_path)
+    bus = MessageBus()
+    fake_loop = type('Loop', (), {'sessions': sessions, 'bus': bus})()
+
+    mark_runtime_healthy(config_path, version='1.2.3')
+
+    sent = await maybe_broadcast_startup_restart_notice(
+        fake_loop,
+        config_path=config_path,
+        config=cfg,
+    )
+
+    assert sent == 1
+    outbound = await bus.consume_outbound()
+    assert outbound.channel == 'telegram'
+    assert outbound.chat_id == 'owner-dm'
+    assert 'completed successfully' in outbound.content.lower()
+    state = load_runtime_state(config_path)
+    assert any(item['chat_id'] == 'owner-dm' and item.get('source') == 'pairing_owner' for item in state['notify_targets'])
+    assert int((state.get('notifications') or {}).get('healthy') or 0) == int(state.get('last_restart_completed_at_ms') or 0)
 
 
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):
