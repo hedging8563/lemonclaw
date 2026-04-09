@@ -9,6 +9,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.wecom import WeComChannel, WeComCrypto, verify_signature
 from lemonclaw.config.schema import WeComConfig
 from lemonclaw.config.schema import Config
+from lemonclaw.config.schema import MCPServerConfig
 from lemonclaw.gateway.server import create_app
 from lemonclaw.ledger.runtime import TaskLedger
 from lemonclaw.session.manager import SessionManager
@@ -210,6 +211,37 @@ def test_trigger_bundle_includes_linked_task_bundle(tmp_path: Path) -> None:
     assert data["trigger"]["trigger_id"] == trigger["trigger_id"]
     assert data["task_bundle"]["task"]["task_id"] == "task_bundle"
     assert data["task_bundle"]["trigger"]["trigger_id"] == trigger["trigger_id"]
+
+
+def test_mcp_status_reports_stdio_and_http_servers_correctly(tmp_path: Path) -> None:
+    fake_loop = SimpleNamespace(
+        workspace=tmp_path,
+        _mcp_connected=True,
+        _mcp_servers={
+            "Notion": MCPServerConfig(command="npx", args=["-y", "@notionhq/notion-mcp-server"]),
+            "Remote": MCPServerConfig(url="https://example.com/mcp"),
+        },
+        tools=SimpleNamespace(
+            tool_names=[
+                "mcp_Notion_API-post-page",
+                "mcp_Remote_search",
+            ]
+        ),
+    )
+    app = create_app(
+        auth_token=None,
+        agent_loop=fake_loop,
+        session_manager=SessionManager(tmp_path),
+        webui_enabled=True,
+    )
+    client = TestClient(app)
+
+    resp = client.get("/api/mcp/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    servers = {item["name"]: item["type"] for item in data["servers"]}
+    assert servers["Notion"] == "stdio"
+    assert servers["Remote"] == "http"
 
 
 @pytest.mark.asyncio

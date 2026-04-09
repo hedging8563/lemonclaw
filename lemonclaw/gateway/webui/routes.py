@@ -1538,9 +1538,14 @@ def get_webui_routes(
         connected = getattr(agent_loop, "_mcp_connected", False)
         servers_cfg = getattr(agent_loop, "_mcp_servers", {})
 
+        def _mcp_server_type(cfg: Any) -> str:
+            if isinstance(cfg, dict):
+                return "stdio" if str(cfg.get("command") or "").strip() else "http"
+            return "stdio" if str(getattr(cfg, "command", "") or "").strip() else "http"
+
         servers = []
         for name, cfg in servers_cfg.items():
-            stype = "stdio" if "command" in cfg else "http"
+            stype = _mcp_server_type(cfg)
             servers.append({"name": name, "type": stype})
 
         # Enumerate MCP tools from tool registry
