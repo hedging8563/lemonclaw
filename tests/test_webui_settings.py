@@ -417,6 +417,73 @@ def test_settings_exposes_effective_weixin_pairing_runtime_state(monkeypatch, tm
     assert runtime['approved_count'] == 1
 
 
+def test_pairing_state_route_exposes_raw_owner_and_pending(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    cfg.channels.auto_pairing = True
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': 'owner-1|phone',
+        'owner_notify_target': 'owner-dm',
+        'approved': ['owner-1|phone'],
+        'pending': {'user-2': {'display_name': 'User 2', 'notify_target': 'dm-2'}},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.get('/api/settings/channels/telegram/pairing-state')
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['channel'] == 'telegram'
+    assert body['pairing']['owner'] == 'owner-1|phone'
+    assert body['pairing']['owner_notify_target'] == 'owner-dm'
+    assert body['pairing']['pending']['user-2']['notify_target'] == 'dm-2'
+
+
+def test_pairing_break_glass_can_replace_owner(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    cfg.channels.auto_pairing = True
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': 'owner-1|phone',
+        'owner_notify_target': 'owner-dm',
+        'approved': ['owner-1|phone'],
+        'pending': {'user-2': {'display_name': 'User 2', 'notify_target': 'dm-2'}},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/channels/telegram/pairing-break-glass', json={
+        'owner': 'new-owner|laptop',
+        'notify_target': 'new-dm',
+        'clear_pending': True,
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['break_glass']['owner_set'] == 'new-owner|laptop'
+    assert body['pairing']['owner'] == 'new-owner|laptop'
+    assert body['pairing']['owner_notify_target'] == 'new-dm'
+    assert body['pairing']['pending_count'] == 0
+    assert 'new-owner|laptop' in body['pairing']['approved']
+
+
 def test_settings_exposes_qq_group_runtime_state(tmp_path):
     config_path = tmp_path / 'config.json'
     cfg = Config()

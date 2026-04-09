@@ -352,6 +352,58 @@ def _derive_channel_runtime(config) -> dict[str, dict[str, object]]:
     return runtime
 
 
+def _pairing_runtime_entry(config, channel_name: str) -> dict[str, object] | None:
+    runtime = _derive_channel_runtime(config)
+    entry = runtime.get(channel_name)
+    if not isinstance(entry, dict):
+        return None
+    if str(entry.get("effective_dm_policy") or "") != "pairing":
+        return None
+    return entry
+
+
+def _pairing_state_payload(config, channel_name: str, *, masked: bool = False) -> dict[str, object]:
+    from lemonclaw.channels.auto_pairing import AutoPairing
+    from lemonclaw.utils.helpers import get_data_path
+
+    entry = _pairing_runtime_entry(config, channel_name)
+    if not entry:
+        raise ValueError(f"channel `{channel_name}` does not currently use pairing")
+
+    pairing = AutoPairing(channel_name, get_data_path())
+
+    def _mask(entry_value: str | None) -> str | None:
+        if not masked or not entry_value:
+            return entry_value
+        parts = str(entry_value).split("|", 1)
+        uid = parts[0]
+        masked_uid = uid[:3] + "***" + uid[-4:] if len(uid) > 7 else uid[:2] + "***"
+        if len(parts) > 1 and parts[1]:
+            return f"{masked_uid}|{parts[1][:3]}***"
+        return masked_uid
+
+    pending = {
+        sid: {
+            "display_name": str(data.get("display_name") or sid),
+            "notify_target": _mask(str(data.get("notify_target") or sid)),
+        }
+        for sid, data in pairing.pending.items()
+    }
+    return {
+        "channel": channel_name,
+        "effective_dm_policy": entry.get("effective_dm_policy"),
+        "source": entry.get("source"),
+        "pairing": {
+            "owner": _mask(pairing.owner),
+            "owner_notify_target": _mask(pairing.owner_notify_target),
+            "approved": [_mask(str(item)) for item in pairing.approved],
+            "pending": pending,
+            "approved_count": len(pairing.approved),
+            "pending_count": len(pairing.pending),
+        },
+    }
+
+
 def _derive_group_runtime(config) -> dict[str, dict[str, object]]:
     """Derive effective group policy runtime state from config.
 
@@ -1033,6 +1085,68 @@ def get_settings_routes(
         except WhatsAppBridgeError as exc:
             return _json({"error": str(exc), "status": "error", "running": False, "qr": None, "account": None}, 400)
 
+    # ── GET /api/settings/channels/{channel}/pairing-state ────────────
+
+    async def get_pairing_state(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        channel_name = str(request.path_params.get("channel_name") or "").strip()
+        from lemonclaw.config.loader import load_config
+
+        config = load_config(config_path)
+        try:
+            return _json(_pairing_state_payload(config, channel_name, masked=False))
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+
+    # ── POST /api/settings/channels/{channel}/pairing-break-glass ─────
+
+    async def break_glass_pairing_owner(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        channel_name = str(request.path_params.get("channel_name") or "").strip()
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+
+        owner = str(body.get("owner") or "").strip()
+        notify_target = str(body.get("notify_target") or "").strip() or None
+        clear_pending = bool(body.get("clear_pending"))
+        if not owner:
+            return _json({"error": "owner is required"}, 400)
+
+        from lemonclaw.channels.auto_pairing import AutoPairing
+        from lemonclaw.config.loader import load_config
+        from lemonclaw.utils.helpers import get_data_path
+
+        async with _config_lock:
+            config = load_config(config_path)
+            try:
+                _pairing_state_payload(config, channel_name, masked=False)
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 400)
+            pairing = AutoPairing(channel_name, get_data_path())
+            try:
+                pairing.break_glass_set_owner(
+                    owner,
+                    notify_target=notify_target,
+                    clear_pending=clear_pending,
+                )
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 400)
+            payload = _pairing_state_payload(config, channel_name, masked=False)
+            payload["break_glass"] = {
+                "owner_set": owner,
+                "notify_target": pairing.owner_notify_target,
+                "clear_pending": clear_pending,
+            }
+            return _json(payload)
+
     # ── GET /api/settings/skills ──────────────────────────────────────
 
     async def list_skills(request: Request) -> Response:
@@ -1310,6 +1424,8 @@ def get_settings_routes(
         Route("/api/settings/channels/whatsapp/pairing", start_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/whatsapp/disconnect", disconnect_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
+        Route("/api/settings/channels/{channel_name:str}/pairing-state", get_pairing_state, methods=["GET"]),
+        Route("/api/settings/channels/{channel_name:str}/pairing-break-glass", break_glass_pairing_owner, methods=["POST"]),
         Route("/api/governance", get_governance, methods=["GET"]),
         Route("/api/governance/capabilities", get_governance_capabilities, methods=["GET"]),
         Route("/api/governance/audit", get_governance_audit, methods=["GET"]),

@@ -212,6 +212,32 @@ class AutoPairing:
         logger.info("auto-pairing: {} became owner of {}", resolved, self._channel)
         return self.owner_notify_target
 
+    def break_glass_set_owner(
+        self,
+        sender_id: str,
+        *,
+        notify_target: str | None = None,
+        clear_pending: bool = False,
+    ) -> str:
+        """Force-set the current owner for dashboard/support recovery.
+
+        This is intentionally a control-plane escape hatch, not a chat-plane action.
+        """
+        sid = str(sender_id).strip()
+        if not sid:
+            raise ValueError("owner is required")
+        approved = [str(item) for item in list(self._state.get("approved") or []) if str(item)]
+        if sid not in approved:
+            approved.append(sid)
+        self._state["owner"] = sid
+        self._state["owner_notify_target"] = str(notify_target or self._default_notify_target(sid)).strip() or self._default_notify_target(sid)
+        self._state["approved"] = approved
+        if clear_pending:
+            self._state["pending"] = {}
+        self._save()
+        logger.warning("auto-pairing: break-glass owner reset on {} -> {}", self._channel, sid)
+        return self.owner_notify_target or self._default_notify_target(sid)
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
