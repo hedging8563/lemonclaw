@@ -152,6 +152,42 @@ def test_sqlite_resume_candidate_prefers_failed_outbox_retry_and_executes(tmp_pa
     assert task["current_stage"] == "waiting_outbox"
 
 
+def test_sqlite_can_reclaim_stale_claimed_outbox_event(tmp_path: Path):
+    ledger = TaskLedger(tmp_path, backend="sqlite")
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="reclaim stale claim",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="claimed",
+        attempts=1,
+        metadata={"claimed_at_ms": 1_000, "claimed_by": "dead-dispatcher"},
+    )
+
+    reclaimed = ledger.reclaim_stale_claimed_outbox_events(
+        stale_after_ms=30_000,
+        source="sqlite-dispatcher",
+        now_ms=40_000,
+    )
+
+    assert [item["event_id"] for item in reclaimed] == [event["event_id"]]
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+    assert updated["next_attempt_at_ms"] is not None
+
+
 def test_migrate_json_to_sqlite_preserves_task_steps_and_outbox(tmp_path: Path):
     json_ledger = TaskLedger(tmp_path, backend="json")
     json_ledger.ensure_task(

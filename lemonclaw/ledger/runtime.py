@@ -38,6 +38,7 @@ _SAFE_OUTBOX_ID = re.compile(r"^ob_[A-Za-z0-9_-]{1,64}$")
 _SAFE_STEP_ID = re.compile(r"^step_[A-Za-z0-9_-]{1,64}$")
 _SENSITIVE_EXPORT_KEY = re.compile(r"(^|[_-])(authorization|token|secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)($|[_-])", re.IGNORECASE)
 _OUTBOX_MANUAL_RETRY_DEBOUNCE_MS = 1500
+_OUTBOX_CLAIM_STALE_AFTER_MS = 30_000
 
 
 def build_task_resume_context(
@@ -142,6 +143,32 @@ class TaskLedgerSharedMixin:
             )
             self.update_task(task_id, metadata=metadata)
         return self.build_resume_candidate(task_id)
+
+    def reclaim_stale_claimed_outbox_events(
+        self,
+        *,
+        stale_after_ms: int = _OUTBOX_CLAIM_STALE_AFTER_MS,
+        source: str,
+        now_ms: int | None = None,
+    ) -> list[dict[str, Any]]:
+        now = now_ms if now_ms is not None else _now_ms()
+        threshold = max(1, int(stale_after_ms))
+        reclaimed: list[dict[str, Any]] = []
+        for event in self.materialize_outbox_events():
+            if str(event.get("status") or "") != "claimed":
+                continue
+            metadata = dict(event.get("metadata") or {})
+            claimed_at_ms = int(metadata.get("claimed_at_ms") or 0)
+            if claimed_at_ms <= 0 or (now - claimed_at_ms) < threshold:
+                continue
+            updated = self.request_outbox_retry(
+                str(event["event_id"]),
+                source=source,
+                delay_ms=0,
+            )
+            if updated is not None:
+                reclaimed.append(updated)
+        return reclaimed
 
     def materialize_steps(self, task_id: str) -> list[dict[str, Any]]:
         """Collapse step event history into the latest state per step_id."""
@@ -2795,6 +2822,7 @@ class TaskLedger:
         "compact_outbox",
         "list_outbox_events",
         "claim_due_outbox_events",
+        "reclaim_stale_claimed_outbox_events",
         "mark_outbox_sent",
         "mark_outbox_retry",
         "mark_outbox_failed",

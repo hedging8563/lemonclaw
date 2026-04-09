@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from lemonclaw.ledger.completion_gate import finalize_task
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, _OUTBOX_CLAIM_STALE_AFTER_MS
 
 
 class PermanentOutboxError(RuntimeError):
@@ -37,6 +37,7 @@ class OutboxDispatcher:
         retry_delay_ms: int = 5_000,
         max_attempts: int = 3,
         claim_owner: str = "outbox_dispatcher",
+        claim_stale_after_ms: int = _OUTBOX_CLAIM_STALE_AFTER_MS,
         compact_interval_s: float = 3600.0,
         keep_terminal: int = 200,
         min_terminal_age_ms: int = 24 * 60 * 60 * 1000,
@@ -49,6 +50,7 @@ class OutboxDispatcher:
         self._retry_delay_ms = retry_delay_ms
         self._max_attempts = max_attempts
         self._claim_owner = claim_owner
+        self._claim_stale_after_ms = max(1, int(claim_stale_after_ms))
         self._compact_interval_s = compact_interval_s
         self._keep_terminal = keep_terminal
         self._min_terminal_age_ms = min_terminal_age_ms
@@ -80,6 +82,7 @@ class OutboxDispatcher:
         while self._running:
             try:
                 await self._expire_due_events()
+                await self._reclaim_stale_claimed_events()
                 delivered = await self.dispatch_once()
                 await self._maybe_compact()
                 if delivered == 0:
@@ -122,6 +125,18 @@ class OutboxDispatcher:
                 logger.warning("outbox: expired {} event(s) before dispatch", len(expired))
         except Exception:
             logger.exception("outbox: expiry sweep failed")
+
+    async def _reclaim_stale_claimed_events(self) -> None:
+        try:
+            reclaimed = await asyncio.to_thread(
+                self._ledger.reclaim_stale_claimed_outbox_events,
+                stale_after_ms=self._claim_stale_after_ms,
+                source=self._claim_owner,
+            )
+            if reclaimed:
+                logger.warning("outbox: reclaimed {} stale claimed event(s)", len(reclaimed))
+        except Exception:
+            logger.exception("outbox: stale claim sweep failed")
 
     async def dispatch_once(self) -> int:
         claimed = await asyncio.to_thread(

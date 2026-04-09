@@ -505,6 +505,45 @@ def test_task_ledger_request_outbox_retry_debounces_claimed_event(tmp_path: Path
     assert same["metadata"]["manual_retry_requested_at_ms"] == 10_000
 
 
+def test_task_ledger_can_reclaim_stale_claimed_outbox_event(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="reclaim stale claim",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="claimed",
+        attempts=1,
+        metadata={"claimed_at_ms": 1_000, "claimed_by": "dead-dispatcher"},
+    )
+
+    reclaimed = ledger.reclaim_stale_claimed_outbox_events(
+        stale_after_ms=30_000,
+        source="outbox_dispatcher",
+        now_ms=40_000,
+    )
+
+    assert [item["event_id"] for item in reclaimed] == [event["event_id"]]
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+    assert updated["next_attempt_at_ms"] is not None
+    task = ledger.read_task("task_1")
+    assert task is not None
+    assert task["metadata"]["recovery"]["action"] == "manual_retry_requested"
+
+
 def test_task_ledger_compact_outbox_keeps_nonterminal_and_recent_terminal(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(

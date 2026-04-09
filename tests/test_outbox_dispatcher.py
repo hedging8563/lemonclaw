@@ -153,3 +153,43 @@ async def test_outbox_dispatcher_uses_idle_backoff_when_no_events(tmp_path: Path
     await dispatcher._run_loop()
 
     assert sleeps == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_outbox_dispatcher_reclaims_stale_claimed_event_before_dispatch(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="reclaim stale claim",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"channel": "telegram", "chat_id": "123", "content": "hello"},
+        status="claimed",
+        attempts=1,
+        metadata={"claimed_at_ms": 1_000, "claimed_by": "dead-dispatcher"},
+    )
+    delivered: list[str] = []
+
+    async def _deliver(outbox_event: dict) -> None:
+        delivered.append(str(outbox_event["event_id"]))
+
+    dispatcher = OutboxDispatcher(ledger, _deliver, claim_stale_after_ms=30_000)
+    reclaimed = await dispatcher._reclaim_stale_claimed_events()
+    count = await dispatcher.dispatch_once()
+
+    assert reclaimed is None
+    assert count == 1
+    assert delivered == [event["event_id"]]
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "sent"

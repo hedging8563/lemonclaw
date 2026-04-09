@@ -279,6 +279,157 @@ async def test_telegram_inbound_records_poll_trigger(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_polling_keeps_backlog_by_default(monkeypatch) -> None:
+    poll_kwargs: dict[str, object] = {}
+
+    class FakeBot:
+        username = "lemonclaw"
+
+        async def get_me(self):
+            return SimpleNamespace(username=self.username)
+
+        async def set_my_commands(self, _commands):
+            return None
+
+    class FakeUpdater:
+        async def start_polling(self, **kwargs):
+            poll_kwargs.update(kwargs)
+            channel._running = False
+
+        async def stop(self):
+            return None
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.bot = FakeBot()
+            self.updater = FakeUpdater()
+
+        def add_error_handler(self, _handler):
+            return None
+
+        def add_handler(self, _handler):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+        async def shutdown(self):
+            return None
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def request(self, _request):
+            return self
+
+        def get_updates_request(self, _request):
+            return self
+
+        def proxy(self, _proxy):
+            return self
+
+        def get_updates_proxy(self, _proxy):
+            return self
+
+        def build(self):
+            return FakeApp()
+
+    monkeypatch.setattr("lemonclaw.channels.telegram.HTTPXRequest", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr("lemonclaw.channels.telegram.Application.builder", lambda: FakeBuilder())
+
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus())
+    await channel.start()
+
+    assert poll_kwargs["drop_pending_updates"] is False
+    assert poll_kwargs["allowed_updates"] == [
+        "message",
+        "edited_message",
+        "channel_post",
+        "edited_channel_post",
+        "callback_query",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_polling_can_opt_in_to_dropping_backlog(monkeypatch) -> None:
+    poll_kwargs: dict[str, object] = {}
+
+    class FakeBot:
+        username = "lemonclaw"
+
+        async def get_me(self):
+            return SimpleNamespace(username=self.username)
+
+        async def set_my_commands(self, _commands):
+            return None
+
+    class FakeUpdater:
+        async def start_polling(self, **kwargs):
+            poll_kwargs.update(kwargs)
+            channel._running = False
+
+        async def stop(self):
+            return None
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.bot = FakeBot()
+            self.updater = FakeUpdater()
+
+        def add_error_handler(self, _handler):
+            return None
+
+        def add_handler(self, _handler):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+        async def shutdown(self):
+            return None
+
+    class FakeBuilder:
+        def token(self, _token):
+            return self
+
+        def request(self, _request):
+            return self
+
+        def get_updates_request(self, _request):
+            return self
+
+        def proxy(self, _proxy):
+            return self
+
+        def get_updates_proxy(self, _proxy):
+            return self
+
+        def build(self):
+            return FakeApp()
+
+    monkeypatch.setattr("lemonclaw.channels.telegram.HTTPXRequest", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr("lemonclaw.channels.telegram.Application.builder", lambda: FakeBuilder())
+
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test-token"), MessageBus())
+    await channel.start(drop_pending_updates=True)
+
+    assert poll_kwargs["drop_pending_updates"] is True
+
+
+@pytest.mark.asyncio
 async def test_on_message_includes_reply_context_for_text_reply(telegram_channel: TelegramChannel) -> None:
     update = _private_text_update("现在继续", reply_text="上一条消息内容")
     telegram_channel._handle_message = AsyncMock()

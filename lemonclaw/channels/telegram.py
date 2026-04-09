@@ -41,6 +41,9 @@ _TG_SPLIT_STALE_MAX_AGE_S = 6 * 60 * 60
 _TG_SPLIT_TEMP_PREFIX = "lemonclaw_tg_split_"
 _TG_REPLY_CONTEXT_MAX_CHARS = 600
 _EMPTY_MESSAGE = "[empty message]"
+# Keep queued Telegram updates on startup; duplicate suppression still protects
+# against replayed update IDs within the dedupe window.
+_TG_DROP_PENDING_UPDATES_ON_STARTUP = False
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -160,7 +163,7 @@ class TelegramChannel(BaseChannel):
         self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
         self._activity_bus = activity_bus
 
-    async def start(self) -> None:
+    async def start(self, *, drop_pending_updates: bool = _TG_DROP_PENDING_UPDATES_ON_STARTUP) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
             logger.error("Telegram bot token not configured")
@@ -197,7 +200,10 @@ class TelegramChannel(BaseChannel):
             )
         )
 
-        logger.info("Starting Telegram bot (polling mode)...")
+        logger.info(
+            "Starting Telegram bot (polling mode, drop_pending_updates={})...",
+            drop_pending_updates,
+        )
 
         # Initialize and start polling
         await self._app.initialize()
@@ -216,7 +222,7 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message", "edited_message", "channel_post", "edited_channel_post", "callback_query"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=drop_pending_updates,
         )
 
         # Keep running until stopped

@@ -27,6 +27,7 @@ from starlette.staticfiles import StaticFiles
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
+from lemonclaw.gateway.runtime_state import load_runtime_state
 from lemonclaw.gateway.runtime_state import mark_runtime_healthy
 
 if TYPE_CHECKING:
@@ -44,6 +45,31 @@ def _build_status_handler(
 ):
     """Return a handler for GET /api/status (token-protected)."""
 
+    def _channel_status_snapshot() -> dict[str, dict[str, Any]]:
+        channel_manager = runtime.channel_manager
+        if channel_manager is None:
+            return {}
+        if hasattr(channel_manager, "get_channel_status"):
+            try:
+                return channel_manager.get_channel_status()
+            except Exception:
+                return {}
+        if hasattr(channel_manager, "get_status"):
+            try:
+                return channel_manager.get_status()
+            except Exception:
+                return {}
+        return {}
+
+    def _enabled_channels(channel_status: dict[str, dict[str, Any]]) -> list[str]:
+        enabled: list[str] = []
+        for name, status in channel_status.items():
+            if not isinstance(status, dict):
+                continue
+            if bool(status.get("configured_enabled", status.get("enabled", False))):
+                enabled.append(name)
+        return enabled
+
     async def status_handler(request: Request) -> JSONResponse:
         if auth_token:
             header = request.headers.get("authorization", "")
@@ -53,8 +79,22 @@ def _build_status_handler(
         data: dict[str, Any] = {
             "uptime_s": round(time.monotonic() - runtime.start_time, 1),
         }
-        if runtime.channel_manager:
-            data["channels"] = runtime.channel_manager.enabled_channels
+        channel_status = _channel_status_snapshot()
+        if channel_status:
+            data["channel_status"] = channel_status
+            data["channels"] = _enabled_channels(channel_status)
+        elif runtime.channel_manager:
+            data["channels"] = list(getattr(runtime.channel_manager, "enabled_channels", []) or [])
+        if runtime.config_path:
+            restart_status = load_runtime_state(runtime.config_path)
+            if restart_status:
+                data["restart_status"] = restart_status
+        watchdog = runtime.watchdog
+        if watchdog and hasattr(watchdog, "snapshot"):
+            try:
+                data["watchdog_status"] = watchdog.snapshot()
+            except Exception:
+                pass
         for k in ("version", "model", "instance_id"):
             value = getattr(runtime, k, "")
             if value:
