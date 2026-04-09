@@ -50,20 +50,69 @@ def mark_restart_requested(
     now_ms = int(time.time() * 1000)
     payload = load_runtime_state(config_path)
     payload.update({
-        "status": "restarting",
+        "status": "submitted",
         "updated_at_ms": now_ms,
         "last_restart_requested_at_ms": now_ms,
+        "last_restart_started_at_ms": payload.get("last_restart_started_at_ms"),
         "last_restart_completed_at_ms": payload.get("last_restart_completed_at_ms"),
-        "last_restart_result": "restarting",
+        "last_restart_result": "submitted",
         "restart_fields": list(restart_fields),
         "runtime_errors": list(runtime_errors),
+        "source": source,
+    })
+    _append_history(payload, {
+        "state": "submitted",
+        "at_ms": now_ms,
+        "source": source,
+        "restart_fields": list(restart_fields),
+        "runtime_errors": list(runtime_errors),
+    })
+    return _write_runtime_state(config_path, payload)
+
+
+def mark_restart_in_progress(
+    config_path: Path,
+    *,
+    source: str = "settings_apply",
+) -> dict[str, Any]:
+    now_ms = int(time.time() * 1000)
+    payload = load_runtime_state(config_path)
+    payload.update({
+        "status": "restarting",
+        "updated_at_ms": now_ms,
+        "last_restart_started_at_ms": now_ms,
+        "last_restart_result": "restarting",
         "source": source,
     })
     _append_history(payload, {
         "state": "restarting",
         "at_ms": now_ms,
         "source": source,
-        "restart_fields": list(restart_fields),
+        "restart_fields": list(payload.get("restart_fields") or []),
+        "runtime_errors": list(payload.get("runtime_errors") or []),
+    })
+    return _write_runtime_state(config_path, payload)
+
+
+def mark_runtime_failed(
+    config_path: Path,
+    *,
+    runtime_errors: list[str],
+    source: str,
+) -> dict[str, Any]:
+    now_ms = int(time.time() * 1000)
+    payload = load_runtime_state(config_path)
+    payload.update({
+        "status": "failed",
+        "updated_at_ms": now_ms,
+        "last_restart_result": "failed",
+        "runtime_errors": list(runtime_errors),
+        "source": source,
+    })
+    _append_history(payload, {
+        "state": "failed",
+        "at_ms": now_ms,
+        "source": source,
         "runtime_errors": list(runtime_errors),
     })
     return _write_runtime_state(config_path, payload)
@@ -90,7 +139,7 @@ def mark_runtime_healthy(
         "instance_id": instance_id,
         "pid": os.getpid(),
     })
-    if previous_status == "restarting":
+    if previous_status in {"submitted", "restarting"}:
         _append_history(payload, {
             "state": "healthy",
             "at_ms": now_ms,

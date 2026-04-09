@@ -753,13 +753,43 @@ def test_apply_settings_marks_mcp_servers_as_restart_required(monkeypatch, tmp_p
     body = resp.json()
     assert body['restart_required'] is True
     assert body['restart_fields'] == ['tools.mcp_servers']
-    assert body['runtime_status'] == 'restarting'
-    assert body['restart_state']['status'] == 'restarting'
+    assert body['runtime_status'] == 'submitted'
+    assert body['restart_state']['status'] == 'submitted'
     assert body['restart_state']['restart_fields'] == ['tools.mcp_servers']
 
     state = load_runtime_state(config_path)
-    assert state['status'] == 'restarting'
+    assert state['status'] == 'submitted'
     assert state['restart_fields'] == ['tools.mcp_servers']
+
+
+def test_apply_settings_persists_failed_runtime_state(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    class FakeAgentLoop:
+        async def refresh_runtime_config(self, config, *, changed_paths):
+            raise RuntimeError("tool refresh boom")
+
+        def update_defaults(self, **kwargs):
+            return None
+
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=FakeAgentLoop())
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.http'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['restart_required'] is False
+    assert body['runtime_status'] == 'failed'
+    assert any('tool refresh failed' in item for item in body['runtime_errors'])
+    assert body['restart_state']['status'] == 'failed'
+
+    state = load_runtime_state(config_path)
+    assert state['status'] == 'failed'
+    assert any('tool refresh failed' in item for item in state['runtime_errors'])
 
 
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):

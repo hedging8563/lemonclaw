@@ -22,7 +22,12 @@ from lemonclaw.channels.whatsapp_bridge_runtime import (
     get_whatsapp_pairing_state,
     restart_whatsapp_pairing,
 )
-from lemonclaw.gateway.runtime_state import load_runtime_state, mark_restart_requested
+from lemonclaw.gateway.runtime_state import (
+    load_runtime_state,
+    mark_restart_in_progress,
+    mark_restart_requested,
+    mark_runtime_failed,
+)
 from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 
 if TYPE_CHECKING:
@@ -942,7 +947,7 @@ def get_settings_routes(
 
         if restart_required:
             if runtime_status != "failed":
-                runtime_status = "restarting"
+                runtime_status = "submitted"
             logger.info("Settings apply: restart required for {}", restart_fields)
             restart_state = mark_restart_requested(
                 config_path,
@@ -963,8 +968,24 @@ def get_settings_routes(
             # Schedule graceful shutdown after response is sent (SIGTERM triggers drain sequence)
             import os
             import signal
-            asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+
+            def _trigger_restart() -> None:
+                try:
+                    mark_restart_in_progress(config_path)
+                except Exception:
+                    logger.exception("Failed to update runtime restart-in-progress state")
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            asyncio.get_running_loop().call_later(0.5, _trigger_restart)
             return resp
+
+        restart_state = load_runtime_state(config_path)
+        if runtime_status == "failed":
+            restart_state = mark_runtime_failed(
+                config_path,
+                runtime_errors=runtime_errors,
+                source="settings_apply",
+            )
 
         return _maybe_refresh(request, _json({
             "reloaded": runtime_status == "healthy",
@@ -973,7 +994,7 @@ def get_settings_routes(
             "runtime_errors": runtime_errors,
             "tool_updates": tool_updates,
             "channel_updates": channel_updates,
-            "restart_state": load_runtime_state(config_path),
+            "restart_state": restart_state,
         }))
 
     # ── POST /api/runtime-policy/reload ───────────────────────────────
