@@ -3083,6 +3083,48 @@ class AgentLoop:
                 kind="channel",
             )
 
+        if action == "repair" and channel_name == "weixin":
+            try:
+                from lemonclaw.channels.weixin import WeixinChannel
+                from lemonclaw.channels.weixin_bridge_runtime import get_weixin_pairing_state
+                from lemonclaw.config.loader import get_config_path, load_config
+            except Exception as exc:
+                return self._command_reply(msg, t("channel_repair_failed", lang, channel=channel_name, error=str(exc)[:200]), kind="channel", level="warning")
+
+            config_path = getattr(self, "config_path", None) or get_config_path()
+            try:
+                runtime_config = load_config(config_path)
+                state = await asyncio.to_thread(
+                    get_weixin_pairing_state,
+                    runtime_config.channels.weixin,
+                    start_if_needed=True,
+                    wait_timeout=5.0,
+                )
+                if channel_manager is not None and hasattr(channel_manager, "get_channel") and hasattr(channel_manager, "ensure_channel"):
+                    existing = channel_manager.get_channel("weixin")
+                    if existing is None and (state.get("status") == "connected" or state.get("accounts")):
+                        await channel_manager.ensure_channel(
+                            "weixin",
+                            WeixinChannel(
+                                runtime_config.channels.weixin,
+                                channel_manager.bus,
+                                trigger_runtime=getattr(channel_manager, "trigger_runtime", None),
+                            ),
+                        )
+            except Exception as exc:
+                return self._command_reply(msg, t("channel_repair_failed", lang, channel=channel_name, error=str(exc)[:200]), kind="channel", level="warning")
+            return self._command_reply(
+                msg,
+                t(
+                    "channel_repair_done",
+                    lang,
+                    channel=channel_name,
+                    status=str(state.get("status") or "unknown"),
+                    running="yes" if state.get("running") else "no",
+                ),
+                kind="channel",
+            )
+
         if channel_manager is None or not hasattr(channel_manager, "restart_channel"):
             return self._command_reply(msg, t("channel_unavailable", lang), kind="channel", level="warning")
 

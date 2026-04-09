@@ -804,6 +804,49 @@ class TestSlashCommands:
         assert "status=qr" in response.content.lower()
 
     @pytest.mark.asyncio
+    async def test_channel_repair_weixin_uses_bridge_helper(self, make_agent_loop, monkeypatch):
+        from lemonclaw.config.loader import save_config
+        from lemonclaw.config.schema import Config
+
+        loop, _bus = make_agent_loop()
+        loop.config_path = loop.workspace / "config.json"
+        cfg = Config()
+        cfg.channels.weixin.enabled = True
+        save_config(cfg, loop.config_path)
+
+        ensured: list[str] = []
+
+        class _Manager:
+            bus = _bus
+            trigger_runtime = None
+
+            def get_channel(self, name: str):
+                return None
+
+            async def ensure_channel(self, name: str, channel):
+                ensured.append(name)
+                return channel
+
+        loop.channel_manager = _Manager()
+        monkeypatch.setattr(
+            "lemonclaw.channels.weixin_bridge_runtime.get_weixin_pairing_state",
+            lambda config, start_if_needed=False, wait_timeout=5.0, **kwargs: {
+                "status": "connected",
+                "running": True,
+                "accounts": [{"accountId": "wx-1"}],
+            },
+        )
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/channel repair weixin")
+        )
+
+        assert response is not None
+        assert "weixin" in response.content.lower()
+        assert "status=connected" in response.content.lower()
+        assert ensured == ["weixin"]
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(
