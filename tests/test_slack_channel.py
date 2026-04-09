@@ -11,6 +11,77 @@ SlackChannel = slack_module.SlackChannel
 
 
 @pytest.mark.asyncio
+async def test_slack_socket_mode_records_trigger_before_ack():
+    bus = MessageBus()
+    config = SlackConfig(enabled=True, bot_token='xoxb-test', app_token='xapp-test')
+    channel = SlackChannel(config, bus)
+    channel._handle_message = AsyncMock()
+
+    calls: list[tuple[str, str]] = []
+
+    class _RecordingTriggerRuntime:
+        def record_trigger(self, *, source, kind, payload_summary="", session_key="", channel="", chat_id="", status="received", metadata=None, task_id=""):
+            calls.append(("record", source))
+            return {
+                "trigger_id": "tr_123456789abc",
+                "source": source,
+                "kind": kind,
+            }
+
+    async def _ack(_response):
+        calls.append(("ack", "sent"))
+
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock(side_effect=_ack))
+    channel._trigger_runtime = _RecordingTriggerRuntime()
+
+    event = {
+        'type': 'message',
+        'user': 'USER1',
+        'channel': 'D1',
+        'channel_type': 'im',
+        'text': 'hello',
+        'ts': '2000.2',
+    }
+    req = SimpleNamespace(type='events_api', envelope_id='env1', payload={'event': event})
+
+    await channel._on_socket_request(client, req)
+
+    assert calls[:2] == [("record", "socket.slack"), ("ack", "sent")]
+    channel._handle_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_slack_socket_mode_does_not_ack_when_durable_intake_fails():
+    bus = MessageBus()
+    config = SlackConfig(enabled=True, bot_token='xoxb-test', app_token='xapp-test')
+    channel = SlackChannel(config, bus)
+    channel._handle_message = AsyncMock()
+
+    class _FailingTriggerRuntime:
+        def record_trigger(self, **kwargs):
+            raise RuntimeError("durable intake failed")
+
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    channel._trigger_runtime = _FailingTriggerRuntime()
+
+    event = {
+        'type': 'message',
+        'user': 'USER1',
+        'channel': 'D1',
+        'channel_type': 'im',
+        'text': 'hello',
+        'ts': '2000.2',
+    }
+    req = SimpleNamespace(type='events_api', envelope_id='env1', payload={'event': event})
+
+    with pytest.raises(RuntimeError, match="durable intake failed"):
+        await channel._on_socket_request(client, req)
+
+    client.send_socket_mode_response.assert_not_awaited()
+    channel._handle_message.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_slack_dm_pairing_routes_pending_and_approval(tmp_path):
     bus = MessageBus()
     outbound = []

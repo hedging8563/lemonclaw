@@ -125,11 +125,6 @@ class SlackChannel(BaseChannel):
         if req.type != "events_api":
             return
 
-        # Acknowledge right away
-        await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
-        )
-
         payload = req.payload or {}
         event = payload.get("event") or {}
         event_type = event.get("type")
@@ -183,32 +178,10 @@ class SlackChannel(BaseChannel):
         if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id, event=event):
             return
 
-        text = self._strip_bot_mention(text)
-        content_parts = [text] if text else []
-        media_paths: list[str] = []
-        for attachment in event.get("files") or []:
-            marker, file_path = await self._download_inbound_file(attachment)
-            if marker:
-                content_parts.append(marker)
-            if file_path:
-                media_paths.append(file_path)
-        content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
-
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
             thread_ts = event.get("ts")
-        # Add :eyes: reaction to the triggering message (best-effort)
-        try:
-            if self._web_client and event.get("ts"):
-                await self._web_client.reactions_add(
-                    channel=chat_id,
-                    name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
-                )
-        except Exception as e:
-            logger.debug("Slack reactions_add failed: {}", e)
 
-        # Thread-scoped session key for channel/group messages
         session_key = build_channel_session_key("slack", chat_id, thread_id=thread_ts) if thread_ts and channel_type != "im" else None
         metadata = {
             "slack": {
@@ -221,13 +194,38 @@ class SlackChannel(BaseChannel):
             trigger = self._trigger_runtime.record_trigger(
                 source="socket.slack",
                 kind=f"{event_type}.{channel_type or 'unknown'}",
-                payload_summary=content[:200],
+                payload_summary=text[:200],
                 session_key=session_key or build_channel_session_key("slack", chat_id),
                 channel=self.name,
                 chat_id=chat_id,
                 metadata={"ts": event.get("ts"), "thread_ts": thread_ts},
             )
             metadata.update(build_trigger_metadata(trigger))
+
+        await client.send_socket_mode_response(
+            SocketModeResponse(envelope_id=req.envelope_id)
+        )
+
+        text = self._strip_bot_mention(text)
+        content_parts = [text] if text else []
+        media_paths: list[str] = []
+        for attachment in event.get("files") or []:
+            marker, file_path = await self._download_inbound_file(attachment)
+            if marker:
+                content_parts.append(marker)
+            if file_path:
+                media_paths.append(file_path)
+        content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
+        # Add :eyes: reaction to the triggering message (best-effort)
+        try:
+            if self._web_client and event.get("ts"):
+                await self._web_client.reactions_add(
+                    channel=chat_id,
+                    name=self.config.react_emoji,
+                    timestamp=event.get("ts"),
+                )
+        except Exception as e:
+            logger.debug("Slack reactions_add failed: {}", e)
 
         try:
             await self._handle_message(
