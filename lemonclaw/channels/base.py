@@ -211,7 +211,7 @@ class BaseChannel(ABC):
             stripped.startswith(("/approve ", "/deny ", "/pairing "))
             or stripped in {"/pairing", "/pairing status", "/pairing pending"}
         ):
-            reply = await self._handle_pairing_command(sender_id, stripped)
+            reply = await self._handle_pairing_command(sender_id, stripped, notify_target=str(notify_target))
             if reply:
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=self.name, chat_id=str(notify_target), content=reply,
@@ -331,7 +331,7 @@ class BaseChannel(ABC):
 
         await self.bus.publish_inbound(msg)
 
-    async def _handle_pairing_command(self, sender_id: str, content: str) -> str | None:
+    async def _handle_pairing_command(self, sender_id: str, content: str, *, notify_target: str | None = None) -> str | None:
         """Handle pairing commands. Only the owner can execute mutating actions."""
         if not self._pairing:
             return None
@@ -368,12 +368,28 @@ class BaseChannel(ABC):
                 return "There are no pending pairing requests."
             return "Pending pairing requests:\n- " + "\n- ".join(pending_ids)
 
+        if content.startswith("/pairing break-glass "):
+            code = content.split(maxsplit=2)[2].strip()
+            new_notify_target = self._pairing.claim_owner_with_break_glass_code(
+                code,
+                sender_id=sid,
+                notify_target=notify_target,
+            )
+            if new_notify_target:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=self.name,
+                    chat_id=str(new_notify_target),
+                    content="✅ Break-glass recovery succeeded. You are now the current owner for this channel.",
+                ))
+                return "Break-glass recovery succeeded."
+            return "Invalid or expired break-glass recovery code."
+
         if not is_owner:
-            return "Only the current owner can approve, deny, or transfer pairing requests."
+            return "Only the current owner can approve, deny, transfer, or inspect pending pairing requests."
 
         parts = content.split(maxsplit=1)
         if len(parts) < 2:
-            return "Usage: /approve <user_id>, /deny <user_id>, or /pairing transfer <user_id>"
+            return "Usage: /approve <user_id>, /deny <user_id>, /pairing pending, /pairing transfer <user_id>, or /pairing break-glass <code>"
 
         cmd, target = parts[0].lower(), parts[1].strip()
 
@@ -417,6 +433,10 @@ class BaseChannel(ABC):
                 return await self._handle_pairing_command(sender_id, "/pairing status")
             if action == "pending":
                 return await self._handle_pairing_command(sender_id, "/pairing pending")
+            if action == "break-glass":
+                if not payload:
+                    return "Usage: /pairing break-glass <code>"
+                return await self._handle_pairing_command(sender_id, f"/pairing break-glass {payload}", notify_target=notify_target)
             return "Usage: /pairing status, /pairing pending, or /pairing transfer <user_id>"
         return None
     

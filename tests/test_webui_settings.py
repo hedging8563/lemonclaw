@@ -485,6 +485,36 @@ def test_pairing_break_glass_can_replace_owner(monkeypatch, tmp_path):
     assert 'new-owner|laptop' in body['pairing']['approved']
 
 
+def test_pairing_recovery_code_route_issues_one_time_code(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    cfg.channels.auto_pairing = True
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': 'owner-1|phone',
+        'owner_notify_target': 'owner-dm',
+        'approved': ['owner-1|phone'],
+        'pending': {},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/channels/telegram/pairing-recovery-code', json={'ttl_s': 120})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['break_glass']['active'] is True
+    assert body['break_glass']['code'].startswith('lc_recovery_')
+    assert body['pairing']['break_glass']['active'] is True
+
+
 def test_settings_exposes_qq_group_runtime_state(tmp_path):
     config_path = tmp_path / 'config.json'
     cfg = Config()

@@ -31,6 +31,7 @@ _KNOWN_SECRET_PATTERNS = (
     re.compile(r"\b(?:xoxb|xapp|xoxa|xoxp)-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9._-]{16,}\b"),
     re.compile(r"\b(?:rk|pk|whsec)_[A-Za-z0-9._-]{16,}\b"),
+    re.compile(r"\blc_recovery_[A-Za-z0-9]{12,}\b"),
 )
 _AGGRESSIVE_SECRET_PATTERNS = (
     re.compile(r"\b[0-9a-fA-F]{32,}\b"),

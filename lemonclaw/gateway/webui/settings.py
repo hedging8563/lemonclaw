@@ -397,6 +397,7 @@ def _pairing_state_payload(config, channel_name: str, *, masked: bool = False) -
         }
         for sid, data in pairing.pending.items()
     }
+    break_glass = pairing.get_break_glass_metadata()
     return {
         "channel": channel_name,
         "effective_dm_policy": entry.get("effective_dm_policy"),
@@ -408,6 +409,7 @@ def _pairing_state_payload(config, channel_name: str, *, masked: bool = False) -
             "pending": pending,
             "approved_count": len(pairing.approved),
             "pending_count": len(pairing.pending),
+            "break_glass": break_glass,
         },
     }
 
@@ -1207,6 +1209,39 @@ def get_settings_routes(
             }
             return _json(payload)
 
+    # ── POST /api/settings/channels/{channel}/pairing-recovery-code ────
+
+    async def issue_pairing_recovery_code(request: Request) -> Response:
+        ok, err = _require_auth(request)
+        if not ok:
+            return err  # type: ignore[return-value]
+
+        channel_name = str(request.path_params.get("channel_name") or "").strip()
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ttl_s = int(body.get("ttl_s") or 600) if isinstance(body, dict) else 600
+
+        from lemonclaw.channels.auto_pairing import AutoPairing
+        from lemonclaw.config.loader import load_config
+        from lemonclaw.utils.helpers import get_data_path
+
+        async with _config_lock:
+            config = load_config(config_path)
+            try:
+                _pairing_state_payload(config, channel_name, masked=False)
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 400)
+            pairing = AutoPairing(channel_name, get_data_path())
+            issued = pairing.issue_break_glass_code(ttl_s=ttl_s)
+            payload = _pairing_state_payload(config, channel_name, masked=False)
+            payload["break_glass"] = {
+                **issued,
+                "active": True,
+            }
+            return _json(payload)
+
     # ── GET /api/settings/skills ──────────────────────────────────────
 
     async def list_skills(request: Request) -> Response:
@@ -1485,6 +1520,7 @@ def get_settings_routes(
         Route("/api/settings/channels/whatsapp/disconnect", disconnect_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-state", get_pairing_state, methods=["GET"]),
+        Route("/api/settings/channels/{channel_name:str}/pairing-recovery-code", issue_pairing_recovery_code, methods=["POST"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-break-glass", break_glass_pairing_owner, methods=["POST"]),
         Route("/api/governance", get_governance, methods=["GET"]),
         Route("/api/governance/capabilities", get_governance_capabilities, methods=["GET"]),

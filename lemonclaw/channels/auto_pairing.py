@@ -11,11 +11,19 @@ a practical middle ground for self-hosted instances.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
 
 
 class AutoPairing:
@@ -120,6 +128,66 @@ class AutoPairing:
 
     def list_pending_ids(self) -> list[str]:
         return sorted(str(item) for item in self.pending.keys())
+
+    @staticmethod
+    def _hash_break_glass_code(code: str) -> str:
+        return hashlib.sha256(str(code).encode("utf-8")).hexdigest()
+
+    def get_break_glass_metadata(self) -> dict[str, Any]:
+        payload = dict(self._state.get("break_glass") or {})
+        expires_at_ms = int(payload.get("expires_at_ms") or 0)
+        if expires_at_ms and expires_at_ms < _now_ms():
+            self._state.pop("break_glass", None)
+            self._save()
+            return {"active": False, "expires_at_ms": None}
+        return {
+            "active": bool(payload.get("code_hash")) and expires_at_ms > 0,
+            "expires_at_ms": expires_at_ms or None,
+            "issued_at_ms": int(payload.get("issued_at_ms") or 0) or None,
+        }
+
+    def issue_break_glass_code(self, *, ttl_s: int = 600) -> dict[str, Any]:
+        ttl = max(60, min(int(ttl_s), 3600))
+        code = f"lc_recovery_{secrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
+        now_ms = _now_ms()
+        expires_at_ms = now_ms + ttl * 1000
+        self._state["break_glass"] = {
+            "code_hash": self._hash_break_glass_code(code),
+            "issued_at_ms": now_ms,
+            "expires_at_ms": expires_at_ms,
+        }
+        self._save()
+        logger.warning("auto-pairing: issued break-glass code for {}", self._channel)
+        return {
+            "code": code,
+            "issued_at_ms": now_ms,
+            "expires_at_ms": expires_at_ms,
+            "ttl_s": ttl,
+        }
+
+    def claim_owner_with_break_glass_code(
+        self,
+        code: str,
+        *,
+        sender_id: str,
+        notify_target: str | None = None,
+        clear_pending: bool = False,
+    ) -> str | None:
+        payload = dict(self._state.get("break_glass") or {})
+        expected_hash = str(payload.get("code_hash") or "")
+        expires_at_ms = int(payload.get("expires_at_ms") or 0)
+        if not expected_hash or expires_at_ms <= 0 or expires_at_ms < _now_ms():
+            self._state.pop("break_glass", None)
+            self._save()
+            return None
+        if self._hash_break_glass_code(code) != expected_hash:
+            return None
+        self._state.pop("break_glass", None)
+        return self.break_glass_set_owner(
+            sender_id,
+            notify_target=notify_target,
+            clear_pending=clear_pending,
+        )
 
     def check_or_pair(
         self,
@@ -266,10 +334,11 @@ class AutoPairing:
                         "owner_notify_target": raw.get("owner_notify_target") or raw.get("owner"),
                         "approved": list(raw.get("approved", [])),
                         "pending": pending,
+                        "break_glass": dict(raw.get("break_glass") or {}),
                     }
             except (json.JSONDecodeError, OSError, TypeError, ValueError):
                 logger.warning("auto-pairing: corrupt state for {}, resetting", self._channel)
-        return {"owner": None, "owner_notify_target": None, "approved": [], "pending": {}}
+        return {"owner": None, "owner_notify_target": None, "approved": [], "pending": {}, "break_glass": {}}
 
     def _save(self) -> None:
         tmp = self._path.with_suffix(".json.tmp")

@@ -15,6 +15,9 @@ def test_redact_sensitive_text_redacts_github_pat_and_direct_token():
     assert "github_pat_" not in redact_sensitive_text(text)
     assert "[REDACTED]" in redact_sensitive_text(text)
     assert contains_sensitive_credential("Qq5lRL0uytLwD5VRiTfBqALRDvl24XNWGYRPO2YiC2xo")
+    recovery = "Use /pairing break-glass lc_recovery_ABCDEFGH1234567890TOKEN"
+    assert "lc_recovery_" not in redact_sensitive_text(recovery)
+    assert "[REDACTED]" in redact_sensitive_text(recovery)
 
 
 def test_session_manager_save_redacts_persisted_messages(tmp_path):
