@@ -18,7 +18,7 @@ import {
   startWeixinLoginWithQr,
   waitForWeixinLogin,
 } from './login-qr.js';
-import { WeixinMonitorHub } from './monitor.js';
+import type { WeixinMonitorHub } from './monitor.js';
 
 interface BridgeState {
   status: 'idle' | 'starting' | 'qr' | 'scaned' | 'connected' | 'disconnected' | 'error';
@@ -68,7 +68,9 @@ export class WeixinBridgeServer {
   private server = createServer(this.handleRequest.bind(this));
   private state: BridgeState = initialState();
   private readonly trackedLogins = new Set<string>();
-  private readonly monitorHub = new WeixinMonitorHub((account, error) => {
+  private monitorHub: WeixinMonitorHub | null = null;
+
+  private readonly handleAccountStatus = (account: WeixinAccountRecord | null, error?: string | null) => {
     if (error) {
       this.state = {
         ...this.state,
@@ -91,7 +93,7 @@ export class WeixinBridgeServer {
       };
     }
     this.persistState();
-  });
+  };
 
   constructor(
     private readonly port: number,
@@ -100,6 +102,17 @@ export class WeixinBridgeServer {
     private readonly token?: string,
   ) {
     this.persistState();
+  }
+
+  private async getMonitorHub(): Promise<WeixinMonitorHub> {
+    if (this.monitorHub) {
+      return this.monitorHub;
+    }
+    // Lazy import keeps the bridge entrypoint closer to upstream 2.1.7:
+    // avoid loading the full monitor/media chain before the server is actually starting.
+    const { WeixinMonitorHub } = await import('./monitor.js');
+    this.monitorHub = new WeixinMonitorHub(this.handleAccountStatus);
+    return this.monitorHub;
   }
 
   private persistState(): void {
@@ -158,7 +171,7 @@ export class WeixinBridgeServer {
             userId: result.userId,
             lastError: '',
           });
-          this.monitorHub.ensureMonitorForAccount(accountId);
+          (await this.getMonitorHub()).ensureMonitorForAccount(accountId);
           this.state = {
             ...this.state,
             status: 'connected',
@@ -238,14 +251,15 @@ export class WeixinBridgeServer {
       }
 
       if (request.method === 'GET' && url.pathname === '/updates') {
+        const monitorHub = await this.getMonitorHub();
         const cursor = Number(url.searchParams.get('cursor') || '0');
         const ackCursor = Number(url.searchParams.get('ackCursor') || '0');
         const limit = Number(url.searchParams.get('limit') || '50');
         const waitMs = Number(url.searchParams.get('waitMs') || '25000');
         if (Number.isFinite(ackCursor) && ackCursor > 0) {
-          this.monitorHub.ackThrough(ackCursor);
+          monitorHub.ackThrough(ackCursor);
         }
-        const payload = await this.monitorHub.getUpdatesAfter(Number.isFinite(cursor) ? cursor : 0, limit, waitMs);
+        const payload = await monitorHub.getUpdatesAfter(Number.isFinite(cursor) ? cursor : 0, limit, waitMs);
         this.json(response, 200, {
           ...payload,
           running: true,
@@ -278,6 +292,7 @@ export class WeixinBridgeServer {
       }
 
       if (request.method === 'POST' && url.pathname === '/send') {
+        const monitorHub = await this.getMonitorHub();
         const body = await parseJsonBody(request);
         const accountId = String(body.accountId || '').trim();
         const to = String(body.to || '').trim();
@@ -289,7 +304,7 @@ export class WeixinBridgeServer {
           this.json(response, 400, { error: 'accountId, to, and text or mediaPaths are required' });
           return;
         }
-        const result = await this.monitorHub.sendText({
+        const result = await monitorHub.sendText({
           accountId,
           to,
           text,
@@ -301,12 +316,13 @@ export class WeixinBridgeServer {
       }
 
       if (request.method === 'POST' && url.pathname === '/disconnect') {
+        const monitorHub = await this.getMonitorHub();
         const body = await parseJsonBody(request);
         const accountId = typeof body.accountId === 'string' ? normalizeWeixinAccountId(body.accountId) : undefined;
         if (accountId) {
-          this.monitorHub.stopMonitor(accountId);
+          monitorHub.stopMonitor(accountId);
         } else {
-          this.monitorHub.stopAll();
+          monitorHub.stopAll();
         }
         removeWeixinAccount(accountId);
         const accounts = listWeixinAccounts();
@@ -341,14 +357,23 @@ export class WeixinBridgeServer {
   }
 
   async start(): Promise<void> {
-    this.monitorHub.ensureMonitors();
-    await new Promise<void>((resolve) => {
-      this.server.listen(this.port, '127.0.0.1', () => resolve());
+    (await this.getMonitorHub()).ensureMonitors();
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        this.server.off('listening', onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        this.server.off('error', onError);
+        resolve();
+      };
+      this.server.once('error', onError);
+      this.server.listen(this.port, '127.0.0.1', onListening);
     });
   }
 
   async stop(): Promise<void> {
-    this.monitorHub.stopAll();
+    this.monitorHub?.stopAll();
     await new Promise<void>((resolve, reject) => {
       this.server.close((error) => (error ? reject(error) : resolve()));
     });

@@ -23,6 +23,7 @@ import {
   type WeixinAccountRecord,
 } from './accounts.js';
 import { PersistentWeixinEventQueue } from './event-queue.js';
+import { filterWeixinMarkdown } from './markdown-filter.js';
 import { extractInboundMediaPaths, sendWeixinMediaFiles } from './media.js';
 
 export interface WeixinBridgeEvent {
@@ -287,12 +288,13 @@ export class WeixinMonitorHub {
     if (!contextToken) {
       throw new Error('缺少微信 context token，当前只能回复最近互动过的会话。');
     }
+    const filteredText = filterWeixinMarkdown(params.text ?? "");
     const mediaPaths = (params.mediaPaths || []).filter(Boolean);
     if (mediaPaths.length > 0) {
       const result = await sendWeixinMediaFiles({
         accountId,
         to: params.to,
-        text: params.text,
+        text: filteredText,
         mediaPaths,
         contextToken,
         baseUrl: account.baseUrl || DEFAULT_WEIXIN_BASE_URL,
@@ -311,8 +313,8 @@ export class WeixinMonitorHub {
         message_type: MessageType.BOT,
         message_state: MessageState.FINISH,
         context_token: contextToken,
-        item_list: params.text
-          ? [{ type: MessageItemType.TEXT, text_item: { text: params.text } }]
+        item_list: filteredText
+          ? [{ type: MessageItemType.TEXT, text_item: { text: filteredText } }]
           : undefined,
       },
     };

@@ -91,6 +91,55 @@ def test_agent_loop_process_direct_links_trigger_to_task(tmp_path: Path, echo_pr
     assert task["metadata"]["trigger"]["trigger_id"] == trigger["trigger_id"]
 
 
+@pytest.mark.asyncio
+async def test_dispatch_task_failure_marks_trigger_failed(tmp_path: Path, echo_provider) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    bus = MessageBus()
+    loop = AgentLoop(
+        bus=bus,
+        provider=echo_provider,
+        workspace=tmp_path,
+        model="test-model",
+        max_iterations=2,
+        memory_window=10,
+        trigger_runtime=trigger_runtime,
+    )
+    trigger = trigger_runtime.record_trigger(
+        source="bridge.weixin",
+        kind="message.dm",
+        payload_summary="ping",
+        session_key="weixin:test:user",
+        channel="weixin",
+        chat_id="bot|user",
+    )
+
+    async def _boom(_msg):
+        raise RuntimeError("pre-dispatch crash")
+
+    loop._dispatch_entry = _boom  # type: ignore[method-assign]
+
+    from lemonclaw.bus.events import InboundMessage
+
+    msg = InboundMessage(
+        channel="weixin",
+        sender_id="user",
+        chat_id="bot|user",
+        content="ping",
+        metadata=build_trigger_metadata(trigger),
+        session_key_override="weixin:test:user",
+    )
+    task = loop._spawn_dispatch_task(msg)
+
+    with pytest.raises(RuntimeError, match="pre-dispatch crash"):
+        await task
+
+    record = trigger_runtime.read_trigger(trigger["trigger_id"])
+    assert record is not None
+    assert record["status"] == "failed"
+    assert record["error"] == "pre-dispatch crash"
+    assert record["metadata"]["task_stage"] == "dispatch_entry"
+
+
 def test_trigger_api_lists_and_reads_records(tmp_path: Path) -> None:
     trigger_runtime = TriggerRuntime(tmp_path)
     trigger = trigger_runtime.record_trigger(

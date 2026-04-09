@@ -1,7 +1,7 @@
 {
   "name": "lemonclaw-weixin-bridge",
-  "version": "2.1.6",
-  "description": "Weixin bridge for LemonClaw aligned with official openclaw-weixin 2.1.6",
+  "version": "2.1.7",
+  "description": "Weixin bridge for LemonClaw aligned with official openclaw-weixin 2.1.7 semantics",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

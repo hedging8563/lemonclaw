@@ -1219,11 +1219,44 @@ class AgentLoop:
         self._active_tasks.setdefault(msg.session_key, []).append(task)
 
         def _on_task_done(t: asyncio.Task, key: str = msg.session_key) -> None:
-            tasks = self._active_tasks.get(key, [])
-            if t in tasks:
-                tasks.remove(t)
-            if not tasks and key in self._active_tasks:
-                del self._active_tasks[key]
+            try:
+                if not t.cancelled():
+                    exc = t.exception()
+                    if exc is not None:
+                        logger.opt(exception=exc).error(
+                            "Dispatch task crashed before settlement (session={} channel={} sender={} chat={} preview={})",
+                            key,
+                            msg.channel,
+                            msg.sender_id,
+                            msg.chat_id,
+                            self._redact_preview(msg.content, limit=120),
+                        )
+                        if self.trigger_runtime and isinstance(msg.metadata, dict):
+                            trigger_id = str(msg.metadata.get("_trigger_id") or "")
+                            if trigger_id:
+                                self.trigger_runtime.finish_trigger(
+                                    trigger_id,
+                                    status="failed",
+                                    error=str(exc)[:500],
+                                    metadata={
+                                        "session_key": key,
+                                        "task_status": "dispatch_crashed",
+                                        "task_stage": "dispatch_entry",
+                                    },
+                                )
+            except Exception as callback_exc:  # pragma: no cover - defensive cleanup
+                logger.opt(exception=callback_exc).error(
+                    "Dispatch task completion callback failed (session={} channel={} sender={})",
+                    key,
+                    msg.channel,
+                    msg.sender_id,
+                )
+            finally:
+                tasks = self._active_tasks.get(key, [])
+                if t in tasks:
+                    tasks.remove(t)
+                if not tasks and key in self._active_tasks:
+                    del self._active_tasks[key]
 
         task.add_done_callback(_on_task_done)
         return task
