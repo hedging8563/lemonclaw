@@ -70,6 +70,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — Stop the current task\n"
             "/tasks [limit] — Show recent tasks and recovery hints\n"
             "/resume [task_id] — Run the safest available resume action\n"
+            "/retry-outbox [task_id] — Retry failed outbox delivery when safe\n"
+            "/recheck [task_id] — Re-run completion/recovery checks when safe\n"
+            "/postmortem [task_id] — Show a concise failure and recovery summary\n"
             "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
@@ -85,6 +88,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — 停止当前任务\n"
             "/tasks [数量] — 查看最近任务与恢复建议\n"
             "/resume [task_id] — 执行当前最安全的恢复动作\n"
+            "/retry-outbox [task_id] — 在安全前提下重试失败的 outbox 投递\n"
+            "/recheck [task_id] — 在安全前提下重新执行完成/恢复检查\n"
+            "/postmortem [task_id] — 查看简要失败与恢复摘要\n"
             "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
@@ -166,6 +172,58 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "resume_failed": {
         "en": "Failed to resume `{task_id}`: {error}",
         "zh": "恢复 `{task_id}` 失败：{error}",
+    },
+    "retry_outbox_usage": {
+        "en": "Use `/retry-outbox` to target the latest task, or `/retry-outbox <task_id>` for a specific task from `/tasks`.",
+        "zh": "使用 `/retry-outbox` 重试最近任务，或 `/retry-outbox <task_id>` 重试 `/tasks` 中的指定任务。",
+    },
+    "retry_outbox_unsafe": {
+        "en": "Task `{task_id}` is not currently in a safe retry-outbox state. Recommended action: {action}. Reason: {reason}",
+        "zh": "任务 `{task_id}` 当前不适合执行 retry-outbox。建议动作：{action}。原因：{reason}",
+    },
+    "retry_outbox_done": {
+        "en": "Retried outbox delivery for `{task_id}`. Reason: {reason}",
+        "zh": "已为 `{task_id}` 重试 outbox 投递。原因：{reason}",
+    },
+    "recheck_usage": {
+        "en": "Use `/recheck` to target the latest task, or `/recheck <task_id>` for a specific task from `/tasks`.",
+        "zh": "使用 `/recheck` 检查最近任务，或 `/recheck <task_id>` 检查 `/tasks` 中的指定任务。",
+    },
+    "recheck_unsafe": {
+        "en": "Task `{task_id}` is not currently in a safe recheck state. Recommended action: {action}. Reason: {reason}",
+        "zh": "任务 `{task_id}` 当前不适合执行 recheck。建议动作：{action}。原因：{reason}",
+    },
+    "recheck_done": {
+        "en": "Rechecked `{task_id}`. Reason: {reason}",
+        "zh": "已为 `{task_id}` 执行 recheck。原因：{reason}",
+    },
+    "postmortem_usage": {
+        "en": "Use `/postmortem` to inspect the latest task, or `/postmortem <task_id>` for a specific task from `/tasks`.",
+        "zh": "使用 `/postmortem` 查看最近任务，或 `/postmortem <task_id>` 查看 `/tasks` 中的指定任务。",
+    },
+    "postmortem_not_found": {
+        "en": "No postmortem is available for `{task_id}` in this chat session.",
+        "zh": "当前聊天会话中没有 `{task_id}` 的 postmortem。",
+    },
+    "postmortem_header": {
+        "en": "Postmortem for `{task_id}`:",
+        "zh": "`{task_id}` 的 postmortem：",
+    },
+    "postmortem_state": {
+        "en": "- status={status}, stage={stage}, display={display}, next={action}, safe={safe}",
+        "zh": "- 状态={status}，阶段={stage}，展示={display}，下一步={action}，可自动执行={safe}",
+    },
+    "postmortem_recovery": {
+        "en": "- recovery source={source}, action={recovery_action}, reason={reason}",
+        "zh": "- 恢复 source={source}，action={recovery_action}，reason={reason}",
+    },
+    "postmortem_outbox": {
+        "en": "- outbox failed={failed}, active={active}, terminal={terminal}",
+        "zh": "- outbox failed={failed}，active={active}，terminal={terminal}",
+    },
+    "postmortem_steps": {
+        "en": "- steps={steps}, last_successful_step={last_successful_step}",
+        "zh": "- steps={steps}，last_successful_step={last_successful_step}",
     },
     "runtime_usage": {
         "en": "Use `/runtime`, `/runtime inventory`, `/runtime mcp`, `/runtime health`, or `/runtime recovery`.",

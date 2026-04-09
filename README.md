@@ -76,6 +76,9 @@ Generated runtime data lives under:
 | `/runtime [inventory|mcp|health|recovery]` | Show bot-facing runtime, MCP, health, and recovery truth |
 | `/tasks` | Show recent task and recovery hints in chat |
 | `/resume [task_id]` | Execute the safest available resume action in chat |
+| `/retry-outbox [task_id]` | Retry failed outbox delivery in chat when it is safe |
+| `/recheck [task_id]` | Re-run completion/recovery checks in chat when it is safe |
+| `/postmortem [task_id]` | Show a concise failure/recovery summary in chat |
 | `/pairing status` | Show current pairing state in chat |
 | `/pairing pending` | Show pending pairing requests in chat (owner only) |
 | `/pairing transfer <user_id>` | Transfer owner role in chat (owner only) |

@@ -2279,6 +2279,18 @@ class AgentLoop:
             reply = await self._handle_resume_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="resume")
             return reply
+        if cmd == "/retry-outbox" or cmd.startswith("/retry-outbox "):
+            reply = await self._handle_retry_outbox_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="retry_outbox")
+            return reply
+        if cmd == "/recheck" or cmd.startswith("/recheck "):
+            reply = await self._handle_recheck_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="recheck")
+            return reply
+        if cmd == "/postmortem" or cmd.startswith("/postmortem "):
+            reply = self._handle_postmortem_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="postmortem")
+            return reply
         if cmd == "/kb" or cmd.startswith("/kb "):
             reply = self._handle_kb_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="kb_search")
@@ -2293,7 +2305,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/retry-outbox", "/recheck", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2573,32 +2585,44 @@ class AgentLoop:
             )
         return self._command_reply(msg, "\n".join(lines), kind="tasks")
 
+    def _resolve_session_task(
+        self,
+        msg: InboundMessage,
+        *,
+        raw_task_id: str = "",
+    ) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+        requested = raw_task_id.strip()
+        if requested and any(ch.isspace() for ch in requested):
+            requested = requested.split()[0]
+        if requested.lower() == "latest":
+            requested = ""
+
+        if requested:
+            task = self.ledger.read_task(requested)
+            if not task or str(task.get("session_key") or "") != msg.session_key:
+                return None, None, None
+            return requested, task, self.ledger.build_resume_candidate(requested)
+
+        for task in self.ledger.list_tasks(limit=20, session_key=msg.session_key):
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            return task_id, task, self.ledger.build_resume_candidate(task_id)
+        return None, None, None
+
     async def _handle_resume_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[7:].strip()
-        task_id = raw or ""
-        if task_id and any(ch.isspace() for ch in task_id):
-            task_id = task_id.split()[0]
-        if task_id.lower() == "help":
+        if raw.lower() == "help":
             return self._command_reply(msg, t("resume_usage", lang), kind="resume_help", level="warning")
 
-        if not task_id or task_id.lower() == "latest":
-            task_id = ""
-            for task in self.ledger.list_tasks(limit=20, session_key=msg.session_key):
-                candidate = self.ledger.build_resume_candidate(str(task.get("task_id") or ""))
-                if candidate:
-                    task_id = str(task.get("task_id") or "")
-                    break
-
-        task = self.ledger.read_task(task_id) if task_id else None
-        if not task or str(task.get("session_key") or "") != msg.session_key:
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id:
             return self._command_reply(
                 msg,
-                t("resume_not_found", lang, task_id=task_id or "latest"),
+                t("resume_not_found", lang, task_id=raw or "latest"),
                 kind="resume",
                 level="warning",
             )
-
-        candidate = self.ledger.build_resume_candidate(task_id)
         if not candidate:
             return self._command_reply(
                 msg,
@@ -2641,8 +2665,112 @@ class AgentLoop:
                 action=str(payload.get("recommended_action") or candidate.get("recommended_action") or "resume"),
                 reason=str(payload.get("reason") or candidate.get("reason") or ""),
             ),
-                kind="resume",
+            kind="resume",
+        )
+
+    async def _handle_retry_outbox_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[13:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("retry_outbox_usage", lang), kind="retry_outbox_help", level="warning")
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id or not candidate:
+            return self._command_reply(msg, t("resume_not_found", lang, task_id=raw or "latest"), kind="retry_outbox", level="warning")
+        if str(candidate.get("recommended_action") or "") != "retry_outbox" or not candidate.get("safe_to_execute"):
+            return self._command_reply(
+                msg,
+                t(
+                    "retry_outbox_unsafe",
+                    lang,
+                    task_id=task_id,
+                    action=str(candidate.get("recommended_action") or "manual_resume"),
+                    reason=str(candidate.get("reason") or "manual intervention required"),
+                ),
+                kind="retry_outbox",
+                level="warning",
             )
+        result = await self.execute_safe_resume(task_id, source="chat_command_retry_outbox")
+        payload = result or candidate
+        return self._command_reply(
+            msg,
+            t("retry_outbox_done", lang, task_id=task_id, reason=str(payload.get("reason") or candidate.get("reason") or "")),
+            kind="retry_outbox",
+        )
+
+    async def _handle_recheck_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[8:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("recheck_usage", lang), kind="recheck_help", level="warning")
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id or not candidate:
+            return self._command_reply(msg, t("resume_not_found", lang, task_id=raw or "latest"), kind="recheck", level="warning")
+        if str(candidate.get("recommended_action") or "") != "recheck" or not candidate.get("safe_to_execute"):
+            return self._command_reply(
+                msg,
+                t(
+                    "recheck_unsafe",
+                    lang,
+                    task_id=task_id,
+                    action=str(candidate.get("recommended_action") or "manual_resume"),
+                    reason=str(candidate.get("reason") or "manual intervention required"),
+                ),
+                kind="recheck",
+                level="warning",
+            )
+        result = await self.execute_safe_resume(task_id, source="chat_command_recheck")
+        payload = result or candidate
+        return self._command_reply(
+            msg,
+            t("recheck_done", lang, task_id=task_id, reason=str(payload.get("reason") or candidate.get("reason") or "")),
+            kind="recheck",
+        )
+
+    def _handle_postmortem_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[11:].strip()
+        if raw.lower() == "help":
+            return self._command_reply(msg, t("postmortem_usage", lang), kind="postmortem_help", level="warning")
+        task_id, task, candidate = self._resolve_session_task(msg, raw_task_id=raw)
+        if not task or not task_id:
+            return self._command_reply(msg, t("postmortem_not_found", lang, task_id=raw or "latest"), kind="postmortem", level="warning")
+        postmortem = self.ledger.build_task_postmortem_view(task_id)
+        if not postmortem:
+            return self._command_reply(msg, t("postmortem_not_found", lang, task_id=task_id), kind="postmortem", level="warning")
+        summary = dict(postmortem.get("summary") or {})
+        display_state = dict(summary.get("display_state") or {})
+        recovery = dict(summary.get("recovery") or {})
+        outbox = dict((postmortem.get("outbox") or {}).get("lifecycle") or {})
+        lines = [
+            t("postmortem_header", lang, task_id=task_id),
+            t(
+                "postmortem_state",
+                lang,
+                status=str(task.get("status") or "unknown"),
+                stage=str(task.get("current_stage") or "unknown"),
+                display=str(display_state.get("key") or "unknown"),
+                action=str((candidate or {}).get("recommended_action") or "manual_resume"),
+                safe="yes" if (candidate or {}).get("safe_to_execute") else "no",
+            ),
+            t(
+                "postmortem_recovery",
+                lang,
+                source=str(recovery.get("source") or "none"),
+                recovery_action=str(recovery.get("action") or "none"),
+                reason=str(recovery.get("reason") or task.get("error") or "none"),
+            ),
+            t(
+                "postmortem_outbox",
+                lang,
+                failed=int((candidate or {}).get("failed_outbox_count") or 0),
+                active=int(outbox.get("active_count") or 0),
+                terminal=int(outbox.get("terminal_count") or 0),
+            ),
+            t(
+                "postmortem_steps",
+                lang,
+                steps=int(summary.get("step_count") or 0),
+                last_successful_step=str(task.get("last_successful_step") or "none"),
+            ),
+        ]
+        return self._command_reply(msg, "\n".join(lines), kind="postmortem")
 
     def _handle_runtime_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[8:].strip().lower()

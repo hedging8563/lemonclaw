@@ -310,6 +310,107 @@ class TestSlashCommands:
         assert "manual_resume" in response.content
 
     @pytest.mark.asyncio
+    async def test_retry_outbox_command_executes_retry_for_safe_candidate(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/retry-outbox")
+        loop.ledger.ensure_task(
+            task_id="task_outbox",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="outbox demo",
+            status="waiting",
+            current_stage="waiting_outbox",
+        )
+        loop.ledger.build_resume_candidate = MagicMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_outbox",
+            "recommended_action": "retry_outbox",
+            "safe_to_execute": True,
+            "reason": "1 failed outbox event(s) can be retried safely",
+        })
+        loop.execute_safe_resume = AsyncMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_outbox",
+            "recommended_action": "retry_outbox",
+            "reason": "1 failed outbox event(s) can be retried safely",
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_outbox" in response.content
+        loop.execute_safe_resume.assert_awaited_once_with("task_outbox", source="chat_command_retry_outbox")
+
+    @pytest.mark.asyncio
+    async def test_recheck_command_executes_recheck_for_safe_candidate(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/recheck")
+        loop.ledger.ensure_task(
+            task_id="task_recheck",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="recheck demo",
+            status="waiting",
+            current_stage="verify",
+        )
+        loop.ledger.build_resume_candidate = MagicMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_recheck",
+            "recommended_action": "recheck",
+            "safe_to_execute": True,
+            "reason": "task can be safely rechecked through CompletionGate",
+        })
+        loop.execute_safe_resume = AsyncMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_recheck",
+            "recommended_action": "recheck",
+            "reason": "task can be safely rechecked through CompletionGate",
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_recheck" in response.content
+        loop.execute_safe_resume.assert_awaited_once_with("task_recheck", source="chat_command_recheck")
+
+    @pytest.mark.asyncio
+    async def test_postmortem_command_summarizes_failure_state(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/postmortem")
+        loop.ledger.ensure_task(
+            task_id="task_pm",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="pm demo",
+            status="failed",
+            current_stage="execute",
+        )
+        loop.ledger.build_resume_candidate = MagicMock(return_value={  # type: ignore[method-assign]
+            "task_id": "task_pm",
+            "recommended_action": "manual_resume",
+            "safe_to_execute": False,
+            "reason": "manual intervention required",
+            "failed_outbox_count": 1,
+        })
+        loop.ledger.build_task_postmortem_view = MagicMock(return_value={  # type: ignore[method-assign]
+            "summary": {
+                "step_count": 3,
+                "display_state": {"key": "manual_resume"},
+                "recovery": {"source": "watchdog_soft_recovery", "action": "manual_review", "reason": "manual intervention required"},
+            },
+            "outbox": {"lifecycle": {"active_count": 0, "terminal_count": 1}},
+        })
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Postmortem for `task_pm`" in response.content
+        assert "watchdog_soft_recovery" in response.content
+        assert "failed=1" in response.content
+
+    @pytest.mark.asyncio
     async def test_runtime_command_summarizes_inventory_and_mcp(self, make_agent_loop, monkeypatch):
         loop, _bus = make_agent_loop()
         loop._mcp_connected = True
