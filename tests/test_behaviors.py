@@ -731,6 +731,32 @@ class TestSlashCommands:
         assert "tools.mcp_servers" in response.content
 
     @pytest.mark.asyncio
+    async def test_agent_loop_resolves_lemondata_runtime_context_off_thread(self, make_agent_loop, monkeypatch):
+        loop, _bus = make_agent_loop()
+        calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        async def _fake_to_thread(fn, *args, **kwargs):
+            calls.append((args, kwargs))
+            return fn(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "lemonclaw.agent.loop.asyncio.to_thread",
+            _fake_to_thread,
+        )
+        monkeypatch.setattr(
+            "lemonclaw.agent.loop.build_lemondata_runtime_block",
+            lambda current_message, media=None: "[LemonData Live Capability]\n- focus_model=seedance-2.0",
+        )
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="用 seedance-2.0 做图生视频")
+        )
+
+        assert response is not None
+        assert calls
+        assert calls[0][0][0] == "用 seedance-2.0 做图生视频"
+
+    @pytest.mark.asyncio
     async def test_channel_command_shows_channel_status(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.channel_manager = MagicMock()

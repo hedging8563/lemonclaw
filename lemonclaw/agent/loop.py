@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from lemonclaw.agent.context import ContextBuilder
+from lemonclaw.agent.lemondata_runtime import build_lemondata_runtime_block
 from lemonclaw.agent.locale import detect_lang, session_lang, t
 from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.coding import CodingTool
@@ -1938,6 +1939,14 @@ class AgentLoop:
             tool_context_extra["_outbound_sink"] = outbound_sink
         return tool_context_extra
 
+    async def _resolve_lemondata_runtime_context(
+        self,
+        *,
+        current_message: str,
+        media: list[str] | None = None,
+    ) -> str:
+        return await asyncio.to_thread(build_lemondata_runtime_block, current_message, media)
+
     async def close_mcp(self) -> None:
         """Close MCP connections and tool resources."""
         if self._mcp_stack:
@@ -2150,6 +2159,10 @@ class AgentLoop:
             )
             history = session.get_history(max_messages=self.memory_window)
             memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
+            lemondata_ctx = await self._resolve_lemondata_runtime_context(
+                current_message=msg.content,
+                media=None,
+            )
             logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
             messages = self.context.build_messages(
                 history=history,
@@ -2158,6 +2171,7 @@ class AgentLoop:
                 memory_context_override=memory_ctx,
                 rules_context_override=rules_ctx,
                 runtime_context_appendix=self._build_runtime_context_appendix(),
+                lemondata_context_override=lemondata_ctx,
                 skip_local_retrieval=True,
             )
             # Token-level compaction for system messages too
@@ -2384,6 +2398,10 @@ class AgentLoop:
             memory_ctx=memory_ctx,
             retrieval_meta=retrieval_meta,
         )
+        lemondata_ctx = await self._resolve_lemondata_runtime_context(
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+        )
         logger.debug("Retrieval [{}]: {}", key, retrieval_meta)
         if task_id:
             self._record_retrieval_meta(task_id, retrieval_meta)
@@ -2398,6 +2416,7 @@ class AgentLoop:
             memory_context_override=memory_ctx,
             rules_context_override=rules_ctx,
             runtime_context_appendix=self._build_runtime_context_appendix(),
+            lemondata_context_override=lemondata_ctx,
             skip_local_retrieval=True,
         )
 

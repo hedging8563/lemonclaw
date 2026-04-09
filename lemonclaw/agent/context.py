@@ -709,6 +709,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         memory_context_override: str | None = None,
         rules_context_override: str | None = None,
         runtime_context_appendix: str | None = None,
+        lemondata_context_override: str | None = None,
         skip_local_retrieval: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
@@ -737,7 +738,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             timezone,
             runtime_context_appendix=runtime_context_appendix,
         )
-        lemondata_ctx = build_lemondata_runtime_block(current_message, media)
+        lemondata_ctx = (
+            lemondata_context_override
+            if lemondata_context_override is not None
+            else build_lemondata_runtime_block(current_message, media)
+        )
         if lemondata_ctx:
             runtime_ctx = runtime_ctx + "\n\n" + lemondata_ctx
 
