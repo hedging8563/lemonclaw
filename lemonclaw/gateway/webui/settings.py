@@ -111,7 +111,7 @@ _WRITABLE_PATHS: set[str] = {
 # Channel names that accept full object replacement
 _CHANNEL_NAMES = {
     "telegram", "discord", "whatsapp", "slack", "feishu",
-    "dingtalk", "email", "wecom", "qq", "mochat", "matrix",
+    "dingtalk", "email", "wecom", "qq", "mochat", "matrix", "weixin", "agentbridge",
 }
 # Add channels.{name} to writable paths
 for _ch in _CHANNEL_NAMES:

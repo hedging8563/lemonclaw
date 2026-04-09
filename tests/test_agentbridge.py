@@ -303,6 +303,30 @@ class TestAgentBridgeRoutes:
         assert media.status_code == 200
         assert media.content == b"hello agentbridge"
 
+    def test_media_allows_content_token_paths_after_reload(self, make_agent_loop, tmp_path):
+        loop, _manager, client = _make_agentbridge_app(make_agent_loop)
+        headers = {"Authorization": "Bearer secret-token"}
+        media_file = tmp_path / "content-token.png"
+        media_file.write_bytes(b"pngdata")
+        session_key = "agentbridge:codex:default:token-demo"
+        session = loop.sessions.get_or_create(session_key)
+        session.messages.append({
+            "role": "assistant",
+            "content": f"See [image: {media_file} (content-token.png)]",
+            "media": [],
+        })
+        loop.sessions.save(session)
+        loop.sessions.invalidate(session_key)
+
+        media = client.get(
+            "/api/agentbridge/media",
+            headers=headers,
+            params={"path": str(media_file), "session_key": session_key},
+        )
+
+        assert media.status_code == 200
+        assert media.content == b"pngdata"
+
     def test_uploads_accept_multipart_and_preserve_video_kind(self, make_agent_loop):
         _loop, _manager, client = _make_agentbridge_app(make_agent_loop)
         headers = {"Authorization": "Bearer secret-token"}

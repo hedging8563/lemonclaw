@@ -28,7 +28,7 @@ from lemonclaw.channels.delivery_context import attach_delivery_context
 from lemonclaw.channels.session_context import attach_session_context
 from lemonclaw.channels.session_keys import build_agentbridge_session_key
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
-from lemonclaw.gateway.webui.message_schema import serialize_ui_message
+from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
 from lemonclaw.providers.catalog import resolve_model_id
 from lemonclaw.providers.registry import provider_family_for_model
 
@@ -188,26 +188,12 @@ def get_agentbridge_routes(
             entry["paths"].update(paths)
 
     def _extract_message_grant_paths(message: dict[str, Any]) -> list[str]:
-        media = message.get("media")
-        if not isinstance(media, list):
-            return []
-
         paths: list[str] = []
-        for item in media:
-            raw_path: str | None = None
-            if isinstance(item, str):
-                raw_path = item
-            elif isinstance(item, dict) and item.get("source") == "media_field" and isinstance(item.get("path"), str):
-                raw_path = item["path"]
-
-            if not raw_path:
-                continue
-
+        for raw_path in extract_message_media_paths(message):
             try:
                 resolved = Path(raw_path).expanduser().resolve(strict=False)
             except OSError:
                 continue
-
             paths.append(str(resolved))
         return paths
 

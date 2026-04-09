@@ -419,6 +419,34 @@ def test_settings_exposes_effective_weixin_pairing_runtime_state(monkeypatch, tm
     assert runtime['approved_count'] == 1
 
 
+def test_patch_settings_accepts_weixin_and_agentbridge_roots(tmp_path):
+    from lemonclaw.config.loader import load_config
+
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    app = create_app(config_path=config_path, auth_token=None)
+    client = TestClient(app)
+
+    resp = client.patch('/api/settings', json={
+        'channels.weixin': {
+            'enabled': True,
+            'base_url': 'http://127.0.0.1:5030',
+        },
+        'channels.agentbridge': {
+            'enabled': True,
+            'max_upload_bytes': 123456,
+        },
+    })
+
+    assert resp.status_code == 200
+    updated = load_config(config_path)
+    assert updated.channels.weixin.enabled is True
+    assert updated.channels.weixin.base_url == 'http://127.0.0.1:5030'
+    assert updated.channels.agentbridge.enabled is True
+    assert updated.channels.agentbridge.max_upload_bytes == 123456
+
+
 def test_pairing_state_route_exposes_raw_owner_and_pending(monkeypatch, tmp_path):
     import json
 
