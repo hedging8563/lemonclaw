@@ -90,6 +90,25 @@ class TestAutoPairing:
         assert pairing.owner_notify_target == 'alice'
         assert pairing.get_pending_notify_target('bob') == 'bob'
 
+    def test_describe_sender_and_transfer_owner(self, tmp_path: Path):
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        pairing = AutoPairing('discord', tmp_path)
+        assert pairing.check_or_pair('owner|mobile', notify_target='owner-dm') == 'paired'
+        assert pairing.check_or_pair('user-2', notify_target='dm-2') == 'pending'
+        assert pairing.approve('user-2') == 'dm-2'
+
+        owner_view = pairing.describe_sender('owner')
+        assert owner_view["state"] == "owner"
+        assert owner_view["pending_count"] == 0
+
+        approved_view = pairing.describe_sender('user-2')
+        assert approved_view["state"] == "approved"
+
+        assert pairing.transfer_owner('user-2') == 'user-2'
+        assert pairing.owner == 'user-2'
+        assert pairing.owner_notify_target == 'user-2'
+
     @pytest.mark.asyncio
     async def test_pairing_mode_does_not_log_empty_allow_from_warning(self, tmp_path: Path):
         from lemonclaw.channels.base import BaseChannel
@@ -265,6 +284,100 @@ class TestAutoPairing:
         ) is False
         assert any(msg.chat_id == '!user:matrix.org' and 'access denied' in (msg.content or '').lower() for msg in outbound)
         assert any(msg.chat_id == '!owner:matrix.org' and 'denied: @user:matrix.org' in (msg.content or '').lower() for msg in outbound)
+
+    @pytest.mark.asyncio
+    async def test_pairing_commands_surface_status_pending_and_transfer(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'slack'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('slack', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='owner|phone',
+            notify_target='owner-dm',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        assert await ch._run_pairing_flow(
+            sender_id='user-2',
+            notify_target='dm-2',
+            content='hello',
+            display_name='User 2',
+            policy='pairing',
+        ) is False
+        outbound.clear()
+
+        assert await ch._run_pairing_flow(
+            sender_id='user-2',
+            notify_target='dm-2',
+            content='/pairing status',
+            display_name='User 2',
+            policy='pairing',
+        ) is False
+        assert len(outbound) == 1
+        assert 'pending owner approval' in (outbound[0].content or '').lower()
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='owner|phone',
+            notify_target='owner-dm',
+            content='/pairing pending',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        assert len(outbound) == 1
+        assert 'pending pairing requests' in (outbound[0].content or '').lower()
+        assert 'user-2' in (outbound[0].content or '')
+
+        outbound.clear()
+        assert await ch._run_pairing_flow(
+            sender_id='owner|phone',
+            notify_target='owner-dm',
+            content='/approve user-2',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        outbound.clear()
+
+        assert await ch._run_pairing_flow(
+            sender_id='owner|phone',
+            notify_target='owner-dm',
+            content='/pairing transfer user-2',
+            display_name='Owner',
+            policy='pairing',
+        ) is False
+        assert any(msg.chat_id == 'owner-dm' and 'ownership transferred' in (msg.content or '').lower() for msg in outbound)
+        assert any(msg.chat_id == 'user-2' and 'now the current owner' in (msg.content or '').lower() for msg in outbound)
 
     @pytest.mark.asyncio
     async def test_pairing_flow_surfaces_disabled_and_allowlist_denials(self):

@@ -310,6 +310,67 @@ class TestSlashCommands:
         assert "manual_resume" in response.content
 
     @pytest.mark.asyncio
+    async def test_runtime_command_summarizes_inventory_and_mcp(self, make_agent_loop, monkeypatch):
+        loop, _bus = make_agent_loop()
+        loop._mcp_connected = True
+        loop._mcp_servers = {"Notion": {"command": "npx"}, "Remote": {"url": "https://example.com/mcp"}}
+        monkeypatch.setattr(
+            "lemonclaw.gateway.webui.settings._derive_runtime_inventory",
+            lambda: {
+                "persistent_prefixes": [
+                    {"path": "/home/lemonclaw", "mounted": True, "fs_type": "overlay", "source": "/mnt/persist"},
+                    {"path": "/tmp", "mounted": False, "fs_type": None, "source": None},
+                ],
+                "binary_inventory": {
+                    "browser": {"command": "agent-browser", "installed": True, "binary": "/usr/bin/agent-browser"},
+                    "kubectl": {"command": "kubectl", "installed": False, "binary": None},
+                },
+            },
+        )
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/runtime")
+        )
+
+        assert response is not None
+        assert "mounted=1/2" in response.content
+        assert "Notion, Remote" in response.content
+        assert "registered_tools=0" in response.content
+
+    @pytest.mark.asyncio
+    async def test_runtime_command_can_show_mcp_detail(self, make_agent_loop):
+        from lemonclaw.agent.tools.base import Tool
+
+        class _DummyMCPTool(Tool):
+            @property
+            def name(self) -> str:
+                return "mcp_Notion_API-post-search"
+
+            @property
+            def description(self) -> str:
+                return "dummy"
+
+            @property
+            def parameters(self) -> dict:
+                return {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs):
+                return "ok"
+
+        loop, _bus = make_agent_loop()
+        loop._mcp_connected = False
+        loop._mcp_servers = {"Notion": {"command": "npx"}}
+        loop.tools.register(_DummyMCPTool())
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/runtime mcp")
+        )
+
+        assert response is not None
+        assert "Notion" in response.content
+        assert "mcp_Notion_API-post-search" in response.content
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(

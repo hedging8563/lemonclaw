@@ -70,6 +70,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — Stop the current task\n"
             "/tasks [limit] — Show recent tasks and recovery hints\n"
             "/resume [task_id] — Run the safest available resume action\n"
+            "/runtime [inventory|mcp] — Show runtime and MCP status\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
@@ -84,6 +85,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — 停止当前任务\n"
             "/tasks [数量] — 查看最近任务与恢复建议\n"
             "/resume [task_id] — 执行当前最安全的恢复动作\n"
+            "/runtime [inventory|mcp] — 查看运行时与 MCP 状态\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
@@ -164,6 +166,46 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "resume_failed": {
         "en": "Failed to resume `{task_id}`: {error}",
         "zh": "恢复 `{task_id}` 失败：{error}",
+    },
+    "runtime_usage": {
+        "en": "Use `/runtime`, `/runtime inventory`, or `/runtime mcp`.",
+        "zh": "使用 `/runtime`、`/runtime inventory` 或 `/runtime mcp`。",
+    },
+    "runtime_summary_header": {
+        "en": "Runtime summary:",
+        "zh": "运行时摘要：",
+    },
+    "runtime_inventory_summary": {
+        "en": "- Inventory: mounted={mounted}/{total}, missing_prefixes={missing_prefixes}, binaries={installed}/{binary_total}, missing_binaries={missing_binaries}",
+        "zh": "- Inventory：已挂载={mounted}/{total}，缺失前缀={missing_prefixes}，二进制={installed}/{binary_total}，缺失二进制={missing_binaries}",
+    },
+    "runtime_mcp_summary": {
+        "en": "- MCP: connected={connected}, servers={servers}, registered_tools={tools}",
+        "zh": "- MCP：已连接={connected}，servers={servers}，已注册工具={tools}",
+    },
+    "runtime_inventory_detail_header": {
+        "en": "Runtime inventory detail:",
+        "zh": "运行时 inventory 详情：",
+    },
+    "runtime_inventory_prefix_line": {
+        "en": "- Prefix {path}: mounted={mounted}, fs={fs_type}, source={source}",
+        "zh": "- 前缀 {path}：已挂载={mounted}，fs={fs_type}，source={source}",
+    },
+    "runtime_inventory_binary_line": {
+        "en": "- Binary {name}: installed={installed}, command={command}, path={path}",
+        "zh": "- 二进制 {name}：已安装={installed}，command={command}，路径={path}",
+    },
+    "runtime_mcp_detail_header": {
+        "en": "MCP status detail:",
+        "zh": "MCP 状态详情：",
+    },
+    "runtime_mcp_server_line": {
+        "en": "- Server {name}: mode={mode}",
+        "zh": "- Server {name}：模式={mode}",
+    },
+    "runtime_mcp_tool_line": {
+        "en": "- Registered MCP tools: {tools}",
+        "zh": "- 已注册 MCP 工具：{tools}",
     },
     "git_auth_usage": {
         "en": (

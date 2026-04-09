@@ -2267,6 +2267,10 @@ class AgentLoop:
             reply = self._command_reply(msg, t("help", lang), kind="help")
             self._persist_simple_reply(session, msg.content, reply, kind="help")
             return reply
+        if cmd == "/runtime" or cmd.startswith("/runtime "):
+            reply = self._handle_runtime_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="runtime")
+            return reply
         if cmd == "/tasks" or cmd.startswith("/tasks "):
             reply = self._handle_tasks_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="tasks")
@@ -2289,7 +2293,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/tasks", "/resume", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/tasks", "/resume", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2637,8 +2641,88 @@ class AgentLoop:
                 action=str(payload.get("recommended_action") or candidate.get("recommended_action") or "resume"),
                 reason=str(payload.get("reason") or candidate.get("reason") or ""),
             ),
-            kind="resume",
-        )
+                kind="resume",
+            )
+
+    def _handle_runtime_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[8:].strip().lower()
+        mode = raw or "summary"
+        if mode not in {"summary", "inventory", "mcp"}:
+            return self._command_reply(msg, t("runtime_usage", lang), kind="runtime_help", level="warning")
+
+        lines: list[str] = []
+        if mode in {"summary", "inventory"}:
+            from lemonclaw.gateway.webui.settings import _derive_runtime_inventory
+
+            inventory = _derive_runtime_inventory()
+            prefixes = list(inventory.get("persistent_prefixes") or [])
+            binaries = dict(inventory.get("binary_inventory") or {})
+            mounted = sum(1 for item in prefixes if item.get("mounted"))
+            missing_prefixes = [str(item.get("path") or "") for item in prefixes if not item.get("mounted")]
+            installed = sum(1 for item in binaries.values() if item.get("installed"))
+            missing_binaries = [name for name, item in binaries.items() if not item.get("installed")]
+
+            if mode == "summary":
+                lines.append(t("runtime_summary_header", lang))
+                lines.append(
+                    t(
+                        "runtime_inventory_summary",
+                        lang,
+                        mounted=mounted,
+                        total=len(prefixes),
+                        missing_prefixes=", ".join(missing_prefixes) if missing_prefixes else "none",
+                        installed=installed,
+                        binary_total=len(binaries),
+                        missing_binaries=", ".join(missing_binaries) if missing_binaries else "none",
+                    )
+                )
+            else:
+                lines.append(t("runtime_inventory_detail_header", lang))
+                for item in prefixes:
+                    lines.append(
+                        t(
+                            "runtime_inventory_prefix_line",
+                            lang,
+                            path=str(item.get("path") or "unknown"),
+                            mounted="yes" if item.get("mounted") else "no",
+                            fs_type=str(item.get("fs_type") or "n/a"),
+                            source=str(item.get("source") or "n/a"),
+                        )
+                    )
+                for name, item in sorted(binaries.items()):
+                    lines.append(
+                        t(
+                            "runtime_inventory_binary_line",
+                            lang,
+                            name=name,
+                            installed="yes" if item.get("installed") else "no",
+                            command=str(item.get("command") or ""),
+                            path=str(item.get("binary") or "n/a"),
+                        )
+                    )
+
+        if mode in {"summary", "mcp"}:
+            servers = list(self._mcp_servers.keys())
+            mcp_tools = sorted(name for name in self.tools.tool_names if name.startswith("mcp_"))
+            if mode == "summary":
+                lines.append(
+                    t(
+                        "runtime_mcp_summary",
+                        lang,
+                        connected="yes" if self._mcp_connected else "no",
+                        servers=", ".join(servers) if servers else "none",
+                        tools=len(mcp_tools),
+                    )
+                )
+            else:
+                lines.append(t("runtime_mcp_detail_header", lang))
+                for name in servers:
+                    cfg = self._mcp_servers.get(name)
+                    mode_name = "stdio" if str(getattr(cfg, "command", "") or (cfg.get("command") if isinstance(cfg, dict) else "")).strip() else "http"
+                    lines.append(t("runtime_mcp_server_line", lang, name=name, mode=mode_name))
+                lines.append(t("runtime_mcp_tool_line", lang, tools=", ".join(mcp_tools) if mcp_tools else "none"))
+
+        return self._command_reply(msg, "\n".join(lines), kind="runtime")
 
     def _handle_kb_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[3:].strip()

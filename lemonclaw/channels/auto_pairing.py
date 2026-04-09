@@ -61,6 +61,66 @@ class AutoPairing:
         sid = str(sender_id)
         return sid.split("|")[0] if sid else None
 
+    @staticmethod
+    def _default_notify_target(sender_id: str) -> str:
+        sid = str(sender_id).strip()
+        return sid.split("|")[0] if sid else sid
+
+    def resolve_sender(self, sender_id: str, *, include_pending: bool = True) -> str | None:
+        sid = str(sender_id).strip()
+        if not sid:
+            return None
+        candidates = []
+        if self.owner:
+            candidates.append(str(self.owner))
+        candidates.extend(str(item) for item in self.approved if str(item))
+        if include_pending:
+            candidates.extend(str(item) for item in self.pending.keys() if str(item))
+        if sid in candidates:
+            return sid
+        for candidate in candidates:
+            if sid and any(part == sid for part in candidate.split("|") if part):
+                return candidate
+        return None
+
+    def describe_sender(self, sender_id: str) -> dict[str, Any]:
+        sid = str(sender_id).strip()
+        resolved = self.resolve_sender(sid)
+        if self.owner and resolved == self.owner:
+            return {
+                "state": "owner",
+                "resolved_sender_id": resolved,
+                "approved_count": len(self.approved),
+                "pending_count": len(self.pending),
+                "pending_ids": list(self.pending.keys()),
+            }
+        if resolved in self.approved:
+            return {
+                "state": "approved",
+                "resolved_sender_id": resolved,
+                "approved_count": len(self.approved),
+                "pending_count": len(self.pending),
+                "pending_ids": [],
+            }
+        if resolved in self.pending:
+            return {
+                "state": "pending",
+                "resolved_sender_id": resolved,
+                "approved_count": len(self.approved),
+                "pending_count": len(self.pending),
+                "pending_ids": [],
+            }
+        return {
+            "state": "unknown",
+            "resolved_sender_id": None,
+            "approved_count": len(self.approved),
+            "pending_count": len(self.pending),
+            "pending_ids": [],
+        }
+
+    def list_pending_ids(self) -> list[str]:
+        return sorted(str(item) for item in self.pending.keys())
+
     def check_or_pair(
         self,
         sender_id: str,
@@ -132,6 +192,25 @@ class AutoPairing:
         del pending[sid]
         self._save()
         return target
+
+    def transfer_owner(self, sender_id: str) -> str | None:
+        """Transfer ownership to an already approved user.
+
+        Returns the new owner notify target when successful.
+        """
+        resolved = self.resolve_sender(sender_id, include_pending=False)
+        if not resolved:
+            return None
+        if resolved not in self.approved and resolved != self.owner:
+            return None
+        self._state["owner"] = resolved
+        self._state["owner_notify_target"] = self._default_notify_target(resolved)
+        approved = self._state.setdefault("approved", [])
+        if resolved not in approved:
+            approved.append(resolved)
+        self._save()
+        logger.info("auto-pairing: {} became owner of {}", resolved, self._channel)
+        return self.owner_notify_target
 
     # ------------------------------------------------------------------
     # Persistence

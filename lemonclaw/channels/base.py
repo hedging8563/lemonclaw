@@ -207,7 +207,10 @@ class BaseChannel(ABC):
             )
             return False
 
-        if self._pairing and stripped.startswith(("/approve ", "/deny ")):
+        if self._pairing and (
+            stripped.startswith(("/approve ", "/deny ", "/pairing "))
+            or stripped in {"/pairing", "/pairing status", "/pairing pending"}
+        ):
             reply = await self._handle_pairing_command(sender_id, stripped)
             if reply:
                 await self.bus.publish_outbound(OutboundMessage(
@@ -329,7 +332,7 @@ class BaseChannel(ABC):
         await self.bus.publish_inbound(msg)
 
     async def _handle_pairing_command(self, sender_id: str, content: str) -> str | None:
-        """Handle /approve or /deny commands. Only the owner can execute these."""
+        """Handle pairing commands. Only the owner can execute mutating actions."""
         if not self._pairing:
             return None
 
@@ -339,12 +342,38 @@ class BaseChannel(ABC):
         is_owner = sid == owner
         if not is_owner and "|" in sid:
             is_owner = any(p == owner for p in sid.split("|") if p)
+        if content == "/pairing" or content == "/pairing status":
+            summary = self._pairing.describe_sender(sid)
+            state = str(summary.get("state") or "unknown")
+            if state == "owner":
+                pending_ids = list(summary.get("pending_ids") or [])
+                suffix = f"\nPending requests: {', '.join(pending_ids)}" if pending_ids else "\nPending requests: none"
+                return (
+                    f"You are the current owner on this channel.\n"
+                    f"Approved users: {summary.get('approved_count', 0)}\n"
+                    f"Pending requests: {summary.get('pending_count', 0)}"
+                    f"{suffix}"
+                )
+            if state == "approved":
+                return "You are approved to use this bot on this channel."
+            if state == "pending":
+                return "Your access request is still pending owner approval."
+            return "You are not approved on this channel yet. Send a normal message to request access."
+
+        if content == "/pairing pending":
+            if not is_owner:
+                return "Only the current owner can view the full pending request list."
+            pending_ids = self._pairing.list_pending_ids()
+            if not pending_ids:
+                return "There are no pending pairing requests."
+            return "Pending pairing requests:\n- " + "\n- ".join(pending_ids)
+
         if not is_owner:
-            return "Only the current owner can approve or deny pairing requests."
+            return "Only the current owner can approve, deny, or transfer pairing requests."
 
         parts = content.split(maxsplit=1)
         if len(parts) < 2:
-            return "Usage: /approve <user_id> or /deny <user_id>"
+            return "Usage: /approve <user_id>, /deny <user_id>, or /pairing transfer <user_id>"
 
         cmd, target = parts[0].lower(), parts[1].strip()
 
@@ -368,6 +397,27 @@ class BaseChannel(ABC):
                 ))
                 return f"Denied: {target}"
             return f"No pending request from: {target}"
+        elif cmd == "/pairing":
+            action_parts = target.split(maxsplit=1)
+            action = action_parts[0].lower() if action_parts else ""
+            payload = action_parts[1].strip() if len(action_parts) > 1 else ""
+            if action == "transfer":
+                if not payload:
+                    return "Usage: /pairing transfer <user_id>"
+                notify_target = self._pairing.transfer_owner(payload)
+                if notify_target:
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(notify_target),
+                        content="✅ You are now the current owner for this channel.",
+                    ))
+                    return f"Ownership transferred to: {payload}"
+                return f"Cannot transfer ownership to `{payload}`. Approve that user first."
+            if action == "status":
+                return await self._handle_pairing_command(sender_id, "/pairing status")
+            if action == "pending":
+                return await self._handle_pairing_command(sender_id, "/pairing pending")
+            return "Usage: /pairing status, /pairing pending, or /pairing transfer <user_id>"
         return None
     
     @property
