@@ -150,7 +150,7 @@ export class WeixinBridgeServer {
     };
   }
 
-  private async trackLogin(sessionKey: string): Promise<void> {
+  private async trackLogin(sessionKey: string, baseUrl: string): Promise<void> {
     if (this.trackedLogins.has(sessionKey)) return;
     this.trackedLogins.add(sessionKey);
     try {
@@ -159,6 +159,7 @@ export class WeixinBridgeServer {
         if (!active) break;
         const result = await waitForWeixinLogin({
           sessionKey,
+          baseUrl,
           timeoutMs: 2_000,
         });
         if (result.connected && result.botToken && result.accountId) {
@@ -287,7 +288,7 @@ export class WeixinBridgeServer {
           pid: process.pid,
         };
         this.persistState();
-        void this.trackLogin(result.sessionKey);
+        void this.trackLogin(result.sessionKey, baseUrl);
         this.json(response, 200, this.snapshot());
         return;
       }
