@@ -24,17 +24,23 @@ def get_activity_routes(
     *,
     activity_bus: ActivityBus,
     session_manager: SessionManager,
-    auth_token: str | None = None,
+    auth_state: Any | None = None,
 ) -> list[Route | WebSocketRoute]:
     """Build Activity Feed routes (REST + WebSocket)."""
 
-    from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
+    from lemonclaw.gateway.webui.auth import COOKIE_NAME, GatewayAuthState, verify_session_cookie
+
+    def _auth_token() -> str | None:
+        if isinstance(auth_state, GatewayAuthState):
+            return auth_state.token
+        return auth_state
 
     def _check_auth(request: Request) -> bool:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True
         cookie = request.cookies.get(COOKIE_NAME, "")
-        valid, _ = verify_session_cookie(cookie, auth_token)
+        valid, _ = verify_session_cookie(cookie, token)
         return valid
 
     # ── REST: GET /api/activity/sessions ──────────────────────────────
@@ -120,9 +126,10 @@ def get_activity_routes(
 
     async def ws_activity(websocket: WebSocket) -> None:
         # Auth check before accept
-        if auth_token:
+        token = _auth_token()
+        if token:
             cookie = websocket.cookies.get(COOKIE_NAME, "")
-            valid, _ = verify_session_cookie(cookie, auth_token)
+            valid, _ = verify_session_cookie(cookie, token)
             if not valid:
                 await websocket.close(code=4001, reason="Unauthorized")
                 return

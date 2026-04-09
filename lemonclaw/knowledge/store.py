@@ -19,6 +19,7 @@ from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import zipfile
 from xml.etree import ElementTree as ET
@@ -47,6 +48,20 @@ def _next_refresh_at_ms(interval_hours: int, *, now_ms: int | None = None) -> in
 
 def _sha1_hexdigest(data: bytes) -> str:
     return hashlib.sha1(data).hexdigest()[:12]
+
+
+def _validate_source_for_type(source_type: str, source: str) -> str:
+    normalized_source = str(source or "").strip()
+    if not normalized_source:
+        raise ValueError("source is required")
+    if str(source_type or "").strip().lower() != "url":
+        return normalized_source
+    parsed = urlparse(normalized_source)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("url sources must use http or https")
+    if not parsed.netloc:
+        raise ValueError("url source is missing host")
+    return normalized_source
 
 
 class _RemoteNotModified(RuntimeError):
@@ -155,9 +170,7 @@ class KnowledgeStore:
         source_type = str(source_type or "").strip().lower()
         if source_type not in _ALLOWED_TYPES:
             raise ValueError("invalid source_type")
-        source = str(source or "").strip()
-        if not source:
-            raise ValueError("source is required")
+        source = _validate_source_for_type(source_type, source)
         refresh_interval_hours = max(0, int(refresh_interval_hours or 0))
         now = _now_ms()
         record = {
@@ -243,9 +256,7 @@ class KnowledgeStore:
             if note is not None:
                 target["note"] = str(note or "")[:2000]
             if source is not None:
-                next_source = str(source or "").strip()
-                if not next_source:
-                    raise ValueError("source is required")
+                next_source = _validate_source_for_type(str(target.get("source_type") or ""), source)
                 if next_source != str(target.get("source") or ""):
                     target["source"] = next_source[:2000]
                     needs_reingest = True
@@ -253,6 +264,7 @@ class KnowledgeStore:
                 next_type = str(source_type or "").strip().lower()
                 if next_type not in _ALLOWED_TYPES:
                     raise ValueError("invalid source_type")
+                _validate_source_for_type(next_type, str(source if source is not None else target.get("source") or ""))
                 if next_type != str(target.get("source_type") or ""):
                     target["source_type"] = next_type
                     needs_reingest = True
@@ -773,6 +785,7 @@ class KnowledgeStore:
             }
         if source_type == "url":
             source = str(document.get("source") or "")
+            source = _validate_source_for_type(source_type, source)
             existing_meta = dict(document.get("metadata") or {})
             headers = {"User-Agent": "LemonClawKnowledge/1.0"}
             etag = str(existing_meta.get("etag") or "").strip()

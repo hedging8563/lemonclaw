@@ -215,8 +215,8 @@ def create_outbox_delivery_handler(
     http_config: "HTTPRequestToolConfig | None" = None,
     email_config: "EmailConfig | None" = None,
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
-    async def _deliver(event: dict[str, Any]) -> None:
-        await deliver_outbox_event(
+    async def _deliver(event: dict[str, Any]) -> dict[str, Any]:
+        return await deliver_outbox_event(
             event,
             publish_outbound=bus.publish_outbound,
             notify_config=notify_config,

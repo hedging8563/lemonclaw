@@ -17,15 +17,23 @@ from lemonclaw.channels.weixin_bridge_runtime import (
 
 def get_weixin_pairing_routes(
     *,
-    auth_token: str | None,
+    auth_state: Any | None,
     config_path: Any,
     runtime: Any | None = None,
 ) -> list[Route]:
+    from lemonclaw.gateway.webui.auth import GatewayAuthState
+
+    def _auth_token() -> str | None:
+        if isinstance(auth_state, GatewayAuthState):
+            return auth_state.token
+        return auth_state
+
     def _require_bearer(request: Request) -> JSONResponse | None:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return None
         header = request.headers.get("authorization", "")
-        if not hmac.compare_digest(header, f"Bearer {auth_token}"):
+        if not hmac.compare_digest(header, f"Bearer {token}"):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         return None
 

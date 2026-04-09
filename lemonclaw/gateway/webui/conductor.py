@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -19,17 +19,23 @@ def get_conductor_routes(
     *,
     orchestrator: Orchestrator | None = None,
     registry: AgentRegistry | None = None,
-    auth_token: str | None = None,
+    auth_state: Any | None = None,
 ) -> list[Route]:
     """Build Conductor panel REST routes."""
 
-    from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
+    from lemonclaw.gateway.webui.auth import COOKIE_NAME, GatewayAuthState, verify_session_cookie
+
+    def _auth_token() -> str | None:
+        if isinstance(auth_state, GatewayAuthState):
+            return auth_state.token
+        return auth_state
 
     def _check_auth(request: Request) -> bool:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True
         cookie = request.cookies.get(COOKIE_NAME, "")
-        valid, _ = verify_session_cookie(cookie, auth_token)
+        valid, _ = verify_session_cookie(cookie, token)
         return valid
 
     async def api_agents(request: Request) -> JSONResponse:

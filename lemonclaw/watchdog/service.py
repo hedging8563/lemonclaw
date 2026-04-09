@@ -19,9 +19,10 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from lemonclaw.channels.session_keys import build_system_session_key
@@ -109,6 +110,41 @@ class WatchdogService:
         self._state = WatchdogState()
         self._running = False
         self._task: asyncio.Task | None = None
+
+    def _list_session_activity(self) -> list[dict[str, Any]]:
+        """Return the live session activity snapshots watchdog should trust."""
+        if self._session_manager is None:
+            return []
+
+        cached_sessions = getattr(self._session_manager, "list_cached_sessions", None)
+        if callable(cached_sessions):
+            try:
+                return list(cached_sessions())
+            except Exception as exc:
+                logger.error(f"watchdog: failed to read cached session activity: {exc}")
+                return []
+
+        try:
+            return list(self._session_manager.list_sessions())
+        except Exception as exc:
+            logger.error(f"watchdog: failed to read session activity: {exc}")
+            return []
+
+    @staticmethod
+    def _parse_session_updated_at(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if not isinstance(value, str):
+            return None
+        stamp = value.strip()
+        if not stamp:
+            return None
+        if stamp.endswith("Z"):
+            stamp = f"{stamp[:-1]}+00:00"
+        try:
+            return datetime.fromisoformat(stamp).timestamp()
+        except ValueError:
+            return None
 
     @property
     def state(self) -> WatchdogState:
@@ -305,14 +341,16 @@ class WatchdogService:
             return HealthCheck("session_stuck", True, "no session manager")
 
         try:
-            sessions = self._session_manager.list_sessions()
+            sessions = self._list_session_activity()
             now = time.time()
             stuck_count = 0
 
             for info in sessions:
-                updated_at = info.get("updated_at", 0)
-                is_active = info.get("active", False)
-                if is_active and updated_at and (now - updated_at) > SESSION_STUCK_THRESHOLD:
+                updated_at = self._parse_session_updated_at(info.get("updated_at"))
+                message_count = int(info.get("message_count") or 0)
+                if message_count <= 0 or updated_at is None:
+                    continue
+                if (now - updated_at) > SESSION_STUCK_THRESHOLD:
                     stuck_count += 1
 
             if stuck_count > 0:
@@ -443,13 +481,15 @@ class WatchdogService:
         for c in checks:
             if c.name == "session_stuck" and self._session_manager is not None:
                 try:
-                    sessions = self._session_manager.list_sessions()
+                    sessions = self._list_session_activity()
                     now = time.time()
                     for info in sessions:
-                        updated_at = info.get("updated_at", 0)
-                        is_active = info.get("active", False)
+                        updated_at = self._parse_session_updated_at(info.get("updated_at"))
+                        message_count = int(info.get("message_count") or 0)
                         key = info.get("key", "")
-                        if is_active and updated_at and (now - updated_at) > SESSION_STUCK_THRESHOLD:
+                        if message_count <= 0 or updated_at is None:
+                            continue
+                        if (now - updated_at) > SESSION_STUCK_THRESHOLD:
                             logger.warning(f"watchdog: clearing stuck session {key}")
                             # Invalidate from cache to force reload on next access
                             self._session_manager.invalidate(key)

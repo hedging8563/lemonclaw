@@ -499,6 +499,31 @@ class SessionManager:
                 continue
         return sorted(sessions, key=lambda item: item.get("updated_at") or "", reverse=True)
 
+    def list_cached_sessions(self) -> list[dict[str, Any]]:
+        """Return the currently cached sessions as activity snapshots.
+
+        This is the in-memory truth source for live session activity. It avoids
+        re-inferring "active" from the on-disk session index, which only tracks
+        persisted history and does not know whether a session is currently
+        loaded or being worked on.
+        """
+        sessions: list[dict[str, Any]] = []
+        for key in self._cache_order:
+            session = self._cache.get(key)
+            if session is None:
+                continue
+            sessions.append(
+                {
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "message_count": len(session.messages),
+                    "last_consolidated": session.last_consolidated,
+                    "version": session.version,
+                }
+            )
+        return sessions
+
     def archive_session(self, key: str) -> bool:
         path = self._get_session_path(key)
         if not path.exists():

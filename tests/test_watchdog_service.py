@@ -1,9 +1,11 @@
 from pathlib import Path
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 
 from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.session.manager import Session, SessionManager
 from lemonclaw.triggers import TriggerRuntime
 from lemonclaw.watchdog.service import HealthCheck, WatchdogService
 
@@ -31,6 +33,16 @@ def _seed_stale_task(
     ledger._write_json(ledger._task_path(task_id), task)
 
 
+def _seed_stale_session_file(manager: SessionManager, *, key: str, updated_at: datetime) -> None:
+    session = Session(
+        key=key,
+        messages=[{"role": "user", "content": "hello", "timestamp": updated_at.isoformat()}],
+        created_at=updated_at,
+        updated_at=updated_at,
+    )
+    manager._atomic_save(manager._get_session_path(key), session)
+
+
 def test_watchdog_detects_stale_tasks_from_ledger(tmp_path: Path):
     ledger = TaskLedger(tmp_path, backend="json")
     _seed_stale_task(ledger, task_id="task_1", status="running", current_stage="execute")
@@ -39,6 +51,25 @@ def test_watchdog_detects_stale_tasks_from_ledger(tmp_path: Path):
     check = watchdog._check_task_stuck()
 
     assert check == HealthCheck("task_stuck", False, "1 stale task(s): task_1")
+
+
+def test_watchdog_detects_stale_cached_sessions_without_disk_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    sessions = SessionManager(tmp_path)
+    live = sessions.get_or_create("telegram:live")
+    live.add_message("user", "hello")
+    live.updated_at = datetime.now() - timedelta(seconds=10)
+    sessions.save(live)
+
+    archived_at = datetime.now() - timedelta(seconds=10)
+    _seed_stale_session_file(sessions, key="telegram:archived", updated_at=archived_at)
+
+    monkeypatch.setattr("lemonclaw.watchdog.service.SESSION_STUCK_THRESHOLD", 1)
+    watchdog = WatchdogService(session_manager=sessions)
+
+    check = watchdog._check_session_stuck()
+
+    assert check == HealthCheck("session_stuck", False, "1 stuck session(s)")
+    assert [item["key"] for item in sessions.list_cached_sessions()] == ["telegram:live"]
 
 
 @pytest.mark.asyncio
@@ -54,6 +85,34 @@ async def test_watchdog_soft_recovery_marks_running_task_failed(tmp_path: Path):
     assert task["status"] == "failed"
     assert task["current_stage"] == "stale_recovery"
     assert task["metadata"]["recovery"]["source"] == "watchdog_soft_recovery"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_soft_recovery_only_invalidates_cached_stale_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    sessions = SessionManager(tmp_path)
+    live = sessions.get_or_create("telegram:live")
+    live.add_message("user", "hello")
+    live.updated_at = datetime.now() - timedelta(seconds=10)
+    sessions.save(live)
+
+    archived_at = datetime.now() - timedelta(seconds=10)
+    _seed_stale_session_file(sessions, key="telegram:archived", updated_at=archived_at)
+
+    monkeypatch.setattr("lemonclaw.watchdog.service.SESSION_STUCK_THRESHOLD", 1)
+    watchdog = WatchdogService(session_manager=sessions)
+
+    invalidated: list[str] = []
+    original_invalidate = sessions.invalidate
+
+    def _record_invalidate(key: str) -> None:
+        invalidated.append(key)
+        original_invalidate(key)
+
+    monkeypatch.setattr(sessions, "invalidate", _record_invalidate)
+
+    await watchdog._soft_recovery([HealthCheck("session_stuck", False, "1 stuck session(s)")])
+
+    assert invalidated == ["telegram:live"]
 
 
 @pytest.mark.asyncio

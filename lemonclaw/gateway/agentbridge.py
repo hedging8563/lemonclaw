@@ -113,7 +113,7 @@ def _sse_line(event: dict[str, Any]) -> str:
 
 def get_agentbridge_routes(
     *,
-    auth_token: str | None,
+    auth_state: Any | None,
     runtime: GatewayRuntimeContext,
 ) -> list[Route]:
     """Build AgentBridge runtime routes."""
@@ -131,11 +131,19 @@ def get_agentbridge_routes(
     _attachments: dict[str, dict[str, Any]] = {}
     _session_media_grants: dict[str, dict[str, Any]] = {}
 
+    from lemonclaw.gateway.webui.auth import GatewayAuthState
+
+    def _auth_token() -> str | None:
+        if isinstance(auth_state, GatewayAuthState):
+            return auth_state.token
+        return auth_state
+
     def _require_auth(request: Request) -> tuple[bool, Response | None]:
-        if not auth_token:
+        token = _auth_token()
+        if not token:
             return True, None
         header = request.headers.get("authorization", "")
-        if hmac.compare_digest(header, f"Bearer {auth_token}"):
+        if hmac.compare_digest(header, f"Bearer {token}"):
             return True, None
         return False, _json({"error": "Unauthorized"}, 401)
 

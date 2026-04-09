@@ -68,3 +68,14 @@ def test_knowledge_ingest_error_clears_stale_search_data(tmp_path: Path, monkeyp
     assert store.list_chunks(doc["doc_id"]) == []
     assert store.list_facts(doc["doc_id"]) == []
     assert store.search("retry outbox") == []
+
+
+def test_knowledge_url_sources_reject_non_http_schemes(tmp_path: Path) -> None:
+    store = KnowledgeStore(tmp_path)
+
+    with pytest.raises(ValueError, match="http or https"):
+        store.create_document(
+            source_type="url",
+            source="file:///etc/passwd",
+            title="Nope",
+        )
