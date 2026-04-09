@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from lemonclaw.agent.tools.cron import CronTool, _IN_CRON_CONTEXT
@@ -165,6 +167,28 @@ async def test_cron_tool_persists_session_and_delivery_context(tmp_path) -> None
     assert jobs[0].payload.metadata["delivery_context"]["route"]["message_thread_id"] == 456
     assert jobs[0].payload.metadata["delivery_policy"]["mode"] == "replace"
     assert jobs[0].payload.metadata["delivery_policy"]["preserve_message_identity"] is True
+
+
+@pytest.mark.asyncio
+async def test_cron_tool_accepts_explicit_context_params(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    tool = CronTool(service)
+
+    result = await tool.execute(
+        action="add",
+        message="hello",
+        every_seconds=60,
+        channel="telegram",
+        chat_id="123",
+        session_key="telegram:123:456",
+    )
+
+    assert "Created job" in result
+    jobs = service.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.channel == "telegram"
+    assert jobs[0].payload.to == "123"
+    assert jobs[0].payload.session_key == "telegram:123:456"
 
 
 def test_cron_service_round_trips_session_key_from_json(tmp_path) -> None:

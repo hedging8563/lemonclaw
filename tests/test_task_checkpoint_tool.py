@@ -104,3 +104,39 @@ def test_task_checkpoint_merges_verification_metadata_without_dropping_existing_
     assert gate.verification["acceptance_evidence_summary"]["count"] == 1
     assert gate.verification["surface_replay_pointer"]["kind"] == "task_bundle"
     assert gate.verification["surface_replay_pointer"]["step_id"] == "step_abc"
+
+
+def test_task_checkpoint_accepts_explicit_task_id_alias(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="demo",
+    )
+
+    tool = TaskCheckpointTool()
+    result = asyncio.run(
+        tool.execute(
+            stage="verify",
+            summary="Waiting for verification",
+            task_id="task_1",
+            _task_ledger=ledger,
+        )
+    )
+
+    assert "Checkpoint saved for task_1" in result
+
+
+def test_task_checkpoint_missing_context_error_is_explicit():
+    tool = TaskCheckpointTool()
+    result = asyncio.run(
+        tool.execute(
+            stage="verify",
+            summary="Waiting for verification",
+        )
+    )
+
+    assert "tracked LemonClaw task" in result

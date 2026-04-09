@@ -71,6 +71,18 @@ class CronTool(Tool):
                 "job_id": {
                     "type": "string",
                     "description": "Job ID (for remove)"
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "Optional delivery channel override when running outside injected chat context."
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "Optional delivery chat id override when running outside injected chat context."
+                },
+                "session_key": {
+                    "type": "string",
+                    "description": "Optional session key override. Provide together with channel and chat_id."
                 }
             },
             "required": ["action"]
@@ -89,6 +101,9 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        session_key: str | None = None,
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
@@ -100,7 +115,10 @@ class CronTool(Tool):
         if action == "add":
             if _IN_CRON_CONTEXT.get():
                 return "Error: cannot schedule new jobs from within a cron job (prevents recursive loops)"
-            if not (_default_channel and _default_chat_id and _session_key):
+            resolved_channel = str(channel or _default_channel or "").strip()
+            resolved_chat_id = str(chat_id or _default_chat_id or "").strip()
+            resolved_session_key = str(session_key or _session_key or "").strip()
+            if not (resolved_channel and resolved_chat_id and resolved_session_key):
                 return (
                     "Error: cron add needs an active conversation target. "
                     "Create the reminder from a real chat thread, or provide channel, chat_id, and session_key together."
@@ -111,9 +129,9 @@ class CronTool(Tool):
                 cron_expr,
                 tz,
                 at,
-                _default_channel,
-                _default_chat_id,
-                _session_key,
+                resolved_channel,
+                resolved_chat_id,
+                resolved_session_key,
                 dict(_default_delivery_context or {}),
                 dict(_default_delivery_policy or {}),
                 dict(_default_session_context or {}),

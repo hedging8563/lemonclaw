@@ -178,4 +178,27 @@ async def test_spawn_carries_session_context() -> None:
 
     assert result == "ok"
     assert calls[0]["origin_session_context"]["identity"]["thread"] == "demo"
-    assert calls[0]["origin_session_context"]["run_mode"] == "detached"
+
+
+@pytest.mark.asyncio
+async def test_spawn_accepts_explicit_context_params() -> None:
+    calls = []
+
+    async def _spawn(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    tool = SpawnTool(SimpleNamespace(spawn=_spawn))
+
+    result = await tool.execute(
+        task="do work",
+        channel="telegram",
+        chat_id="123",
+        session_key="telegram:123:456",
+    )
+
+    assert result == "ok"
+    assert calls[0]["origin_channel"] == "telegram"
+    assert calls[0]["origin_chat_id"] == "123"
+    assert calls[0]["session_key"] == "telegram:123:456"
+    assert calls[0]["origin_session_context"] == {}

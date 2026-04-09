@@ -54,6 +54,18 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "channel": {
+                    "type": "string",
+                    "description": "Optional origin channel override when running outside injected chat context.",
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "Optional origin chat id override when running outside injected chat context.",
+                },
+                "session_key": {
+                    "type": "string",
+                    "description": "Optional session key override. Provide together with channel and chat_id.",
+                },
             },
             "required": ["task"],
         }
@@ -66,6 +78,9 @@ class SpawnTool(Tool):
         self,
         task: str,
         label: str | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        session_key: str | None = None,
         _default_channel: str | None = None,
         _default_chat_id: str | None = None,
         _default_delivery_context: dict[str, Any] | None = None,
@@ -75,20 +90,20 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        if not (_default_channel and _default_chat_id and _session_key):
+        origin_channel = str(channel or _default_channel or "").strip()
+        origin_chat_id = str(chat_id or _default_chat_id or "").strip()
+        resolved_session_key = str(session_key or _session_key or "").strip()
+        if not (origin_channel and origin_chat_id and resolved_session_key):
             return (
                 "Error: spawn only works inside an active conversation with delivery context. "
                 "Run it from a real chat thread, or provide channel, chat_id, and session_key together."
             )
-        origin_channel = _default_channel
-        origin_chat_id = _default_chat_id
-        session_key = _session_key
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
-            session_key=session_key,
+            session_key=resolved_session_key,
             origin_delivery_context=dict(_default_delivery_context or {}),
             origin_delivery_policy=dict(_default_delivery_policy or {}),
             origin_session_context=dict(_default_session_context or {}),
