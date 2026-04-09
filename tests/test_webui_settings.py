@@ -860,6 +860,48 @@ def test_apply_settings_restart_state_tracks_recent_notify_targets(monkeypatch, 
     assert body['restart_state']['notify_targets'][0]['chat_id'] == '123'
 
 
+def test_apply_settings_restart_state_includes_pairing_owner_notify_target(monkeypatch, tmp_path):
+    from lemonclaw.channels.auto_pairing import AutoPairing
+
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.auto_pairing = True
+    cfg.channels.telegram.enabled = True
+    save_config(cfg, config_path)
+
+    monkeypatch.setattr('lemonclaw.utils.helpers.get_data_path', lambda: tmp_path)
+    pairing = AutoPairing('telegram', tmp_path)
+    assert pairing.check_or_pair('owner|phone', notify_target='owner-dm') == 'paired'
+
+    sessions = SessionManager(tmp_path)
+
+    class FakeAgentLoop:
+        def __init__(self) -> None:
+            self.sessions = sessions
+            self.bus = MessageBus()
+
+        async def refresh_runtime_config(self, config, *, changed_paths):
+            return {}
+
+        def update_defaults(self, **kwargs):
+            return None
+
+    kill_calls = []
+    monkeypatch.setattr('os.kill', lambda pid, sig: kill_calls.append((pid, sig)))
+
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=FakeAgentLoop())
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.mcp_servers'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    targets = body['restart_state']['notify_targets']
+    assert any(item['channel'] == 'telegram' and item['chat_id'] == 'owner-dm' and item.get('source') == 'pairing_owner' for item in targets)
+
+
 @pytest.mark.asyncio
 async def test_broadcast_restart_notice_publishes_to_recent_session(tmp_path):
     sessions = SessionManager(tmp_path)

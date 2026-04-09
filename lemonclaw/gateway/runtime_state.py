@@ -49,6 +49,32 @@ def _derive_chat_id_from_session_key(channel: str, session_key: str) -> str:
     return session_key.split(":", 1)[-1] if ":" in session_key else session_key
 
 
+def _append_unique_notify_target(
+    targets: list[dict[str, str]],
+    seen: set[tuple[str, str]],
+    *,
+    channel: str,
+    chat_id: str,
+    session_key: str,
+    source: str,
+) -> None:
+    normalized_channel = str(channel or "").strip()
+    normalized_chat_id = str(chat_id or "").strip()
+    normalized_session_key = str(session_key or "").strip()
+    if not normalized_channel or not normalized_chat_id or not normalized_session_key:
+        return
+    dedupe = (normalized_channel, normalized_chat_id)
+    if dedupe in seen:
+        return
+    seen.add(dedupe)
+    targets.append({
+        "session_key": normalized_session_key,
+        "channel": normalized_channel,
+        "chat_id": normalized_chat_id,
+        "source": source,
+    })
+
+
 def derive_recent_notify_targets(
     session_manager: Any | None,
     *,
@@ -77,13 +103,81 @@ def derive_recent_notify_targets(
             except ValueError:
                 pass
         chat_id = _derive_chat_id_from_session_key(channel, key)
-        dedupe = (channel, chat_id)
-        if dedupe in seen:
-            continue
-        seen.add(dedupe)
-        targets.append({"session_key": key, "channel": channel, "chat_id": chat_id})
+        _append_unique_notify_target(
+            targets,
+            seen,
+            channel=channel,
+            chat_id=chat_id,
+            session_key=key,
+            source="recent_session",
+        )
         if len(targets) >= max_targets:
             break
+    return targets
+
+
+def derive_restart_notify_targets(
+    session_manager: Any | None,
+    *,
+    config: Any | None = None,
+    max_recent_targets: int = 3,
+    max_age_s: int = 2 * 60 * 60,
+) -> list[dict[str, str]]:
+    targets = derive_recent_notify_targets(
+        session_manager,
+        max_targets=max_recent_targets,
+        max_age_s=max_age_s,
+    )
+    seen = {
+        (str(item.get("channel") or "").strip(), str(item.get("chat_id") or "").strip())
+        for item in targets
+        if str(item.get("channel") or "").strip() and str(item.get("chat_id") or "").strip()
+    }
+
+    if config is None:
+        return targets
+
+    try:
+        from lemonclaw.channels.auto_pairing import AutoPairing
+        from lemonclaw.utils.helpers import get_data_path
+    except Exception:
+        return targets
+
+    data_path = get_data_path()
+
+    def _uses_pairing(channel_name: str) -> bool:
+        channels = getattr(config, "channels", None)
+        if channels is None:
+            return False
+        if channel_name == "slack":
+            slack_cfg = getattr(channels, "slack", None)
+            slack_dm = getattr(slack_cfg, "dm", None)
+            return bool(getattr(slack_cfg, "enabled", False) and str(getattr(slack_dm, "policy", "") or "").strip() == "pairing")
+        if channel_name == "whatsapp":
+            return bool(getattr(getattr(channels, "whatsapp", None), "enabled", False) and getattr(channels, "auto_pairing", False))
+        channel_cfg = getattr(channels, channel_name, None)
+        if not getattr(channel_cfg, "enabled", False):
+            return False
+        raw_policy = str(getattr(channel_cfg, "dm_policy", "") or "").strip()
+        if raw_policy:
+            return raw_policy == "pairing"
+        return bool(getattr(channels, "auto_pairing", False))
+
+    for channel_name in ("telegram", "discord", "feishu", "matrix", "weixin", "whatsapp", "slack"):
+        if not _uses_pairing(channel_name):
+            continue
+        pairing = AutoPairing(channel_name, data_path)
+        owner_target = str(pairing.owner_notify_target or "").strip()
+        if not owner_target:
+            continue
+        _append_unique_notify_target(
+            targets,
+            seen,
+            channel=channel_name,
+            chat_id=owner_target,
+            session_key=f"{channel_name}:{owner_target}",
+            source="pairing_owner",
+        )
     return targets
 
 

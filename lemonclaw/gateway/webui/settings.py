@@ -23,7 +23,7 @@ from lemonclaw.channels.whatsapp_bridge_runtime import (
     restart_whatsapp_pairing,
 )
 from lemonclaw.gateway.runtime_state import (
-    derive_recent_notify_targets,
+    derive_restart_notify_targets,
     load_runtime_state,
     mark_restart_in_progress,
     mark_runtime_notification_sent,
@@ -954,7 +954,10 @@ def get_settings_routes(
             if runtime_status != "failed":
                 runtime_status = "submitted"
             logger.info("Settings apply: restart required for {}", restart_fields)
-            notify_targets = derive_recent_notify_targets(getattr(agent_loop, "sessions", None))
+            notify_targets = derive_restart_notify_targets(
+                getattr(agent_loop, "sessions", None),
+                config=runtime_config,
+            )
             restart_state = mark_restart_requested(
                 config_path,
                 restart_fields=restart_fields,
@@ -1014,7 +1017,10 @@ def get_settings_routes(
                 runtime_errors=runtime_errors,
                 source="settings_apply",
             )
-            notify_targets = derive_recent_notify_targets(getattr(agent_loop, "sessions", None))
+            notify_targets = derive_restart_notify_targets(
+                getattr(agent_loop, "sessions", None),
+                config=runtime_config,
+            )
             if notify_targets:
                 restart_state["notify_targets"] = notify_targets
                 if agent_loop is not None:
