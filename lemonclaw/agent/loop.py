@@ -2647,7 +2647,7 @@ class AgentLoop:
     def _handle_runtime_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
         raw = msg.content.strip()[8:].strip().lower()
         mode = raw or "summary"
-        if mode not in {"summary", "inventory", "mcp"}:
+        if mode not in {"summary", "inventory", "mcp", "health"}:
             return self._command_reply(msg, t("runtime_usage", lang), kind="runtime_help", level="warning")
 
         lines: list[str] = []
@@ -2721,6 +2721,65 @@ class AgentLoop:
                     mode_name = "stdio" if str(getattr(cfg, "command", "") or (cfg.get("command") if isinstance(cfg, dict) else "")).strip() else "http"
                     lines.append(t("runtime_mcp_server_line", lang, name=name, mode=mode_name))
                 lines.append(t("runtime_mcp_tool_line", lang, tools=", ".join(mcp_tools) if mcp_tools else "none"))
+
+        if mode in {"summary", "health"}:
+            watchdog = getattr(self, "watchdog", None)
+            channel_manager = getattr(self, "channel_manager", None)
+            snapshot = watchdog.snapshot() if watchdog and hasattr(watchdog, "snapshot") else {}
+            channels = {}
+            if isinstance(snapshot.get("channels"), dict):
+                channels = dict(snapshot.get("channels") or {})
+            elif channel_manager and hasattr(channel_manager, "get_channel_status"):
+                channels = dict(channel_manager.get_channel_status() or {})
+            total_channels = len(channels)
+            running_channels = sum(1 for item in channels.values() if item.get("running"))
+            blocked_channels = sum(1 for item in channels.values() if item.get("enabled") and not item.get("available"))
+            watchdog_running = bool(snapshot.get("running")) if snapshot else False
+            stale_tasks = int(((snapshot.get("task_stuck") or {}).get("count")) or 0) if snapshot else 0
+            state = dict(snapshot.get("state") or {}) if snapshot else {}
+            if mode == "summary":
+                lines.append(
+                    t(
+                        "runtime_health_summary",
+                        lang,
+                        watchdog="yes" if watchdog_running else "no",
+                        stale_tasks=stale_tasks,
+                        recent_errors=int(state.get("recent_error_count") or 0),
+                        soft=int(state.get("total_soft_recoveries") or 0),
+                        hard=int(state.get("total_hard_restarts") or 0),
+                        running=running_channels,
+                        total=total_channels,
+                        blocked=blocked_channels,
+                    )
+                )
+            else:
+                lines.append(t("runtime_health_detail_header", lang))
+                lines.append(
+                    t(
+                        "runtime_health_summary",
+                        lang,
+                        watchdog="yes" if watchdog_running else "no",
+                        stale_tasks=stale_tasks,
+                        recent_errors=int(state.get("recent_error_count") or 0),
+                        soft=int(state.get("total_soft_recoveries") or 0),
+                        hard=int(state.get("total_hard_restarts") or 0),
+                        running=running_channels,
+                        total=total_channels,
+                        blocked=blocked_channels,
+                    )
+                )
+                for name, item in sorted(channels.items()):
+                    lines.append(
+                        t(
+                            "runtime_health_channel_line",
+                            lang,
+                            name=name,
+                            enabled="yes" if item.get("enabled") or item.get("configured_enabled") else "no",
+                            available="yes" if item.get("available") else "no",
+                            running="yes" if item.get("running") else "no",
+                            error=str(item.get("error") or "none"),
+                        )
+                    )
 
         return self._command_reply(msg, "\n".join(lines), kind="runtime")
 

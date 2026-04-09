@@ -70,7 +70,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — Stop the current task\n"
             "/tasks [limit] — Show recent tasks and recovery hints\n"
             "/resume [task_id] — Run the safest available resume action\n"
-            "/runtime [inventory|mcp] — Show runtime and MCP status\n"
+            "/runtime [inventory|mcp|health] — Show runtime, MCP, and health status\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
@@ -85,7 +85,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/stop — 停止当前任务\n"
             "/tasks [数量] — 查看最近任务与恢复建议\n"
             "/resume [task_id] — 执行当前最安全的恢复动作\n"
-            "/runtime [inventory|mcp] — 查看运行时与 MCP 状态\n"
+            "/runtime [inventory|mcp|health] — 查看运行时、MCP 与健康状态\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
@@ -168,8 +168,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "恢复 `{task_id}` 失败：{error}",
     },
     "runtime_usage": {
-        "en": "Use `/runtime`, `/runtime inventory`, or `/runtime mcp`.",
-        "zh": "使用 `/runtime`、`/runtime inventory` 或 `/runtime mcp`。",
+        "en": "Use `/runtime`, `/runtime inventory`, `/runtime mcp`, or `/runtime health`.",
+        "zh": "使用 `/runtime`、`/runtime inventory`、`/runtime mcp` 或 `/runtime health`。",
     },
     "runtime_summary_header": {
         "en": "Runtime summary:",
@@ -206,6 +206,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "runtime_mcp_tool_line": {
         "en": "- Registered MCP tools: {tools}",
         "zh": "- 已注册 MCP 工具：{tools}",
+    },
+    "runtime_health_summary": {
+        "en": "- Health: watchdog={watchdog}, stale_tasks={stale_tasks}, recent_errors={recent_errors}, soft_recoveries={soft}, hard_restarts={hard}, channel_running={running}/{total}, channel_blocked={blocked}",
+        "zh": "- 健康：watchdog={watchdog}，卡住任务={stale_tasks}，近期错误={recent_errors}，软恢复={soft}，硬重启={hard}，运行中渠道={running}/{total}，阻塞渠道={blocked}",
+    },
+    "runtime_health_detail_header": {
+        "en": "Runtime health detail:",
+        "zh": "运行时健康详情：",
+    },
+    "runtime_health_channel_line": {
+        "en": "- Channel {name}: enabled={enabled}, available={available}, running={running}, error={error}",
+        "zh": "- 渠道 {name}：enabled={enabled}，available={available}，running={running}，error={error}",
     },
     "git_auth_usage": {
         "en": (

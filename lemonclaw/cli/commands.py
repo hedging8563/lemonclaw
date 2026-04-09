@@ -765,6 +765,8 @@ def gateway(
         task_ledger=agent.ledger,
         trigger_runtime=trigger_runtime,
     )
+    agent.channel_manager = channels
+    agent.watchdog = watchdog
     # Feed error log events to watchdog for rate tracking
     _logger.add(create_loguru_error_sink(watchdog), level="ERROR")
 

@@ -371,6 +371,34 @@ class TestSlashCommands:
         assert "mcp_Notion_API-post-search" in response.content
 
     @pytest.mark.asyncio
+    async def test_runtime_command_can_show_health_detail(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        loop.watchdog = MagicMock()
+        loop.watchdog.snapshot.return_value = {
+            "running": True,
+            "state": {
+                "recent_error_count": 2,
+                "total_soft_recoveries": 3,
+                "total_hard_restarts": 1,
+            },
+            "task_stuck": {"count": 1, "task_ids": ["task_1"]},
+            "channels": {
+                "telegram": {"enabled": True, "available": True, "running": True, "error": ""},
+                "wecom": {"enabled": True, "available": False, "running": False, "error": "missing dependency"},
+            },
+        }
+
+        response = await loop._process_message(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/runtime health")
+        )
+
+        assert response is not None
+        assert "watchdog=yes" in response.content
+        assert "stale_tasks=1" in response.content
+        assert "telegram" in response.content
+        assert "wecom" in response.content
+
+    @pytest.mark.asyncio
     async def test_process_message_records_retrieval_observability(self, make_agent_loop):
         loop, _bus = make_agent_loop()
         loop.context.resolve_retrieval_context = AsyncMock(return_value=(
