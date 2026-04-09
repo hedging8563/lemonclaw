@@ -9,6 +9,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.config.schema import WhatsAppConfig
 from lemonclaw.triggers import TriggerRuntime, build_trigger_metadata
 
@@ -159,6 +160,10 @@ class WhatsAppChannel(BaseChannel):
             # New LID sytle typically: 
             sender = data.get("sender", "")
             content = data.get("content", "")
+            message_id = str(data.get("id") or "").strip()
+            if message_id and not self._ingress_dedupe.remember(f"message:{sender}:{message_id}"):
+                logger.debug("WhatsApp duplicate message id={}, sender={}, skipping", message_id, sender)
+                return
             
             # Extract just the phone number or lid as chat_id
             user_id = pn if pn else sender

@@ -69,6 +69,30 @@ async def test_weixin_bridge_event_passes_media_paths() -> None:
 
 
 @pytest.mark.asyncio
+async def test_weixin_bridge_event_duplicate_event_id_is_deduped() -> None:
+    channel = WeixinChannel(WeixinConfig(enabled=True, allow_from=["*"]), MessageBus())
+    channel._handle_message = AsyncMock()
+    event = {
+        "id": 99,
+        "type": "message",
+        "accountId": "bot-1",
+        "senderId": "wx-user-9",
+        "peerId": "wx-user-9",
+        "chatId": "bot-1|wx-user-9",
+        "content": "你好",
+        "contextToken": "ctx-123",
+        "messageId": 42,
+        "timestamp": 1710000000,
+        "metadata": {"itemTypes": ["text"], "hasMedia": False},
+    }
+
+    await channel._handle_bridge_event(event)
+    await channel._handle_bridge_event(event)
+
+    channel._handle_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_weixin_send_uses_account_context_and_media_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: dict[str, object] = {}
 

@@ -12,6 +12,7 @@ from loguru import logger
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.base import BaseChannel
+from lemonclaw.channels.inbound_dedupe import InboundDedupeCache
 from lemonclaw.channels.session_keys import build_channel_session_key
 from lemonclaw.channels.weixin_bridge_runtime import (
     WeixinBridgeError,
@@ -42,6 +43,7 @@ class WeixinChannel(BaseChannel):
         self.config: WeixinConfig = config
         self._trigger_runtime = trigger_runtime
         self._cursor = self._load_cursor()
+        self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
 
     @staticmethod
     def _cursor_state_path() -> Path:
@@ -141,6 +143,10 @@ class WeixinChannel(BaseChannel):
         peer_id = str(event.get("peerId") or event.get("senderId") or "").strip()
         chat_id = str(event.get("chatId") or "").strip() or f"{account_id}|{peer_id}"
         content = str(event.get("content") or "")
+        event_id = str(event.get("id") or "").strip()
+        if event_id and not self._ingress_dedupe.remember(f"event:{event_id}"):
+            logger.debug("Weixin duplicate event id={}, skipping", event_id)
+            return
         trigger_metadata: dict[str, Any] = {}
 
         if self._trigger_runtime:
