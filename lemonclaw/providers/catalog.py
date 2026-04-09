@@ -32,7 +32,7 @@ _BUILTIN_MODEL_CATALOG: list[ModelEntry] = [
     ModelEntry("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "standard", "1M context, strong vision", fallback="claude-sonnet-4-6"),
     ModelEntry("deepseek-v3-2", "DeepSeek V3.2", "standard", "Great value, strong Chinese", fallback="claude-sonnet-4-6"),
     ModelEntry("kimi-k2.5", "Kimi K2.5", "standard", "Long-context Chinese", fallback="deepseek-v3-2"),
-    ModelEntry("grok-4.1", "Grok 4.1", "standard", "Real-time knowledge", fallback="gpt-5.2"),
+    ModelEntry("grok-4.1", "Grok 4.1", "standard", "Real-time knowledge", fallback="gpt-5.2", hidden=True),
     ModelEntry("claude-haiku-4-5", "Claude Haiku 4.5", "economy", "Fast and lightweight", fallback="gpt-4.1-mini"),
     ModelEntry("gpt-4.1-mini", "GPT-4.1 Mini", "economy", "Stable tool calling", fallback="claude-haiku-4-5"),
     ModelEntry("gemini-3-flash-preview", "Gemini 3 Flash", "economy", "Ultra fast, low cost", fallback="gpt-4.1-mini"),

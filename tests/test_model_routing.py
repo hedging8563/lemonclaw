@@ -20,6 +20,7 @@ from lemonclaw.providers.catalog import (
     format_model_list,
     fuzzy_match,
 )
+from lemonclaw.providers.registry import find_by_model
 
 
 # ── Catalog integrity ────────────────────────────────────────────────
@@ -60,6 +61,12 @@ class TestCatalogIntegrity:
         assert len(MODEL_MAP) == len(MODEL_CATALOG)
         for m in MODEL_CATALOG:
             assert MODEL_MAP[m.id] is m
+
+    def test_visible_models_are_routable(self):
+        for m in MODEL_CATALOG:
+            if m.hidden:
+                continue
+            assert find_by_model(m.id) is not None, f"{m.id} is visible but not routable"
 
 
 # ── Fuzzy matching ───────────────────────────────────────────────────

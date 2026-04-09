@@ -204,6 +204,67 @@ async def test_connect_mcp_servers_reconnect_uses_original_binding(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_skips_degraded_tools(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import mcp
+    import mcp.client.stdio as mcp_stdio
+
+    class FakeParams:
+        def __init__(self, **kwargs):
+            self.command = kwargs.get('command')
+            self.args = tuple(kwargs.get('args') or [])
+            self.env = kwargs.get('env')
+            self.cwd = kwargs.get('cwd')
+
+    @asynccontextmanager
+    async def fake_stdio_client(params):
+        yield ('read', 'write')
+
+    class FakeSession:
+        def __init__(self, read, write):
+            self.read = read
+            self.write = write
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name='bad', description='Bad', inputSchema='string'),
+                    SimpleNamespace(name='good', description='Good', inputSchema={'type': 'object', 'properties': {}}),
+                ]
+            )
+
+        async def call_tool(self, name, arguments=None):
+            return SimpleNamespace(content=[])
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(mcp, 'StdioServerParameters', FakeParams)
+    monkeypatch.setattr(mcp, 'ClientSession', FakeSession)
+    monkeypatch.setattr(mcp_stdio, 'stdio_client', fake_stdio_client)
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers(
+            {'filesystem': SimpleNamespace(command='npx', args=['@mcp/server-filesystem'], env={}, tool_timeout=30, url='', headers={})},
+            registry,
+            stack,
+            workspace=tmp_path,
+        )
+
+    assert not registry.has('mcp_filesystem_bad')
+    assert registry.has('mcp_filesystem_good')
+
+
+@pytest.mark.asyncio
 async def test_mcp_wrapper_formats_resource_and_image_content(monkeypatch: pytest.MonkeyPatch) -> None:
     from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
 
@@ -584,6 +645,10 @@ async def test_mcp_wrapper_appends_compatibility_diagnostics_to_description() ->
         "allOf contains a non-object branch",
         "input schema is not an object schema; falling back to empty object schema",
     )
+    result = await wrapper.execute()
+    assert result.startswith("Error: MCP tool 'mcp_filesystem_inspect' has degraded schema compatibility; refusing to invoke")
+    assert "allOf contains a non-object branch" in result
+    assert "input schema is not an object schema; falling back to empty object schema" in result
 
 
 @pytest.mark.asyncio

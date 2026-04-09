@@ -320,6 +320,123 @@ async def test_lemondata_nonchat_request_auto_selects_and_falls_back_on_retryabl
 
 
 @pytest.mark.asyncio
+async def test_lemondata_nonchat_request_auto_selects_catalog_fallback_when_recommendation_snapshot_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = LemonDataNonChatTool()
+    calls: list[tuple[str, str, dict | None]] = []
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        calls.append((method, path, body))
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "catalog-a", "lemondata": {"category": "image"}},
+                        {"id": "catalog-b", "lemondata": {"category": "image"}},
+                    ]
+                },
+            }
+        if path == "/v1/models?category=image&recommended_for=image":
+            return {"ok": False, "error": "HTTP 503", "body": None}
+        if path == "/v1/images/generations" and body and body["model"] == "catalog-a":
+            return {"ok": True, "body": {"id": "img_ok", "model": "catalog-a"}}
+        raise AssertionError((method, path, body))
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="image",
+            payload={"prompt": "draw a skyline"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["selected_model"] == "catalog-a"
+    assert result["attempted_models"] == ["catalog-a"]
+    assert result["selection_reason"] == "recommendation_snapshot_failed"
+    assert result["response"]["model"] == "catalog-a"
+    assert calls == [
+        ("GET", "/v1/models?category=image", None),
+        ("GET", "/v1/models?category=image&recommended_for=image", None),
+        ("POST", "/v1/images/generations", {"prompt": "draw a skyline", "model": "catalog-a"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lemondata_nonchat_request_auto_selects_catalog_fallback_when_recommendations_are_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = LemonDataNonChatTool()
+
+    async def _fake_fetch(path: str, *, method: str = "GET", body=None):
+        if path == "/v1/models?category=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {"id": "catalog-a", "lemondata": {"category": "image"}},
+                        {"id": "catalog-b", "lemondata": {"category": "image"}},
+                    ]
+                },
+            }
+        if path == "/v1/models?category=image&recommended_for=image":
+            return {
+                "ok": True,
+                "body": {
+                    "data": [
+                        {
+                            "id": "catalog-a",
+                            "lemondata": {
+                                "category": "image",
+                                "agent_preferences": {
+                                    "image": {
+                                        "preferred_rank": 1,
+                                        "status": "pending",
+                                        "updated_at": "2026-03-28T00:00:00.000Z",
+                                    }
+                                },
+                            },
+                        },
+                        {
+                            "id": "catalog-b",
+                            "lemondata": {
+                                "category": "image",
+                                "agent_preferences": {
+                                    "image": {
+                                        "preferred_rank": 2,
+                                        "status": "pending",
+                                        "updated_at": "2026-03-28T00:00:00.000Z",
+                                    }
+                                },
+                            },
+                        },
+                    ]
+                },
+            }
+        if path == "/v1/images/generations" and body and body["model"] == "catalog-a":
+            return {"ok": True, "body": {"id": "img_ready", "model": "catalog-a"}}
+        raise AssertionError((method, path, body))
+
+    monkeypatch.setattr(tool, "_fetch_json", _fake_fetch)
+    result = json.loads(
+        await tool.execute(
+            action="request",
+            category="image",
+            payload={"prompt": "draw a skyline"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["selected_model"] == "catalog-a"
+    assert result["attempted_models"] == ["catalog-a"]
+    assert result["selection_reason"] == "no_ready_recommendations"
+    assert result["response"]["model"] == "catalog-a"
+
+
+@pytest.mark.asyncio
 async def test_lemondata_nonchat_translation_requires_text_and_target_language(monkeypatch: pytest.MonkeyPatch) -> None:
     tool = LemonDataNonChatTool()
 

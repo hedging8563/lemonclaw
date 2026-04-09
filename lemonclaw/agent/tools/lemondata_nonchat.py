@@ -86,7 +86,8 @@ class LemonDataNonChatTool(Tool):
             "Discover currently available LemonData non-chat models and perform guarded non-chat requests. "
             "For image, video, music, 3d, tts, stt, embedding, rerank, and translation, discover reads the "
             "category catalog from /v1/models?category=... and can optionally overlay recommended_for snapshot metadata. "
-            "When model is omitted for a request, it automatically picks from the top ready recommended models only. "
+            "When model is omitted for a request, it automatically picks from the top ready recommended models when available, "
+            "then falls back to catalog-backed candidates if the recommendation snapshot is missing or not ready. "
             "Request supports JSON payloads plus local file uploads for multipart endpoints: "
             "image edits and variations can use files.image_path / files.mask_path, "
             "speech-to-text can use files.audio_path or files.file_path, and text-to-speech binary output can be saved via save_to. "
@@ -256,6 +257,7 @@ class LemonDataNonChatTool(Tool):
         available_models = {str(item) for item in discovery.get("all_model_ids") or []}
         if not available_models:
             available_models = {str(item["id"]) for item in discovery["models"]}
+        selection_reason: str | None = None
         if requested_model:
             if requested_model not in available_models:
                 return json.dumps({
@@ -267,22 +269,11 @@ class LemonDataNonChatTool(Tool):
                 }, ensure_ascii=False)
             attempt_chain = [requested_model]
         else:
-            if discovery.get("recommendation_error"):
-                return json.dumps({
-                    "ok": False,
-                    "error": "Fresh LemonData recommendation snapshot failed; refusing auto-selected non-chat request.",
-                    "category": category,
-                    "discovery": discovery,
-                }, ensure_ascii=False)
-            attempt_chain = [
-                str(item["id"])
-                for item in discovery["models"]
-                if item.get("status") == "ready"
-            ][:3]
+            attempt_chain, selection_reason = self._build_auto_attempt_chain(discovery)
             if not attempt_chain:
                 return json.dumps({
                     "ok": False,
-                    "error": f"No ready recommended models are currently available for category '{category}'.",
+                    "error": f"No catalog models are currently available for category '{category}'.",
                     "category": category,
                     "discovery": discovery,
                 }, ensure_ascii=False)
@@ -351,6 +342,8 @@ class LemonDataNonChatTool(Tool):
                 ),
             }
             request_result["request_guidance"] = self._request_guidance(category)
+            if selection_reason:
+                request_result["selection_reason"] = selection_reason
 
             if request_result["ok"] or not auto_selected or not self._should_retry_with_next_model(request_result):
                 if fallback_reason:
@@ -380,10 +373,11 @@ class LemonDataNonChatTool(Tool):
 
         return json.dumps({
             "ok": False,
-            "error": "All recommended models failed for this request.",
+            "error": "All selected models failed for this request.",
             "category": category,
             "attempted_models": attempted_models,
             "fallback_reason": fallback_reason,
+            "selection_reason": selection_reason,
             "recommendation_context": recommendation_context,
         }, ensure_ascii=False)
 
@@ -496,6 +490,37 @@ class LemonDataNonChatTool(Tool):
             "recommendation_error": recommendation_error,
             "request_guidance": self._request_guidance(category),
         }
+
+    @staticmethod
+    def _build_auto_attempt_chain(discovery: dict[str, Any]) -> tuple[list[str], str | None]:
+        models = discovery.get("models") if isinstance(discovery, dict) else None
+        ready_models: list[str] = []
+        if isinstance(models, list):
+            for item in models:
+                if not isinstance(item, dict):
+                    continue
+                model_id = str(item.get("id") or "").strip()
+                if model_id and item.get("status") == "ready":
+                    ready_models.append(model_id)
+        if ready_models:
+            return ready_models[:3], None
+
+        catalog_ids = [
+            str(item).strip()
+            for item in (discovery.get("all_model_ids") if isinstance(discovery, dict) else [])
+            if str(item).strip()
+        ]
+        if not catalog_ids and isinstance(models, list):
+            catalog_ids = [
+                str(item.get("id") or "").strip()
+                for item in models
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
+        if not catalog_ids:
+            return [], None
+
+        selection_reason = "recommendation_snapshot_failed" if discovery.get("recommendation_error") else "no_ready_recommendations"
+        return catalog_ids[:3], selection_reason
 
     async def _request(
         self,

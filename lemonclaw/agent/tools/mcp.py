@@ -217,7 +217,14 @@ class MCPToolWrapper(Tool):
     def compatibility_warnings(self) -> tuple[str, ...]:
         return self._schema_warnings
 
+    @property
+    def is_compatible(self) -> bool:
+        return self._compatibility_status == "compatible"
+
     async def execute(self, **kwargs: Any) -> str:
+        if not self.is_compatible:
+            warnings = "; ".join(self._schema_warnings) or "unknown schema compatibility issue"
+            return f"Error: MCP tool '{self._name}' has degraded schema compatibility; refusing to invoke ({warnings})"
         from mcp import types
         try:
             binding = self._binding_getter()
@@ -351,6 +358,7 @@ async def connect_mcp_servers(
             binding.reconnect = _reconnect
 
             tools = await session.list_tools()
+            registered_tools = 0
             for tool_def in tools.tools:
                 wrapper = MCPToolWrapper(
                     binding,
@@ -359,9 +367,18 @@ async def connect_mcp_servers(
                     tool_timeout=cfg.tool_timeout,
                     binding_getter=lambda server_name=name: bindings[server_name],
                 )
+                if not wrapper.is_compatible:
+                    logger.error(
+                        "MCP server '{}': tool '{}' has degraded schema compatibility ({}); skipping registration",
+                        name,
+                        wrapper.name,
+                        "; ".join(wrapper.compatibility_warnings) or "unknown",
+                    )
+                    continue
                 registry.register(wrapper)
+                registered_tools += 1
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            logger.info("MCP server '{}': connected, {} tools registered", name, registered_tools)
         except (Exception, BaseExceptionGroup) as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

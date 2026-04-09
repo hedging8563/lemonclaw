@@ -211,17 +211,22 @@ class TriggerRuntime:
         return latest
 
     def _materialize_unlocked(self) -> list[dict[str, Any]]:
-        latest_by_id: dict[str, dict[str, Any]] = {}
-        for item in self._read_events_unlocked():
+        latest_by_id: dict[str, tuple[int, dict[str, Any]]] = {}
+        for order, item in enumerate(self._read_events_unlocked()):
             trigger_id = str(item.get("trigger_id") or "")
             if not trigger_id:
                 continue
-            latest_by_id[trigger_id] = item
-        return sorted(
-            latest_by_id.values(),
-            key=lambda item: int(item.get("updated_at_ms") or 0),
+            latest_by_id[trigger_id] = (order, item)
+        materialized = list(latest_by_id.values())
+        materialized.sort(
+            key=lambda pair: (
+                int(pair[1].get("updated_at_ms") or 0),
+                int(pair[1].get("created_at_ms") or 0),
+                pair[0],
+            ),
             reverse=True,
         )
+        return [item for _order, item in materialized]
 
     def _read_events_unlocked(self) -> list[dict[str, Any]]:
         if not self._path.exists():
