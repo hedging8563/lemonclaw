@@ -1,4 +1,4 @@
-from lemonclaw.providers.registry import find_by_name
+from lemonclaw.providers.registry import find_by_model, find_by_name
 
 
 def test_managed_lemondata_provider_registry_keeps_expected_api_shapes() -> None:
@@ -30,3 +30,10 @@ def test_managed_lemondata_provider_registry_keeps_expected_api_shapes() -> None
     assert claude.keywords == ("claude",)
     assert minimax.keywords == ("minimax",)
     assert gemini.keywords == ("gemini",)
+
+
+def test_codex_branched_models_match_the_codex_provider_before_generic_openai() -> None:
+    spec = find_by_model("gpt-5.3-codex")
+
+    assert spec is not None
+    assert spec.name == "openai_codex"

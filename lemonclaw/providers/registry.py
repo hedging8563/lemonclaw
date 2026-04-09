@@ -297,6 +297,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         reasoning_keywords=(),  # all Claude models support it
     ),
 
+    # OpenAI Codex: uses OAuth, not API key.
+    ProviderSpec(
+        name="openai_codex",
+        keywords=("openai-codex", "codex"),
+        env_key="",                         # OAuth-based, no API key
+        display_name="OpenAI Codex",
+        litellm_prefix="",                  # Not routed through LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="codex",
+        default_api_base="https://chatgpt.com/backend-api",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,                      # OAuth-based authentication
+    ),
+
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
     # Only o1/o3/o4 series support reasoning_content.
     ProviderSpec(
@@ -316,25 +335,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
         supports_reasoning=True,
         reasoning_keywords=("o1-", "o3-", "o4-"),
-    ),
-
-    # OpenAI Codex: uses OAuth, not API key.
-    ProviderSpec(
-        name="openai_codex",
-        keywords=("openai-codex", "codex"),
-        env_key="",                         # OAuth-based, no API key
-        display_name="OpenAI Codex",
-        litellm_prefix="",                  # Not routed through LiteLLM
-        skip_prefixes=(),
-        env_extras=(),
-        is_gateway=False,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="codex",
-        default_api_base="https://chatgpt.com/backend-api",
-        strip_model_prefix=False,
-        model_overrides=(),
-        is_oauth=True,                      # OAuth-based authentication
     ),
 
     # Github Copilot: uses OAuth, not API key.

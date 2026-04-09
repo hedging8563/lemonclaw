@@ -113,6 +113,13 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_codex_branched_model_without_generic_openai_drift():
+    config = Config()
+    config.agents.defaults.model = "gpt-5.3-codex"
+
+    assert config.get_provider_name() == "openai_codex"
+
+
 def test_config_matches_lemondata_response_for_gpt54():
     config = Config()
     config.agents.defaults.model = "gpt-5.4"
@@ -126,6 +133,13 @@ def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
 
     assert spec is not None
     assert spec.name == "github_copilot"
+
+
+def test_find_by_model_prefers_codex_keyword_over_generic_gpt_keyword():
+    spec = find_by_model("gpt-5.3-codex")
+
+    assert spec is not None
+    assert spec.name == "openai_codex"
 
 
 def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():

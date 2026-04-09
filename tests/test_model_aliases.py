@@ -29,6 +29,7 @@ def test_list_aliases():
     aliases = list_aliases()
     assert "fast-and-cheap" in aliases
     assert "best-for-code" in aliases
+    assert aliases["best-for-code"] == "claude-opus-4-6"
     assert len(aliases) == 5
 
 
