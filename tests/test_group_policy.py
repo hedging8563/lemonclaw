@@ -446,10 +446,11 @@ class TestWhatsAppGroupPolicy:
 
     @pytest.mark.asyncio
     async def test_mention_degrades_when_bot_identity_unknown(self):
-        """WhatsApp mention mode still fails loud when bridge status never reported bot identity."""
+        """WhatsApp mention mode emits a visible degraded notice when identity is unknown."""
         ch = _whatsapp_channel(group_policy="mention")
         ch._bot_identity_tokens.clear()
         ch._handle_message = AsyncMock()
+        ch._publish_feedback = AsyncMock()
         raw = json.dumps({
             "type": "message",
             "sender": "120363xxx@g.us",
@@ -460,14 +461,20 @@ class TestWhatsAppGroupPolicy:
         })
         await ch._handle_bridge_message(raw)
         ch._handle_message.assert_not_awaited()
+        ch._publish_feedback.assert_awaited_once()
+        notice_chat_id, notice_text = ch._publish_feedback.await_args.args
+        assert notice_chat_id == "120363xxx@g.us"
+        assert "degraded" in notice_text.lower()
+        assert "identity is unavailable" in notice_text.lower()
         assert ch._mention_warned is True
 
     @pytest.mark.asyncio
     async def test_mention_warns_only_once(self):
-        """Warn-once flag prevents log spam."""
+        """Warn-once flag prevents repeated degraded notices."""
         ch = _whatsapp_channel(group_policy="mention")
         ch._bot_identity_tokens.clear()
         ch._handle_message = AsyncMock()
+        ch._publish_feedback = AsyncMock()
         raw = json.dumps({
             "type": "message",
             "sender": "120363xxx@g.us",
@@ -480,6 +487,7 @@ class TestWhatsAppGroupPolicy:
         await ch._handle_bridge_message(raw)
         assert ch._mention_warned is True
         ch._handle_message.assert_not_awaited()
+        ch._publish_feedback.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_dm_bypasses_group_policy(self):
@@ -659,14 +667,36 @@ class TestFeishuGroupPolicy:
 
     @pytest.mark.asyncio
     async def test_mention_degrades_when_bot_open_id_unknown(self):
-        """When bot open_id is unavailable, mention mode degrades to disabled."""
+        """When bot open_id is unavailable, mention mode emits a visible degraded notice."""
         ch = _feishu_channel(group_policy="mention", bot_open_id=None)
         ch._handle_message = AsyncMock()
         ch._add_reaction = AsyncMock()
+        ch._publish_feedback = AsyncMock()
         data = _feishu_message_event(chat_type="group")
         await ch._on_message(data)
         ch._handle_message.assert_not_awaited()
+        ch._add_reaction.assert_not_awaited()
+        ch._publish_feedback.assert_awaited_once()
+        notice_chat_id, notice_text = ch._publish_feedback.await_args.args
+        assert notice_chat_id == "oc_test123"
+        assert "degraded" in notice_text.lower()
+        assert "open_id is unavailable" in notice_text.lower()
         assert ch._mention_warned is True
+
+    @pytest.mark.asyncio
+    async def test_mention_warns_only_once(self):
+        """Warn-once flag prevents repeated degraded notices."""
+        ch = _feishu_channel(group_policy="mention", bot_open_id=None)
+        ch._handle_message = AsyncMock()
+        ch._add_reaction = AsyncMock()
+        ch._publish_feedback = AsyncMock()
+        data1 = _feishu_message_event(chat_type="group", message_id="msg_001")
+        data2 = _feishu_message_event(chat_type="group", message_id="msg_002")
+        await ch._on_message(data1)
+        await ch._on_message(data2)
+        ch._handle_message.assert_not_awaited()
+        ch._add_reaction.assert_not_awaited()
+        ch._publish_feedback.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_dm_bypasses_group_policy(self):

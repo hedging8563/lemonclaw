@@ -406,9 +406,21 @@ class FeishuChannel(BaseChannel):
         """
         if not self._client or not Emoji:
             return
-        
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+
+    async def _publish_mention_degraded_notice(self, chat_id: str) -> None:
+        if self._mention_warned:
+            return
+        self._mention_warned = True
+        notice = (
+            "Mention-gated group handling is degraded right now because Feishu bot open_id "
+            "is unavailable. I'm ignoring group messages until bot identity becomes available "
+            "or mention gating is disabled."
+        )
+        logger.warning(notice)
+        await self._publish_feedback(chat_id, notice)
     
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -840,13 +852,7 @@ class FeishuChannel(BaseChannel):
                     else:
                         # Bot open_id unknown (API call failed at startup).
                         # Cannot do precise mention detection — be safe and ignore.
-                        if not self._mention_warned:
-                            logger.warning(
-                                "Feishu group mention requirement needs bot open_id "
-                                "(failed to fetch at startup). Group messages will be ignored "
-                                "until bot open_id is available or mention requirement is disabled.",
-                            )
-                            self._mention_warned = True
+                        await self._publish_mention_degraded_notice(chat_id)
                         return
                 if not self._group_policy_allows(
                     policy,

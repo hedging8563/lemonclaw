@@ -77,6 +77,18 @@ class WhatsAppChannel(BaseChannel):
         }
         text_lower = (content or "").lower()
         return any(f"@{token}" in text_lower for token in phone_tokens)
+
+    async def _publish_mention_degraded_notice(self, chat_id: str) -> None:
+        if self._mention_warned:
+            return
+        self._mention_warned = True
+        notice = (
+            "Mention-gated group handling is degraded right now because WhatsApp bridge "
+            "identity is unavailable. I'm ignoring group messages until the bridge reports "
+            "the connected account or mention gating is disabled."
+        )
+        logger.warning(notice)
+        await self._publish_feedback(chat_id, notice)
     
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -187,12 +199,7 @@ class WhatsAppChannel(BaseChannel):
                     if self._bot_identity_tokens:
                         bot_mentioned = self._group_message_mentions_bot(data, content)
                     else:
-                        if not self._mention_warned:
-                            logger.warning(
-                                "WhatsApp group mention requirement needs bot account identity from bridge status. "
-                                "Group messages will be ignored until the bridge reports the connected account or mention requirement is disabled.",
-                            )
-                            self._mention_warned = True
+                        await self._publish_mention_degraded_notice(sender)
                         return
                 if not self._group_policy_allows(
                     policy,
