@@ -786,10 +786,13 @@ def gateway(
     # Create config watcher (started later in run())
     from lemonclaw.config.watcher import ConfigWatcher
     from lemonclaw.config.loader import get_config_path
+    from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
     from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
+    from lemonclaw.gateway.runtime_state import load_runtime_state, mark_runtime_notification_sent
     from lemonclaw.ledger.delivery import create_outbox_delivery_handler
     from lemonclaw.ledger.outbox import OutboxDispatcher
-    config_watcher = ConfigWatcher(get_config_path(), provider, agent_loop=agent)
+    runtime_config_path = get_config_path()
+    config_watcher = ConfigWatcher(runtime_config_path, provider, agent_loop=agent)
     outbox_dispatcher = OutboxDispatcher(
         agent.ledger,
         create_outbox_delivery_handler(
@@ -821,7 +824,7 @@ def gateway(
         activity_bus=activity_bus,
         outbox_dispatcher=outbox_dispatcher,
         trigger_runtime=trigger_runtime,
-        config_path=get_config_path(),
+        config_path=runtime_config_path,
         config_watcher=config_watcher,
     )
 
@@ -852,6 +855,24 @@ def gateway(
         mem_backup = MemoryBackup(config.workspace_path)
         await mem_backup.start()
 
+        async def _startup_runtime_notice():
+            await asyncio.sleep(1.5)
+            state = load_runtime_state(runtime_config_path)
+            if str(state.get("status") or "") != "healthy":
+                return
+            targets = list(state.get("notify_targets") or [])
+            completed_at_ms = int(state.get("last_restart_completed_at_ms") or 0)
+            sent_at_ms = int(((state.get("notifications") or {}).get("healthy")) or 0)
+            if not targets or not completed_at_ms or sent_at_ms == completed_at_ms:
+                return
+            sent = await broadcast_restart_notice(agent, stage="healthy", state=state)
+            if sent:
+                mark_runtime_notification_sent(
+                    runtime_config_path,
+                    stage="healthy",
+                    at_ms=completed_at_ms,
+                )
+
         # Run agent, channels, HTTP server, and shutdown watcher concurrently
         async def _shutdown_watcher():
             await shutdown.wait()
@@ -872,6 +893,7 @@ def gateway(
                 agent.run(),
                 channels.start_all(),
                 http_server.serve(),
+                _startup_runtime_notice(),
                 _shutdown_watcher(),
             )
         except asyncio.CancelledError:

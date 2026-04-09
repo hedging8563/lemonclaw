@@ -235,6 +235,22 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "- Pairing {channel}: approved={approved}, pending={pending}, owner={owner}",
         "zh": "- 配对 {channel}：approved={approved}，pending={pending}，owner={owner}",
     },
+    "runtime_notice_submitted": {
+        "en": "Runtime restart submitted. Planned restart fields: {fields}. I will report again when restart begins and when the runtime is healthy.",
+        "zh": "运行时重启已提交。计划重启字段：{fields}。重启开始和恢复健康后我会继续汇报。",
+    },
+    "runtime_notice_restarting": {
+        "en": "Runtime restart is now in progress. Fields: {fields}.",
+        "zh": "运行时现在开始重启。字段：{fields}。",
+    },
+    "runtime_notice_healthy": {
+        "en": "Runtime restart completed successfully. Current version: {version}.",
+        "zh": "运行时重启已成功完成。当前版本：{version}。",
+    },
+    "runtime_notice_failed": {
+        "en": "Runtime apply/restart failed. Errors: {errors}",
+        "zh": "运行时应用/重启失败。错误：{errors}",
+    },
     "git_auth_usage": {
         "en": (
             "Git auth commands:\n"

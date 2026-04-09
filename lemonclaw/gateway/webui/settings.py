@@ -23,11 +23,14 @@ from lemonclaw.channels.whatsapp_bridge_runtime import (
     restart_whatsapp_pairing,
 )
 from lemonclaw.gateway.runtime_state import (
+    derive_recent_notify_targets,
     load_runtime_state,
     mark_restart_in_progress,
+    mark_runtime_notification_sent,
     mark_restart_requested,
     mark_runtime_failed,
 )
+from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
 from lemonclaw.gateway.webui.auth import COOKIE_NAME, verify_session_cookie
 
 if TYPE_CHECKING:
@@ -949,11 +952,23 @@ def get_settings_routes(
             if runtime_status != "failed":
                 runtime_status = "submitted"
             logger.info("Settings apply: restart required for {}", restart_fields)
+            notify_targets = derive_recent_notify_targets(getattr(agent_loop, "sessions", None))
             restart_state = mark_restart_requested(
                 config_path,
                 restart_fields=restart_fields,
                 runtime_errors=runtime_errors,
+                notify_targets=notify_targets,
             )
+            if notify_targets and agent_loop is not None:
+                async def _notify_submitted() -> None:
+                    sent = await broadcast_restart_notice(agent_loop, stage="submitted", state=restart_state)
+                    if sent:
+                        mark_runtime_notification_sent(
+                            config_path,
+                            stage="submitted",
+                            at_ms=int(restart_state.get("last_restart_requested_at_ms") or 0),
+                        )
+                asyncio.create_task(_notify_submitted())
             # Return response first, then exit — K8s/systemd will restart
             resp = _json({
                 "reloaded": True,
@@ -971,9 +986,20 @@ def get_settings_routes(
 
             def _trigger_restart() -> None:
                 try:
-                    mark_restart_in_progress(config_path)
+                    next_state = mark_restart_in_progress(config_path)
                 except Exception:
                     logger.exception("Failed to update runtime restart-in-progress state")
+                    next_state = restart_state
+                if notify_targets and agent_loop is not None:
+                    async def _notify_restarting() -> None:
+                        sent = await broadcast_restart_notice(agent_loop, stage="restarting", state=next_state)
+                        if sent:
+                            mark_runtime_notification_sent(
+                                config_path,
+                                stage="restarting",
+                                at_ms=int(next_state.get("last_restart_started_at_ms") or 0),
+                            )
+                    asyncio.create_task(_notify_restarting())
                 os.kill(os.getpid(), signal.SIGTERM)
 
             asyncio.get_running_loop().call_later(0.5, _trigger_restart)
@@ -986,6 +1012,19 @@ def get_settings_routes(
                 runtime_errors=runtime_errors,
                 source="settings_apply",
             )
+            notify_targets = derive_recent_notify_targets(getattr(agent_loop, "sessions", None))
+            if notify_targets:
+                restart_state["notify_targets"] = notify_targets
+                if agent_loop is not None:
+                    async def _notify_failed() -> None:
+                        sent = await broadcast_restart_notice(agent_loop, stage="failed", state=restart_state)
+                        if sent:
+                            mark_runtime_notification_sent(
+                                config_path,
+                                stage="failed",
+                                at_ms=int(restart_state.get("updated_at_ms") or 0),
+                            )
+                    asyncio.create_task(_notify_failed())
 
         return _maybe_refresh(request, _json({
             "reloaded": runtime_status == "healthy",

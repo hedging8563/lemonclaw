@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -40,12 +41,59 @@ def _append_history(payload: dict[str, Any], event: dict[str, Any]) -> None:
     payload["history"] = history[-20:]
 
 
+def _derive_chat_id_from_session_key(channel: str, session_key: str) -> str:
+    prefix = f"{channel}:"
+    if session_key.startswith(prefix):
+        remainder = session_key[len(prefix):]
+        return remainder.split(":", 1)[0] if ":" in remainder else remainder
+    return session_key.split(":", 1)[-1] if ":" in session_key else session_key
+
+
+def derive_recent_notify_targets(
+    session_manager: Any | None,
+    *,
+    max_targets: int = 3,
+    max_age_s: int = 2 * 60 * 60,
+) -> list[dict[str, str]]:
+    if session_manager is None or not hasattr(session_manager, "list_sessions"):
+        return []
+    now = datetime.now()
+    cutoff = now - timedelta(seconds=max_age_s)
+    targets: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in session_manager.list_sessions():
+        key = str(item.get("key") or "").strip()
+        if not key or ":" not in key:
+            continue
+        channel = key.split(":", 1)[0]
+        if channel in {"webui", "system", "internal", "cli", "agentbridge"}:
+            continue
+        updated_at = str(item.get("updated_at") or "").strip()
+        if updated_at:
+            try:
+                parsed = datetime.fromisoformat(updated_at)
+                if parsed < cutoff:
+                    continue
+            except ValueError:
+                pass
+        chat_id = _derive_chat_id_from_session_key(channel, key)
+        dedupe = (channel, chat_id)
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        targets.append({"session_key": key, "channel": channel, "chat_id": chat_id})
+        if len(targets) >= max_targets:
+            break
+    return targets
+
+
 def mark_restart_requested(
     config_path: Path,
     *,
     restart_fields: list[str],
     runtime_errors: list[str],
     source: str = "settings_apply",
+    notify_targets: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     now_ms = int(time.time() * 1000)
     payload = load_runtime_state(config_path)
@@ -59,6 +107,7 @@ def mark_restart_requested(
         "restart_fields": list(restart_fields),
         "runtime_errors": list(runtime_errors),
         "source": source,
+        "notify_targets": list(notify_targets or payload.get("notify_targets") or []),
     })
     _append_history(payload, {
         "state": "submitted",
@@ -115,6 +164,20 @@ def mark_runtime_failed(
         "source": source,
         "runtime_errors": list(runtime_errors),
     })
+    return _write_runtime_state(config_path, payload)
+
+
+def mark_runtime_notification_sent(
+    config_path: Path,
+    *,
+    stage: str,
+    at_ms: int,
+) -> dict[str, Any]:
+    payload = load_runtime_state(config_path)
+    notifications = dict(payload.get("notifications") or {})
+    notifications[stage] = at_ms
+    payload["notifications"] = notifications
+    payload["updated_at_ms"] = int(time.time() * 1000)
     return _write_runtime_state(config_path, payload)
 
 

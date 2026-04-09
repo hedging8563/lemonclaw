@@ -5,6 +5,7 @@ from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.whatsapp_bridge_runtime import WhatsAppBridgeError
 from lemonclaw.config.loader import load_config, save_config
 from lemonclaw.config.schema import Config, GitAuthProfileConfig, GovernanceSandboxProfileConfig, GovernanceSecretProfileConfig
+from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.runtime_state import load_runtime_state
 from lemonclaw.gateway.webui.settings import _RESTART_FIELDS
@@ -790,6 +791,68 @@ def test_apply_settings_persists_failed_runtime_state(monkeypatch, tmp_path):
     state = load_runtime_state(config_path)
     assert state['status'] == 'failed'
     assert any('tool refresh failed' in item for item in state['runtime_errors'])
+
+
+def test_apply_settings_restart_state_tracks_recent_notify_targets(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create('telegram:123')
+    session.add_message('user', 'hello')
+    sessions.save(session)
+
+    class FakeAgentLoop:
+        def __init__(self) -> None:
+            self.sessions = sessions
+            self.bus = MessageBus()
+
+        async def refresh_runtime_config(self, config, *, changed_paths):
+            return {}
+
+        def update_defaults(self, **kwargs):
+            return None
+
+    kill_calls = []
+    monkeypatch.setattr('os.kill', lambda pid, sig: kill_calls.append((pid, sig)))
+
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=FakeAgentLoop())
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.mcp_servers'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['restart_state']['notify_targets'][0]['session_key'] == 'telegram:123'
+    assert body['restart_state']['notify_targets'][0]['channel'] == 'telegram'
+    assert body['restart_state']['notify_targets'][0]['chat_id'] == '123'
+
+
+@pytest.mark.asyncio
+async def test_broadcast_restart_notice_publishes_to_recent_session(tmp_path):
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create('telegram:123')
+    session.metadata['lang'] = 'zh'
+    sessions.save(session)
+    bus = MessageBus()
+
+    fake_loop = type('Loop', (), {'sessions': sessions, 'bus': bus})()
+    sent = await broadcast_restart_notice(
+        fake_loop,
+        stage='submitted',
+        state={
+            'restart_fields': ['tools.mcp_servers'],
+            'notify_targets': [{'session_key': 'telegram:123', 'channel': 'telegram', 'chat_id': '123'}],
+        },
+    )
+
+    assert sent == 1
+    outbound = await bus.consume_outbound()
+    assert outbound.channel == 'telegram'
+    assert outbound.chat_id == '123'
+    assert '重启已提交' in outbound.content
 
 
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):
