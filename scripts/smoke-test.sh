@@ -33,42 +33,53 @@ chat_raw() {
     -d "'$(printf '{"message":"%s","session":"%s","timeout":%d}' "$1" "$2" "$T")'" 2>/dev/null
 }
 chat() { chat_raw "$1" "$2" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('response',''))" 2>/dev/null; }
+ready_raw() {
+  $K curl -s --max-time $T http://localhost:18789/readyz 2>/dev/null
+}
+ready() {
+  ready_raw | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('status',''))" 2>/dev/null
+}
 
 echo ""
 echo "======= LemonClaw Smoke Test ======="
 echo ""
 
 # 1
-echo "1. Health"
+echo "1. Readiness"
+R=$(ready)
+[[ "$R" == "ready" ]] && ok "readyz" || ng "readyz" "$(ready_raw)"
+
+# 2
+echo "2. Health"
 R=$($K curl -s http://localhost:18789/health 2>/dev/null)
 echo "$R" | grep -q '"ok"' && ok "health" || ng "health" "$R"
 
-# 2
-echo "2. /help"
+# 3
+echo "3. /help"
 C=$(chat "/help" "s-help")
 echo "$C" | grep -qi "lemonclaw" && ok "/help" || ng "/help" "${C:0:60}"
 
-# 3
-echo "3. /usage"
+# 4
+echo "4. /usage"
 C=$(chat "/usage" "s-usage")
 echo "$C" | grep -qi "token" && ok "/usage" || ng "/usage" "${C:0:60}"
 
-# 4
-echo "4. Chinese"
+# 5
+echo "5. Chinese"
 C=$(chat "你好" "s-zh")
 if [[ -z "$C" ]]; then ng "Chinese" "empty"
 elif python3 -c "exit(0 if any('\u4e00'<=c<='\u9fff' for c in '''$C''') else 1)" 2>/dev/null; then ok "Chinese (${#C}c)"
 else ng "Chinese" "${C:0:60}"; fi
 
-# 5
-echo "5. English"
+# 6
+echo "6. English"
 C=$(chat "What is 1+1? One word." "s-en")
 if [[ -z "$C" ]]; then ng "English" "empty"
 elif python3 -c "exit(1 if any('\u4e00'<=c<='\u9fff' for c in '''$C''') else 0)" 2>/dev/null; then ok "English"
 else ng "English" "${C:0:60}"; fi
 
-# 6 (last - may trigger tool calls)
-echo "6. Anti-hallucination"
+# 7 (last - may trigger tool calls)
+echo "7. Anti-hallucination"
 C=$(chat "nanobot skill install怎么用" "s-ah")
 if [[ -z "$C" ]]; then sk "anti-halluc" "empty"
 elif echo "$C" | grep -qi "nanobot skill install"; then ng "anti-halluc" "nanobot cmd"

@@ -4,7 +4,7 @@ Runs alongside the agent loop and channel manager inside the
 ``lemonclaw gateway`` command.  Provides:
 
 - GET /health   — liveness probe (always 200 if process alive)
-- GET /readyz   — readiness probe (checks channel connectivity)
+- GET /readyz   — readiness probe (checks channel availability and restart state)
 - GET /api/status — detailed instance status (requires auth_token)
 """
 
@@ -285,7 +285,11 @@ def create_app(
             )
         except Exception:
             logger.exception("Failed to update runtime healthy state")
-    set_context(version=runtime.version, channel_manager=runtime.channel_manager)
+    set_context(
+        version=runtime.version,
+        channel_manager=runtime.channel_manager,
+        config_path=runtime.config_path,
+    )
 
     routes = [
         Route("/health", liveness, methods=["GET"]),
