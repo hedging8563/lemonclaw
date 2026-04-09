@@ -32,6 +32,7 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         self._mention_warned = False  # Only warn once when mention mode lacks enough bridge identity
         self._bot_identity_tokens: set[str] = set()
+        self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
 
     @staticmethod
     def _jid_tokens(value: str) -> set[str]:
