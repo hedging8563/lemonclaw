@@ -182,7 +182,7 @@ def test_governance_marks_k8s_restart_as_destructive(tmp_path):
         "capability_overrides": {},
     })()
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
-    token = runtime.issue_token(task_id="task_1")
+    token = runtime.issue_token(task_id="task_1", allowed_capabilities=["k8s.rollout.restart"])
     decision = runtime.authorize(capability_id="k8s.rollout.restart", tool_name="k8s", token=token, mode="operator")
     assert decision.capability.risk_level.value == "destructive"
 
@@ -198,6 +198,6 @@ def test_governance_marks_k8s_scale_as_destructive(tmp_path):
         "capability_overrides": {},
     })()
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
-    token = runtime.issue_token(task_id="task_1")
+    token = runtime.issue_token(task_id="task_1", allowed_capabilities=["k8s.scale"])
     decision = runtime.authorize(capability_id="k8s.scale", tool_name="k8s", token=token, mode="operator")
     assert decision.capability.risk_level.value == "destructive"

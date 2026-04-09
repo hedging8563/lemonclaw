@@ -128,6 +128,14 @@ class ToolRegistry:
             task_id = str(call_context.get("_task_id") or "")
             tenant_id = str(call_context.get("_tenant_id") or "")
             actor_identity = str(call_context.get("_actor_identity") or call_context.get("_agent_id") or "agent")
+            if self._governance and capability_token is None:
+                capability_token = self._governance.issue_token(
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                    mode=mode,
+                    allowed_capabilities=[capability_id],
+                )
+                call_context["_capability_token"] = capability_token
             if self._ledger and task_id:
                 summary = json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500]
                 replayable = tool.is_replayable(capability_id)

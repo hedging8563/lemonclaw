@@ -28,7 +28,7 @@ from lemonclaw.channels.delivery_context import attach_delivery_context
 from lemonclaw.channels.session_context import attach_session_context
 from lemonclaw.channels.session_keys import build_agentbridge_session_key
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
-from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, serialize_ui_message
+from lemonclaw.gateway.webui.message_schema import extract_message_media_paths, neutralize_media_tokens, serialize_ui_message
 from lemonclaw.providers.catalog import resolve_model_id
 from lemonclaw.providers.registry import provider_family_for_model
 
@@ -189,13 +189,37 @@ def get_agentbridge_routes(
 
     def _extract_message_grant_paths(message: dict[str, Any]) -> list[str]:
         paths: list[str] = []
-        for raw_path in extract_message_media_paths(message):
+
+        def _append_resolved(raw_path: Any) -> None:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                return
             try:
                 resolved = Path(raw_path).expanduser().resolve(strict=False)
             except OSError:
-                continue
+                return
             paths.append(str(resolved))
-        return paths
+
+        media = message.get("media")
+        if isinstance(media, list):
+            for item in media:
+                if isinstance(item, str):
+                    _append_resolved(item)
+                elif isinstance(item, dict):
+                    _append_resolved(item.get("path"))
+
+        role = str(message.get("role") or "")
+        if role != "user":
+            for raw_path in extract_message_media_paths({"content": message.get("content")}):
+                _append_resolved(raw_path)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            deduped.append(path)
+        return deduped
 
     def _path_allowed_for_session(file_path: Path, session_key: str) -> bool:
         _cleanup_session_media_grants()
@@ -415,7 +439,7 @@ def get_agentbridge_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
 
-        message = str(body.get("message") or "").strip()
+        message = neutralize_media_tokens(str(body.get("message") or "").strip())
         if not message:
             return _json({"error": "message is required"}, 400)
 
@@ -505,7 +529,7 @@ def get_agentbridge_routes(
         except Exception:
             return _json({"error": "Invalid JSON"}, 400)
 
-        message = str(body.get("message") or "").strip()
+        message = neutralize_media_tokens(str(body.get("message") or "").strip())
         if not message:
             return _json({"error": "message is required"}, 400)
 

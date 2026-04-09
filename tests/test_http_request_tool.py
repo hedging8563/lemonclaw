@@ -140,6 +140,6 @@ def test_governance_marks_http_write_as_external_write(tmp_path):
         "capability_overrides": {},
     })()
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
-    token = runtime.issue_token(task_id="task_1")
+    token = runtime.issue_token(task_id="task_1", allowed_capabilities=["http.write"])
     decision = runtime.authorize(capability_id="http.write", tool_name="http_request", token=token, mode="operator")
     assert decision.capability.risk_level.value == "external_write"

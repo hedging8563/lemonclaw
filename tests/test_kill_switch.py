@@ -26,7 +26,7 @@ def test_global_kill_switch_blocks_execution(tmp_path: Path):
     cfg.kill_switch_file = str(kill_path)
     cfg.audit_log_path = str(audit_path)
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
-    token = runtime.issue_token(task_id="task_1")
+    token = runtime.issue_token(task_id="task_1", allowed_capabilities=["tool.read_file.default"])
 
     decision = runtime.authorize(
         capability_id="tool.read_file.default",

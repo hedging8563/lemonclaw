@@ -63,6 +63,12 @@ def extract_message_media_paths(raw: dict[str, Any]) -> list[str]:
     return out
 
 
+def neutralize_media_tokens(content: str) -> str:
+    if not isinstance(content, str) or not content:
+        return content
+    return _MEDIA_TOKEN_RE.sub(lambda match: f"［{match.group(0)[1:-1]}］", content)
+
+
 def media_url(path: str, session_key: str | None = None) -> str:
     if path.startswith(("http://", "https://")):
         return path

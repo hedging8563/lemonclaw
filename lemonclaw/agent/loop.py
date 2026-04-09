@@ -1928,11 +1928,6 @@ class AgentLoop:
                 else {}
             ),
             "_message_turn_state": message_turn_state,
-            "_capability_token": self.governance.issue_token(
-                task_id=str(metadata.get("_task_id")),
-                tenant_id=str(metadata.get("_tenant_id", "")),
-                mode=str(metadata.get("_mode", "chat")),
-            ),
         }
         outbound_sink = metadata.get("_outbound_sink")
         if outbound_sink:

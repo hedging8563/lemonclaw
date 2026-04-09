@@ -48,7 +48,20 @@ def test_issue_token_defaults(tmp_path: Path):
 
     assert token.task_id == "task_1"
     assert token.mode == "chat"
-    assert token.allows("tool.read_file.default")
+    assert token.allowed_capabilities == []
+    assert token.approval_state == "pending"
+
+
+def test_issue_token_scoped_auto_capability_defaults_to_approved(tmp_path: Path):
+    cfg = DummyConfig()
+    cfg.kill_switch_file = str(tmp_path / "governance.json")
+    cfg.audit_log_path = str(tmp_path / "audit.jsonl")
+    runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
+
+    token = runtime.issue_token(task_id="task_1", mode="chat", allowed_capabilities=["git.read"])
+
+    assert token.allowed_capabilities == ["git.read"]
+    assert token.approval_state == "approved"
 
 
 def test_authorize_denies_by_override(tmp_path: Path):
@@ -57,7 +70,7 @@ def test_authorize_denies_by_override(tmp_path: Path):
     cfg.audit_log_path = str(tmp_path / "audit.jsonl")
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
 
-    token = runtime.issue_token(task_id="task_1", mode="operator")
+    token = runtime.issue_token(task_id="task_1", mode="operator", allowed_capabilities=["dangerous.exec"])
     decision = runtime.authorize(
         capability_id="dangerous.exec",
         tool_name="exec",
@@ -68,6 +81,41 @@ def test_authorize_denies_by_override(tmp_path: Path):
     assert decision.allowed is False
     assert decision.capability.approval_policy == ApprovalPolicy.DENY
     assert decision.capability.risk_level == RiskLevel.DESTRUCTIVE
+
+
+def test_authorize_requires_explicit_approval_for_confirm_gated_capabilities(tmp_path: Path):
+    cfg = DummyConfig()
+    cfg.kill_switch_file = str(tmp_path / "governance.json")
+    cfg.audit_log_path = str(tmp_path / "audit.jsonl")
+    runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
+
+    pending_token = runtime.issue_token(
+        task_id="task_1",
+        mode="operator",
+        allowed_capabilities=["exec.system"],
+    )
+    denied = runtime.authorize(
+        capability_id="exec.system",
+        tool_name="exec",
+        token=pending_token,
+        mode="operator",
+    )
+    assert denied.allowed is False
+    assert denied.reason == "approval required"
+
+    approved_token = runtime.issue_token(
+        task_id="task_1",
+        mode="operator",
+        allowed_capabilities=["exec.system"],
+        approval_state="approved",
+    )
+    approved = runtime.authorize(
+        capability_id="exec.system",
+        tool_name="exec",
+        token=approved_token,
+        mode="operator",
+    )
+    assert approved.allowed is True
 
 
 def test_governance_overview_surfaces_profiles_and_unbound_counts(tmp_path: Path):
@@ -94,7 +142,7 @@ def test_record_audit_includes_governance_fields(tmp_path: Path):
     cfg.kill_switch_file = str(tmp_path / "governance.json")
     cfg.audit_log_path = str(tmp_path / "audit.jsonl")
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
-    token = runtime.issue_token(task_id="task_1", mode="operator")
+    token = runtime.issue_token(task_id="task_1", mode="operator", allowed_capabilities=["http.write"])
     decision = runtime.authorize(
         capability_id="http.write",
         tool_name="http_request",
@@ -134,7 +182,12 @@ def test_validate_tool_call_enforces_bound_exec_sandbox(tmp_path: Path):
     cfg.audit_log_path = str(tmp_path / "audit.jsonl")
     runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
     tool = ExecTool(timeout=120)
-    token = runtime.issue_token(task_id="task_1", mode="operator")
+    token = runtime.issue_token(
+        task_id="task_1",
+        mode="operator",
+        allowed_capabilities=["exec.system"],
+        approval_state="approved",
+    )
     decision = runtime.authorize(
         capability_id="exec.system",
         tool_name="exec",

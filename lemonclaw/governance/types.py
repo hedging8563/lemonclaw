@@ -77,7 +77,7 @@ class CapabilityToken:
     tenant_id: str = ""
     mode: str = "chat"
     expires_at: float = 0.0
-    allowed_capabilities: list[str] = field(default_factory=lambda: ["*"])
+    allowed_capabilities: list[str] = field(default_factory=list)
     autonomy_cap: AutonomyCap = AutonomyCap.L1
     cost_ceiling_usd: float | None = None
     approval_state: str = "approved"

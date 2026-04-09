@@ -20,13 +20,14 @@ def issue_capability_token(
     approval_state: str = "approved",
     kill_switch_epoch: int = 0,
 ) -> CapabilityToken:
+    normalized_capabilities = [str(item).strip() for item in list(allowed_capabilities or []) if str(item).strip()]
     return CapabilityToken(
         token_id=f"ct_{secrets.token_hex(6)}",
         task_id=task_id,
         tenant_id=tenant_id,
         mode=mode,
         expires_at=time.time() + max(ttl_seconds, 1),
-        allowed_capabilities=allowed_capabilities or ["*"],
+        allowed_capabilities=normalized_capabilities,
         autonomy_cap=autonomy_cap,
         cost_ceiling_usd=cost_ceiling_usd,
         approval_state=approval_state,

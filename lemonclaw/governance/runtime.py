@@ -298,16 +298,19 @@ class GovernanceRuntime:
         tenant_id: str = "",
         mode: str = "chat",
         allowed_capabilities: list[str] | None = None,
+        approval_state: str | None = None,
     ) -> CapabilityToken:
         state = load_kill_switch_state(self._kill_switch_path)
+        normalized_capabilities = self._normalize_allowed_capabilities(allowed_capabilities)
         return issue_capability_token(
             task_id=task_id,
             tenant_id=tenant_id,
             mode=mode,
             ttl_seconds=self.token_ttl_seconds,
-            allowed_capabilities=allowed_capabilities,
+            allowed_capabilities=normalized_capabilities,
             autonomy_cap=self.default_autonomy_cap,
             cost_ceiling_usd=self._task_budget,
+            approval_state=approval_state or self._default_token_approval_state(normalized_capabilities),
             kill_switch_epoch=int(state.get("epoch", 0)),
         )
 
@@ -660,6 +663,21 @@ class GovernanceRuntime:
             supports_cancel=tool_name in {"browser", "coding", "exec"},
             supports_resume=False,
         )
+
+    @staticmethod
+    def _normalize_allowed_capabilities(allowed_capabilities: list[str] | None) -> list[str]:
+        return [str(item).strip() for item in list(allowed_capabilities or []) if str(item).strip()]
+
+    def _default_token_approval_state(self, allowed_capabilities: list[str]) -> str:
+        if not allowed_capabilities or "*" in allowed_capabilities:
+            return "pending"
+        for capability_id in allowed_capabilities:
+            defaults = _CAPABILITY_SPECS.get(capability_id, {})
+            tool_name = str(defaults.get("tool_name") or capability_id.split(".", 1)[0])
+            definition = self._resolve_definition(capability_id, tool_name)
+            if definition.approval_policy == ApprovalPolicy.REQUIRE_CONFIRM:
+                return "pending"
+        return "approved"
 
     def _iter_configured_secret_values(self) -> list[str]:
         values: list[str] = []
