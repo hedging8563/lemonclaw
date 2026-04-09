@@ -540,6 +540,41 @@ def test_safe_resume_execute_api_retries_failed_outbox(tmp_path):
     assert updated["status"] == "retrying"
 
 
+def test_safe_resume_execute_api_retries_expired_outbox(tmp_path):
+    app, ledger = _build_app(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="telegram:123",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="resume expired outbox",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="expired")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="expired",
+        attempts=1,
+        error="expired by retention policy",
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/tasks/task_1/resume/execute")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate"]["recommended_action"] in {"wait_outbox", "manual_resume"}
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+
+
 def test_safe_resume_execute_api_uses_agent_loop_resume_executor_when_available(tmp_path):
     ledger = TaskLedger(tmp_path, backend="json")
     agent_loop = SimpleNamespace(

@@ -748,6 +748,44 @@ def test_task_ledger_execute_safe_resume_retries_failed_outbox(tmp_path: Path):
     assert task["metadata"]["recovery_history"][-1]["action"] == "safe_resume_execute"
 
 
+def test_task_ledger_execute_safe_resume_retries_expired_outbox(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="resume expired outbox",
+        status="waiting",
+        current_stage="waiting_outbox",
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="notify")
+    ledger.finish_step(step, status="waiting_outbox", error="delivery expired")
+    event = ledger.enqueue_outbox(
+        task_id="task_1",
+        step_id=step.step_id,
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+        status="expired",
+        attempts=1,
+        error="expired by retention policy",
+    )
+
+    candidate = ledger.execute_safe_resume("task_1", source="webui_safe_resume_execute")
+
+    assert candidate is not None
+    updated = ledger.read_outbox_event(event["event_id"])
+    assert updated is not None
+    assert updated["status"] == "retrying"
+    task = ledger.read_task("task_1")
+    assert task is not None
+    history = task["metadata"]["recovery_history"][-1]
+    assert history["action"] == "safe_resume_execute"
+    assert history["details"]["expired_outbox_count"] == 1
+
+
 def test_step_replayable_flag_persisted(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(

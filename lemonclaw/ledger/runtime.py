@@ -89,6 +89,60 @@ def build_task_resume_context(
 class TaskLedgerSharedMixin:
     """Shared ledger behavior that is backend-agnostic."""
 
+    @staticmethod
+    def _build_retry_outbox_reason(*, failed_count: int, expired_count: int) -> str:
+        if failed_count and expired_count:
+            return f"{failed_count} failed and {expired_count} expired outbox event(s) can be retried safely"
+        if failed_count:
+            return f"{failed_count} failed outbox event(s) can be retried safely"
+        return f"{expired_count} expired outbox event(s) can be retried safely"
+
+    def _retryable_outbox_events(
+        self,
+        outbox_events: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
+        expired_outbox = [event for event in outbox_events if str(event.get("status") or "") == "expired"]
+        retryable_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_FAILURE_STATUSES]
+        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
+        return failed_outbox, expired_outbox, retryable_outbox, open_outbox
+
+    def _execute_retry_outbox_recovery(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        failed_count: int,
+        expired_count: int,
+    ) -> dict[str, Any] | None:
+        retried = 0
+        for event in self.materialize_outbox_events_for_task(task_id):
+            if str(event.get("status") or "") not in OUTBOX_FAILURE_STATUSES:
+                continue
+            updated = self.request_outbox_retry(str(event["event_id"]), source=source)
+            if updated is not None:
+                retried += 1
+        task = self.read_task(task_id)
+        if task:
+            metadata = dict(task.get("metadata") or {})
+            self._append_recovery_history(
+                metadata,
+                source=source,
+                action="safe_resume_execute",
+                reason=self._build_retry_outbox_reason(
+                    failed_count=failed_count,
+                    expired_count=expired_count,
+                ),
+                details={
+                    "task_id": task_id,
+                    "retried_outbox_count": retried,
+                    "failed_outbox_count": failed_count,
+                    "expired_outbox_count": expired_count,
+                },
+            )
+            self.update_task(task_id, metadata=metadata)
+        return self.build_resume_candidate(task_id)
+
     def materialize_steps(self, task_id: str) -> list[dict[str, Any]]:
         """Collapse step event history into the latest state per step_id."""
         latest_by_step: dict[str, dict[str, Any]] = {}
@@ -721,23 +775,20 @@ class TaskLedgerSharedMixin:
         current_stage = str(task.get("current_stage") or "")
         resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
         resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
-        failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
-        expired_outbox = [event for event in outbox_events if str(event.get("status") or "") == "expired"]
-        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
+        failed_outbox, expired_outbox, retryable_outbox, open_outbox = self._retryable_outbox_events(outbox_events)
         replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and step.get("replayable", True)]
         non_replayable_failed = [step for step in steps if str(step.get("status") or "") == "failed" and not step.get("replayable", True)]
 
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
-        if expired_outbox:
+        if retryable_outbox:
             recommended_action = "retry_outbox"
             safe_to_execute = True
-            reason = f"{len(expired_outbox)} expired outbox event(s) can be retried manually"
-        elif failed_outbox:
-            recommended_action = "retry_outbox"
-            safe_to_execute = True
-            reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
+            reason = self._build_retry_outbox_reason(
+                failed_count=len(failed_outbox),
+                expired_count=len(expired_outbox),
+            )
         elif non_replayable_failed:
             recommended_action = "manual_resume"
             safe_to_execute = False
@@ -797,22 +848,12 @@ class TaskLedgerSharedMixin:
             raise ValueError(str(candidate.get("reason") or "manual intervention required"))
 
         if action == "retry_outbox":
-            for event in self.materialize_outbox_events_for_task(task_id):
-                if str(event.get("status") or "") != "failed":
-                    continue
-                self.request_outbox_retry(str(event["event_id"]), source=source)
-            task = self.read_task(task_id)
-            if task:
-                metadata = dict(task.get("metadata") or {})
-                self._append_recovery_history(
-                    metadata,
-                    source=source,
-                    action="safe_resume_execute",
-                    reason="retry failed outbox events",
-                    details={"task_id": task_id},
-                )
-                self.update_task(task_id, metadata=metadata)
-            return self.build_resume_candidate(task_id)
+            return self._execute_retry_outbox_recovery(
+                task_id,
+                source=source,
+                failed_count=int(candidate.get("failed_outbox_count") or 0),
+                expired_count=int(candidate.get("expired_outbox_count") or 0),
+            )
 
         if action == "replay_failed_steps":
             raise ValueError("replay_failed_steps is not executable until a dedicated resume executor is wired")
@@ -1986,9 +2027,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         resume_context = dict(task.get("resume_context") or {})
         resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
         resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
-        failed_outbox = [event for event in outbox_events if str(event.get("status") or "") == "failed"]
-        expired_outbox = [event for event in outbox_events if str(event.get("status") or "") == "expired"]
-        open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
+        failed_outbox, expired_outbox, retryable_outbox, open_outbox = self._retryable_outbox_events(outbox_events)
 
         # Classify steps by replayability
         failed_steps = [s for s in steps if str(s.get("status") or "") == "failed"]
@@ -1998,14 +2037,13 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
-        if expired_outbox:
+        if retryable_outbox:
             recommended_action = "retry_outbox"
             safe_to_execute = True
-            reason = f"{len(expired_outbox)} expired outbox event(s) can be retried manually"
-        elif failed_outbox:
-            recommended_action = "retry_outbox"
-            safe_to_execute = True
-            reason = f"{len(failed_outbox)} failed outbox event(s) can be retried safely"
+            reason = self._build_retry_outbox_reason(
+                failed_count=len(failed_outbox),
+                expired_count=len(expired_outbox),
+            )
         elif non_replayable_failed:
             recommended_action = "manual_resume"
             safe_to_execute = False
@@ -2069,21 +2107,12 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
 
         action = str(candidate.get("recommended_action") or "")
         if action == "retry_outbox":
-            for event in self.materialize_outbox_events_for_task(task_id):
-                if str(event.get("status") or "") != "failed":
-                    continue
-                self.request_outbox_retry(str(event["event_id"]), source=source)
-            task = self.read_task(task_id)
-            if task:
-                metadata = dict(task.get("metadata") or {})
-                self._append_recovery_history(
-                    metadata,
-                    source=source,
-                    action="safe_resume_execute",
-                    reason="retry failed outbox events",
-                    details={"task_id": task_id},
-                )
-                self.update_task(task_id, metadata=metadata)
+            self._execute_retry_outbox_recovery(
+                task_id,
+                source=source,
+                failed_count=int(candidate.get("failed_outbox_count") or 0),
+                expired_count=int(candidate.get("expired_outbox_count") or 0),
+            )
         elif action == "replay_failed_steps":
             raise ValueError("replay_failed_steps is not executable until a dedicated resume executor is wired")
         elif action == "recheck":
