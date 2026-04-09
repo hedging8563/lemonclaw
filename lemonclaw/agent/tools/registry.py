@@ -1,5 +1,6 @@
 """Tool registry for dynamic tool management."""
 
+import inspect
 import json
 import time
 from typing import Any
@@ -64,6 +65,39 @@ class ToolRegistry:
         metadata["verification"] = verification
         self._ledger.update_task(task_id, metadata=metadata)
 
+    @staticmethod
+    def _build_execute_kwargs(
+        tool: Tool,
+        params: dict[str, Any],
+        context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Pass user params through untouched, but only inject internal context keys that
+        the tool explicitly declares.
+
+        This keeps runtime-only objects (for example TaskLedger) available to internal
+        tools like message/notify/task_checkpoint without leaking them into generic
+        `**kwargs` tools such as MCP wrappers, where they would be forwarded to external
+        servers and fail serialization.
+        """
+        execute_kwargs = dict(params)
+        if not context:
+            return execute_kwargs
+        try:
+            signature = inspect.signature(tool.execute)
+        except (TypeError, ValueError):
+            return execute_kwargs
+
+        for name, parameter in signature.parameters.items():
+            if not name.startswith("_") or name not in context:
+                continue
+            if parameter.kind not in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ):
+                continue
+            execute_kwargs[name] = context[name]
+        return execute_kwargs
+
     async def execute(
         self,
         name: str,
@@ -123,7 +157,7 @@ class ToolRegistry:
                 if not sandbox_allowed and sandbox_reason:
                     governance_warnings.append(f"would_block:{sandbox_reason}")
 
-            result = await tool.execute(**params, **call_context)
+            result = await tool.execute(**self._build_execute_kwargs(tool, params, call_context))
             if isinstance(result, str):
                 result = redact_sensitive_text(result)
             else:

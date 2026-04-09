@@ -1,7 +1,10 @@
+import ast
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from lemonclaw.agent.tools.base import Tool
+from lemonclaw.agent.tools.mcp import MCPToolWrapper, _MCPBinding
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.ledger.runtime import TaskLedger
 
@@ -89,6 +92,42 @@ class CombinedSchemaTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
+class ExplicitContextTool(Tool):
+    def __init__(self) -> None:
+        self.last_context: dict[str, Any] | None = None
+
+    @property
+    def name(self) -> str:
+        return "explicit_context"
+
+    @property
+    def description(self) -> str:
+        return "captures declared internal context"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+
+    async def execute(
+        self,
+        query: str,
+        _task_id: str | None = None,
+        _task_ledger: Any | None = None,
+        **kwargs: Any,
+    ) -> str:
+        self.last_context = {
+            "query": query,
+            "_task_id": _task_id,
+            "_task_ledger": _task_ledger,
+            "extra": dict(kwargs),
+        }
         return "ok"
 
 
@@ -198,3 +237,113 @@ async def test_registry_appends_tool_trace_to_verification_metadata(tmp_path: Pa
     assert tool_trace[0]["tool_name"] == "sample"
     assert tool_trace[0]["status"] == "completed"
     assert tool_trace[0]["ok"] is True
+
+
+async def test_registry_does_not_forward_internal_context_to_mcp_wrappers(tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeSession:
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+            calls.append((name, arguments))
+            return SimpleNamespace(content=["ok"])
+
+    wrapper = MCPToolWrapper(
+        _MCPBinding(session=FakeSession(), reconnect=None),
+        "Notion_API",
+        SimpleNamespace(
+            name="post-search",
+            description="search notion",
+            inputSchema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        ),
+    )
+    reg = ToolRegistry()
+    reg.register(wrapper)
+    ledger = TaskLedger(tmp_path)
+
+    result = await reg.execute(
+        wrapper.name,
+        {"query": "release notes"},
+        context={
+            "_task_id": "task_1",
+            "_task_ledger": ledger,
+            "_session_key": "session_1",
+        },
+    )
+
+    assert result == "ok"
+    assert calls == [("post-search", {"query": "release notes"})]
+
+
+async def test_registry_keeps_declared_internal_context_for_context_aware_tools(tmp_path: Path) -> None:
+    ledger = TaskLedger(tmp_path)
+    tool = ExplicitContextTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+
+    result = await reg.execute(
+        "explicit_context",
+        {"query": "hello"},
+        context={
+            "_task_id": "task_1",
+            "_task_ledger": ledger,
+            "_session_key": "session_1",
+        },
+    )
+
+    assert result == "ok"
+    assert tool.last_context == {
+        "query": "hello",
+        "_task_id": "task_1",
+        "_task_ledger": ledger,
+        "extra": {},
+    }
+
+
+def test_private_tool_context_keys_must_be_explicit_execute_params() -> None:
+    tools_dir = Path(__file__).resolve().parents[1] / "lemonclaw" / "agent" / "tools"
+    violations: list[str] = []
+
+    for path in sorted(tools_dir.glob("*.py")):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        for node in module.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for item in node.body:
+                if not isinstance(item, ast.AsyncFunctionDef) or item.name != "execute":
+                    continue
+                explicit_private_params = {
+                    arg.arg
+                    for arg in [*item.args.posonlyargs, *item.args.args, *item.args.kwonlyargs]
+                    if arg.arg.startswith("_")
+                }
+                for child in ast.walk(item):
+                    key: str | None = None
+                    if (
+                        isinstance(child, ast.Call)
+                        and isinstance(child.func, ast.Attribute)
+                        and isinstance(child.func.value, ast.Name)
+                        and child.func.value.id == "kwargs"
+                        and child.func.attr in {"get", "pop"}
+                        and child.args
+                        and isinstance(child.args[0], ast.Constant)
+                        and isinstance(child.args[0].value, str)
+                    ):
+                        key = child.args[0].value
+                    elif (
+                        isinstance(child, ast.Subscript)
+                        and isinstance(child.value, ast.Name)
+                        and child.value.id == "kwargs"
+                        and isinstance(child.slice, ast.Constant)
+                        and isinstance(child.slice.value, str)
+                    ):
+                        key = child.slice.value
+                    if key and key.startswith("_") and key not in explicit_private_params:
+                        violations.append(
+                            f"{path.name}:{node.name}.execute accesses private context key {key!r} via kwargs"
+                        )
+
+    assert violations == []

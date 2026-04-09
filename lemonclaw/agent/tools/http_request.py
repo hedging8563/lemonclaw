@@ -211,6 +211,10 @@ class HTTPRequestTool(Tool):
         auth_profile: str | None = None,
         expect_json: bool = True,
         timeout: int | None = None,
+        _task_id: str | None = None,
+        _task_ledger: Any | None = None,
+        _step_id: str | None = None,
+        _outbox_enabled: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         method = method.upper().strip()
@@ -220,10 +224,7 @@ class HTTPRequestTool(Tool):
         request_timeout = timeout or self._timeout
 
         # Internal context injected by ToolRegistry — not exposed in tool schema
-        _task_id: str | None = kwargs.get("_task_id")
-        _task_ledger = kwargs.get("_task_ledger")
-        _step_id: str | None = kwargs.get("_step_id")
-        _outbox_enabled: bool = bool(kwargs.get("_outbox_enabled"))
+        _outbox_enabled = bool(_outbox_enabled)
 
         # Pre-validate domain and auth before enqueuing to fail fast
         if auth_profile:

@@ -148,11 +148,12 @@ class K8sTool(Tool):
         confirm_token: str | None = None,
         limit: int | None = None,
         timeout: int | None = None,
+        _task_id: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         action = action.strip()
         namespace = (namespace or self.default_namespace).strip()
-        task_id = str(kwargs.get("_task_id", "") or "")
+        task_id = str(_task_id or "")
         command_timeout = timeout or self.timeout
         if self.allowed_namespaces:
             if not namespace:

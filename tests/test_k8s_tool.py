@@ -5,6 +5,7 @@ import json
 import pytest
 
 from lemonclaw.agent.tools.k8s import K8sTool
+from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.governance.runtime import GovernanceRuntime
 
 
@@ -139,6 +140,28 @@ async def test_k8s_rejects_invalid_confirmation_token():
     )
     assert result["ok"] is False
     assert "Invalid or expired" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_tool_registry_passes_task_id_to_k8s_confirmation_context():
+    registry = ToolRegistry()
+    tool = K8sTool(default_namespace="claw")
+    registry.register(tool)
+
+    first = json.loads(
+        await registry.execute(
+            "k8s",
+            {"action": "restart", "resource_type": "deployment", "name": "claw-a"},
+            context={"_task_id": "task-1"},
+        )
+    )
+    assert first["ok"] is False
+    assert first["raw"]["confirmation_required"] is True
+    assert first["raw"]["confirm_token"] == "[redacted]"
+    assert len(tool._confirmations) == 1
+    stored = next(iter(tool._confirmations.values()))
+    assert stored["task_id"] == "task-1"
+    assert stored["target"] == "restart:deployment/claw-a@claw"
 
 
 def test_k8s_resolves_capability_by_action():
