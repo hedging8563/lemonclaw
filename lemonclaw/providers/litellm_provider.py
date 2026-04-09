@@ -117,6 +117,14 @@ class LiteLLMProvider(LLMProvider):
     def _active_gateway(self) -> "ProviderSpec | None":
         return self._gateway or self._platform_gateway
 
+    @staticmethod
+    def _gateway_family(spec: "ProviderSpec | None") -> str:
+        if spec is None:
+            return ""
+        if spec.name.startswith("lemondata"):
+            return "lemondata"
+        return spec.name
+
     def _can_use_platform_fallback(self, gateway: "ProviderSpec | None" = None) -> bool:
         effective_gateway = gateway or self._active_gateway()
         if not self._platform_api_key:
@@ -246,6 +254,7 @@ class LiteLLMProvider(LLMProvider):
             return None
         gw_keywords = base_gateway.keywords
         model_lower = model.lower()
+        base_family = self._gateway_family(base_gateway)
 
         # If current gateway has keywords and they match this model, keep it.
         if gw_keywords and any(kw in model_lower for kw in gw_keywords):
@@ -261,6 +270,8 @@ class LiteLLMProvider(LLMProvider):
                 continue
             if spec.name == base_gateway.name:
                 continue
+            if self._gateway_family(spec) != base_family:
+                continue
             if spec.keywords and any(kw in model_lower for kw in spec.keywords):
                 return spec
 
@@ -270,7 +281,7 @@ class LiteLLMProvider(LLMProvider):
 
         # Current gateway has keywords that don't match — fall back to generic gateway.
         for spec in PROVIDERS:
-            if spec.is_gateway and not spec.keywords:
+            if spec.is_gateway and self._gateway_family(spec) == base_family and not spec.keywords:
                 return spec
         return None
 

@@ -182,6 +182,30 @@ def test_litellm_provider_uses_platform_env_for_gemini_embedding_gateway(monkeyp
     assert kwargs["model"] == "gemini/gemini-embedding-001"
 
 
+def test_litellm_provider_does_not_jump_gateway_families_for_openrouter_claude_model():
+    provider = LiteLLMProvider(
+        api_key="sk-or-test",
+        api_base="https://openrouter.ai/api/v1",
+        provider_name="openrouter",
+    )
+
+    gateway = provider._resolve_gateway_for_model("claude-sonnet-4-6")
+
+    assert gateway is None
+
+
+def test_litellm_provider_does_not_jump_gateway_families_for_aihubmix_gemini_model():
+    provider = LiteLLMProvider(
+        api_key="sk-test",
+        api_base="https://aihubmix.com/v1",
+        provider_name="aihubmix",
+    )
+
+    gateway = provider._resolve_gateway_for_model("gemini-3.1-pro-preview")
+
+    assert gateway is None
+
+
 def test_litellm_provider_uses_platform_env_for_chat_requests(monkeypatch):
     monkeypatch.setenv("API_KEY", "sk-platform")
     monkeypatch.setenv("API_BASE_URL", "https://api.lemondata.cc/v1")
