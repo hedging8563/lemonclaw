@@ -145,13 +145,16 @@ class WhatsAppChannel(BaseChannel):
             return
         
         try:
+            text = msg.content or ""
             payload = {
                 "type": "send",
                 "to": msg.chat_id,
-                "text": msg.content or ""
+                "text": text
             }
             if msg.media:
                 logger.warning("WhatsApp channel does not support media sending yet, {} file(s) dropped", len(msg.media))
+                if not text:
+                    payload["text"] = f"[Media omitted: {len(msg.media)} file(s)]"
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)

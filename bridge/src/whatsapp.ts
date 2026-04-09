@@ -50,6 +50,31 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private static readonly supportedContentFields = new Set([
+    'conversation',
+    'extendedTextMessage',
+    'imageMessage',
+    'videoMessage',
+    'documentMessage',
+    'audioMessage',
+  ]);
+
+  private static readonly unsupportedContentLabels: Record<string, string> = {
+    stickerMessage: 'sticker',
+    locationMessage: 'location',
+    liveLocationMessage: 'live location',
+    contactMessage: 'contact',
+    contactsArrayMessage: 'contacts',
+    pollCreationMessage: 'poll',
+    pollUpdateMessage: 'poll update',
+    reactionMessage: 'reaction',
+    buttonsResponseMessage: 'button response',
+    templateButtonReplyMessage: 'template button reply',
+    listResponseMessage: 'list response',
+    orderMessage: 'order',
+    productMessage: 'product',
+    protocolMessage: 'protocol',
+  };
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
@@ -199,7 +224,34 @@ export class WhatsAppClient {
       return `[Voice Message]`;
     }
 
+    const unsupported = this.describeUnsupportedMessage(message);
+    if (unsupported) {
+      return `[Unsupported WhatsApp message type: ${unsupported}]`;
+    }
+
     return null;
+  }
+
+  private describeUnsupportedMessage(message: any): string | null {
+    if (!message || typeof message !== 'object') return null;
+
+    for (const [key, label] of Object.entries(WhatsAppClient.unsupportedContentLabels)) {
+      if (message[key]) return label;
+    }
+
+    const fallbackKey = Object.keys(message).find(
+      (key) => key.endsWith('Message') && !WhatsAppClient.supportedContentFields.has(key)
+    );
+    if (!fallbackKey) return null;
+
+    return (
+      WhatsAppClient.unsupportedContentLabels[fallbackKey] ||
+      fallbackKey
+        .replace(/Message$/, '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .trim()
+        .toLowerCase()
+    );
   }
 
   private extractContextInfo(msg: any): { mentions: string[]; quotedParticipant: string } {
