@@ -356,7 +356,8 @@ def test_archive_session_rewrites_attachment_paths(tmp_path: Path) -> None:
     message = archived_session.messages[0]
     archived_path = message['media'][0]['path']
     assert archived_path.startswith(str(mgr.get_attachment_dir(archived['key'])))
-    assert archived_path in message['content']
+    assert '[REDACTED]' in message['content']
+    assert Path(archived_path).name in message['content']
     assert original_persisted_path not in message['content']
     assert Path(archived_path).is_file()
 
