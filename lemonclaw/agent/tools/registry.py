@@ -137,6 +137,43 @@ class ToolRegistry:
                 )
                 call_context["_step_id"] = step.step_id
 
+            def _finish_blocked_call(reason: str, *, warning_prefix: str) -> str:
+                blocked_error = redact_sensitive_text(reason, aggressive=True)[:500]
+                governance_warnings.append(f"{warning_prefix}:{blocked_error}")
+                ended_at_ms = int(time.time() * 1000)
+                if step:
+                    self._ledger.finish_step(step, status="failed", error=blocked_error)
+                self._append_tool_trace(
+                    task_id=task_id,
+                    trace={
+                        "tool_name": name,
+                        "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
+                        "capability_id": capability_id,
+                        "status": "failed",
+                        "ok": False,
+                        "replayable": tool.is_replayable(capability_id),
+                        "started_at_ms": started_at_ms,
+                        "ended_at_ms": ended_at_ms,
+                        "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
+                        "result_summary": blocked_error,
+                        "warnings": governance_warnings,
+                    },
+                )
+                if self._governance and capability is not None:
+                    self._governance.record_audit(
+                        capability=capability,
+                        token=capability_token,
+                        task_id=task_id,
+                        mode=mode,
+                        actor_identity=actor_identity,
+                        started_at=started_at,
+                        ended_at=time.time(),
+                        params=params,
+                        result_status="error",
+                        warnings=governance_warnings,
+                    )
+                return f"Error: {blocked_error}" + _TOOL_ERROR_HINT
+
             if self._governance:
                 decision = self._governance.authorize(
                     capability_id=capability_id,
@@ -148,14 +185,20 @@ class ToolRegistry:
                 capability = decision.capability
                 governance_warnings = list(decision.warnings or [])
                 if not decision.allowed and decision.reason:
-                    governance_warnings.append(f"would_deny:{decision.reason}")
+                    return _finish_blocked_call(
+                        f"Governance denied tool '{name}': {decision.reason}",
+                        warning_prefix="denied",
+                    )
                 sandbox_allowed, sandbox_reason = self._governance.validate_tool_call(
                     capability=capability,
                     params=params,
                     tool=tool,
                 )
                 if not sandbox_allowed and sandbox_reason:
-                    governance_warnings.append(f"would_block:{sandbox_reason}")
+                    return _finish_blocked_call(
+                        f"Sandbox blocked tool '{name}': {sandbox_reason}",
+                        warning_prefix="blocked",
+                    )
 
             result = await tool.execute(**self._build_execute_kwargs(tool, params, call_context))
             if isinstance(result, str):
