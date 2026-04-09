@@ -7,6 +7,7 @@ from lemonclaw.cli.commands import _normalize_runtime_delivery_metadata
 from lemonclaw.cron.service import CronService
 from lemonclaw.cron.types import CronSchedule
 from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.triggers import TriggerRuntime
 
 
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
@@ -349,3 +350,79 @@ async def test_cron_service_persists_resume_context_from_job_payload(tmp_path) -
     assert task["resume_context"]["delivery_policy"]["mode"] == "replace"
     assert task["resume_context"]["delivery_policy"]["preserve_message_identity"] is True
     assert task["resume_context"]["delivery_policy"]["throttle_ms"] == 250
+
+
+@pytest.mark.asyncio
+async def test_cron_service_emits_trigger_runtime_lifecycle_records(tmp_path) -> None:
+    ledger = TaskLedger(tmp_path)
+    trigger_runtime = TriggerRuntime(tmp_path)
+    service = CronService(
+        tmp_path / "cron" / "jobs.json",
+        task_ledger=ledger,
+        trigger_runtime=trigger_runtime,
+    )
+    job = service.add_job(
+        name="runtime job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello runtime",
+        channel="telegram",
+        to="123",
+        session_key="telegram:123:456",
+        metadata={"delivery_context": {"source_channel": "telegram", "source_chat_id": "123"}},
+    )
+
+    async def _on_job(_job):
+        return "ok"
+
+    service.on_job = _on_job
+    await service._execute_job(job)
+
+    path = tmp_path / ".lemonclaw-state" / "triggers.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+
+    first = json.loads(lines[0])
+    middle = json.loads(lines[1])
+    last = json.loads(lines[2])
+
+    assert first["status"] == "received"
+    assert middle["status"] == "dispatching"
+    assert last["status"] == "completed"
+    assert first["trigger_id"] == middle["trigger_id"] == last["trigger_id"]
+    assert last["task_id"].startswith(f"task_cron_{job.id}_")
+    assert last["metadata"]["job_id"] == job.id
+    assert last["metadata"]["task_status"] == "completed"
+    assert last["metadata"]["task_stage"] == "done"
+    assert last["result_summary"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_cron_service_emits_failed_trigger_runtime_lifecycle_records(tmp_path) -> None:
+    trigger_runtime = TriggerRuntime(tmp_path)
+    service = CronService(tmp_path / "cron" / "jobs.json", trigger_runtime=trigger_runtime)
+    job = service.add_job(
+        name="failing runtime job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello failure",
+    )
+
+    async def _boom(_job):
+        raise RuntimeError("cron boom")
+
+    service.on_job = _boom
+    await service._execute_job(job)
+
+    path = tmp_path / ".lemonclaw-state" / "triggers.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+
+    first = json.loads(lines[0])
+    last = json.loads(lines[1])
+
+    assert first["status"] == "received"
+    assert last["status"] == "failed"
+    assert first["trigger_id"] == last["trigger_id"]
+    assert last["error"] == "cron boom"
+    assert last["metadata"]["job_id"] == job.id
+    assert last["metadata"]["task_status"] == "failed"
+    assert last["metadata"]["task_stage"] == "error"

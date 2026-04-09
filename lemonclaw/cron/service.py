@@ -16,6 +16,7 @@ from lemonclaw.channels.delivery_context import get_delivery_policy
 from lemonclaw.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
 from lemonclaw.ledger.completion_gate import finalize_task
 from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
+from lemonclaw.triggers import TriggerRuntime
 
 
 def _now_ms() -> int:
@@ -116,6 +117,7 @@ class CronService:
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
         task_ledger: TaskLedger | None = None,
+        trigger_runtime: TriggerRuntime | None = None,
     ):
         self.store_path = store_path
         self.on_job = on_job  # Callback to execute job, returns response text
@@ -124,6 +126,7 @@ class CronService:
         self._timer_task: asyncio.Task | None = None
         self._running = False
         self._task_ledger = task_ledger
+        self._trigger_runtime = trigger_runtime
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -385,7 +388,22 @@ class CronService:
         payload_metadata = dict(job.payload.metadata or {})
         delivery_context = dict(payload_metadata.get("delivery_context") or {})
         delivery_policy = get_delivery_policy(payload_metadata)
+        trigger = None
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        if self._trigger_runtime:
+            trigger = self._trigger_runtime.record_trigger(
+                source="cron",
+                kind=str(job.payload.kind or "agent_turn"),
+                payload_summary=job.payload.message[:500],
+                session_key=effective_session_key,
+                channel=effective_channel,
+                chat_id=effective_chat_id,
+                metadata={
+                    "job_id": job.id,
+                    "schedule_kind": job.schedule.kind,
+                    "deliver": bool(job.payload.deliver),
+                },
+            )
         if self._task_ledger:
             self._task_ledger.ensure_task(
                 task_id=task_id,
@@ -414,11 +432,24 @@ class CronService:
                 ),
                 metadata={"job_id": job.id},
             )
+            if trigger:
+                self._trigger_runtime.link_task(
+                    trigger["trigger_id"],
+                    task_id=task_id,
+                    session_key=effective_session_key,
+                    metadata={
+                        "job_id": job.id,
+                        "schedule_kind": job.schedule.kind,
+                    },
+                )
             step = self._task_ledger.start_step(task_id, step_type="cron_job", name=job.name, input_summary=job.payload.message[:500])
         else:
             step = None
 
         token = _IN_CRON_CONTEXT.set(True)
+        trigger_status = "completed"
+        trigger_result_summary = ""
+        trigger_error = ""
         try:
             response = None
             if self.on_job:
@@ -430,17 +461,45 @@ class CronService:
                 self._task_ledger.finish_step(step, status="completed")
             if self._task_ledger:
                 finalize_task(self._task_ledger, task_id)
+            trigger_result_summary = str(response or "")[:500]
             logger.info("Cron: job '{}' completed", job.name)
 
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
+            trigger_status = "failed"
+            trigger_error = str(e)[:500]
             if step:
                 self._task_ledger.finish_step(step, status="failed", error=str(e)[:500])
             if self._task_ledger:
                 self._task_ledger.update_task(task_id, status="failed", current_stage="error", error=str(e)[:500])
             logger.error("Cron: job '{}' failed: {}", job.name, e)
         finally:
+            if trigger:
+                task = None
+                if self._task_ledger:
+                    try:
+                        task = self._task_ledger.read_task(task_id)
+                    except Exception as exc:
+                        logger.error("Cron: failed to read task '{}' while finalizing trigger runtime: {}", task_id, exc)
+                trigger_task_status = str((task or {}).get("status") or ("completed" if trigger_status == "completed" else "failed"))
+                trigger_task_stage = str((task or {}).get("current_stage") or ("done" if trigger_status == "completed" else "error"))
+                try:
+                    self._trigger_runtime.finish_trigger(
+                        trigger["trigger_id"],
+                        status=trigger_status,
+                        result_summary=trigger_result_summary,
+                        error=trigger_error,
+                        metadata={
+                            "job_id": job.id,
+                            "task_id": task_id,
+                            "session_key": effective_session_key,
+                            "task_status": trigger_task_status,
+                            "task_stage": trigger_task_stage,
+                        },
+                    )
+                except Exception as exc:
+                    logger.error("Cron: failed to finalize trigger runtime for job '{}': {}", job.name, exc)
             _IN_CRON_CONTEXT.reset(token)
 
         job.state.last_run_at_ms = start_ms
