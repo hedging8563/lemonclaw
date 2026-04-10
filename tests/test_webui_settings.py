@@ -544,6 +544,78 @@ def test_pairing_recovery_code_route_issues_one_time_code(monkeypatch, tmp_path)
     assert body['pairing']['break_glass']['active'] is True
 
 
+def test_pairing_recovery_code_can_recover_owner_without_auth(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    cfg.channels.auto_pairing = True
+    cfg.gateway.auth_token = 'secret-token'
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': 'owner-1|phone',
+        'owner_notify_target': 'owner-dm',
+        'approved': ['owner-1|phone'],
+        'pending': {'user-2': {'display_name': 'User 2', 'notify_target': 'dm-2'}},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token='secret-token')
+    issue_client = TestClient(app)
+    issue_client.cookies.set('lc_session', create_session_cookie('secret-token'))
+    issue_resp = issue_client.post('/api/settings/channels/telegram/pairing-recovery-code', json={'ttl_s': 120})
+    assert issue_resp.status_code == 200
+    recovery_code = issue_resp.json()['break_glass']['code']
+
+    recover_client = TestClient(app)
+    recover_resp = recover_client.post('/api/settings/channels/telegram/pairing-recover', json={
+        'recovery_code': recovery_code,
+        'owner': 'new-owner|laptop',
+        'notify_target': 'new-dm',
+        'clear_pending': True,
+    })
+    assert recover_resp.status_code == 200
+    body = recover_resp.json()
+    assert body['break_glass']['recovered'] is True
+    assert body['pairing']['owner'] == 'new-owner|laptop'
+    assert body['pairing']['owner_notify_target'] == 'new-dm'
+    assert body['pairing']['pending_count'] == 0
+
+
+def test_pairing_recovery_code_rejects_invalid_recover_attempt(monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    config_path = tmp_path / 'config.json'
+    cfg = Config()
+    cfg.channels.telegram.enabled = True
+    cfg.channels.auto_pairing = True
+    cfg.gateway.auth_token = 'secret-token'
+    save_config(cfg, config_path)
+
+    pairing_dir = tmp_path / '.lemonclaw' / 'pairing'
+    pairing_dir.mkdir(parents=True, exist_ok=True)
+    (pairing_dir / 'telegram.json').write_text(json.dumps({
+        'owner': 'owner-1|phone',
+        'owner_notify_target': 'owner-dm',
+        'approved': ['owner-1|phone'],
+        'pending': {},
+    }), encoding='utf-8')
+
+    app = create_app(config_path=config_path, auth_token='secret-token')
+    client = TestClient(app)
+    resp = client.post('/api/settings/channels/telegram/pairing-recover', json={
+        'recovery_code': 'lc_recovery_invalid',
+        'owner': 'new-owner|laptop',
+    })
+    assert resp.status_code == 401
+    assert resp.json()['error'] == 'Invalid or expired recovery code'
+
+
 def test_gateway_auth_token_rotate_and_recover_flow(tmp_path):
     from lemonclaw.config.loader import load_config
 
@@ -926,6 +998,42 @@ def test_apply_settings_persists_failed_runtime_state(monkeypatch, tmp_path):
     state = load_runtime_state(config_path)
     assert state['status'] == 'failed'
     assert any('tool refresh failed' in item for item in state['runtime_errors'])
+
+
+def test_apply_settings_failed_runtime_state_persists_notify_targets(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create('telegram:123')
+    session.add_message('user', 'hello')
+    sessions.save(session)
+
+    class FakeAgentLoop:
+        def __init__(self) -> None:
+            self.sessions = sessions
+            self.bus = MessageBus()
+
+        async def refresh_runtime_config(self, config, *, changed_paths):
+            raise RuntimeError("tool refresh boom")
+
+        def update_defaults(self, **kwargs):
+            return None
+
+    app = create_app(config_path=config_path, auth_token=None, agent_loop=FakeAgentLoop())
+    client = TestClient(app)
+
+    resp = client.post('/api/settings/apply', json={
+        'changed_paths': ['tools.http'],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['restart_state']['status'] == 'failed'
+    assert body['restart_state']['notify_targets'][0]['session_key'] == 'telegram:123'
+
+    state = load_runtime_state(config_path)
+    assert state['notify_targets'][0]['session_key'] == 'telegram:123'
 
 
 def test_apply_settings_restart_state_tracks_recent_notify_targets(monkeypatch, tmp_path):

@@ -3312,13 +3312,13 @@ class AgentLoop:
         if mode in {"summary", "health", "recovery"}:
             from lemonclaw.config.loader import get_config_path
             from lemonclaw.config.loader import load_config
-            from lemonclaw.gateway.runtime_state import load_runtime_state
+            from lemonclaw.gateway.runtime_state import derive_runtime_state_view, load_runtime_state
 
             watchdog = getattr(self, "watchdog", None)
             channel_manager = getattr(self, "channel_manager", None)
             snapshot = watchdog.snapshot() if watchdog and hasattr(watchdog, "snapshot") else {}
             config_path = getattr(self, "config_path", None) or get_config_path()
-            restart_state = load_runtime_state(config_path)
+            restart_state = derive_runtime_state_view(load_runtime_state(config_path))
             runtime_config = None
             if mode == "recovery":
                 try:

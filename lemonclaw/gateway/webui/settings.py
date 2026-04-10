@@ -23,12 +23,14 @@ from lemonclaw.channels.whatsapp_bridge_runtime import (
     restart_whatsapp_pairing,
 )
 from lemonclaw.gateway.runtime_state import (
+    derive_runtime_state_view,
     derive_restart_notify_targets,
     load_runtime_state,
     mark_restart_in_progress,
     mark_runtime_notification_sent,
     mark_restart_requested,
     mark_runtime_failed,
+    set_runtime_notify_targets,
 )
 from lemonclaw.gateway.runtime_notifications import broadcast_restart_notice
 from lemonclaw.gateway.webui.auth import COOKIE_NAME, GatewayAuthState, create_session_cookie, verify_session_cookie
@@ -733,7 +735,7 @@ def get_settings_routes(
             "group_runtime": _derive_group_runtime(config),
             "dicloak_runtime": _derive_dicloak_runtime(agent_loop),
             "runtime_inventory": runtime_inventory,
-            "restart_status": load_runtime_state(config_path),
+            "restart_status": derive_runtime_state_view(load_runtime_state(config_path)),
             "tool_status": {
                 "browser": {
                     "installed": bool(browser_status.get("installed")),
@@ -1179,7 +1181,7 @@ def get_settings_routes(
             asyncio.get_running_loop().call_later(0.5, _trigger_restart)
             return resp
 
-        restart_state = load_runtime_state(config_path)
+        restart_state = derive_runtime_state_view(load_runtime_state(config_path))
         if runtime_status == "failed":
             restart_state = mark_runtime_failed(
                 config_path,
@@ -1191,7 +1193,10 @@ def get_settings_routes(
                 config=runtime_config,
             )
             if notify_targets:
-                restart_state["notify_targets"] = notify_targets
+                restart_state = set_runtime_notify_targets(
+                    config_path,
+                    notify_targets=notify_targets,
+                )
                 if agent_loop is not None:
                     async def _notify_failed() -> None:
                         sent = await broadcast_restart_notice(agent_loop, stage="failed", state=restart_state)
@@ -1210,7 +1215,7 @@ def get_settings_routes(
             "runtime_errors": runtime_errors,
             "tool_updates": tool_updates,
             "channel_updates": channel_updates,
-            "restart_state": restart_state,
+            "restart_state": derive_runtime_state_view(restart_state),
         }))
 
     # ── POST /api/runtime-policy/reload ───────────────────────────────
@@ -1414,6 +1419,54 @@ def get_settings_routes(
             payload["break_glass"] = {
                 **issued,
                 "active": True,
+            }
+            return _json(payload)
+
+    # ── POST /api/settings/channels/{channel}/pairing-recover ──────────
+
+    async def recover_pairing_owner(request: Request) -> Response:
+        channel_name = str(request.path_params.get("channel_name") or "").strip()
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "Invalid JSON"}, 400)
+        if not isinstance(body, dict):
+            return _json({"error": "Expected object body"}, 400)
+
+        recovery_code = str(body.get("recovery_code") or body.get("code") or "").strip()
+        owner = str(body.get("owner") or "").strip()
+        notify_target = str(body.get("notify_target") or "").strip() or None
+        clear_pending = bool(body.get("clear_pending"))
+        if not recovery_code:
+            return _json({"error": "recovery_code is required"}, 400)
+        if not owner:
+            return _json({"error": "owner is required"}, 400)
+
+        from lemonclaw.channels.auto_pairing import AutoPairing
+        from lemonclaw.config.loader import load_config
+        from lemonclaw.utils.helpers import get_data_path
+
+        async with _config_lock:
+            config = load_config(config_path)
+            try:
+                _pairing_state_payload(config, channel_name, masked=False)
+            except ValueError as exc:
+                return _json({"error": str(exc)}, 400)
+            pairing = AutoPairing(channel_name, get_data_path())
+            claimed_notify_target = pairing.claim_owner_with_break_glass_code(
+                recovery_code,
+                sender_id=owner,
+                notify_target=notify_target,
+                clear_pending=clear_pending,
+            )
+            if not claimed_notify_target:
+                return _json({"error": "Invalid or expired recovery code"}, 401)
+            payload = _pairing_state_payload(config, channel_name, masked=False)
+            payload["break_glass"] = {
+                "recovered": True,
+                "owner": owner,
+                "notify_target": pairing.owner_notify_target,
+                "clear_pending": clear_pending,
             }
             return _json(payload)
 
@@ -1696,6 +1749,7 @@ def get_settings_routes(
         Route("/api/settings/channels/whatsapp/repair", repair_whatsapp_pairing, methods=["POST"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-state", get_pairing_state, methods=["GET"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-recovery-code", issue_pairing_recovery_code, methods=["POST"]),
+        Route("/api/settings/channels/{channel_name:str}/pairing-recover", recover_pairing_owner, methods=["POST"]),
         Route("/api/settings/channels/{channel_name:str}/pairing-break-glass", break_glass_pairing_owner, methods=["POST"]),
         Route("/api/settings/gateway/auth-token-state", get_gateway_auth_state, methods=["GET"]),
         Route("/api/settings/gateway/auth-token/recovery-code", issue_gateway_auth_recovery_code, methods=["POST"]),

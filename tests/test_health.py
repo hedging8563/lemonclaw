@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from starlette.testclient import TestClient
@@ -172,6 +173,49 @@ def test_readyz_fails_when_restart_state_is_failed(tmp_path):
         )
     )
     mark_runtime_failed(config_path, runtime_errors=["startup failed"], source="settings_apply")
+
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json()["checks"] == {
+        "channels_configured": True,
+        "channels_usable": True,
+        "restart_state_healthy": False,
+    }
+
+
+def test_readyz_fails_when_restart_state_is_stale(tmp_path):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    client = TestClient(
+        create_app(
+            config_path=config_path,
+            auth_token=None,
+            channel_manager=_FakeChannelManager(
+                {
+                    "telegram": {
+                        "configured_enabled": True,
+                        "configured_complete": True,
+                        "registered": True,
+                        "available": True,
+                        "running": True,
+                        "error": "",
+                    }
+                },
+            ),
+        )
+    )
+    mark_restart_requested(
+        config_path,
+        restart_fields=["tools.mcp_servers"],
+        runtime_errors=["restart required"],
+        source="settings_apply",
+    )
+    state_path = config_path.with_name("runtime-state.json")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["status"] = "restarting"
+    state["last_restart_started_at_ms"] = 1
+    state["last_restart_requested_at_ms"] = 1
+    state_path.write_text(json.dumps(state), encoding="utf-8")
 
     resp = client.get("/readyz")
     assert resp.status_code == 503

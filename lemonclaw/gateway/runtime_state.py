@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+_RESTART_SUBMITTED_TIMEOUT_MS = 2 * 60 * 1000
+_RESTART_RESTARTING_TIMEOUT_MS = 10 * 60 * 1000
+
 
 def get_runtime_state_path(config_path: Path) -> Path:
     return Path(config_path).with_name("runtime-state.json")
@@ -33,6 +36,38 @@ def _write_runtime_state(config_path: Path, payload: dict[str, Any]) -> dict[str
     tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp_path.replace(path)
     return payload
+
+
+def derive_runtime_state_view(payload: dict[str, Any] | None, *, now_ms: int | None = None) -> dict[str, Any]:
+    state = dict(payload or {})
+    current_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    status = str(state.get("status") or "").strip().lower()
+    last_restart_result = str(state.get("last_restart_result") or "").strip().lower()
+
+    timeout_stage: str | None = None
+    timeout_at_ms: int | None = None
+    if status == "submitted":
+        requested_at_ms = int(state.get("last_restart_requested_at_ms") or 0)
+        if requested_at_ms > 0:
+            timeout_at_ms = requested_at_ms + _RESTART_SUBMITTED_TIMEOUT_MS
+            if current_ms >= timeout_at_ms:
+                timeout_stage = "submitted"
+    elif status == "restarting":
+        started_at_ms = int(state.get("last_restart_started_at_ms") or state.get("last_restart_requested_at_ms") or 0)
+        if started_at_ms > 0:
+            timeout_at_ms = started_at_ms + _RESTART_RESTARTING_TIMEOUT_MS
+            if current_ms >= timeout_at_ms:
+                timeout_stage = "restarting"
+
+    state["timed_out"] = bool(timeout_stage)
+    state["timeout_stage"] = timeout_stage
+    state["timeout_at_ms"] = timeout_at_ms
+    state["restart_state_healthy"] = (
+        status != "failed"
+        and last_restart_result != "failed"
+        and not bool(timeout_stage)
+    )
+    return state
 
 
 def _append_history(payload: dict[str, Any], event: dict[str, Any]) -> None:

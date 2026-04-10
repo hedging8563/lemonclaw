@@ -27,7 +27,7 @@ from starlette.staticfiles import StaticFiles
 
 from lemonclaw.gateway.health import liveness, readiness, set_context
 from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
-from lemonclaw.gateway.runtime_state import load_runtime_state
+from lemonclaw.gateway.runtime_state import derive_runtime_state_view, load_runtime_state
 from lemonclaw.gateway.runtime_state import mark_runtime_healthy
 from lemonclaw.gateway.webui.auth import GatewayAuthState
 
@@ -88,7 +88,7 @@ def _build_status_handler(
         elif runtime.channel_manager:
             data["channels"] = list(getattr(runtime.channel_manager, "enabled_channels", []) or [])
         if runtime.config_path:
-            restart_status = load_runtime_state(runtime.config_path)
+            restart_status = derive_runtime_state_view(load_runtime_state(runtime.config_path))
             if restart_status:
                 data["restart_status"] = restart_status
         watchdog = runtime.watchdog

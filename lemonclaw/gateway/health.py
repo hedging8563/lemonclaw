@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from lemonclaw.gateway.runtime_state import load_runtime_state
+from lemonclaw.gateway.runtime_state import derive_runtime_state_view, load_runtime_state
 
 if TYPE_CHECKING:
     from lemonclaw.channels.manager import ChannelManager
@@ -70,10 +70,8 @@ def _configured_channels_are_usable(channel_status: dict[str, dict[str, object]]
 def _restart_state_is_healthy() -> bool:
     if _config_path is None:
         return True
-    state = load_runtime_state(_config_path)
-    status = str(state.get("status") or "").strip().lower()
-    last_restart_result = str(state.get("last_restart_result") or "").strip().lower()
-    return status != "failed" and last_restart_result != "failed"
+    state = derive_runtime_state_view(load_runtime_state(_config_path))
+    return bool(state.get("restart_state_healthy"))
 
 
 async def liveness(request: Request) -> JSONResponse:
