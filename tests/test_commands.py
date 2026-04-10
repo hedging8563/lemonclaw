@@ -1,11 +1,13 @@
 import shutil
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
+from lemonclaw.cli import commands as cli_commands
 from lemonclaw.cli.commands import app
 from lemonclaw.config.schema import Config
 from lemonclaw.providers.base import LLMResponse
@@ -104,6 +106,66 @@ def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
 
     assert config.get_provider_name() == "github_copilot"
+
+
+def test_gateway_calls_get_config_path_without_unbound_local_error(monkeypatch, tmp_path):
+    class StopGateway(Exception):
+        pass
+
+    fake_config = SimpleNamespace(
+        workspace_path=tmp_path / "workspace",
+        agents=SimpleNamespace(
+            defaults=SimpleNamespace(
+                token_budget_per_session=0,
+                cost_budget_per_day=0,
+                input_cost_per_1k_tokens=0,
+                output_cost_per_1k_tokens=0,
+                model="gpt-5.4",
+                temperature=0,
+                max_tokens=1024,
+                max_tool_iterations=1,
+                memory_window=1,
+                timezone="UTC",
+                system_prompt="",
+                disabled_skills=[],
+            )
+        ),
+        tools=SimpleNamespace(
+            web=SimpleNamespace(search=SimpleNamespace(api_key="", max_results=5)),
+            exec=SimpleNamespace(),
+            mcp_servers=[],
+            coding=SimpleNamespace(),
+            browser=SimpleNamespace(),
+            http=SimpleNamespace(),
+            git=SimpleNamespace(),
+            notify=SimpleNamespace(),
+            db=SimpleNamespace(),
+            k8s=SimpleNamespace(),
+        ),
+        channels=SimpleNamespace(),
+        governance=SimpleNamespace(),
+    )
+
+    sync_report = SimpleNamespace(changed=False, failures=False, summary=lambda: "ok")
+
+    monkeypatch.setattr("lemonclaw.config.loader.load_config", lambda: fake_config)
+    monkeypatch.setattr("lemonclaw.config.loader.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("lemonclaw.config.loader.get_config_path", lambda: (_ for _ in ()).throw(StopGateway()))
+    monkeypatch.setattr("lemonclaw.config.logging.setup_logging", lambda: None)
+    monkeypatch.setattr("lemonclaw.config.sync.run_config_sync", lambda _config: sync_report)
+    monkeypatch.setattr("lemonclaw.bus.queue.MessageBus", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.session.manager.SessionManager", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.cron.service.CronService", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.ledger.runtime.TaskLedger", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.triggers.TriggerRuntime", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.telemetry.usage.UsageTracker", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.bus.activity.ActivityBus", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("lemonclaw.agent.loop.AgentLoop", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(cli_commands, "_make_provider", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(cli_commands, "sync_workspace_templates", lambda *args, **kwargs: None)
+
+    with pytest.raises(StopGateway):
+        cli_commands.gateway()
 
 
 def test_config_matches_openai_codex_with_hyphen_prefix():

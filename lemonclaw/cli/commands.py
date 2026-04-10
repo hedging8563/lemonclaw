@@ -539,7 +539,7 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the lemonclaw gateway."""
-    from lemonclaw.config.loader import load_config, get_data_dir
+    from lemonclaw.config.loader import load_config, get_config_path, get_data_dir
     from lemonclaw.config.logging import setup_logging
     from lemonclaw.config.sync import run_config_sync
     from lemonclaw.bus.queue import MessageBus
@@ -785,7 +785,6 @@ def gateway(
 
     # Create config watcher (started later in run())
     from lemonclaw.config.watcher import ConfigWatcher
-    from lemonclaw.config.loader import get_config_path
     from lemonclaw.gateway.runtime_notifications import maybe_broadcast_startup_restart_notice
     from lemonclaw.gateway.runtime_context import GatewayRuntimeContext
     from lemonclaw.ledger.delivery import create_outbox_delivery_handler
