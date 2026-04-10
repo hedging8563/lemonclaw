@@ -1176,6 +1176,45 @@ async def test_startup_runtime_notice_derives_pairing_owner_targets(monkeypatch,
     assert int((state.get('notifications') or {}).get('healthy') or 0) == int(state.get('last_restart_completed_at_ms') or 0)
 
 
+@pytest.mark.asyncio
+async def test_startup_runtime_notice_skips_healthy_when_channel_not_yet_usable(tmp_path):
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create('telegram:123')
+    sessions.save(session)
+    bus = MessageBus()
+    channel_manager = type(
+        'ChannelManager',
+        (),
+        {
+            'get_channel_status': lambda self: {
+                'telegram': {
+                    'configured_enabled': True,
+                    'configured_complete': True,
+                    'registered': True,
+                    'available': False,
+                    'running': False,
+                    'error': 'still booting',
+                }
+            }
+        },
+    )()
+    fake_loop = type('Loop', (), {'sessions': sessions, 'bus': bus, 'channel_manager': channel_manager})()
+
+    config_path = tmp_path / 'config.json'
+    save_config(Config(), config_path)
+    mark_runtime_healthy(config_path, version='1.2.3')
+
+    sent = await maybe_broadcast_startup_restart_notice(
+        fake_loop,
+        config_path=config_path,
+        config=Config(),
+    )
+
+    assert sent == 0
+    state = load_runtime_state(config_path)
+    assert int((state.get('notifications') or {}).get('healthy') or 0) == 0
+
+
 def test_settings_masks_http_auth_profiles_and_preserves_on_patch(tmp_path):
     config_path = tmp_path / 'config.json'
     cfg = Config()

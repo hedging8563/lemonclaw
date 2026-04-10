@@ -855,12 +855,15 @@ def gateway(
         await mem_backup.start()
 
         async def _startup_runtime_notice():
-            await asyncio.sleep(1.5)
-            await maybe_broadcast_startup_restart_notice(
-                agent,
-                config_path=runtime_config_path,
-                config=config,
-            )
+            for _attempt in range(10):
+                await asyncio.sleep(1.5 if _attempt == 0 else 2.0)
+                sent = await maybe_broadcast_startup_restart_notice(
+                    agent,
+                    config_path=runtime_config_path,
+                    config=config,
+                )
+                if sent:
+                    break
 
         # Run agent, channels, HTTP server, and shutdown watcher concurrently
         async def _shutdown_watcher():

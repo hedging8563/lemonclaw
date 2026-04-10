@@ -7,6 +7,7 @@ from typing import Any
 from lemonclaw.agent.locale import session_lang, t
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.gateway.runtime_state import (
+    derive_runtime_state_view,
     derive_restart_notify_targets,
     load_runtime_state,
     mark_runtime_notification_sent,
@@ -67,19 +68,52 @@ async def broadcast_restart_notice(
     return sent
 
 
+def _channel_runtime_usable(agent_loop: Any) -> bool:
+    channel_manager = getattr(agent_loop, "channel_manager", None)
+    if channel_manager is None or not hasattr(channel_manager, "get_channel_status"):
+        return True
+    try:
+        channel_status = channel_manager.get_channel_status() or {}
+    except Exception:
+        return False
+    configured = [
+        status for status in channel_status.values()
+        if bool((status or {}).get("configured_enabled"))
+    ]
+    if not configured:
+        return True
+    for status in configured:
+        item = dict(status or {})
+        if not bool(item.get("configured_complete", True)):
+            return False
+        if not bool(item.get("registered", False)):
+            return False
+        if not bool(item.get("available", False)):
+            return False
+        if not bool(item.get("running", False)):
+            return False
+        if str(item.get("error") or "").strip():
+            return False
+    return True
+
+
 async def maybe_broadcast_startup_restart_notice(
     agent_loop: Any,
     *,
     config_path: Any,
     config: Any | None = None,
 ) -> int:
-    state = load_runtime_state(config_path)
+    state = derive_runtime_state_view(load_runtime_state(config_path))
     if str(state.get("status") or "") != "healthy":
         return 0
 
     completed_at_ms = int(state.get("last_restart_completed_at_ms") or 0)
     sent_at_ms = int(((state.get("notifications") or {}).get("healthy")) or 0)
     if not completed_at_ms or sent_at_ms == completed_at_ms:
+        return 0
+    if not bool(state.get("restart_state_healthy")):
+        return 0
+    if not _channel_runtime_usable(agent_loop):
         return 0
 
     merged_targets = list(state.get("notify_targets") or [])
