@@ -166,3 +166,30 @@ def test_session_load_drops_empty_assistant_messages(tmp_path: Path) -> None:
     assert len(reloaded.messages) == 1
     assert reloaded.messages[0]['role'] == 'user'
     assert reloaded.get_history() == [{'role': 'user', 'content': '今天深圳天气'}]
+
+
+def test_archive_session_preserves_corrupt_original_session(tmp_path: Path) -> None:
+    mgr = SessionManager(tmp_path)
+    key = 'webui:test-corrupt-archive'
+    path = mgr._get_session_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                '_type': 'metadata',
+                'key': key,
+                'created_at': 'not-a-date',
+                'updated_at': '2026-04-09T00:00:00',
+                'metadata': {},
+                'last_consolidated': 0,
+                'version': 0,
+            },
+            ensure_ascii=False,
+        )
+        + '\n',
+        encoding='utf-8',
+    )
+
+    assert mgr.archive_session(key) is False
+    assert path.exists()
+    assert 'not-a-date' in path.read_text(encoding='utf-8')

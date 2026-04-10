@@ -45,6 +45,8 @@ async def test_db_tool_allows_write_queries(tmp_path):
 def test_db_tool_resolves_capability():
     tool = DBTool()
     assert tool.resolve_capability({"connection_profile": "local", "query": "select 1"}) == "db.read"
+    assert tool.resolve_capability({"connection_profile": "local", "query": "with cte as (select 1) select * from cte"}) == "db.read"
+    assert tool.resolve_capability({"connection_profile": "local", "query": "with inserted as (insert into items(name) values ('gamma') returning id) select * from inserted"}) == "db.write"
     assert tool.resolve_capability({"connection_profile": "local", "query": "delete from items"}) == "db.write"
 
 

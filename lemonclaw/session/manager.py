@@ -541,11 +541,14 @@ class SessionManager:
                     relative = source.relative_to(attachments_src)
                     path_map[str(source)] = str(attachments_dst / relative)
 
-        if session:
-            session.key = archived_key
-            session.messages = [rewrite_payload_paths(message, path_map) for message in session.messages]
-            archived_path = self._get_session_path(archived_key)
-            self._atomic_save(archived_path, session)
+        if not session:
+            logger.warning("Failed to archive session {}: original file could not be loaded, preserving source", key)
+            return False
+
+        session.key = archived_key
+        session.messages = [rewrite_payload_paths(message, path_map) for message in session.messages]
+        archived_path = self._get_session_path(archived_key)
+        self._atomic_save(archived_path, session)
 
         if attachments_src.exists():
             attachments_dst.parent.mkdir(parents=True, exist_ok=True)

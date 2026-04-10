@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,9 @@ from lemonclaw.agent.tools.base import Tool
 
 class DBTool(Tool):
     """Structured database tool."""
+
+    _READ_PREFIXES = ("select", "pragma", "explain")
+    _WRITE_PREFIXES = ("insert", "update", "delete", "merge", "replace", "create", "drop", "alter", "truncate")
 
     def __init__(
         self,
@@ -61,10 +65,26 @@ class DBTool(Tool):
         }
 
     def resolve_capability(self, params: dict[str, Any], context: dict[str, Any] | None = None) -> str:
+        del context
         query = str(params.get("query") or "").strip().lower()
-        if query.startswith(("select", "pragma", "explain", "with")):
-            return "db.read"
-        return "db.write"
+        if self._is_write_query(query):
+            return "db.write"
+        return "db.read"
+
+    @classmethod
+    def _is_write_query(cls, query: str) -> bool:
+        if not query:
+            return False
+
+        first_token = query.split(None, 1)[0]
+        if first_token in cls._WRITE_PREFIXES:
+            return True
+        if first_token in cls._READ_PREFIXES:
+            return False
+        if first_token != "with":
+            return False
+
+        return bool(re.search(r"\b(" + "|".join(cls._WRITE_PREFIXES) + r")\b", query))
 
     async def execute(self, connection_profile: str, query: str, limit: int | None = None, **kwargs: Any) -> dict[str, Any]:
         row_limit = limit or 50

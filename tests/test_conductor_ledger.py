@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from lemonclaw.bus.events import InboundMessage
-from lemonclaw.conductor.types import IntentAnalysis, OrchestrationPlan, OrchestratorPhase, SubTask, TaskComplexity
+from lemonclaw.conductor.types import IntentAnalysis, OrchestrationPlan, OrchestratorPhase, SubTask, SubTaskStatus, TaskComplexity
 from lemonclaw.ledger.runtime import TaskLedger
 
 
@@ -31,7 +31,7 @@ async def test_orchestrator_updates_ledger_for_complex_task(tmp_path: Path):
         original_message="do complex task",
         intent=intent,
         phase=OrchestratorPhase.SPLITTING,
-        subtasks=[SubTask(id="t1", description="part 1")],
+        subtasks=[SubTask(id="t1", description="part 1", status=SubTaskStatus.COMPLETED)],
     )
 
     with patch.object(orch, "_analyze", return_value=intent), \

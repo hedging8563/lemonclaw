@@ -212,6 +212,18 @@ class Orchestrator:
         metadata["conductor"] = serialize_plan(plan, get_swarm_template(plan.swarm_template_id))
         self._ledger.update_task(task_id, metadata=metadata)
 
+    @staticmethod
+    def _blocked_pending_subtasks(plan: OrchestrationPlan) -> list[tuple[str, list[str]]]:
+        failed_ids = {task.id for task in plan.subtasks if task.status == SubTaskStatus.FAILED}
+        blocked: list[tuple[str, list[str]]] = []
+        for task in plan.subtasks:
+            if task.status != SubTaskStatus.PENDING:
+                continue
+            failed_deps = [dep_id for dep_id in task.depends_on if dep_id in failed_ids]
+            if failed_deps:
+                blocked.append((task.id, failed_deps))
+        return blocked
+
     # ── Public API ────────────────────────────────────────────────────────
 
     async def handle_message(self, msg: InboundMessage) -> str | None:
@@ -284,6 +296,19 @@ class Orchestrator:
                 if self._ledger:
                     self._ledger.update_task(task_id, status="failed", current_stage="degraded", error="all subtasks failed")
                 return None  # Caller handles directly as single agent
+
+            unresolved = [st.id for st in plan.subtasks if st.status in (SubTaskStatus.PENDING, SubTaskStatus.RUNNING)]
+            if unresolved:
+                blocked = self._blocked_pending_subtasks(plan)
+                if blocked:
+                    blocked_summary = ", ".join(f"{task_id}<-{','.join(dep_ids)}" for task_id, dep_ids in blocked[:5])
+                    reason = f"pending subtasks remain blocked by failed dependencies: {blocked_summary}"
+                else:
+                    reason = f"pending subtasks remain unresolved: {', '.join(unresolved[:5])}"
+                logger.warning("Orchestrator: {}", reason)
+                if self._ledger:
+                    self._ledger.update_task(task_id, status="failed", current_stage="blocked", error=reason[:500])
+                return None
 
             # Phase 5: MERGING
             if self._ledger:

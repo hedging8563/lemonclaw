@@ -1,7 +1,7 @@
 """Tests for Conductor orchestration pipeline (P3 Phase 2)."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -368,3 +368,59 @@ async def test_execute_subtask_failure_finishes_original_ledger_step(tmp_path):
     assert len(steps) == 1
     assert steps[0]["name"] == "t_fail"
     assert steps[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_blocks_merge_when_dependencies_fail_and_pending_remain(tmp_path):
+    from lemonclaw.agent.registry import AgentRegistry
+    from lemonclaw.bus.queue import MessageBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
+    from lemonclaw.ledger.runtime import TaskLedger
+    from lemonclaw.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.chat = AsyncMock(return_value=LLMResponse(content="unused"))
+    bus = MessageBus()
+    registry = AgentRegistry(bus, tmp_path)
+    ledger = TaskLedger(tmp_path)
+    orch = Orchestrator(provider, bus, registry, model="gpt-5.4", ledger=ledger)
+
+    intent = IntentAnalysis(
+        complexity=TaskComplexity.MODERATE,
+        summary="complex task",
+        required_skills=["analysis"],
+        reasoning="needs orchestration",
+    )
+    plan = OrchestrationPlan(
+        request_id="plan-blocked",
+        original_message="Do the complex task",
+        intent=intent,
+        subtasks=[
+            SubTask(id="t1", description="root step", status=SubTaskStatus.FAILED),
+            SubTask(id="t2", description="dependent step", depends_on=["t1"], status=SubTaskStatus.PENDING),
+        ],
+    )
+
+    msg = type("Msg", (), {
+        "content": "Do the complex task",
+        "channel": "cli",
+        "chat_id": "chat1",
+        "sender_id": "user1",
+        "session_key": "cli:chat1",
+        "metadata": {"_task_id": "task_blocked"},
+    })()
+
+    with patch.object(orch, "_analyze", return_value=intent), \
+        patch.object(orch, "_split", return_value=plan), \
+        patch.object(orch, "_assign", return_value=None), \
+        patch.object(orch, "_monitor", return_value=None), \
+        patch.object(orch, "_merge", return_value="merged result") as merge_mock:
+        result = await orch.handle_message(msg)
+
+    assert result is None
+    merge_mock.assert_not_called()
+    task = ledger.read_task("task_blocked")
+    assert task is not None
+    assert task["status"] == "failed"
+    assert task["current_stage"] == "blocked"
+    assert task.get("completion_gate") is None
