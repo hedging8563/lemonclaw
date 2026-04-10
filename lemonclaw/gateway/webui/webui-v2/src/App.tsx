@@ -4,10 +4,10 @@ import { ChatArea } from './components/layout/ChatArea';
 import { Inspector } from './components/layout/Inspector';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { SettingsModal } from './components/settings/SettingsModal';
-import { closeSessionStream, syncSessionStream } from './stores/chat';
+import { abortStream, closeSessionStream, syncSessionStream } from './stores/chat';
 import { activeSessionKey } from './stores/sessions';
 import { checkAuth, isAuthenticated, authRequired } from './stores/auth';
-import { initActivityWS } from './stores/activity';
+import { closeActivityWS, initActivityWS } from './stores/activity';
 import { CommandPalette } from './components/layout/CommandPalette';
 import { mobileMenuOpen, showSettings } from './stores/ui';
 import { t } from './stores/i18n';
@@ -16,18 +16,27 @@ export function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkAuth().then((data) => {
+    checkAuth().finally(() => {
       setLoading(false);
-      if (data.ok) initActivityWS();
     });
-    return () => closeSessionStream();
+    return () => {
+      abortStream();
+      closeSessionStream();
+      closeActivityWS();
+    };
   }, []);
 
   useEffect(() => {
-    if (!loading && isAuthenticated.value) {
-      syncSessionStream();
+    if (loading) return;
+    if (!isAuthenticated.value) {
+      abortStream();
+      closeSessionStream();
+      closeActivityWS();
+      return;
     }
-  }, [loading, isAuthenticated.value, activeSessionKey.value]);
+    initActivityWS();
+    syncSessionStream();
+  }, [loading, isAuthenticated.value, authRequired.value, activeSessionKey.value]);
 
   if (loading) {
     return (

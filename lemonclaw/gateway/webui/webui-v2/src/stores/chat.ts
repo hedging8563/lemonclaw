@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals';
 import { chatStream, apiFetch, wsConnect } from '../api/client';
+import { isAuthenticated } from './auth';
 import { activeSessionKey, loadSessions } from './sessions';
 import { loadConductor } from './conductor';
 import { currentModel } from './models';
@@ -67,6 +68,7 @@ function upsertActivityErrorMessage(content: string, timestamp?: string) {
 }
 
 export function applyActivityEvent(event: any) {
+  if (!isAuthenticated.value) return;
   const sessionKey = activeSessionKey.value;
   if (!sessionKey || sessionKey.startsWith('webui:') || isStreaming.value) return;
   if (event.session_key !== sessionKey) return;
@@ -109,6 +111,10 @@ function mergeSessionMessages(incoming: ChatMessage[]) {
 
 export function syncSessionStream() {
   const key = activeSessionKey.value;
+  if (!isAuthenticated.value) {
+    closeSessionStream();
+    return;
+  }
   if (sessionWsKey === key) return;
 
   if (sessionWsClient) {
@@ -127,7 +133,9 @@ export function syncSessionStream() {
     if (event.type === 'messages' && event.session_key === activeSessionKey.value && !isStreaming.value) {
       mergeSessionMessages((event.messages || []).map((msg: any) => normalizeMessage(msg)));
     }
-  }, () => {});
+  }, () => {}, {
+    shouldReconnect: () => isAuthenticated.value,
+  });
   sessionWsKey = key;
 }
 
@@ -228,7 +236,7 @@ export async function retryUploadAttachment(id: string) {
 }
 
 export async function loadHistory() {
-  if (!activeSessionKey.value) return;
+  if (!activeSessionKey.value || !isAuthenticated.value) return;
 
   messages.value = [];
   inputText.value = '';
@@ -258,7 +266,7 @@ export async function loadHistory() {
 }
 
 export async function loadMoreHistory() {
-  if (isLoadingMore.value || !hasMoreHistory.value || _nextBefore == null || !activeSessionKey.value) return;
+  if (isLoadingMore.value || !hasMoreHistory.value || _nextBefore == null || !activeSessionKey.value || !isAuthenticated.value) return;
   if (activeSessionKey.value.startsWith('webui:')) return;
 
   isLoadingMore.value = true;
@@ -282,7 +290,7 @@ export async function loadMoreHistory() {
 }
 
 export async function sendMessage(content: string) {
-  if (isStreaming.value) return;
+  if (isStreaming.value || !isAuthenticated.value) return;
 
   const mediaPaths = attachments.value.filter((item) => item.status === 'ready' && item.path).map((item) => item.path!) ;
   attachments.value = [];
@@ -327,8 +335,8 @@ export async function sendMessage(content: string) {
         }
       } else if (event.type === 'done') {
         if (event.data) {
-          const payload = normalizeMessage(event.data);
-          Object.assign(lastMsg, { ...payload, blocks: [...lastMsg.blocks.filter((b) => ['thinking', 'tool', 'error'].includes(b.type)), ...payload.blocks.filter((b) => !['thinking', 'tool', 'error'].includes(b.type))] });
+          const payload = mergeDonePayload(lastMsg, event.data);
+          Object.assign(lastMsg, payload);
         }
         if (event.session_key && event.session_key !== activeSessionKey.value) {
           activeSessionKey.value = event.session_key;
@@ -364,4 +372,20 @@ export async function sendMessage(content: string) {
     loadSessions();
     loadConductor();
   }
+}
+
+const AUX_BLOCK_TYPES = new Set<ChatMessage['blocks'][number]['type']>(['thinking', 'tool', 'error']);
+
+export function mergeDonePayload(lastMsg: ChatMessage, raw: any): ChatMessage {
+  const payload = normalizeMessage(raw || {});
+  const hasVisibleContent = Boolean(payload.content || payload.media.length > 0 || payload.error || payload.blocks.length > 0);
+  if (!hasVisibleContent) return lastMsg;
+  return {
+    ...lastMsg,
+    ...payload,
+    blocks: [
+      ...lastMsg.blocks.filter((block) => AUX_BLOCK_TYPES.has(block.type as any)),
+      ...payload.blocks.filter((block) => !AUX_BLOCK_TYPES.has(block.type as any)),
+    ],
+  };
 }

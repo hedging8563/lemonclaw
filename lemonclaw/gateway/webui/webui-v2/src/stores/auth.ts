@@ -29,11 +29,22 @@ export async function login(token: string) {
 }
 
 export async function logout() {
-  await apiFetch('/api/auth', { method: 'DELETE' });
-  isAuthenticated.value = false;
+  const authWasRequired = authRequired.value;
+  try {
+    await apiFetch('/api/auth', { method: 'DELETE' });
+  } catch (err) {
+    console.error('Failed to logout', err);
+  } finally {
+    if (authWasRequired) {
+      await checkAuth();
+    } else {
+      isAuthenticated.value = false;
+    }
+  }
 }
 
 // Listen to global auth-required event from apiFetch
 window.addEventListener('auth-required', () => {
   isAuthenticated.value = false;
+  authRequired.value = true;
 });

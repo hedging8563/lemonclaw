@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals';
 import { apiFetch, wsConnect } from '../api/client';
-import { activeSessionKey } from './sessions';
+import { isAuthenticated } from './auth';
 import { applyActivityEvent, isStreaming } from './chat';
 
 export interface ActivitySession {
@@ -17,6 +17,7 @@ export const wsConnected = signal(false);
 let wsClient: any = null;
 
 export async function loadActivitySessions() {
+  if (!isAuthenticated.value) return;
   try {
     const res = await apiFetch('/api/activity/sessions');
     const data = await res.json();
@@ -27,8 +28,9 @@ export async function loadActivitySessions() {
 }
 
 export function initActivityWS() {
-  if (wsClient) return;
+  if (wsClient || !isAuthenticated.value) return;
   wsClient = wsConnect('/ws/activity', (event) => {
+    if (!isAuthenticated.value) return;
     if (['message', 'message_in', 'message_out', 'tool_call', 'chunk', 'progress', 'done', 'error'].includes(event.type)) {
       loadActivitySessions();
       if (!isStreaming.value) {
@@ -37,5 +39,14 @@ export function initActivityWS() {
     }
   }, (connected) => {
     wsConnected.value = connected;
+  }, {
+    shouldReconnect: () => isAuthenticated.value,
   });
+}
+
+export function closeActivityWS() {
+  if (wsClient) {
+    wsClient.close();
+    wsClient = null;
+  }
 }

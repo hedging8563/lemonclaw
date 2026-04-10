@@ -73,12 +73,18 @@ export async function* chatStream(params: { message: string, session_key?: strin
   }
 }
 
-export function wsConnect(path: string, onMessage: (data: any) => void, onStatusChange: (connected: boolean) => void) {
+export function wsConnect(
+  path: string,
+  onMessage: (data: any) => void,
+  onStatusChange: (connected: boolean) => void,
+  options: { shouldReconnect?: () => boolean } = {},
+) {
   let ws: WebSocket;
   let pingTimer: any;
   let isIntentionallyClosed = false;
   let retryDelay = 1000;
   const MAX_RETRY_DELAY = 30000;
+  const shouldReconnect = options.shouldReconnect || (() => true);
 
   const connect = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -107,7 +113,13 @@ export function wsConnect(path: string, onMessage: (data: any) => void, onStatus
     ws.onclose = () => {
       onStatusChange(false);
       clearInterval(pingTimer);
-      if (!isIntentionallyClosed) {
+      let allowReconnect = false;
+      try {
+        allowReconnect = shouldReconnect();
+      } catch (err) {
+        console.error('WS reconnect guard failed', err);
+      }
+      if (!isIntentionallyClosed && allowReconnect) {
         setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       }

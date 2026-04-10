@@ -1978,6 +1978,42 @@ class TestWebUIRoutes:
         assert '"type": "done"' in resp.text or '"type":"done"' in resp.text
 
     @pytest.mark.asyncio
+    async def test_chat_stream_omits_empty_done_payload_after_outbound_turn(self, make_agent_loop):
+        import json
+
+        from starlette.testclient import TestClient
+
+        from lemonclaw.gateway.server import create_app
+
+        loop, bus = make_agent_loop()
+
+        async def _fake_process_direct(*args, **kwargs):
+            outbound_sink = kwargs["outbound_sink"]
+            await outbound_sink(type("Outbound", (), {"content": "Visible outbound turn", "media": []})())
+            return ""
+
+        loop.process_direct = _fake_process_direct
+
+        app = create_app(auth_token=None, agent_loop=loop,
+                         session_manager=loop.sessions, webui_enabled=True)
+        client = TestClient(app)
+        resp = client.post("/api/chat/stream", json={"message": "hello"})
+        assert resp.status_code == 200
+
+        events = []
+        for line in resp.text.splitlines():
+            if not line.startswith("data: "):
+                continue
+            events.append(json.loads(line[6:]))
+
+        outbound = next(item for item in events if item["type"] == "outbound")
+        done = next(item for item in events if item["type"] == "done")
+
+        assert outbound["data"]["content"] == "Visible outbound turn"
+        assert "data" not in done
+        assert done["session_key"].startswith("webui:")
+
+    @pytest.mark.asyncio
     async def test_chat_stream_surfaces_progress_kind(self, make_agent_loop):
         from starlette.testclient import TestClient
 

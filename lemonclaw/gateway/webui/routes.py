@@ -619,11 +619,16 @@ def get_webui_routes(
                     outbound_sink=outbound_sink,
                 )
                 # Send final response
+                done_payload = serialize_ui_message({"role": "assistant", "content": final}, session_key=effective_session_key)
                 event = {
                     "type": "done",
                     "session_key": effective_session_key,
-                    "data": serialize_ui_message({"role": "assistant", "content": final}, session_key=effective_session_key),
                 }
+                if any(
+                    done_payload.get(field)
+                    for field in ("content", "error")
+                ) or done_payload.get("media") or done_payload.get("blocks"):
+                    event["data"] = done_payload
                 await queue.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
                 # Set title for new sessions (instant, no LLM)
                 _set_session_title(effective_session_key, message)
