@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -13,7 +14,87 @@ from lemonclaw.channels.whatsapp import WhatsAppChannel
 from lemonclaw.config.schema import WhatsAppConfig
 
 
+_SUPPORTED_CONTENT_FIELDS = {
+    "conversation",
+    "extendedTextMessage",
+    "imageMessage",
+    "videoMessage",
+    "documentMessage",
+    "audioMessage",
+}
+_UNSUPPORTED_CONTENT_LABELS = {
+    "stickerMessage": "sticker",
+    "locationMessage": "location",
+    "liveLocationMessage": "live location",
+    "contactMessage": "contact",
+    "contactsArrayMessage": "contacts",
+    "pollCreationMessage": "poll",
+    "pollUpdateMessage": "poll update",
+    "reactionMessage": "reaction",
+    "buttonsResponseMessage": "button response",
+    "templateButtonReplyMessage": "template button reply",
+    "listResponseMessage": "list response",
+    "orderMessage": "order",
+    "productMessage": "product",
+    "protocolMessage": "protocol",
+}
+
+
+def _python_bridge_extract_content(message: dict[str, object]) -> str | None:
+    payload = message.get("message")
+    if not isinstance(payload, dict):
+        return None
+
+    if isinstance(payload.get("conversation"), str):
+        return payload["conversation"]
+
+    extended = payload.get("extendedTextMessage")
+    if isinstance(extended, dict) and isinstance(extended.get("text"), str):
+        return extended["text"]
+
+    image = payload.get("imageMessage")
+    if isinstance(image, dict):
+        caption = image.get("caption")
+        return f"[Image] {caption}" if isinstance(caption, str) and caption else "[Image]"
+
+    video = payload.get("videoMessage")
+    if isinstance(video, dict):
+        caption = video.get("caption")
+        return f"[Video] {caption}" if isinstance(caption, str) and caption else "[Video]"
+
+    document = payload.get("documentMessage")
+    if isinstance(document, dict):
+        caption = document.get("caption")
+        if isinstance(caption, str) and caption:
+            return f"[Document] {caption}"
+        filename = document.get("fileName") or document.get("title") or "document"
+        return f"[Document] {filename}"
+
+    if isinstance(payload.get("audioMessage"), dict):
+        return "[Voice Message]"
+
+    for key, label in _UNSUPPORTED_CONTENT_LABELS.items():
+        if payload.get(key):
+            return f"[Unsupported WhatsApp message type: {label}]"
+
+    for key in payload:
+        if key.endswith("Message") and key not in _SUPPORTED_CONTENT_FIELDS:
+            normalized = key.removesuffix("Message")
+            normalized = "".join(
+                (f" {char.lower()}" if index and char.isupper() else char.lower())
+                for index, char in enumerate(normalized)
+            ).strip()
+            return f"[Unsupported WhatsApp message type: {normalized}]"
+
+    return None
+
+
 def _bridge_extract_content(message: dict[str, object]) -> str | None:
+    if shutil.which("pnpm") is None:
+        # Python-only CI jobs do not install Node/pnpm. Keep the contract assertion
+        # here so the Python suite does not silently depend on the bridge toolchain.
+        return _python_bridge_extract_content(message)
+
     repo_root = Path(__file__).resolve().parents[2]
     script = f"""
 import {{ WhatsAppClient }} from './lemonclaw/bridge/src/whatsapp.ts';
