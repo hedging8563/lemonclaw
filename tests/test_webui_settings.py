@@ -512,6 +512,7 @@ def test_pairing_break_glass_can_replace_owner(monkeypatch, tmp_path):
     assert body['pairing']['owner_notify_target'] == 'new-dm'
     assert body['pairing']['pending_count'] == 0
     assert 'new-owner|laptop' in body['pairing']['approved']
+    assert body['break_glass']['next_recovery']['code'].startswith('lc_recovery_')
 
 
 def test_pairing_recovery_code_route_issues_one_time_code(monkeypatch, tmp_path):
@@ -584,6 +585,7 @@ def test_pairing_recovery_code_can_recover_owner_without_auth(monkeypatch, tmp_p
     assert body['pairing']['owner'] == 'new-owner|laptop'
     assert body['pairing']['owner_notify_target'] == 'new-dm'
     assert body['pairing']['pending_count'] == 0
+    assert body['break_glass']['next_recovery']['code'].startswith('lc_recovery_')
 
 
 def test_pairing_recovery_code_rejects_invalid_recover_attempt(monkeypatch, tmp_path):

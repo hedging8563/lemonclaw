@@ -21,6 +21,13 @@ describe('normalizeChangedPath', () => {
     expect(normalizeChangedPath(['tools', 'notify', 'allow_webhook_domains'])).toBe('tools.notify');
     expect(normalizeChangedPath(['tools', 'k8s', 'allowed_namespaces'])).toBe('tools.k8s');
   });
+
+  it('treats unsaved SOUL drafts as close-guard worthy', async () => {
+    const { shouldConfirmSettingsClose } = await import('../src/components/settings/SettingsModal');
+    expect(shouldConfirmSettingsClose(0, false)).toBe(false);
+    expect(shouldConfirmSettingsClose(1, false)).toBe(true);
+    expect(shouldConfirmSettingsClose(0, true)).toBe(true);
+  });
 });
 
 describe('dicloak runtime checklist', () => {
@@ -142,5 +149,26 @@ describe('operator settings editors', () => {
     expect(html).toContain('Legacy Limit Profiles');
     expect(html).toContain('Unbound Metadata');
     expect(html).toContain('TURN ON EMERGENCY STOP');
+  });
+});
+
+describe('SOUL draft persistence', () => {
+  it('tracks unsaved SOUL drafts in local storage helpers', async () => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+      configurable: true,
+    });
+
+    const { SOUL_DRAFT_STORAGE_KEY, hasUnsavedSoulDraft, discardSoulDraft } = await import('../src/components/settings/SoulEditor');
+    expect(hasUnsavedSoulDraft()).toBe(false);
+    storage.set(SOUL_DRAFT_STORAGE_KEY, JSON.stringify({ content: 'base', draft: 'edited' }));
+    expect(hasUnsavedSoulDraft()).toBe(true);
+    discardSoulDraft();
+    expect(hasUnsavedSoulDraft()).toBe(false);
   });
 });

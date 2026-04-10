@@ -1381,11 +1381,13 @@ def get_settings_routes(
                 )
             except ValueError as exc:
                 return _json({"error": str(exc)}, 400)
+            issued = pairing.issue_break_glass_code()
             payload = _pairing_state_payload(config, channel_name, masked=False)
             payload["break_glass"] = {
                 "owner_set": owner,
                 "notify_target": pairing.owner_notify_target,
                 "clear_pending": clear_pending,
+                "next_recovery": issued,
             }
             return _json(payload)
 
@@ -1461,12 +1463,14 @@ def get_settings_routes(
             )
             if not claimed_notify_target:
                 return _json({"error": "Invalid or expired recovery code"}, 401)
+            issued = pairing.issue_break_glass_code()
             payload = _pairing_state_payload(config, channel_name, masked=False)
             payload["break_glass"] = {
                 "recovered": True,
                 "owner": owner,
                 "notify_target": pairing.owner_notify_target,
                 "clear_pending": clear_pending,
+                "next_recovery": issued,
             }
             return _json(payload)
 

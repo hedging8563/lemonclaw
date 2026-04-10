@@ -8,7 +8,7 @@ import { MCPServersEditor } from './MCPServersEditor';
 import { PostgresProfilesEditor } from './PostgresProfilesEditor';
 import { SkillsTab } from './SkillsTab';
 import { SQLiteProfilesEditor } from './SQLiteProfilesEditor';
-import { SoulEditor } from './SoulEditor';
+import { SoulEditor, discardSoulDraft, hasUnsavedSoulDraft } from './SoulEditor';
 import { WhatsAppPairingCard } from './WhatsAppPairingCard';
 
 type NoticeTone = 'info' | 'warning';
@@ -171,6 +171,10 @@ export function normalizeChangedPath(path: string[]): string {
     }
   }
   return path.join('.');
+}
+
+export function shouldConfirmSettingsClose(changedCount: number, soulDraftDirty: boolean): boolean {
+  return changedCount > 0 || soulDraftDirty;
 }
 
 export type DICloakRuntimeChecklistState = 'success' | 'warning' | 'neutral';
@@ -482,7 +486,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   const handleClose = () => {
-    if (changedPaths.size > 0 && !confirm(t('confirm_discard_changes'))) return;
+    const soulDirty = hasUnsavedSoulDraft();
+    if (shouldConfirmSettingsClose(changedPaths.size, soulDirty) && !confirm(t('confirm_discard_changes'))) return;
+    if (soulDirty) discardSoulDraft();
     onClose();
   };
 

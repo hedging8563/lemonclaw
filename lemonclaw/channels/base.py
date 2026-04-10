@@ -127,6 +127,30 @@ class BaseChannel(ABC):
             )
         )
 
+    async def _issue_owner_recovery_code_notice(
+        self,
+        chat_id: str,
+        *,
+        ttl_s: int = 900,
+        prefix: str = "",
+    ) -> None:
+        if not self._pairing:
+            return
+        issued = self._pairing.issue_break_glass_code(ttl_s=ttl_s)
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel=self.name,
+                chat_id=str(chat_id),
+                content=(
+                    f"{prefix}"
+                    "Break-glass recovery code issued.\n"
+                    f"Code: {issued['code']}\n"
+                    f"TTL: {issued['ttl_s']}s\n"
+                    "Store it safely. Anyone with this code can claim channel ownership once."
+                ),
+            )
+        )
+
     def _should_send_rate_limit_notice(self, sender_id: str) -> bool:
         now = time.monotonic()
         last_notice = self._rate_limit_notice_at.get(str(sender_id), 0.0)
@@ -241,6 +265,11 @@ class BaseChannel(ABC):
         )
         if result == "paired":
             logger.info("Auto-paired {} as owner on {}", sender_id, self.name)
+            await BaseChannel._issue_owner_recovery_code_notice(
+                self,
+                str(notify_target),
+                prefix="✅ You are now the current owner for this channel.\n",
+            )
             return True
         if result == "allowed":
             return True
@@ -387,6 +416,11 @@ class BaseChannel(ABC):
                     chat_id=str(new_notify_target),
                     content="✅ Break-glass recovery succeeded. You are now the current owner for this channel.",
                 ))
+                await BaseChannel._issue_owner_recovery_code_notice(
+                    self,
+                    str(new_notify_target),
+                    prefix="A fresh recovery code has been issued for the new ownership state.\n",
+                )
                 return "Break-glass recovery succeeded."
             return "Invalid or expired break-glass recovery code."
 
@@ -451,6 +485,11 @@ class BaseChannel(ABC):
                         chat_id=str(notify_target),
                         content="✅ You are now the current owner for this channel.",
                     ))
+                    await BaseChannel._issue_owner_recovery_code_notice(
+                        self,
+                        str(notify_target),
+                        prefix="A fresh recovery code has been issued for the new ownership state.\n",
+                    )
                     return f"Ownership transferred to: {payload}"
                 return f"Cannot transfer ownership to `{payload}`. Approve that user first."
             if action == "status":

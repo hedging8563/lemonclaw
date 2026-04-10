@@ -161,7 +161,7 @@ class AutoPairing:
             "expires_at_ms": expires_at_ms,
         }
         self._save()
-        logger.warning("auto-pairing: issued break-glass code for {}", self._channel)
+        logger.info("auto-pairing: issued break-glass code for {}", self._channel)
         return {
             "code": code,
             "issued_at_ms": now_ms,

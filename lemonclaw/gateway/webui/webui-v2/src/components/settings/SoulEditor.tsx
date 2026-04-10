@@ -2,6 +2,44 @@ import { useEffect, useState } from 'preact/hooks';
 import { apiFetch } from '../../api/client';
 import { t } from '../../stores/i18n';
 
+export const SOUL_DRAFT_STORAGE_KEY = 'lemonclaw:soulDraft';
+
+type SoulDraftSnapshot = {
+  content: string;
+  draft: string;
+};
+
+function readStoredSoulDraft(): SoulDraftSnapshot | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SOUL_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SoulDraftSnapshot>;
+    if (typeof parsed.content !== 'string' || typeof parsed.draft !== 'string') return null;
+    return { content: parsed.content, draft: parsed.draft };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSoulDraft(snapshot: SoulDraftSnapshot | null): void {
+  if (typeof localStorage === 'undefined') return;
+  if (!snapshot) {
+    localStorage.removeItem(SOUL_DRAFT_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(SOUL_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+}
+
+export function hasUnsavedSoulDraft(): boolean {
+  const snapshot = readStoredSoulDraft();
+  return Boolean(snapshot && snapshot.draft !== snapshot.content);
+}
+
+export function discardSoulDraft(): void {
+  writeStoredSoulDraft(null);
+}
+
 export function SoulEditor() {
   const [content, setContent] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -12,12 +50,22 @@ export function SoulEditor() {
     apiFetch('/api/soul')
       .then(r => r.json())
       .then(data => {
-        setContent(data.content || '');
-        setDraft(data.content || '');
+        const nextContent = data.content || '';
+        const stored = readStoredSoulDraft();
+        setContent(nextContent);
+        if (stored) {
+          setDraft(stored.draft);
+          setDirty(stored.draft !== nextContent);
+        } else {
+          setDraft(nextContent);
+          setDirty(false);
+        }
       })
       .catch(() => {
+        const stored = readStoredSoulDraft();
         setContent('');
-        setDraft('');
+        setDraft(stored?.draft || '');
+        setDirty(Boolean(stored && stored.draft !== ''));
       });
   }, []);
 
@@ -30,6 +78,7 @@ export function SoulEditor() {
       });
       setContent(draft);
       setDirty(false);
+      writeStoredSoulDraft(null);
     } catch (e) {
       console.error('Failed to save SOUL.md', e);
     }
@@ -80,7 +129,9 @@ export function SoulEditor() {
         onInput={(e) => {
           const val = (e.target as HTMLTextAreaElement).value;
           setDraft(val);
-          setDirty(val !== content);
+          const nextDirty = val !== content;
+          setDirty(nextDirty);
+          writeStoredSoulDraft(nextDirty ? { content: content || '', draft: val } : null);
         }}
         style={{
           flex: 1,

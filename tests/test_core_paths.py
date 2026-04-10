@@ -131,6 +131,54 @@ class TestAutoPairing:
         assert pairing.get_break_glass_metadata()["ttl_remaining_s"] is None
 
     @pytest.mark.asyncio
+    async def test_first_owner_pairing_auto_issues_recovery_code(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'telegram'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('telegram', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        assert any(msg.chat_id == 'dm-owner' and 'break-glass recovery code issued' in (msg.content or '').lower() for msg in outbound)
+        assert ch._pairing.get_break_glass_metadata()["active"] is True
+
+    @pytest.mark.asyncio
     async def test_pairing_mode_does_not_log_empty_allow_from_warning(self, tmp_path: Path):
         from lemonclaw.channels.base import BaseChannel
         from lemonclaw.channels.auto_pairing import AutoPairing
@@ -340,6 +388,7 @@ class TestAutoPairing:
             _handle_pairing_command = BaseChannel._handle_pairing_command
             _publish_feedback = BaseChannel._publish_feedback
             _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
 
         ch = _Channel()
         assert await ch._run_pairing_flow(
@@ -434,6 +483,7 @@ class TestAutoPairing:
             _handle_pairing_command = BaseChannel._handle_pairing_command
             _publish_feedback = BaseChannel._publish_feedback
             _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
 
         ch = _Channel()
         assert await ch._run_pairing_flow(
@@ -490,6 +540,7 @@ class TestAutoPairing:
             _handle_pairing_command = BaseChannel._handle_pairing_command
             _publish_feedback = BaseChannel._publish_feedback
             _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
 
         ch = _Channel()
         assert await ch._run_pairing_flow(
@@ -523,6 +574,59 @@ class TestAutoPairing:
             policy='pairing',
         ) is False
         assert any(msg.chat_id == 'dm-owner' and 'recovery code: active' in (msg.content or '').lower() for msg in outbound)
+
+    @pytest.mark.asyncio
+    async def test_transfer_owner_auto_issues_fresh_recovery_code(self, tmp_path: Path):
+        from lemonclaw.channels.base import BaseChannel
+        from lemonclaw.channels.auto_pairing import AutoPairing
+
+        outbound = []
+
+        class _Bus:
+            async def publish_inbound(self, msg):
+                return None
+
+            async def publish_outbound(self, msg):
+                outbound.append(msg)
+
+        class _Cfg:
+            allow_from: list[str] = []
+
+        class _Channel:
+            def __init__(self):
+                self.config = _Cfg()
+                self.name = 'telegram'
+                self.bus = _Bus()
+                self._pairing = AutoPairing('telegram', tmp_path)
+                self._rate_limit_window_s = 30.0
+                self._rate_limit_max_messages = 3
+                self._rate_limit_hits = {}
+                self._rate_limit_notice_at = {}
+
+            is_allowed = BaseChannel.is_allowed
+            _is_rate_limited = BaseChannel._is_rate_limited
+            _run_pairing_flow = BaseChannel._run_pairing_flow
+            _handle_pairing_command = BaseChannel._handle_pairing_command
+            _publish_feedback = BaseChannel._publish_feedback
+            _should_send_rate_limit_notice = BaseChannel._should_send_rate_limit_notice
+            _issue_owner_recovery_code_notice = BaseChannel._issue_owner_recovery_code_notice
+
+        ch = _Channel()
+        assert await ch._run_pairing_flow(
+            sender_id='owner-1|phone',
+            notify_target='dm-owner',
+            content='hello',
+            display_name='Owner',
+            policy='pairing',
+        ) is True
+        assert ch._pairing.check_or_pair('user-2', notify_target='dm-2') == 'pending'
+        assert ch._pairing.approve('user-2') == 'dm-2'
+        outbound.clear()
+
+        reply = await ch._handle_pairing_command('owner-1|phone', '/pairing transfer user-2')
+
+        assert reply == 'Ownership transferred to: user-2'
+        assert any(msg.chat_id == 'user-2' and 'break-glass recovery code issued' in (msg.content or '').lower() for msg in outbound)
 
     @pytest.mark.asyncio
     async def test_non_owner_cannot_issue_recovery_code(self, tmp_path: Path):
