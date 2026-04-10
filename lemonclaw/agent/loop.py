@@ -3508,6 +3508,28 @@ class AgentLoop:
             result, level = self._knowledge_retry_failed_sync(limit=limit, lang=lang)
             return self._command_reply(msg, result, kind="kb_retry_failed", level=level)
 
+        if lowered == "refresh-due" or lowered.startswith("refresh-due "):
+            limit_arg = raw[len("refresh-due"):].strip()
+            limit = 20
+            if limit_arg:
+                try:
+                    limit = min(max(int(limit_arg), 1), 50)
+                except ValueError:
+                    return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+            result, level = self._knowledge_refresh_due_sync(limit=limit, lang=lang)
+            return self._command_reply(msg, result, kind="kb_refresh_due", level=level)
+
+        if lowered == "ingest-pending" or lowered.startswith("ingest-pending "):
+            limit_arg = raw[len("ingest-pending"):].strip()
+            limit = 20
+            if limit_arg:
+                try:
+                    limit = min(max(int(limit_arg), 1), 50)
+                except ValueError:
+                    return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+            result, level = self._knowledge_ingest_pending_sync(limit=limit, lang=lang)
+            return self._command_reply(msg, result, kind="kb_ingest_pending", level=level)
+
         if lowered == "show" or lowered.startswith("show "):
             payload = raw[4:].strip()
             result, level = self._knowledge_show_sync(payload, lang=lang)
@@ -3706,6 +3728,38 @@ class AgentLoop:
         updated = int(result.get("updated") or 0)
         failed = int(result.get("failed") or 0)
         lines = [t("kb_retry_failed_done", lang, updated=updated, failed=failed)]
+        for item in list(result.get("errors") or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            doc_id = str(item.get("doc_id") or "unknown")
+            error = str(item.get("error") or "unknown error")
+            lines.append(f"- {doc_id}: {error}")
+        return "\n".join(lines), ("warning" if failed > 0 else "info")
+
+    def _knowledge_refresh_due_sync(self, *, limit: int = 20, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(self.workspace)
+        result = store.refresh_due(limit=limit)
+        updated = int(result.get("updated") or 0)
+        failed = int(result.get("failed") or 0)
+        lines = [t("kb_refresh_due_done", lang, updated=updated, failed=failed)]
+        for item in list(result.get("errors") or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            doc_id = str(item.get("doc_id") or "unknown")
+            error = str(item.get("error") or "unknown error")
+            lines.append(f"- {doc_id}: {error}")
+        return "\n".join(lines), ("warning" if failed > 0 else "info")
+
+    def _knowledge_ingest_pending_sync(self, *, limit: int = 20, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(self.workspace)
+        result = store.ingest_pending(limit=limit)
+        updated = int(result.get("updated") or 0)
+        failed = int(result.get("failed") or 0)
+        lines = [t("kb_ingest_pending_done", lang, updated=updated, failed=failed)]
         for item in list(result.get("errors") or [])[:5]:
             if not isinstance(item, dict):
                 continue

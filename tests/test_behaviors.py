@@ -1588,6 +1588,57 @@ class TestNativeBlockSchemaPersistence:
         assert refreshed["status"] == "ingested"
 
     @pytest.mark.asyncio
+    async def test_kb_refresh_due_reingests_due_documents(self, make_agent_loop, monkeypatch):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://due-me",
+            title="Due Me",
+            content="Initial content",
+            refresh_interval_hours=1,
+        )
+        store.ingest_document(doc["doc_id"])
+        monkeypatch.setattr(
+            KnowledgeStore,
+            "_is_due_document",
+            staticmethod(lambda document, now_ms=None: str(document.get("doc_id") or "") == str(doc["doc_id"])),
+        )
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb refresh-due 5")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "updated=1" in resp.content
+        refreshed = store.read_document(doc["doc_id"])
+        assert refreshed is not None
+        assert refreshed["status"] == "ingested"
+
+    @pytest.mark.asyncio
+    async def test_kb_ingest_pending_ingests_registered_documents(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://pending-me",
+            title="Pending Me",
+            content="Pending content",
+        )
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb ingest-pending 5")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "updated=1" in resp.content
+        refreshed = store.read_document(doc["doc_id"])
+        assert refreshed is not None
+        assert refreshed["status"] == "ingested"
+
+    @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:
         from unittest.mock import AsyncMock, MagicMock
 

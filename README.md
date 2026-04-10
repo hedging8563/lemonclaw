@@ -80,6 +80,8 @@ Generated runtime data lives under:
 | `/channel repair <name>` | Run channel repair from chat, including WhatsApp bridge repair |
 | `/tasks` | Show recent task and recovery hints in chat |
 | `/kb retry-failed [limit]` | Retry failed knowledge ingests from chat |
+| `/kb refresh-due [limit]` | Refresh due knowledge documents from chat |
+| `/kb ingest-pending [limit]` | Ingest pending knowledge documents from chat |
 | `/resume [task_id]` | Execute the safest available resume action in chat |
 | `/retry-outbox [task_id]` | Retry failed outbox delivery in chat when it is safe |
 | `/recheck [task_id]` | Re-run completion/recovery checks in chat when it is safe |

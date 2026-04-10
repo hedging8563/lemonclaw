@@ -85,6 +85,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
             "/kb retry-failed [limit] — Retry failed knowledge ingests\n"
+            "/kb refresh-due [limit] — Refresh due knowledge documents\n"
+            "/kb ingest-pending [limit] — Ingest pending knowledge documents\n"
             "/model — List or switch models\n"
             "/git-auth — Manage saved Git push credentials\n"
             "/usage — Show token usage\n"
@@ -111,6 +113,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
             "/kb retry-failed [数量] — 重试失败的知识入库\n"
+            "/kb refresh-due [数量] — 刷新到期的知识文档\n"
+            "/kb ingest-pending [数量] — 入库待处理的知识文档\n"
             "/model — 查看或切换模型\n"
             "/git-auth — 管理 Git 远端推送凭证\n"
             "/usage — 查看 Token 用量\n"
@@ -534,6 +538,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "kb_retry_failed_done": {
         "en": "Retried failed knowledge ingests: updated={updated}, failed={failed}.",
         "zh": "已重试失败的知识入库：updated={updated}，failed={failed}。",
+    },
+    "kb_refresh_due_done": {
+        "en": "Refreshed due knowledge documents: updated={updated}, failed={failed}.",
+        "zh": "已刷新到期知识文档：updated={updated}，failed={failed}。",
+    },
+    "kb_ingest_pending_done": {
+        "en": "Ingested pending knowledge documents: updated={updated}, failed={failed}.",
+        "zh": "已入库待处理知识文档：updated={updated}，failed={failed}。",
     },
     "kb_added": {
         "en": "Added knowledge note **{title}** (`{doc_id}`) and ingested it.",
