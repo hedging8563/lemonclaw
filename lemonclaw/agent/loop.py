@@ -2295,6 +2295,10 @@ class AgentLoop:
             reply = self._handle_tasks_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="tasks")
             return reply
+        if cmd == "/recovery" or cmd.startswith("/recovery "):
+            reply = self._handle_recovery_command(msg, lang)
+            self._persist_simple_reply(session, msg.content, reply, kind="recovery")
+            return reply
         if cmd == "/resume" or cmd.startswith("/resume "):
             reply = await self._handle_resume_command(msg, lang)
             self._persist_simple_reply(session, msg.content, reply, kind="resume")
@@ -2337,7 +2341,7 @@ class AgentLoop:
             return reply
         # Unknown slash command guard
         if cmd.startswith("/") and not cmd[1:2].isspace():
-            known = ("/new", "/usage", "/help", "/runtime", "/channel", "/tasks", "/resume", "/retry-outbox", "/recheck", "/abandon", "/export", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
+            known = ("/new", "/usage", "/help", "/runtime", "/channel", "/tasks", "/recovery", "/resume", "/retry-outbox", "/recheck", "/abandon", "/export", "/bundle", "/postmortem", "/kb", "/model", "/git-auth", "/stop")
             first_word = cmd.split()[0]
             if first_word not in known:
                 reply = self._command_reply(msg, t("unknown_command", lang, cmd=first_word), kind="unknown_command", level="warning")
@@ -2621,6 +2625,66 @@ class AgentLoop:
                 )
             )
         return self._command_reply(msg, "\n".join(lines), kind="tasks")
+
+    def _handle_recovery_command(self, msg: InboundMessage, lang: str = "en") -> OutboundMessage:
+        raw = msg.content.strip()[9:].strip()
+        limit = 5
+        manual_only = False
+        if raw:
+            tokens = raw.split()
+            for token in tokens:
+                lowered = token.lower()
+                if lowered in {"manual", "manual-only", "manual_review"}:
+                    manual_only = True
+                    continue
+                try:
+                    limit = min(max(int(token), 1), 10)
+                except ValueError:
+                    return self._command_reply(msg, t("recovery_usage", lang), kind="recovery_help", level="warning")
+
+        recovery_tasks = [
+            task
+            for task in self.ledger.list_recovery_tasks(limit=500, manual_review_only=manual_only)
+            if str(task.get("session_key") or "") == msg.session_key
+        ]
+        if not recovery_tasks:
+            return self._command_reply(msg, t("recovery_empty", lang), kind="recovery", level="warning")
+
+        visible = [
+            item
+            for item in self.ledger.list_operator_queue_view(limit=500, manual_review_only=manual_only)
+            if str(item.get("session_key") or "") == msg.session_key
+        ][:limit]
+        summary = self.ledger.summarize_recovery_tasks(recovery_tasks)
+        lines = [
+            t("recovery_header", lang),
+            t(
+                "recovery_summary",
+                lang,
+                tasks=summary.get("tasks_with_recovery", 0),
+                manual_review=summary.get("manual_review_required", 0),
+                stale_failed=summary.get("stale_recovery_failed", 0),
+                waiting_manual=summary.get("waiting_manual_review", 0),
+            ),
+        ]
+        for task in visible:
+            queue = dict(task.get("queue") or {})
+            reason = str(queue.get("reason") or task.get("error") or "no recovery hint")
+            if len(reason) > 120:
+                reason = reason[:117] + "..."
+            lines.append(
+                t(
+                    "tasks_item",
+                    lang,
+                    task_id=str(task.get("task_id") or ""),
+                    status=str(task.get("status") or "unknown"),
+                    stage=str(task.get("current_stage") or "unknown"),
+                    action=str(queue.get("recommended_action") or "manual_review"),
+                    safe="yes" if queue.get("safe_to_execute") else "no",
+                    reason=reason,
+                )
+            )
+        return self._command_reply(msg, "\n".join(lines), kind="recovery")
 
     def _resolve_session_task(
         self,
@@ -3433,6 +3497,17 @@ class AgentLoop:
             result, level = self._knowledge_add_sync(msg, payload, lang)
             return self._command_reply(msg, result, kind="kb_add", level=level)
 
+        if lowered == "retry-failed" or lowered.startswith("retry-failed "):
+            limit_arg = raw[len("retry-failed"):].strip()
+            limit = 20
+            if limit_arg:
+                try:
+                    limit = min(max(int(limit_arg), 1), 50)
+                except ValueError:
+                    return self._command_reply(msg, t("kb_usage", lang), kind="kb_help", level="warning")
+            result, level = self._knowledge_retry_failed_sync(limit=limit, lang=lang)
+            return self._command_reply(msg, result, kind="kb_retry_failed", level=level)
+
         if lowered == "show" or lowered.startswith("show "):
             payload = raw[4:].strip()
             result, level = self._knowledge_show_sync(payload, lang=lang)
@@ -3622,6 +3697,22 @@ class AgentLoop:
         except Exception as exc:
             return t("kb_add_failed", lang, error=str(exc)[:200]), "warning"
         return t("kb_added", lang, title=doc.get("title") or doc.get("doc_id"), doc_id=doc.get("doc_id")), "info"
+
+    def _knowledge_retry_failed_sync(self, *, limit: int = 20, lang: str = "en") -> tuple[str, str]:
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(self.workspace)
+        result = store.retry_failed(limit=limit)
+        updated = int(result.get("updated") or 0)
+        failed = int(result.get("failed") or 0)
+        lines = [t("kb_retry_failed_done", lang, updated=updated, failed=failed)]
+        for item in list(result.get("errors") or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            doc_id = str(item.get("doc_id") or "unknown")
+            error = str(item.get("error") or "unknown error")
+            lines.append(f"- {doc_id}: {error}")
+        return "\n".join(lines), ("warning" if failed > 0 else "info")
 
     def _knowledge_show_sync(self, payload: str, *, lang: str = "en") -> tuple[str, str]:
         from lemonclaw.knowledge import KnowledgeStore

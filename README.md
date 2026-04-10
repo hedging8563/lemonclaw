@@ -74,6 +74,7 @@ Generated runtime data lives under:
 | `lemonclaw doctor --fix` | Auto-fix common issues |
 | `lemonclaw status` | Show runtime status |
 | `/runtime [inventory|mcp|health|recovery]` | Show bot-facing runtime, MCP, health, and recovery truth |
+| `/recovery [limit] [manual]` | Show current-session recovery queue summary in chat |
 | `/channel status [name]` | Show channel status in chat |
 | `/channel restart <name>` | Restart a channel from chat |
 | `/channel repair <name>` | Run channel repair from chat, including WhatsApp bridge repair |

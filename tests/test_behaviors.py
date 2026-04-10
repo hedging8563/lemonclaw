@@ -204,6 +204,7 @@ class TestSlashCommands:
         assert response is not None
         assert "LemonClaw" in response.content
         assert "/export" in response.content
+        assert "/recovery" in response.content
 
     @pytest.mark.asyncio
     async def test_usage_contains_token(self, make_agent_loop):
@@ -258,6 +259,39 @@ class TestSlashCommands:
         assert response is not None
         assert "task_1" in response.content
         assert "recheck" in response.content
+
+    @pytest.mark.asyncio
+    async def test_recovery_command_lists_current_session_recovery_queue(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/recovery manual")
+        loop.ledger.ensure_task(
+            task_id="task_1",
+            session_key=msg.session_key,
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="demo",
+            metadata={"recovery": {"manual_review_required": True, "reason": "operator follow-up"}},
+        )
+        loop.ledger.update_task("task_1", status="waiting", current_stage="verify")
+
+        loop.ledger.ensure_task(
+            task_id="task_2",
+            session_key="test:other",
+            agent_id="default",
+            mode="chat",
+            channel="test",
+            goal="other",
+            metadata={"recovery": {"manual_review_required": True, "reason": "other session"}},
+        )
+        loop.ledger.update_task("task_2", status="waiting", current_stage="verify")
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "task_1" in response.content
+        assert "task_2" not in response.content
+        assert "manual_review" in response.content or "人工处理" in response.content
 
     @pytest.mark.asyncio
     async def test_resume_command_executes_safe_resume_for_latest_session_task(self, make_agent_loop):
@@ -1521,6 +1555,37 @@ class TestNativeBlockSchemaPersistence:
         assert f"id={doc['doc_id']}" in resp.content
         assert "chunk:" in resp.content
         assert "fact:" in resp.content
+
+    @pytest.mark.asyncio
+    async def test_kb_retry_failed_reingests_error_documents(self, make_agent_loop):
+        loop, _bus = make_agent_loop()
+        from lemonclaw.knowledge import KnowledgeStore
+
+        store = KnowledgeStore(loop.workspace)
+        doc = store.create_document(
+            source_type="manual",
+            source="manual://retry-me",
+            title="Retry Me",
+            content="Initial content",
+        )
+        original_loader = store._load_document_content
+
+        def _fail(_document):
+            raise RuntimeError("boom")
+
+        store._load_document_content = _fail  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="boom"):
+            store.ingest_document(doc["doc_id"])
+        store._load_document_content = original_loader  # type: ignore[assignment]
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/kb retry-failed 5")
+        resp = await loop._process_message(msg)
+
+        assert resp is not None
+        assert "updated=1" in resp.content
+        refreshed = store.read_document(doc["doc_id"])
+        assert refreshed is not None
+        assert refreshed["status"] == "ingested"
 
     @pytest.mark.asyncio
     async def test_tool_only_message_persists_tool_block(self, tmp_path: Path) -> None:

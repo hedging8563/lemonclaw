@@ -77,12 +77,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/bundle [task_id] [md|json] — Show a compact summary or the full task bundle artifact\n"
             "/postmortem [task_id] [md|json] — Show a concise summary or the full postmortem artifact\n"
             "/runtime [inventory|mcp|health|recovery] — Show runtime, MCP, health, and recovery status\n"
+            "/recovery [limit] [manual] — Show current-session recovery queue summary\n"
             "/channel status [name] — Show channel status in chat\n"
             "/channel restart <name> — Restart a channel from chat\n"
             "/channel repair <name> — Run channel repair from chat (currently includes WhatsApp)\n"
             "/kb <query> — Search ingested knowledge\n"
             "/kb list — List knowledge documents\n"
             "/kb add <title> :: <content> — Add a manual knowledge note\n"
+            "/kb retry-failed [limit] — Retry failed knowledge ingests\n"
             "/model — List or switch models\n"
             "/git-auth — Manage saved Git push credentials\n"
             "/usage — Show token usage\n"
@@ -101,12 +103,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "/bundle [task_id] [md|json] — 查看紧凑摘要或完整 task bundle 产物\n"
             "/postmortem [task_id] [md|json] — 查看简要摘要或完整 postmortem 产物\n"
             "/runtime [inventory|mcp|health|recovery] — 查看运行时、MCP、健康与恢复状态\n"
+            "/recovery [数量] [manual] — 查看当前会话的恢复队列摘要\n"
             "/channel status [name] — 查看渠道状态\n"
             "/channel restart <name> — 在聊天中重启渠道\n"
             "/channel repair <name> — 在聊天中执行渠道修复（当前包含 WhatsApp）\n"
             "/kb <查询> — 搜索已入库知识\n"
             "/kb list — 列出知识文档\n"
             "/kb add <标题> :: <内容> — 新增手动知识\n"
+            "/kb retry-failed [数量] — 重试失败的知识入库\n"
             "/model — 查看或切换模型\n"
             "/git-auth — 管理 Git 远端推送凭证\n"
             "/usage — 查看 Token 用量\n"
@@ -160,6 +164,22 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "tasks_item": {
         "en": "- {task_id}: status={status}, stage={stage}, next={action}, safe={safe}, reason={reason}",
         "zh": "- {task_id}：状态={status}，阶段={stage}，下一步={action}，可自动执行={safe}，原因={reason}",
+    },
+    "recovery_usage": {
+        "en": "Use `/recovery`, `/recovery <limit>`, or append `manual` to only show tasks that still require manual review in this chat session.",
+        "zh": "使用 `/recovery`、`/recovery <数量>`，或追加 `manual` 只查看当前聊天会话中仍需人工处理的任务。",
+    },
+    "recovery_empty": {
+        "en": "No recovery tasks need attention for this chat session.",
+        "zh": "当前聊天会话没有需要关注的恢复任务。",
+    },
+    "recovery_header": {
+        "en": "Recovery queue for this chat session:",
+        "zh": "当前聊天会话的恢复队列：",
+    },
+    "recovery_summary": {
+        "en": "- Summary: tasks={tasks}, manual_review={manual_review}, stale_failed={stale_failed}, waiting_manual={waiting_manual}",
+        "zh": "- 摘要：任务={tasks}，人工处理={manual_review}，陈旧恢复失败={stale_failed}，等待人工={waiting_manual}",
     },
     "resume_usage": {
         "en": "Use `/resume` to resume the latest task, or `/resume <task_id>` to target a specific task from `/tasks`.",
@@ -510,6 +530,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "kb_add_usage": {
         "en": "Use `/kb add <title> :: <content>` to add a manual knowledge note.",
         "zh": "使用 `/kb add <标题> :: <内容>` 来新增手动知识。",
+    },
+    "kb_retry_failed_done": {
+        "en": "Retried failed knowledge ingests: updated={updated}, failed={failed}.",
+        "zh": "已重试失败的知识入库：updated={updated}，failed={failed}。",
     },
     "kb_added": {
         "en": "Added knowledge note **{title}** (`{doc_id}`) and ingested it.",
