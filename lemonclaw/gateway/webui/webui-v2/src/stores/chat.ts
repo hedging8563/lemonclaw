@@ -328,7 +328,7 @@ export async function sendMessage(content: string) {
       } else if (event.type === 'outbound') {
         const payload = normalizeMessage(event.data || {});
         if (!lastMsg.content && lastMsg.media.length === 0 && lastMsg.role === 'assistant') {
-          Object.assign(lastMsg, payload);
+          Object.assign(lastMsg, mergeOutboundPayload(lastMsg, payload));
           currentMessages[lastIdx] = lastMsg;
         } else {
           currentMessages.push(payload);
@@ -375,6 +375,18 @@ export async function sendMessage(content: string) {
 }
 
 const AUX_BLOCK_TYPES = new Set<ChatMessage['blocks'][number]['type']>(['thinking', 'tool', 'error']);
+
+export function mergeOutboundPayload(lastMsg: ChatMessage, raw: any): ChatMessage {
+  const payload = normalizeMessage(raw || {});
+  return {
+    ...lastMsg,
+    ...payload,
+    blocks: [
+      ...lastMsg.blocks.filter((block) => AUX_BLOCK_TYPES.has(block.type as any)),
+      ...payload.blocks.filter((block) => !AUX_BLOCK_TYPES.has(block.type as any)),
+    ],
+  };
+}
 
 export function mergeDonePayload(lastMsg: ChatMessage, raw: any): ChatMessage {
   const payload = normalizeMessage(raw || {});

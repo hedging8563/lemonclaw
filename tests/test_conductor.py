@@ -371,6 +371,42 @@ async def test_execute_subtask_failure_finishes_original_ledger_step(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_handle_message_does_not_fallback_merge_when_dependency_failure_blocks_pending_subtask(tmp_path):
+    from lemonclaw.agent.registry import AgentRegistry
+    from lemonclaw.bus.events import InboundMessage
+    from lemonclaw.bus.queue import MessageBus
+    from lemonclaw.conductor.orchestrator import Orchestrator
+
+    provider = MagicMock()
+    bus = MessageBus()
+    registry = AgentRegistry(bus, tmp_path)
+    orch = Orchestrator(provider, bus, registry, model="gpt-5.4")
+    orch._analyze = AsyncMock(return_value=IntentAnalysis(complexity=TaskComplexity.MODERATE, summary="complex"))  # type: ignore[method-assign]
+    blocked_plan = OrchestrationPlan(
+        request_id="plan-blocked",
+        original_message="complex request",
+        intent=IntentAnalysis(complexity=TaskComplexity.MODERATE, summary="complex"),
+        subtasks=[
+            SubTask(id="t1", description="upstream", status=SubTaskStatus.FAILED, result="boom"),
+            SubTask(id="t2", description="downstream", status=SubTaskStatus.PENDING, depends_on=["t1"]),
+        ],
+    )
+    orch._split = AsyncMock(return_value=blocked_plan)  # type: ignore[method-assign]
+    orch._assign = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    orch._monitor = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    orch._merge = AsyncMock(return_value="should-not-merge")  # type: ignore[method-assign]
+
+    result = await orch.handle_message(
+        InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="complex request")
+    )
+
+    assert "couldn't safely finalize" in result.lower()
+    orch._merge.assert_not_awaited()
+    assert blocked_plan.merge.status == "failed"
+    assert blocked_plan.evaluation.status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_handle_message_blocks_merge_when_dependencies_fail_and_pending_remain(tmp_path):
     from lemonclaw.agent.registry import AgentRegistry
     from lemonclaw.bus.queue import MessageBus
@@ -417,7 +453,7 @@ async def test_handle_message_blocks_merge_when_dependencies_fail_and_pending_re
         patch.object(orch, "_merge", return_value="merged result") as merge_mock:
         result = await orch.handle_message(msg)
 
-    assert result is None
+    assert "couldn't safely finalize" in result.lower()
     merge_mock.assert_not_called()
     task = ledger.read_task("task_blocked")
     assert task is not None

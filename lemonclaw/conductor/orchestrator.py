@@ -306,9 +306,31 @@ class Orchestrator:
                 else:
                     reason = f"pending subtasks remain unresolved: {', '.join(unresolved[:5])}"
                 logger.warning("Orchestrator: {}", reason)
+                plan.merge = PipelineStage(
+                    status="failed",
+                    mode="merge",
+                    summary="Plan could not be merged because monitoring ended with unresolved subtasks.",
+                    details={
+                        "unresolved_subtasks": unresolved[:20],
+                        "blocked_subtasks": [
+                            {"id": subtask_id, "failed_dependencies": dep_ids}
+                            for subtask_id, dep_ids in blocked
+                        ],
+                    },
+                )
+                plan.evaluation = PipelineStage(
+                    status="failed",
+                    mode="rules",
+                    summary="Plan incomplete due to unresolved or blocked subtasks.",
+                    rationale=reason,
+                    details={"unresolved_count": len(unresolved), "blocked_count": len(blocked)},
+                )
+                plan.phase = OrchestratorPhase.IDLE
+                plan.observability.completed_at_ms = self._now_ms()
+                self._sync_plan_to_ledger(plan)
                 if self._ledger:
                     self._ledger.update_task(task_id, status="failed", current_stage="blocked", error=reason[:500])
-                return None
+                return "I couldn't safely finalize this orchestration because some subtasks were blocked or left unresolved."
 
             # Phase 5: MERGING
             if self._ledger:
