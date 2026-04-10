@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lemonclaw.agent.tools.notify import NotifyTool
+from lemonclaw.agent.tools.notify import NotifyTool, prepare_webhook_delivery
 from lemonclaw.agent.tools.registry import ToolRegistry
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY, DELIVERY_POLICY_KEY
@@ -105,6 +105,18 @@ async def test_notify_webhook_blocks_disallowed_domain():
     result = await tool.execute(target_type="webhook", content="hello", webhook_url="https://evil.example.com/hook")
     assert result["ok"] is False
     assert "not allowed" in result["summary"]
+
+
+def test_prepare_webhook_delivery_keeps_hostname_request_url():
+    request_url, headers, host = prepare_webhook_delivery(
+        "https://hooks.example.com/hook",
+        ["hooks.example.com"],
+    )
+
+    assert request_url == "https://hooks.example.com/hook"
+    assert "User-Agent" in headers
+    assert "Host" not in headers
+    assert host == "hooks.example.com"
 
 
 def test_notify_resolves_capability():

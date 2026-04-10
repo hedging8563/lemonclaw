@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import fnmatch
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -31,6 +32,31 @@ class HTTPRequestResult:
     dns_error: bool = False
 
 
+def _origin_tuple(url: str) -> tuple[str, str, int]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    port = parsed.port or (443 if scheme == "https" else 80)
+    return scheme, host, port
+
+
+def _host_allowed(host: str, patterns: list[str]) -> bool:
+    if not patterns:
+        return True
+    host = host.lower()
+    for pattern in patterns:
+        value = pattern.strip().lower()
+        if not value:
+            continue
+        if fnmatch.fnmatch(host, value):
+            return True
+        if value.startswith("*.") and (host == value[2:] or host.endswith("." + value[2:])):
+            return True
+        if host == value:
+            return True
+    return False
+
+
 async def _execute_http_request(
     *,
     method: str,
@@ -39,6 +65,7 @@ async def _execute_http_request(
     query: dict[str, str],
     body: dict[str, Any],
     timeout: int,
+    allow_domains: list[str],
     auth_profiles: dict[str, dict[str, str]],
     auth_profile: str = "",
     expect_json: bool = True,
@@ -63,6 +90,11 @@ async def _execute_http_request(
     response = None
     current_url = url
     parsed = urlparse(url)
+    if not _host_allowed((parsed.hostname or "").lower(), allow_domains):
+        return HTTPRequestResult(
+            ok=False, status_code=None, final_url=url, method=method,
+            headers={}, body=None, error=f"HTTP domain '{parsed.hostname or ''}' is not allowed",
+        )
     current_port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
     try:
@@ -88,6 +120,27 @@ async def _execute_http_request(
                         break
                     if location.startswith("/"):
                         location = f"{current_parsed.scheme}://{current_parsed.netloc}{location}"
+                    redir_host = (urlparse(location).hostname or "").lower()
+                    if not _host_allowed(redir_host, allow_domains):
+                        return HTTPRequestResult(
+                            ok=False,
+                            status_code=response.status_code,
+                            final_url=current_url,
+                            method=method,
+                            headers=dict(response.headers),
+                            body=None,
+                            error=f"Redirect target domain '{redir_host}' is not allowed",
+                        )
+                    if _origin_tuple(location) != _origin_tuple(current_url):
+                        return HTTPRequestResult(
+                            ok=False,
+                            status_code=response.status_code,
+                            final_url=current_url,
+                            method=method,
+                            headers=dict(response.headers),
+                            body=None,
+                            error=f"Refusing cross-origin redirect from {current_url} to {location}",
+                        )
                     current_url = location
                     redir_parsed = urlparse(location)
                     current_port = redir_parsed.port or (443 if redir_parsed.scheme == "https" else 80)
@@ -132,9 +185,11 @@ class HTTPRequestTool(Tool):
         self,
         *,
         timeout: int = 30,
+        allow_domains: list[str] | None = None,
         auth_profiles: dict[str, dict[str, str]] | None = None,
     ):
         self._timeout = timeout
+        self._allow_domains = allow_domains or []
         self._auth_profiles = auth_profiles or {}
 
     @property
@@ -263,12 +318,13 @@ class HTTPRequestTool(Tool):
             query=query,
             body=body,
             timeout=request_timeout,
+            allow_domains=self._allow_domains,
             auth_profiles=self._auth_profiles,
             auth_profile=auth_profile or "",
             expect_json=expect_json,
         )
 
-        if not result.ok and result.status_code is None:
+        if not result.ok and (result.status_code is None or result.error):
             return {"ok": False, "summary": result.error or "Unknown error", "raw": {"url": url, "method": method}}
 
         return {

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 
 import { eventQueueFilePath } from './accounts.js';
@@ -13,8 +13,11 @@ function defaultState(): PersistedQueue {
   return { nextId: 1, events: [] };
 }
 
-function loadState(): PersistedQueue {
-  const file = eventQueueFilePath();
+function backupFile(file: string): string {
+  return `${file}.bak`;
+}
+
+function tryLoadState(file: string): PersistedQueue | null {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf-8')) as Partial<PersistedQueue>;
     return {
@@ -22,8 +25,15 @@ function loadState(): PersistedQueue {
       events: Array.isArray(raw.events) ? raw.events as WeixinBridgeEvent[] : [],
     };
   } catch {
-    return defaultState();
+    return null;
   }
+}
+
+function loadState(): PersistedQueue {
+  const file = eventQueueFilePath();
+  return tryLoadState(file)
+    || tryLoadState(backupFile(file))
+    || defaultState();
 }
 
 function saveState(state: PersistedQueue): void {
@@ -31,6 +41,9 @@ function saveState(state: PersistedQueue): void {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(state, null, 2));
+  if (existsSync(file)) {
+    copyFileSync(file, backupFile(file));
+  }
   renameSync(tmp, file);
 }
 

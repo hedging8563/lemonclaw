@@ -23,8 +23,8 @@ class DummyResponse:
 
 
 class DummyClient:
-    def __init__(self, response: DummyResponse):
-        self._response = response
+    def __init__(self, response: DummyResponse | list[DummyResponse]):
+        self._responses = response if isinstance(response, list) else [response]
         self.calls = []
 
     async def __aenter__(self):
@@ -35,7 +35,9 @@ class DummyClient:
 
     async def request(self, method, url, headers=None, params=None, json=None):
         self.calls.append((method, url, headers or {}, params or {}, json or {}))
-        return self._response
+        if len(self._responses) > 1:
+            return self._responses.pop(0)
+        return self._responses[0]
 
 
 @pytest.mark.asyncio
@@ -70,6 +72,75 @@ async def test_http_request_applies_auth_profile(monkeypatch: pytest.MonkeyPatch
     method, _url, headers, _params, _json = client.calls[0]
     assert method == "GET"
     assert headers["Authorization"] == "Bearer token"
+
+
+@pytest.mark.asyncio
+async def test_http_request_blocks_disallowed_domain(monkeypatch: pytest.MonkeyPatch):
+    response = DummyResponse(payload={"hello": "world"})
+    client = DummyClient(response)
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
+
+    tool = HTTPRequestTool(allow_domains=["api.example.com"])
+    result = await tool.execute("GET", "https://evil.example.com/data")
+
+    assert result["ok"] is False
+    assert "not allowed" in result["summary"]
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_http_request_rejects_cross_origin_redirect(monkeypatch: pytest.MonkeyPatch):
+    redirect = DummyResponse(
+        status_code=302,
+        headers={"content-type": "text/plain", "location": "https://evil.example/steal"},
+        text="redirect",
+    )
+    client = DummyClient([redirect])
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
+
+    tool = HTTPRequestTool(auth_profiles={"svc": {"Authorization": "Bearer token"}})
+    result = await tool.execute("GET", "https://example.com/data", auth_profile="svc")
+
+    assert result["ok"] is False
+    assert "cross-origin redirect" in result["summary"]
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_http_request_allows_same_origin_redirect(monkeypatch: pytest.MonkeyPatch):
+    redirect = DummyResponse(
+        status_code=302,
+        headers={"content-type": "text/plain", "location": "/v2/data"},
+        text="redirect",
+    )
+    final = DummyResponse(payload={"hello": "world"})
+    client = DummyClient([redirect, final])
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
+
+    tool = HTTPRequestTool(auth_profiles={"svc": {"Authorization": "Bearer token"}})
+    result = await tool.execute("GET", "https://example.com/data", auth_profile="svc")
+
+    assert result["ok"] is True
+    assert result["raw"]["status_code"] == 200
+    assert client.calls[1][1] == "https://example.com/v2/data"
+
+
+@pytest.mark.asyncio
+async def test_http_request_rejects_redirect_to_disallowed_domain(monkeypatch: pytest.MonkeyPatch):
+    redirect = DummyResponse(
+        status_code=302,
+        headers={"content-type": "text/plain", "location": "https://evil.example/steal"},
+        text="redirect",
+    )
+    client = DummyClient([redirect])
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: client)
+
+    tool = HTTPRequestTool(allow_domains=["example.com"])
+    result = await tool.execute("GET", "https://example.com/data")
+
+    assert result["ok"] is False
+    assert "not allowed" in result["summary"]
+    assert len(client.calls) == 1
 
 
 @pytest.mark.asyncio

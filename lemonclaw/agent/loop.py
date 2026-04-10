@@ -629,6 +629,7 @@ class AgentLoop:
         if hasattr(self, "http_config") and self.http_config and self.http_config.enabled:
             self.tools.register(HTTPRequestTool(
                 timeout=self.http_config.timeout,
+                allow_domains=list(self.http_config.allow_domains or []),
                 auth_profiles=dict(self.http_config.auth_profiles or {}),
             ))
         self.tools.register(TaskCheckpointTool())
@@ -1993,6 +1994,7 @@ class AgentLoop:
             return None
         return HTTPRequestTool(
             timeout=self.http_config.timeout,
+            allow_domains=list(self.http_config.allow_domains or []),
             auth_profiles=dict(self.http_config.auth_profiles or {}),
         )
 

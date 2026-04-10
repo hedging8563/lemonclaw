@@ -46,9 +46,8 @@ def prepare_webhook_delivery(
         if error in {"DNS resolution failed", "No addresses returned by DNS"}:
             raise RuntimeError(f"Webhook URL validation failed: {error}")
         raise ValueError(f"Webhook URL validation failed: {error}")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    request_url = webhook_url.replace(f"{parsed.scheme}://{parsed.netloc}", f"{parsed.scheme}://{resolved_ip}:{port}", 1)
-    return request_url, {"User-Agent": USER_AGENT, "Host": parsed.netloc}, host
+    del resolved_ip
+    return webhook_url, {"User-Agent": USER_AGENT}, host
 
 
 async def deliver_webhook_json(
