@@ -252,6 +252,16 @@ class DiscordChannel(BaseChannel):
         content_parts = [content] if content else []
         media_paths: list[str] = []
         media_dir = Path.home() / ".lemonclaw" / "media"
+        pairing_policy = self.config.dm_policy if not payload.get("guild_id") else None
+
+        if not await self._preflight_direct_inbound_access(
+            sender_id=sender_id,
+            chat_id=channel_id,
+            content=content,
+            pairing_policy=pairing_policy,
+            is_group_message=is_group,
+        ):
+            return
 
         for attachment in payload.get("attachments") or []:
             url = attachment.get("url")
@@ -288,7 +298,8 @@ class DiscordChannel(BaseChannel):
                 "guild_id": payload.get("guild_id"),
                 "reply_to": reply_to,
             },
-            pairing_policy=self.config.dm_policy if not payload.get("guild_id") else None,
+            pairing_policy=pairing_policy,
+            pairing_checked=not is_group,
         )
 
     async def _start_typing(self, channel_id: str) -> None:

@@ -339,17 +339,25 @@ class DingTalkChannel(BaseChannel):
                 logger.debug("DingTalk group gate ignored non-@ message from {}", sender_id)
                 return
             content_parts = [str(content)] if str(content).strip() else []
-            media_paths = await self._download_inbound_media(meta)
-            if media_paths and not any("[attachment:" in part or "[image attachment:" in part for part in content_parts):
-                content_parts.extend(f"[attachment: {path}]" for path in media_paths)
-            normalized_content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
             trigger_metadata: dict[str, Any] = {}
             chat_target = str(meta.get("conversation_id") or sender_id)
+            base_metadata = {
+                **meta,
+                "sender_name": sender_name,
+                "platform": "dingtalk",
+                "is_group": is_group,
+                "dingtalk": {
+                    "session_webhook": str(meta.get("session_webhook") or ""),
+                    "conversation_id": str(meta.get("conversation_id") or ""),
+                    "conversation_type": str(meta.get("conversation_type") or ""),
+                    "is_in_at_list": bool(meta.get("is_in_at_list")),
+                },
+            }
             if self._trigger_runtime:
                 trigger = self._trigger_runtime.record_trigger(
                     source="stream.dingtalk",
                     kind="chatbot.message.group" if is_group else "chatbot.message.private",
-                    payload_summary=normalized_content[:200],
+                    payload_summary=("\n".join(part for part in content_parts if part).strip() or "[empty message]")[:200],
                     session_key=f"{self.name}:{chat_target}",
                     channel=self.name,
                     chat_id=chat_target,
@@ -359,24 +367,28 @@ class DingTalkChannel(BaseChannel):
                     },
                 )
                 trigger_metadata = build_trigger_metadata(trigger)
+            if not await self._preflight_direct_inbound_access(
+                sender_id=sender_id,
+                chat_id=chat_target,
+                content=str(content or ""),
+                display_name=sender_name,
+                is_group_message=is_group,
+            ):
+                return
+            media_paths = await self._download_inbound_media(meta)
+            if media_paths and not any("[attachment:" in part or "[image attachment:" in part for part in content_parts):
+                content_parts.extend(f"[attachment: {path}]" for path in media_paths)
+            normalized_content = "\n".join(part for part in content_parts if part).strip() or "[empty message]"
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_target,
                 content=normalized_content,
                 media=media_paths or None,
                 metadata={
-                    **meta,
+                    **base_metadata,
                     **trigger_metadata,
-                    "sender_name": sender_name,
-                    "platform": "dingtalk",
-                    "is_group": is_group,
-                    "dingtalk": {
-                        "session_webhook": str(meta.get("session_webhook") or ""),
-                        "conversation_id": str(meta.get("conversation_id") or ""),
-                        "conversation_type": str(meta.get("conversation_type") or ""),
-                        "is_in_at_list": bool(meta.get("is_in_at_list")),
-                    },
                 },
+                pairing_checked=not is_group,
             )
         except Exception as e:
             logger.error("Error publishing DingTalk message: {}", e)

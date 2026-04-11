@@ -240,6 +240,7 @@ class TestDiscordGroupPolicy:
     async def test_dm_bypasses_group_policy(self):
         """DM (no guild_id) should not be affected by group_policy=disabled."""
         ch = _discord_channel(group_policy="disabled")
+        ch.config.allow_from = ["*"]
         ch._handle_message = AsyncMock()
         payload = {
             "author": {"id": "USER1", "bot": False},

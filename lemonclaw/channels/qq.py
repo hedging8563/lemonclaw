@@ -157,16 +157,6 @@ class QQChannel(BaseChannel):
             )
             content = (data.content or "").strip()
             content_parts = [content] if content else []
-            media_paths: list[str] = []
-            for attachment in list(getattr(data, "attachments", []) or []):
-                marker, file_path = await self._download_attachment(attachment)
-                if marker:
-                    content_parts.append(marker)
-                if file_path:
-                    media_paths.append(file_path)
-            if not content_parts and not media_paths:
-                return
-            content = "\n".join(part for part in content_parts if part).strip()
             reply_to = str(getattr(getattr(data, "message_reference", None), "message_id", "") or "")
 
             chat_id = str(getattr(data, "group_openid", "") or user_id)
@@ -180,31 +170,54 @@ class QQChannel(BaseChannel):
                 ):
                     return
 
+            base_metadata = {
+                "message_id": data.id,
+                "attachments": [
+                    {
+                        "id": str(getattr(item, "id", "") or ""),
+                        "filename": str(getattr(item, "filename", "") or ""),
+                        "content_type": str(getattr(item, "content_type", "") or ""),
+                        "size": int(getattr(item, "size", 0) or 0),
+                        "url": str(getattr(item, "url", "") or ""),
+                    }
+                    for item in list(getattr(data, "attachments", []) or [])
+                ],
+                "reply_to": reply_to or None,
+                "qq": {
+                    "is_group": is_group,
+                    "group_openid": chat_id if is_group else "",
+                    "reply_to": reply_to or None,
+                },
+            }
+            pairing_policy = self.config.dm_policy if hasattr(self.config, "dm_policy") and not is_group else None
+            if not await self._preflight_direct_inbound_access(
+                sender_id=user_id,
+                chat_id=chat_id,
+                content=content,
+                pairing_policy=pairing_policy,
+                is_group_message=is_group,
+            ):
+                return
+
+            media_paths: list[str] = []
+            for attachment in list(getattr(data, "attachments", []) or []):
+                marker, file_path = await self._download_attachment(attachment)
+                if marker:
+                    content_parts.append(marker)
+                if file_path:
+                    media_paths.append(file_path)
+            if not content_parts and not media_paths:
+                return
+            content = "\n".join(part for part in content_parts if part).strip()
+
             await self._handle_message(
                 sender_id=user_id,
                 chat_id=chat_id,
                 content=content,
                 media=media_paths or None,
-                metadata={
-                    "message_id": data.id,
-                    "attachments": [
-                        {
-                            "id": str(getattr(item, "id", "") or ""),
-                            "filename": str(getattr(item, "filename", "") or ""),
-                            "content_type": str(getattr(item, "content_type", "") or ""),
-                            "size": int(getattr(item, "size", 0) or 0),
-                            "url": str(getattr(item, "url", "") or ""),
-                        }
-                        for item in list(getattr(data, "attachments", []) or [])
-                    ],
-                    "reply_to": reply_to or None,
-                    "qq": {
-                        "is_group": is_group,
-                        "group_openid": chat_id if is_group else "",
-                        "reply_to": reply_to or None,
-                    },
-                },
-                pairing_policy=self.config.dm_policy if hasattr(self.config, "dm_policy") and not is_group else None,
+                metadata=base_metadata,
+                pairing_policy=pairing_policy,
+                pairing_checked=not is_group,
             )
         except Exception:
             logger.exception("Error handling QQ message")

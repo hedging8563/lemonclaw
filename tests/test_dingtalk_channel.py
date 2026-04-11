@@ -15,7 +15,10 @@ from lemonclaw.triggers import TriggerRuntime
 
 @pytest.fixture
 def dingtalk_channel() -> DingTalkChannel:
-    return DingTalkChannel(DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"), MessageBus())
+    return DingTalkChannel(
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
 
 
 @pytest.mark.asyncio
@@ -65,7 +68,7 @@ async def test_dingtalk_group_message_with_at_uses_conversation_id(dingtalk_chan
 async def test_dingtalk_inbound_records_stream_trigger(tmp_path) -> None:
     trigger_runtime = TriggerRuntime(tmp_path)
     channel = DingTalkChannel(
-        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"),
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret", allow_from=["*"]),
         MessageBus(),
         trigger_runtime=trigger_runtime,
     )
@@ -132,7 +135,10 @@ async def test_dingtalk_send_rejects_non_allowlisted_session_webhook(dingtalk_ch
 
 @pytest.mark.asyncio
 async def test_dingtalk_handler_keeps_file_only_message() -> None:
-    channel = DingTalkChannel(DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"), MessageBus())
+    channel = DingTalkChannel(
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
     channel._on_message = AsyncMock()
 
     class _FakeChatbotMessage:
@@ -176,7 +182,10 @@ async def test_dingtalk_handler_keeps_file_only_message() -> None:
 
 @pytest.mark.asyncio
 async def test_dingtalk_on_message_downloads_attachment_media(tmp_path, monkeypatch) -> None:
-    channel = DingTalkChannel(DingTalkConfig(enabled=True, client_id="cid", client_secret="secret"), MessageBus())
+    channel = DingTalkChannel(
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
     channel._handle_message = AsyncMock()
     channel._get_access_token = AsyncMock(return_value="token")
 
@@ -220,3 +229,38 @@ async def test_dingtalk_on_message_downloads_attachment_media(tmp_path, monkeypa
     kwargs = channel._handle_message.await_args.kwargs
     assert kwargs["media"] and kwargs["media"][0].endswith("roman-history.docx")
     assert "[attachment:" in kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_blocks_attachment_download_before_allowlist_gate(tmp_path, monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(enabled=True, client_id="cid", client_secret="secret", allow_from=["owner"]),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+    channel._get_access_token = AsyncMock(return_value="token")
+    channel._http = SimpleNamespace(
+        post=AsyncMock(),
+        get=AsyncMock(),
+    )
+    monkeypatch.setattr("lemonclaw.channels.dingtalk.Path.home", lambda: tmp_path)
+
+    await channel._on_message(
+        "",
+        "blocked-user",
+        "Alice",
+        metadata={
+            "message_id": "msg-docx",
+            "conversation_id": "blocked-user",
+            "conversation_type": "1",
+            "msg_type": "file",
+            "robot_code": "robot1",
+            "raw_content": {"downloadCode": "download-1", "fileName": "roman-history.docx"},
+        },
+    )
+
+    channel._handle_message.assert_not_awaited()
+    channel._http.post.assert_not_awaited()
+    channel._http.get.assert_not_awaited()
+    media_dir = tmp_path / ".lemonclaw" / "media" / "dingtalk"
+    assert not media_dir.exists()

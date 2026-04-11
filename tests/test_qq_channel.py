@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -107,3 +108,32 @@ async def test_qq_channel_keeps_text_and_attachment_marker(monkeypatch: pytest.M
 
     assert "请帮我检查这份文档" in str(captured["content"])
     assert "[attachment:" in str(captured["content"])
+
+
+@pytest.mark.asyncio
+async def test_qq_channel_blocks_attachment_download_before_allowlist_gate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    channel = QQChannel(QQConfig(enabled=True, app_id="app", secret="secret", allow_from=["owner"]), _DummyBus())
+    channel._http = SimpleNamespace(get=AsyncMock())
+
+    monkeypatch.setattr("lemonclaw.channels.qq.Path.home", lambda: tmp_path)
+
+    attachment = SimpleNamespace(
+        id="file123",
+        filename="doc.docx",
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size=128,
+        url="https://files.example/doc.docx",
+    )
+    message = SimpleNamespace(
+        id="msg3",
+        author=SimpleNamespace(user_openid="blocked-user"),
+        content="",
+        attachments=[attachment],
+        message_reference=SimpleNamespace(message_id=None),
+    )
+
+    await channel._on_message(message)
+
+    channel._http.get.assert_not_awaited()
+    media_dir = tmp_path / ".lemonclaw" / "media" / "qq"
+    assert not media_dir.exists()

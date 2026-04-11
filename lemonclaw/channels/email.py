@@ -170,12 +170,13 @@ class EmailChannel(BaseChannel):
             missing.append("imap_username")
         if not self.config.imap_password:
             missing.append("imap_password")
-        if not self.config.smtp_host:
-            missing.append("smtp_host")
-        if not self.config.smtp_username:
-            missing.append("smtp_username")
-        if not self.config.smtp_password:
-            missing.append("smtp_password")
+        if self.config.auto_reply_enabled:
+            if not self.config.smtp_host:
+                missing.append("smtp_host")
+            if not self.config.smtp_username:
+                missing.append("smtp_username")
+            if not self.config.smtp_password:
+                missing.append("smtp_password")
 
         if missing:
             logger.error("Email channel not configured, missing: {}", ', '.join(missing))

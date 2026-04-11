@@ -336,33 +336,33 @@ class WeComChannel(BaseChannel):
 
         content = ""
         media: list[str] = []
+        base_content = ""
 
         if msg_type == "text":
             content = msg.get("Content", "").strip()
+            base_content = content
         elif msg_type == "image":
             pic_url = msg.get("PicUrl", "")
-            if pic_url:
-                # Download image to local disk
-                file_path = await self._download_media(pic_url, "image")
-                if file_path:
-                    media.append(file_path)
-                content = "[image]"
-            else:
-                content = "[image: no URL]"
+            base_content = "[image]" if pic_url else "[image: no URL]"
+            content = base_content
         elif msg_type == "voice":
             content = msg.get("Recognition", "[voice]")  # Speech recognition result if enabled
+            base_content = content
         elif msg_type == "video":
             content = "[video]"
+            base_content = content
         elif msg_type == "location":
             label = msg.get("Label", "")
             lat = msg.get("Location_X", "")
             lng = msg.get("Location_Y", "")
             content = f"[location: {label} ({lat}, {lng})]" if label else f"[location: ({lat}, {lng})]"
+            base_content = content
         elif msg_type == "link":
             title = msg.get("Title", "")
             desc = msg.get("Description", "")
             url = msg.get("Url", "")
             content = f"[link: {title}]\n{desc}\n{url}".strip()
+            base_content = content
         elif msg_type == "event":
             # Events like subscribe, click, etc. — ignore for now
             event_type = msg.get("Event", "")
@@ -388,9 +388,24 @@ class WeComChannel(BaseChannel):
             return
         else:
             content = f"[{msg_type}]"
+            base_content = content
 
         if not content and not media:
             return
+
+        if not await self._preflight_direct_inbound_access(
+            sender_id=from_user,
+            chat_id=from_user,
+            content=base_content or content,
+        ):
+            return
+
+        if msg_type == "image":
+            pic_url = msg.get("PicUrl", "")
+            if pic_url:
+                file_path = await self._download_media(pic_url, "image")
+                if file_path:
+                    media.append(file_path)
 
         trigger_metadata: dict[str, Any] = {}
         if self._trigger_runtime:
@@ -420,6 +435,7 @@ class WeComChannel(BaseChannel):
                 "platform": "wecom",
                 **trigger_metadata,
             },
+            pairing_checked=True,
         )
 
     # ---- Outbound: send messages via HTTP API --------------------------------

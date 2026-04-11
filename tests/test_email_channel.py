@@ -217,6 +217,29 @@ async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_allows_imap_only_mode_when_auto_reply_disabled(monkeypatch) -> None:
+    cfg = _make_config()
+    cfg.auto_reply_enabled = False
+    cfg.smtp_host = ""
+    cfg.smtp_username = ""
+    cfg.smtp_password = ""
+    channel = EmailChannel(cfg, MessageBus())
+
+    called = {"fetch": False}
+
+    def _fake_fetch():
+        called["fetch"] = True
+        channel._running = False
+        return []
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    await channel.start()
+
+    assert called["fetch"] is True
+    assert channel.is_running is False
+
+
+@pytest.mark.asyncio
 async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:

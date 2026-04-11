@@ -309,6 +309,7 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         pairing_policy: str | None = None,
+        pairing_checked: bool = False,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -328,7 +329,7 @@ class BaseChannel(ABC):
 
         # Group ingress is governed by group_policy / group_allow_from upstream in the
         # channel implementation. Do not re-apply DM allow_from / pairing here.
-        if not is_group_message:
+        if not is_group_message and not pairing_checked:
             if not await self._run_pairing_flow(
                 sender_id=str(sender_id),
                 notify_target=str(chat_id),
@@ -359,6 +360,27 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+
+    async def _preflight_direct_inbound_access(
+        self,
+        *,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        pairing_policy: str | None = None,
+        display_name: str | None = None,
+        is_group_message: bool = False,
+    ) -> bool:
+        """Run DM allowlist/pairing gate before expensive inbound side effects."""
+        if is_group_message:
+            return True
+        return await self._run_pairing_flow(
+            sender_id=str(sender_id),
+            notify_target=str(chat_id),
+            content=content,
+            display_name=display_name or str(sender_id),
+            policy=pairing_policy,
+        )
 
     async def _handle_pairing_command(self, sender_id: str, content: str, *, notify_target: str | None = None) -> str | None:
         """Handle pairing commands. Only the owner can execute mutating actions."""

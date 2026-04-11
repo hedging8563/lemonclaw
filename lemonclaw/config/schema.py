@@ -123,7 +123,7 @@ class EmailConfig(Base):
     from_address: str = ""
 
     # Behavior
-    auto_reply_enabled: bool = True  # If false, inbound email is read but no automatic reply is sent
+    auto_reply_enabled: bool = True  # If false, IMAP-only ingest is allowed and automatic replies are disabled
     poll_interval_seconds: int = 30
     mark_seen: bool = True
     max_body_chars: int = 12000
