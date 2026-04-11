@@ -130,6 +130,58 @@ async def test_browser_cleanup_kills_process_on_timeout(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_browser_cleanup_releases_dicloak_leases_and_clears_state(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict, status_code: int = 200):
+            self._payload = payload
+            self.status_code = status_code
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def patch(self, url, headers=None):
+            close_urls.append(url)
+            assert url.endswith("/close")
+            return FakeResponse({"code": 0, "data": {}})
+
+    calls: list[tuple[tuple, dict]] = []
+    close_urls: list[str] = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        return DummyProcess(stdout=b"closed")
+
+    monkeypatch.setattr("lemonclaw.agent.tools.browser.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    tool = BrowserTool(workspace=tmp_path)
+    tool._dicloak_enabled = True
+    tool._dicloak_api_base_url = "http://127.0.0.1:52140/openapi"
+    tool._dicloak_api_key = "dicloak-test"
+    tool._cli_path = "/usr/bin/agent-browser"
+    tool._dicloak_leases["lc-default"] = {
+        "profile_id": "profile-9",
+        "debug_port": 45500,
+        "opened_at": "serial-1",
+    }
+
+    await tool.cleanup()
+
+    assert any(list(call[0])[-1] == "close" for call in calls)
+    assert any(url.endswith("/close") for url in close_urls)
+    assert tool._dicloak_leases == {}
+    assert tool._active_sessions == set()
+
+
+@pytest.mark.asyncio
 async def test_browser_dicloak_commands_fail_closed_when_not_enabled() -> None:
     tool = BrowserTool()
 

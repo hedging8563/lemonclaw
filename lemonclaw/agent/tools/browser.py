@@ -198,6 +198,12 @@ class BrowserTool(Tool):
         action = parts[1].lower()
         session_name = self._resolve_session_name(session_key)
 
+        if action == "close_profile":
+            profile_id = parts[2] if len(parts) >= 3 else str((self._dicloak_leases.get(session_name) or {}).get("profile_id") or "")
+            if not profile_id:
+                return "Error: no DICloak profile is currently leased for this session."
+            return await self._close_dicloak_profile(profile_id, session_name)
+
         async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
             headers = {"X-API-KEY": self._dicloak_api_key}
             if action == "list_profiles":
@@ -272,38 +278,6 @@ class BrowserTool(Tool):
                     "agent_browser": connect_output or "connected",
                     "status": "opened",
                 }, ensure_ascii=False))
-
-            if action == "close_profile":
-                profile_id = parts[2] if len(parts) >= 3 else str((self._dicloak_leases.get(session_name) or {}).get("profile_id") or "")
-                if not profile_id:
-                    return "Error: no DICloak profile is currently leased for this session."
-                if self._cli_path:
-                    env = self._build_env()
-                    cwd = str(self._workspace) if self._workspace else None
-                    await self._run_step(
-                        step_args=["close"],
-                        session_name=session_name,
-                        env=env,
-                        cwd=cwd,
-                        timeout=min(self._timeout, 10.0),
-                    )
-                response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/close", headers=headers)
-                payload = response.json()
-                if response.status_code != 200 or payload.get("code") != 0:
-                    self._dicloak_last_close = {
-                        "ok": False,
-                        "profile_id": profile_id,
-                        "session_name": session_name,
-                        "error": payload.get("msg") or response.text,
-                    }
-                    return f"Error: DICloak close_profile failed: {payload.get('msg') or response.text}"
-                self._dicloak_leases.pop(session_name, None)
-                self._dicloak_last_close = {
-                    "ok": True,
-                    "profile_id": profile_id,
-                    "session_name": session_name,
-                }
-                return f"DICloak profile closed: {profile_id}"
 
         return "Error: unsupported DICloak command. Supported: list_profiles, open_profile, close_profile."
 
@@ -497,32 +471,71 @@ class BrowserTool(Tool):
         return text[:self._max_output] + f"\n... (truncated, {len(text) - self._max_output} more chars)"
 
     async def cleanup(self) -> None:
-        """Close all browser sessions. Called on agent shutdown."""
-        if not self._cli_path:
-            return
-        env = self._build_env()
-        cwd = str(self._workspace) if self._workspace else None
-        for session_name in sorted(self._active_sessions):
+        """Close all browser sessions and release leased profiles on shutdown."""
+        session_names = sorted(self._active_sessions | set(self._dicloak_leases))
+        for session_name in session_names:
             try:
-                process = await asyncio.create_subprocess_exec(
-                    self._cli_path,
-                    "--session",
-                    session_name,
-                    "close",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
-                    cwd=cwd,
-                )
-                await asyncio.wait_for(process.communicate(), timeout=10.0)
-                logger.info("browser [{}]: session closed", session_name)
+                lease = self._dicloak_leases.get(session_name)
+                if lease and lease.get("profile_id"):
+                    result = await self._close_dicloak_profile(str(lease["profile_id"]), session_name)
+                    if result and result.startswith("Error:"):
+                        logger.debug("browser [{}]: dicloak cleanup error (non-fatal): {}", session_name, result)
+                elif self._cli_path:
+                    env = self._build_env()
+                    cwd = str(self._workspace) if self._workspace else None
+                    process = await asyncio.create_subprocess_exec(
+                        self._cli_path,
+                        "--session",
+                        session_name,
+                        "close",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env,
+                        cwd=cwd,
+                    )
+                    await asyncio.wait_for(process.communicate(), timeout=10.0)
+                    logger.info("browser [{}]: session closed", session_name)
             except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except Exception:
-                    pass
-                logger.debug("browser [{}]: cleanup timed out; process killed", session_name)
+                if self._cli_path:
+                    process.kill()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                    except Exception:
+                        pass
+                    logger.debug("browser [{}]: cleanup timed out; process killed", session_name)
             except Exception as e:
                 logger.debug("browser [{}]: cleanup error (non-fatal): {}", session_name, e)
         self._active_sessions.clear()
+        self._dicloak_leases.clear()
+
+    async def _close_dicloak_profile(self, profile_id: str, session_name: str) -> str:
+        if self._cli_path:
+            env = self._build_env()
+            cwd = str(self._workspace) if self._workspace else None
+            await self._run_step(
+                step_args=["close"],
+                session_name=session_name,
+                env=env,
+                cwd=cwd,
+                timeout=min(self._timeout, 10.0),
+            )
+
+        async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+            headers = {"X-API-KEY": self._dicloak_api_key}
+            response = await client.patch(f"{self._dicloak_api_base_url}/v1/env/{profile_id}/close", headers=headers)
+            payload = response.json()
+            if response.status_code != 200 or payload.get("code") != 0:
+                self._dicloak_last_close = {
+                    "ok": False,
+                    "profile_id": profile_id,
+                    "session_name": session_name,
+                    "error": payload.get("msg") or response.text,
+                }
+                return f"Error: DICloak close_profile failed: {payload.get('msg') or response.text}"
+            self._dicloak_leases.pop(session_name, None)
+            self._dicloak_last_close = {
+                "ok": True,
+                "profile_id": profile_id,
+                "session_name": session_name,
+            }
+            return f"DICloak profile closed: {profile_id}"
