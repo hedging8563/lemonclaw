@@ -540,7 +540,14 @@ class ChannelManager:
             media=list(msg.media or []),
             metadata=metadata,
         )
-        delay = min(0.1 * retry_count, 1.0)
+        delay = min(0.05 * retry_count, 0.5)
+        if retry_count == 1 or retry_count % 20 == 0:
+            logger.warning(
+                "Requeueing outbound for {} (retry={}, reason={})",
+                msg.channel,
+                retry_count,
+                reason,
+            )
 
         async def _requeue_later() -> None:
             try:
@@ -572,11 +579,8 @@ class ChannelManager:
                 apply_delivery_policy(msg)
                 channel = self.channels.get(msg.channel)
                 if self._channel_temporarily_unavailable_for_dispatch(msg.channel, channel):
-                    retry_count = self._dispatch_retry_count(msg)
-                    if retry_count < 20:
-                        self._schedule_outbound_retry(msg, reason="channel_temporarily_unavailable")
-                        continue
-                    logger.error("Dropping outbound for {} after {} dispatch retries", msg.channel, retry_count)
+                    self._schedule_outbound_retry(msg, reason="channel_temporarily_unavailable")
+                    continue
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
                 if msg.channel != "webui" and self.activity_bus and not self._should_skip_activity_broadcast(msg):

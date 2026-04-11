@@ -22,6 +22,7 @@ test('WhatsAppClient defers inbound media download until resolveInboundMedia', a
 
   const originalDownloader = (WhatsAppClient as any).mediaDownloader;
   (WhatsAppClient as any).mediaDownloader = async () => Buffer.from('doc-bytes');
+  let downloadCalls = 0;
 
   try {
     const msg = {
@@ -39,12 +40,19 @@ test('WhatsAppClient defers inbound media download until resolveInboundMedia', a
     assert.ok(token);
     assert.equal(existsSync(join(tempHome, '.lemonclaw', 'media', 'whatsapp')), false);
 
+    (WhatsAppClient as any).mediaDownloader = async () => {
+      downloadCalls += 1;
+      return Buffer.from('doc-bytes');
+    };
+
     const paths = await client.resolveInboundMedia(token);
     assert.equal(paths.length, 1);
     assert.ok(paths[0].endsWith('roman-history.docx'));
     assert.equal(existsSync(paths[0]), true);
 
-    await assert.rejects(() => client.resolveInboundMedia(token), /unknown or expired media token/);
+    const duplicatePaths = await client.resolveInboundMedia(token);
+    assert.deepEqual(duplicatePaths, paths);
+    assert.equal(downloadCalls, 1);
   } finally {
     (WhatsAppClient as any).mediaDownloader = originalDownloader;
     if (originalHome === undefined) {

@@ -170,10 +170,10 @@ class WhatsAppChannel(BaseChannel):
                 future.set_exception(RuntimeError(reason))
             self._pending_bridge_requests.pop(request_id, None)
 
-    async def _resolve_bridge_media(self, media_token: str) -> list[str]:
+    async def _resolve_bridge_media(self, media_token: str) -> list[str] | None:
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected for media resolution")
-            return []
+            return None
 
         request_id = uuid4().hex
         loop = asyncio.get_running_loop()
@@ -188,11 +188,11 @@ class WhatsAppChannel(BaseChannel):
             payload = await asyncio.wait_for(future, timeout=30.0)
             media = payload.get("media")
             if not isinstance(media, list):
-                return []
+                return None
             return [str(path) for path in media if isinstance(path, str)]
         except Exception as e:
             logger.warning("WhatsApp bridge media resolve failed for {}: {}", media_token, e)
-            return []
+            return None
         finally:
             self._pending_bridge_requests.pop(request_id, None)
     
@@ -285,7 +285,16 @@ class WhatsAppChannel(BaseChannel):
             media = [str(p) for p in data.get("media", []) if isinstance(p, str)]
             media_token = str(data.get("mediaToken") or "").strip()
             if not media and media_token:
-                media = await self._resolve_bridge_media(media_token)
+                resolved = await self._resolve_bridge_media(media_token)
+                if resolved is None:
+                    await self._publish_feedback(
+                        sender,
+                        "WhatsApp media could not be resolved after a bridge interruption. "
+                        "Please resend the attachment if you still need it.",
+                    )
+                    media = []
+                else:
+                    media = resolved
 
             await self._handle_message(
                 sender_id=sender_id,

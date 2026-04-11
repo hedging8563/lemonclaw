@@ -298,3 +298,40 @@ async def test_channel_manager_requeues_outbound_while_channel_restart_lock_is_h
     assert fake.sent_messages[0].content == "hello again"
 
     await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_keeps_requeueing_outbound_past_previous_retry_cap():
+    manager = ChannelManager(Config(), MessageBus())
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": False,
+        "running": False,
+        "available": False,
+        "error": "",
+    }
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="hello after many retries",
+            metadata={"_dispatch_retry_count": 20},
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    fake = _FakeChannel()
+    fake._running = True
+    manager.channels["telegram"] = fake
+    manager._channel_status["telegram"].update({"registered": True, "running": True, "available": True})
+
+    await asyncio.sleep(1.15)
+
+    assert len(fake.sent_messages) == 1
+    assert fake.sent_messages[0].content == "hello after many retries"
+    assert fake.sent_messages[0].metadata.get("_dispatch_retry_count", 0) >= 21
+
+    await manager.stop_all()

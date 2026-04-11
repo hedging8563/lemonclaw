@@ -67,15 +67,14 @@ async def test_internal_queue_publish_attaches_trigger_metadata(tmp_path):
     assert records[0]["metadata"]["target_agent_id"] == "player-1"
 
 
-async def test_unknown_target_falls_back_to_default():
+async def test_unknown_target_fails_closed():
     bus = MessageBus()
     msg = InboundMessage(
         channel="test", sender_id="u1", chat_id="c1",
         content="lost", target_agent_id="nonexistent",
     )
-    await bus.publish_inbound(msg)
-    received = await asyncio.wait_for(bus.consume_inbound(DEFAULT_AGENT_ID), timeout=1.0)
-    assert received.content == "lost"
+    with pytest.raises(ValueError, match="nonexistent"):
+        await bus.publish_inbound(msg)
 
 
 async def test_unregister_agent():
@@ -318,3 +317,28 @@ async def test_bus_request_response_roundtrip():
     bus.resolve_response(request_id, "research complete")
     result = await asyncio.wait_for(fut, timeout=1.0)
     assert result == "research complete"
+
+
+async def test_bus_publish_inbound_fails_closed_for_missing_target_agent():
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="internal",
+        sender_id="conductor",
+        chat_id="ghost",
+        content="do work",
+        target_agent_id="ghost",
+    )
+
+    with pytest.raises(ValueError, match="ghost"):
+        await bus.publish_inbound(msg)
+
+
+async def test_bus_expect_response_ttl_is_enforced():
+    bus = MessageBus()
+    fut = bus.expect_response("req-expire", ttl=0.01)
+
+    await asyncio.sleep(0.02)
+    cleaned = bus.cleanup_stale_responses()
+
+    assert cleaned == 1
+    assert fut.cancelled()

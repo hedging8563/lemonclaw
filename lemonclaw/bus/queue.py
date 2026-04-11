@@ -35,6 +35,7 @@ class MessageBus:
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue(maxsize=maxsize)
         self._pending_responses: dict[str, asyncio.Future[str]] = {}
         self._pending_created_at: dict[str, float] = {}  # request_id -> monotonic time
+        self._pending_expires_at: dict[str, float] = {}  # request_id -> monotonic deadline
         # Always register the default agent
         self.register_agent(DEFAULT_AGENT_ID)
 
@@ -64,6 +65,8 @@ class MessageBus:
         target = msg.target_agent_id or DEFAULT_AGENT_ID
         queue = self._agent_queues.get(target)
         if queue is None:
+            if msg.target_agent_id:
+                raise ValueError(f"Agent '{target}' is not registered")
             logger.warning("Bus: no queue for agent '{}', routing to default", target)
             queue = self._agent_queues[DEFAULT_AGENT_ID]
         await queue.put(msg)
@@ -120,16 +123,21 @@ class MessageBus:
             ttl: Time-to-live in seconds. Stale entries are cleaned up
                  periodically via ``cleanup_stale_responses()``.
         """
+        self.cleanup_stale_responses()
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
         self._pending_responses[request_id] = fut
-        self._pending_created_at[request_id] = time.monotonic()
+        created_at = time.monotonic()
+        self._pending_created_at[request_id] = created_at
+        self._pending_expires_at[request_id] = created_at + max(0.0, float(ttl))
         return fut
 
     def resolve_response(self, request_id: str, content: str) -> bool:
         """Resolve a pending request-response Future. Returns True if matched."""
+        self.cleanup_stale_responses()
         fut = self._pending_responses.pop(request_id, None)
         self._pending_created_at.pop(request_id, None)
+        self._pending_expires_at.pop(request_id, None)
         if fut and not fut.done():
             fut.set_result(content)
             return True
@@ -139,16 +147,22 @@ class MessageBus:
         """Cancel a pending request-response Future."""
         fut = self._pending_responses.pop(request_id, None)
         self._pending_created_at.pop(request_id, None)
+        self._pending_expires_at.pop(request_id, None)
         if fut and not fut.done():
             fut.cancel()
 
     def cleanup_stale_responses(self, max_age: float = 600) -> int:
         """Cancel and remove Futures older than max_age seconds. Returns count cleaned."""
         now = time.monotonic()
-        stale = [
-            rid for rid, created in self._pending_created_at.items()
-            if now - created > max_age
-        ]
+        stale: list[str] = []
+        for rid, created in self._pending_created_at.items():
+            expires_at = self._pending_expires_at.get(rid)
+            if expires_at is not None:
+                if now >= expires_at:
+                    stale.append(rid)
+                continue
+            if now - created > max_age:
+                stale.append(rid)
         for rid in stale:
             self.cancel_response(rid)
         return len(stale)

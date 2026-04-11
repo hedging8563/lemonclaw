@@ -241,3 +241,35 @@ async def test_whatsapp_bridge_blocked_dm_does_not_resolve_media() -> None:
 
     channel._resolve_bridge_media.assert_not_awaited()
     channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_bridge_media_resolution_failure_surfaces_notice() -> None:
+    channel = WhatsAppChannel(
+        WhatsAppConfig(enabled=True, allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+    channel._resolve_bridge_media = AsyncMock(return_value=None)
+    channel._publish_feedback = AsyncMock()
+
+    await channel._handle_bridge_message(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "msg-failed",
+                "sender": "123456@s.whatsapp.net",
+                "pn": "123456@s.whatsapp.net",
+                "content": "",
+                "timestamp": 1710000000,
+                "isGroup": False,
+                "mediaToken": "media-failed",
+            }
+        )
+    )
+
+    channel._resolve_bridge_media.assert_awaited_once_with("media-failed")
+    channel._publish_feedback.assert_awaited_once()
+    assert "bridge interruption" in channel._publish_feedback.await_args.args[1]
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["media"] is None

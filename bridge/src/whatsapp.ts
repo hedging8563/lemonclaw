@@ -47,12 +47,20 @@ export interface WhatsAppClientOptions {
   onStatus: (status: string, account?: WhatsAppAccountSummary | null) => void;
 }
 
+interface PendingInboundMediaEntry {
+  msg: any;
+  createdAt: number;
+  resolvingPromise?: Promise<string[]>;
+  resolvedMedia?: string[];
+  resolvedAt?: number;
+}
+
 export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
   private delayedMediaEnabled = false;
-  private pendingInboundMedia = new Map<string, { msg: any; createdAt: number }>();
+  private pendingInboundMedia = new Map<string, PendingInboundMediaEntry>();
   private static readonly MEDIA_TOKEN_TTL_MS = 5 * 60 * 1000;
   private static mediaDownloader = downloadMediaMessage;
   private static readonly supportedContentFields = new Set([
@@ -197,6 +205,7 @@ export class WhatsAppClient {
   private prunePendingInboundMedia(now: number = Date.now()): void {
     for (const [token, entry] of this.pendingInboundMedia.entries()) {
       if (now - entry.createdAt > WhatsAppClient.MEDIA_TOKEN_TTL_MS) {
+        if (entry.resolvingPromise) continue;
         this.pendingInboundMedia.delete(token);
       }
     }
@@ -332,8 +341,27 @@ export class WhatsAppClient {
     if (!entry) {
       throw new Error(`unknown or expired media token: ${token}`);
     }
-    this.pendingInboundMedia.delete(token);
-    return this.downloadInboundMedia(entry.msg);
+    if (entry.resolvedMedia) {
+      return entry.resolvedMedia;
+    }
+    if (entry.resolvingPromise) {
+      return entry.resolvingPromise;
+    }
+
+    entry.resolvingPromise = (async () => {
+      try {
+        const media = await this.downloadInboundMedia(entry.msg);
+        if (!media.length && this.hasInboundMedia(entry.msg)) {
+          throw new Error(`failed to materialize WhatsApp media for token ${token}`);
+        }
+        entry.resolvedMedia = media;
+        entry.resolvedAt = Date.now();
+        return media;
+      } finally {
+        entry.resolvingPromise = undefined;
+      }
+    })();
+    return entry.resolvingPromise;
   }
 
   private async downloadInboundMedia(msg: any): Promise<string[]> {
@@ -367,7 +395,7 @@ export class WhatsAppClient {
       return [filePath];
     } catch (error) {
       console.error('Failed to download WhatsApp media:', error);
-      return [];
+      throw error;
     }
   }
 
