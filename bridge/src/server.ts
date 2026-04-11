@@ -14,15 +14,28 @@ interface SendCommand {
   text: string;
 }
 
+interface HelloCommand {
+  type: 'hello';
+  capabilities?: string[];
+}
+
+interface ResolveMediaCommand {
+  type: 'resolve_media';
+  requestId: string;
+  mediaToken: string;
+}
+
+type BridgeCommand = SendCommand | HelloCommand | ResolveMediaCommand;
+
 interface BridgeMessage {
-  type: 'message' | 'status' | 'qr' | 'error';
+  type: 'message' | 'status' | 'qr' | 'error' | 'sent' | 'hello_ack' | 'media_resolved';
   [key: string]: unknown;
 }
 
 export class BridgeServer {
   private wss: WebSocketServer | null = null;
   private wa: WhatsAppClient | null = null;
-  private clients: Set<WebSocket> = new Set();
+  private clients: Map<WebSocket, { delayedMediaV1: boolean }> = new Map();
   private lastStatus: string | null = null;
   private lastQR: string | null = null;
   private lastAccount: WhatsAppAccountSummary | null = null;
@@ -88,7 +101,7 @@ export class BridgeServer {
   }
 
   private setupClient(ws: WebSocket): void {
-    this.clients.add(ws);
+    this.clients.set(ws, { delayedMediaV1: false });
     if (this.lastStatus) {
       ws.send(JSON.stringify({ type: 'status', status: this.lastStatus, account: this.lastAccount }));
     }
@@ -97,31 +110,66 @@ export class BridgeServer {
     }
 
     ws.on('message', async (data) => {
+      let requestId = '';
       try {
-        const cmd = JSON.parse(data.toString()) as SendCommand;
-        await this.handleCommand(cmd);
-        ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
+        const cmd = JSON.parse(data.toString()) as BridgeCommand;
+        requestId = cmd.type === 'resolve_media' ? cmd.requestId : '';
+        const response = await this.handleCommand(ws, cmd);
+        if (response) {
+          ws.send(JSON.stringify(response));
+        }
       } catch (error) {
         console.error('Error handling command:', error);
-        ws.send(JSON.stringify({ type: 'error', error: String(error) }));
+        ws.send(JSON.stringify({ type: 'error', requestId, error: String(error) }));
       }
     });
 
     ws.on('close', () => {
       console.log('🔌 Python client disconnected');
       this.clients.delete(ws);
+      this.syncBridgeCapabilities();
     });
 
     ws.on('error', (error) => {
       console.error('WebSocket error:', error);
       this.clients.delete(ws);
+      this.syncBridgeCapabilities();
     });
   }
 
-  private async handleCommand(cmd: SendCommand): Promise<void> {
+  private syncBridgeCapabilities(): void {
+    if (!this.wa) return;
+    const delayedMediaV1 = Array.from(this.clients.values()).some((state) => state.delayedMediaV1);
+    this.wa.setDelayedMediaEnabled(delayedMediaV1);
+  }
+
+  private async handleCommand(ws: WebSocket, cmd: BridgeCommand): Promise<BridgeMessage | null> {
+    if (cmd.type === 'hello') {
+      const capabilities = Array.isArray(cmd.capabilities)
+        ? cmd.capabilities.filter((value): value is string => typeof value === 'string')
+        : [];
+      const delayedMediaV1 = capabilities.includes('delayed_media_v1');
+      this.clients.set(ws, { delayedMediaV1 });
+      this.syncBridgeCapabilities();
+      return { type: 'hello_ack', capabilities };
+    }
     if (cmd.type === 'send' && this.wa) {
       await this.wa.sendMessage(cmd.to, cmd.text);
+      return { type: 'sent', to: cmd.to };
     }
+    if (cmd.type === 'resolve_media' && this.wa) {
+      const media = await this.wa.resolveInboundMedia(cmd.mediaToken);
+      return {
+        type: 'media_resolved',
+        requestId: cmd.requestId,
+        mediaToken: cmd.mediaToken,
+        media,
+      };
+    }
+    if (cmd.type === 'resolve_media') {
+      throw new Error('bridge is not ready to resolve media');
+    }
+    return null;
   }
 
   private broadcast(msg: BridgeMessage): void {
@@ -140,7 +188,7 @@ export class BridgeServer {
     this.persistState();
 
     const data = JSON.stringify(msg);
-    for (const client of this.clients) {
+    for (const client of this.clients.keys()) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
       }
@@ -152,7 +200,7 @@ export class BridgeServer {
     this.lastQR = null;
     this.persistState();
 
-    for (const client of this.clients) {
+    for (const client of this.clients.keys()) {
       client.close();
     }
     this.clients.clear();

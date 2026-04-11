@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from uuid import uuid4
 from typing import Any
 
 from loguru import logger
@@ -33,6 +34,7 @@ class WhatsAppChannel(BaseChannel):
         self._mention_warned = False  # Only warn once when mention mode lacks enough bridge identity
         self._bot_identity_tokens: set[str] = set()
         self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
+        self._pending_bridge_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     @staticmethod
     def _jid_tokens(value: str) -> set[str]:
@@ -108,6 +110,7 @@ class WhatsAppChannel(BaseChannel):
                     # Send auth token if configured
                     if self.config.bridge_token:
                         await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
+                    await ws.send(json.dumps({"type": "hello", "capabilities": ["delayed_media_v1"]}))
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
                     
@@ -123,6 +126,7 @@ class WhatsAppChannel(BaseChannel):
             except Exception as e:
                 self._connected = False
                 self._ws = None
+                self._fail_pending_bridge_requests("bridge disconnected")
                 logger.warning("WhatsApp bridge connection error: {}", e)
                 
                 if self._running:
@@ -133,6 +137,7 @@ class WhatsAppChannel(BaseChannel):
         """Stop the WhatsApp channel."""
         self._running = False
         self._connected = False
+        self._fail_pending_bridge_requests("bridge stopped")
         
         if self._ws:
             await self._ws.close()
@@ -158,6 +163,38 @@ class WhatsAppChannel(BaseChannel):
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
+
+    def _fail_pending_bridge_requests(self, reason: str) -> None:
+        for request_id, future in list(self._pending_bridge_requests.items()):
+            if not future.done():
+                future.set_exception(RuntimeError(reason))
+            self._pending_bridge_requests.pop(request_id, None)
+
+    async def _resolve_bridge_media(self, media_token: str) -> list[str]:
+        if not self._ws or not self._connected:
+            logger.warning("WhatsApp bridge not connected for media resolution")
+            return []
+
+        request_id = uuid4().hex
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending_bridge_requests[request_id] = future
+        try:
+            await self._ws.send(json.dumps({
+                "type": "resolve_media",
+                "requestId": request_id,
+                "mediaToken": media_token,
+            }, ensure_ascii=False))
+            payload = await asyncio.wait_for(future, timeout=30.0)
+            media = payload.get("media")
+            if not isinstance(media, list):
+                return []
+            return [str(path) for path in media if isinstance(path, str)]
+        except Exception as e:
+            logger.warning("WhatsApp bridge media resolve failed for {}: {}", media_token, e)
+            return []
+        finally:
+            self._pending_bridge_requests.pop(request_id, None)
     
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -168,6 +205,13 @@ class WhatsAppChannel(BaseChannel):
             return
         
         msg_type = data.get("type")
+        request_id = str(data.get("requestId") or "").strip()
+
+        if msg_type == "media_resolved":
+            future = self._pending_bridge_requests.get(request_id)
+            if future and not future.done():
+                future.set_result(data)
+            return
         
         if msg_type == "message":
             # Incoming message from WhatsApp
@@ -212,6 +256,15 @@ class WhatsAppChannel(BaseChannel):
                     was_mentioned=bot_mentioned,
                 ):
                     return
+            pairing_policy = self.config.dm_policy if not is_group else None
+            if not await self._preflight_direct_inbound_access(
+                sender_id=sender_id,
+                chat_id=sender,
+                content=content,
+                pairing_policy=pairing_policy,
+                is_group_message=is_group,
+            ):
+                return
             trigger_metadata: dict[str, Any] = {}
             if self._trigger_runtime:
                 trigger = self._trigger_runtime.record_trigger(
@@ -229,18 +282,24 @@ class WhatsAppChannel(BaseChannel):
                 )
                 trigger_metadata = build_trigger_metadata(trigger)
 
+            media = [str(p) for p in data.get("media", []) if isinstance(p, str)]
+            media_token = str(data.get("mediaToken") or "").strip()
+            if not media and media_token:
+                media = await self._resolve_bridge_media(media_token)
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
                 content=content,
-                media=[str(p) for p in data.get("media", []) if isinstance(p, str)] or None,
+                media=media or None,
                 metadata={
                     **trigger_metadata,
                     "message_id": data.get("id"),
                     "timestamp": data.get("timestamp"),
                     "is_group": is_group
                 },
-                pairing_policy=self.config.dm_policy if not is_group else None,
+                pairing_policy=pairing_policy,
+                pairing_checked=not is_group,
             )
         
         elif msg_type == "status":
@@ -259,4 +318,9 @@ class WhatsAppChannel(BaseChannel):
             logger.info("Scan QR code in the bridge terminal to connect WhatsApp")
         
         elif msg_type == "error":
+            if request_id:
+                future = self._pending_bridge_requests.get(request_id)
+                if future and not future.done():
+                    future.set_exception(RuntimeError(str(data.get('error') or 'bridge error')))
+                    return
             logger.error("WhatsApp bridge error: {}", data.get('error'))

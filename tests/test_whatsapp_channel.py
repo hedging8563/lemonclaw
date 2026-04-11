@@ -125,6 +125,7 @@ async def test_whatsapp_bridge_media_only_message_passes_media_paths() -> None:
         MessageBus(),
     )
     channel._handle_message = AsyncMock()
+    channel._resolve_bridge_media = AsyncMock(return_value=["/tmp/roman-history.docx"])
 
     await channel._handle_bridge_message(
         json.dumps(
@@ -136,11 +137,12 @@ async def test_whatsapp_bridge_media_only_message_passes_media_paths() -> None:
                 "content": "",
                 "timestamp": 1710000000,
                 "isGroup": False,
-                "media": ["/tmp/roman-history.docx"],
+                "mediaToken": "media-1",
             }
         )
     )
 
+    channel._resolve_bridge_media.assert_awaited_once_with("media-1")
     channel._handle_message.assert_awaited_once()
     kwargs = channel._handle_message.await_args.kwargs
     assert kwargs["media"] == ["/tmp/roman-history.docx"]
@@ -211,3 +213,31 @@ async def test_whatsapp_bridge_duplicate_message_id_is_deduped() -> None:
     await channel._handle_bridge_message(json.dumps(payload))
 
     channel._handle_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_bridge_blocked_dm_does_not_resolve_media() -> None:
+    channel = WhatsAppChannel(
+        WhatsAppConfig(enabled=True, allow_from=["owner"]),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+    channel._resolve_bridge_media = AsyncMock(return_value=["/tmp/blocked.docx"])
+
+    await channel._handle_bridge_message(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "msg-blocked",
+                "sender": "blocked@s.whatsapp.net",
+                "pn": "blocked@s.whatsapp.net",
+                "content": "",
+                "timestamp": 1710000000,
+                "isGroup": False,
+                "mediaToken": "media-blocked",
+            }
+        )
+    )
+
+    channel._resolve_bridge_media.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()

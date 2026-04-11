@@ -402,6 +402,7 @@ class TestWhatsAppGroupPolicy:
             group_allow_from=["999999@g.us"],
         )
         ch._handle_message = AsyncMock()
+        ch._resolve_bridge_media = AsyncMock(return_value=["/tmp/group-blocked.docx"])
         raw = json.dumps({
             "type": "message",
             "sender": "120363xxx@g.us",
@@ -409,8 +410,10 @@ class TestWhatsAppGroupPolicy:
             "content": "hello",
             "isGroup": True,
             "id": "MSG1",
+            "mediaToken": "group-media-blocked",
         })
         await ch._handle_bridge_message(raw)
+        ch._resolve_bridge_media.assert_not_awaited()
         ch._handle_message.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -494,6 +497,7 @@ class TestWhatsAppGroupPolicy:
     async def test_dm_bypasses_group_policy(self):
         """DM (isGroup=false) should not be affected by group_policy=disabled."""
         ch = _whatsapp_channel(group_policy="disabled")
+        ch.config.allow_from = ["*"]
         ch._handle_message = AsyncMock()
         raw = json.dumps({
             "type": "message",
@@ -513,6 +517,7 @@ class TestWhatsAppGroupPolicy:
             group_policy="disabled",
             trigger_runtime=trigger_runtime,
         )
+        ch.config.allow_from = ["*"]
         ch._handle_message = AsyncMock()
         raw = json.dumps({
             "type": "message",

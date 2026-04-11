@@ -31,6 +31,7 @@ export interface InboundMessage {
   mentions?: string[];
   quotedParticipant?: string;
   media?: string[];
+  mediaToken?: string;
 }
 
 export interface WhatsAppAccountSummary {
@@ -50,6 +51,10 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private delayedMediaEnabled = false;
+  private pendingInboundMedia = new Map<string, { msg: any; createdAt: number }>();
+  private static readonly MEDIA_TOKEN_TTL_MS = 5 * 60 * 1000;
+  private static mediaDownloader = downloadMediaMessage;
   private static readonly supportedContentFields = new Set([
     'conversation',
     'extendedTextMessage',
@@ -78,6 +83,13 @@ export class WhatsAppClient {
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+  }
+
+  setDelayedMediaEnabled(enabled: boolean): void {
+    this.delayedMediaEnabled = enabled;
+    if (!enabled) {
+      this.pendingInboundMedia.clear();
+    }
   }
 
   private resolveAccountSummary(stateCreds: any): WhatsAppAccountSummary | null {
@@ -160,7 +172,8 @@ export class WhatsAppClient {
 
         const content = this.extractMessageContent(msg);
         if (!content) continue;
-        const media = await this.downloadInboundMedia(msg);
+        const mediaToken = this.delayedMediaEnabled ? this.registerPendingInboundMedia(msg) : null;
+        const media = this.delayedMediaEnabled ? [] : await this.downloadInboundMedia(msg);
         const context = this.extractContextInfo(msg);
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
@@ -175,9 +188,43 @@ export class WhatsAppClient {
           mentions: context.mentions,
           quotedParticipant: context.quotedParticipant,
           media,
+          mediaToken: mediaToken || undefined,
         });
       }
     });
+  }
+
+  private prunePendingInboundMedia(now: number = Date.now()): void {
+    for (const [token, entry] of this.pendingInboundMedia.entries()) {
+      if (now - entry.createdAt > WhatsAppClient.MEDIA_TOKEN_TTL_MS) {
+        this.pendingInboundMedia.delete(token);
+      }
+    }
+  }
+
+  private hasInboundMedia(msg: any): boolean {
+    const message = msg?.message;
+    if (!message) return false;
+    return Boolean(
+      message.documentMessage ||
+      message.imageMessage ||
+      message.videoMessage ||
+      message.audioMessage
+    );
+  }
+
+  private registerPendingInboundMedia(msg: any): string | null {
+    if (!this.hasInboundMedia(msg)) return null;
+    this.prunePendingInboundMedia();
+    const baseId = String(msg?.key?.id || 'msg').trim() || 'msg';
+    let token = baseId;
+    let suffix = 1;
+    while (this.pendingInboundMedia.has(token)) {
+      suffix += 1;
+      token = `${baseId}:${suffix}`;
+    }
+    this.pendingInboundMedia.set(token, { msg, createdAt: Date.now() });
+    return token;
   }
 
   private extractMessageContent(msg: any): string | null {
@@ -279,6 +326,16 @@ export class WhatsAppClient {
     return { mentions: [], quotedParticipant: '' };
   }
 
+  async resolveInboundMedia(token: string): Promise<string[]> {
+    this.prunePendingInboundMedia();
+    const entry = this.pendingInboundMedia.get(token);
+    if (!entry) {
+      throw new Error(`unknown or expired media token: ${token}`);
+    }
+    this.pendingInboundMedia.delete(token);
+    return this.downloadInboundMedia(entry.msg);
+  }
+
   private async downloadInboundMedia(msg: any): Promise<string[]> {
     const message = msg.message;
     if (!message) return [];
@@ -286,7 +343,7 @@ export class WhatsAppClient {
     if (!media) return [];
 
     try {
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+      const buffer = await WhatsAppClient.mediaDownloader(msg, 'buffer', {}, {
         logger: pino({ level: 'silent' }),
         reuploadRequest: async (m) => this.sock.updateMediaMessage(m),
       });
