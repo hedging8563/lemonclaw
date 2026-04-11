@@ -61,6 +61,7 @@ class ChannelManager:
         self._restart_locks: dict[str, asyncio.Lock] = {}
         self._restart_state: dict[str, dict[str, Any]] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._dispatch_retry_tasks: set[asyncio.Task] = set()
 
         self._init_channels()
 
@@ -369,6 +370,13 @@ class ChannelManager:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
+        for task in list(self._dispatch_retry_tasks):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._dispatch_retry_tasks.clear()
 
         # Stop all channels
         for name, channel in self.channels.items():
@@ -497,6 +505,53 @@ class ChannelManager:
             return True
         return False
 
+    @staticmethod
+    def _dispatch_retry_count(msg: OutboundMessage) -> int:
+        try:
+            return max(0, int((msg.metadata or {}).get("_dispatch_retry_count") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _channel_temporarily_unavailable_for_dispatch(
+        self,
+        channel_name: str,
+        channel: BaseChannel | None,
+    ) -> bool:
+        lock = self._restart_locks.get(channel_name)
+        if lock and lock.locked():
+            return True
+        if channel is None:
+            status = self._channel_status.get(channel_name, {})
+            return bool(status.get("configured_enabled")) and not bool(status.get("error"))
+        task = self._channel_tasks.get(channel_name)
+        running = getattr(channel, "is_running", True)
+        return not bool(running) and bool(task and not task.done())
+
+    def _schedule_outbound_retry(self, msg: OutboundMessage, *, reason: str) -> None:
+        metadata = dict(msg.metadata or {})
+        retry_count = self._dispatch_retry_count(msg) + 1
+        metadata["_dispatch_retry_count"] = retry_count
+        metadata["_dispatch_retry_reason"] = reason
+        requeued = OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=msg.content,
+            reply_to=msg.reply_to,
+            media=list(msg.media or []),
+            metadata=metadata,
+        )
+        delay = min(0.1 * retry_count, 1.0)
+
+        async def _requeue_later() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await self.bus.publish_outbound(requeued)
+            finally:
+                self._dispatch_retry_tasks.discard(task)
+
+        task = asyncio.create_task(_requeue_later())
+        self._dispatch_retry_tasks.add(task)
+
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
@@ -515,6 +570,13 @@ class ChannelManager:
                 apply_delivery_route(msg)
                 delivery_policy = get_delivery_policy(msg.metadata)
                 apply_delivery_policy(msg)
+                channel = self.channels.get(msg.channel)
+                if self._channel_temporarily_unavailable_for_dispatch(msg.channel, channel):
+                    retry_count = self._dispatch_retry_count(msg)
+                    if retry_count < 20:
+                        self._schedule_outbound_retry(msg, reason="channel_temporarily_unavailable")
+                        continue
+                    logger.error("Dropping outbound for {} after {} dispatch retries", msg.channel, retry_count)
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible
                 if msg.channel != "webui" and self.activity_bus and not self._should_skip_activity_broadcast(msg):
@@ -554,7 +616,6 @@ class ChannelManager:
                     ):
                         continue
 
-                channel = self.channels.get(msg.channel)
                 if channel:
                     try:
                         await channel.send(msg)

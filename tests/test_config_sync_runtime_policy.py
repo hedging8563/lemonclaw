@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from lemonclaw.config.schema import Config
 from lemonclaw.providers.catalog import apply_runtime_model_policy, get_runtime_default_model, get_runtime_memory_policy
 
@@ -224,3 +226,102 @@ def test_sync_runtime_model_policy_clears_managed_default_when_api_returns_none(
     assert config.lemondata.default_model == 'gpt-5.4'
     assert not (tmp_path / 'runtime-model-policy.json').exists()
     assert not (tmp_path / '.managed-runtime-default-model').exists()
+
+
+def test_clear_stale_credentials_resets_dingtalk_when_client_id_changes(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import _clear_stale_credentials
+
+    config = Config()
+    config.channels.dingtalk.client_id = "new-client-id"
+
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    cred_dir = tmp_path / 'credentials'
+    cred_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = cred_dir / '.dingtalk-owner-paired'
+    allow_from = cred_dir / 'dingtalk-allowFrom.json'
+    pairing = cred_dir / 'dingtalk-pairing.json'
+    for path in (sentinel, allow_from, pairing):
+        path.write_text('x', encoding='utf-8')
+
+    (tmp_path / '.channel-token-snapshot.json').write_text('{"dingtalk":"old-client-id"}', encoding='utf-8')
+
+    changed = _clear_stale_credentials(config)
+
+    assert changed is True
+    assert not sentinel.exists()
+    assert not allow_from.exists()
+    assert not pairing.exists()
+    assert (tmp_path / '.channel-token-snapshot.json').read_text(encoding='utf-8') == '{"dingtalk": "new-client-id"}'
+
+
+def test_clear_stale_credentials_resets_channel_when_token_is_cleared(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import _clear_stale_credentials
+
+    config = Config()
+    config.channels.telegram.token = ""
+
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    cred_dir = tmp_path / 'credentials'
+    cred_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = cred_dir / '.telegram-owner-paired'
+    allow_from = cred_dir / 'telegram-allowFrom.json'
+    pairing = cred_dir / 'telegram-pairing.json'
+    for path in (sentinel, allow_from, pairing):
+        path.write_text('x', encoding='utf-8')
+
+    (tmp_path / '.channel-token-snapshot.json').write_text('{"telegram":"old-token"}', encoding='utf-8')
+
+    changed = _clear_stale_credentials(config)
+
+    assert changed is True
+    assert not sentinel.exists()
+    assert not allow_from.exists()
+    assert not pairing.exists()
+    assert (tmp_path / '.channel-token-snapshot.json').read_text(encoding='utf-8') == '{}'
+
+
+def test_run_config_sync_writes_model_version_after_successful_save(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import MODEL_CONFIG_VERSION, run_config_sync
+
+    config = Config()
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    saved = {"called": False}
+
+    def _fake_save(_config):
+        saved["called"] = True
+
+    monkeypatch.setattr('lemonclaw.config.loader.save_config', _fake_save)
+
+    report = run_config_sync(config)
+
+    assert saved["called"] is True
+    assert any(op.name == "sync_model_config" and op.changed for op in report.ops)
+    assert (tmp_path / '.managed-model-version').read_text(encoding='utf-8') == str(MODEL_CONFIG_VERSION)
+
+
+def test_run_config_sync_does_not_write_model_version_when_save_fails(monkeypatch, tmp_path: Path):
+    from lemonclaw.config.sync import run_config_sync
+
+    config = Config()
+    fake_config_path = tmp_path / 'config.json'
+    fake_config_path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr('lemonclaw.config.loader.get_config_path', lambda: fake_config_path)
+
+    def _fake_save(_config):
+        raise OSError("disk full")
+
+    monkeypatch.setattr('lemonclaw.config.loader.save_config', _fake_save)
+
+    with pytest.raises(OSError):
+        run_config_sync(config)
+
+    assert not (tmp_path / '.managed-model-version').exists()

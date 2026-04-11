@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
 from lemonclaw.channels.manager import ChannelManager
 from lemonclaw.config.schema import Config
@@ -15,6 +16,7 @@ class _FakeChannel:
         self.stop_calls = 0
         self.auto_pairing_enabled = False
         self._stop_event = asyncio.Event()
+        self.sent_messages = []
 
     @property
     def is_running(self) -> bool:
@@ -33,6 +35,7 @@ class _FakeChannel:
         self._stop_event.set()
 
     async def send(self, msg) -> None:
+        self.sent_messages.append(msg)
         return None
 
     def enable_auto_pairing(self, data_dir) -> None:
@@ -222,3 +225,76 @@ async def test_channel_manager_refresh_channels_from_config_restarts_only_change
 
     await built["telegram"].stop()
     await discord_old.stop()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_requeues_outbound_while_channel_missing_during_refresh():
+    manager = ChannelManager(Config(), MessageBus())
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": False,
+        "running": False,
+        "available": False,
+        "error": "",
+    }
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="hello",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    fake = _FakeChannel()
+    fake._running = True
+    manager.channels["telegram"] = fake
+    manager._channel_status["telegram"].update({"registered": True, "running": True, "available": True})
+
+    await asyncio.sleep(0.2)
+
+    assert len(fake.sent_messages) == 1
+    assert fake.sent_messages[0].content == "hello"
+
+    await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_requeues_outbound_while_channel_restart_lock_is_held():
+    manager = ChannelManager(Config(), MessageBus())
+    fake = _FakeChannel()
+    fake._running = False
+    manager.channels["telegram"] = fake
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": True,
+        "running": False,
+        "available": True,
+        "error": "",
+    }
+    lock = asyncio.Lock()
+    await lock.acquire()
+    manager._restart_locks["telegram"] = lock
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="hello again",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    fake._running = True
+    lock.release()
+    await asyncio.sleep(0.2)
+
+    assert len(fake.sent_messages) == 1
+    assert fake.sent_messages[0].content == "hello again"
+
+    await manager.stop_all()

@@ -132,6 +132,7 @@ def run_config_sync(config: Config) -> SyncReport:
     if report.changed:
         from lemonclaw.config.loader import save_config
         save_config(config)
+        _finalize_model_config_sync(report)
         logger.info(f"config-sync: saved updated config")
 
     return report
@@ -468,6 +469,22 @@ MODEL_CONFIG_VERSION = 8
 _VERSION_FILE_NAME = ".managed-model-version"
 
 
+def _write_model_config_version() -> None:
+    from lemonclaw.config.loader import get_config_path
+
+    version_file = get_config_path().parent / _VERSION_FILE_NAME
+    try:
+        version_file.write_text(str(MODEL_CONFIG_VERSION), encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"config-sync: failed to write version file: {e}")
+
+
+def _finalize_model_config_sync(report: SyncReport) -> None:
+    if not any(op.name == "sync_model_config" and op.changed and not op.error for op in report.ops):
+        return
+    _write_model_config_version()
+
+
 def _sync_model_config(config: Config) -> bool:
     """Version-controlled model configuration sync.
 
@@ -528,12 +545,6 @@ def _sync_model_config(config: Config) -> bool:
         config.lemondata.api_base_url = api_base_no_v1
         changed = True
 
-    # Write version file (even if nothing else changed, to avoid re-running)
-    try:
-        version_file.write_text(str(MODEL_CONFIG_VERSION))
-    except OSError as e:
-        logger.warning(f"config-sync: failed to write version file: {e}")
-
     if changed:
         logger.info(f"config-sync: model config synced to v{MODEL_CONFIG_VERSION}")
 
@@ -552,7 +563,7 @@ _CHANNEL_TOKEN_KEYS: dict[str, str] = {
     "discord": "token",
     "slack": "bot_token",
     "feishu": "app_id",
-    "dingtalk": "app_key",
+    "dingtalk": "client_id",
     "qq": "app_id",
 }
 
@@ -582,17 +593,20 @@ def _clear_stale_credentials(config: Config) -> bool:
     # Build current token snapshot
     channels_cfg = config.channels
     current_tokens: dict[str, str] = {}
+    raw_current_tokens: dict[str, str] = {}
     for ch, token_field in _CHANNEL_TOKEN_KEYS.items():
         ch_cfg = getattr(channels_cfg, ch, None)
         if ch_cfg is None:
             continue
-        token_val = getattr(ch_cfg, token_field, "")
+        token_val = str(getattr(ch_cfg, token_field, "") or "")
+        raw_current_tokens[ch] = token_val
         if token_val:
             current_tokens[ch] = token_val
 
     # Detect changes
     channels_to_reset: list[str] = []
-    for ch, new_token in current_tokens.items():
+    for ch in sorted(set(old_tokens) | set(raw_current_tokens)):
+        new_token = raw_current_tokens.get(ch, "")
         old_token = old_tokens.get(ch, "")
         if old_token and new_token != old_token:
             channels_to_reset.append(ch)
