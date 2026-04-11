@@ -63,3 +63,58 @@ test('WhatsAppClient defers inbound media download until resolveInboundMedia', a
     rmSync(tempHome, { recursive: true, force: true });
   }
 });
+
+test('WhatsAppClient restores pending inbound media cache across client recreation', async () => {
+  const tempHome = mkdtempSync(join(tmpdir(), 'lemonclaw-wa-restore-'));
+  const authDir = join(tempHome, 'auth');
+  const originalHome = process.env.HOME;
+  process.env.HOME = tempHome;
+
+  const originalDownloader = (WhatsAppClient as any).mediaDownloader;
+  (WhatsAppClient as any).mediaDownloader = async () => Buffer.from('doc-bytes');
+
+  try {
+    const msg = {
+      key: { id: 'msg-restore' },
+      message: {
+        documentMessage: {
+          fileName: 'restored.docx',
+          mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      },
+    };
+
+    const client1 = new WhatsAppClient({
+      authDir,
+      onMessage() {},
+      onQR() {},
+      onStatus() {},
+    });
+    (client1 as any).sock = { updateMediaMessage: async () => undefined };
+    client1.setDelayedMediaEnabled(true);
+    const token = (client1 as any).registerPendingInboundMedia(msg);
+    assert.equal(typeof token, 'string');
+
+    const client2 = new WhatsAppClient({
+      authDir,
+      onMessage() {},
+      onQR() {},
+      onStatus() {},
+    });
+    (client2 as any).sock = { updateMediaMessage: async () => undefined };
+    client2.setDelayedMediaEnabled(true);
+
+    const paths = await client2.resolveInboundMedia(token);
+    assert.equal(paths.length, 1);
+    assert.ok(paths[0].endsWith('restored.docx'));
+    assert.equal(existsSync(paths[0]), true);
+  } finally {
+    (WhatsAppClient as any).mediaDownloader = originalDownloader;
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    rmSync(tempHome, { recursive: true, force: true });
+  }
+});

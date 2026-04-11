@@ -31,6 +31,7 @@ class WhatsAppChannel(BaseChannel):
         self._trigger_runtime = trigger_runtime
         self._ws = None
         self._connected = False
+        self._bridge_ready = asyncio.Event()
         self._mention_warned = False  # Only warn once when mention mode lacks enough bridge identity
         self._bot_identity_tokens: set[str] = set()
         self._ingress_dedupe = InboundDedupeCache(ttl_seconds=300, max_entries=2000)
@@ -112,6 +113,7 @@ class WhatsAppChannel(BaseChannel):
                         await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
                     await ws.send(json.dumps({"type": "hello", "capabilities": ["delayed_media_v1"]}))
                     self._connected = True
+                    self._bridge_ready.set()
                     logger.info("Connected to WhatsApp bridge")
                     
                     # Listen for messages
@@ -125,6 +127,7 @@ class WhatsAppChannel(BaseChannel):
                 break
             except Exception as e:
                 self._connected = False
+                self._bridge_ready.clear()
                 self._ws = None
                 self._fail_pending_bridge_requests("bridge disconnected")
                 logger.warning("WhatsApp bridge connection error: {}", e)
@@ -137,6 +140,7 @@ class WhatsAppChannel(BaseChannel):
         """Stop the WhatsApp channel."""
         self._running = False
         self._connected = False
+        self._bridge_ready.clear()
         self._fail_pending_bridge_requests("bridge stopped")
         
         if self._ws:
@@ -171,30 +175,41 @@ class WhatsAppChannel(BaseChannel):
             self._pending_bridge_requests.pop(request_id, None)
 
     async def _resolve_bridge_media(self, media_token: str) -> list[str] | None:
-        if not self._ws or not self._connected:
-            logger.warning("WhatsApp bridge not connected for media resolution")
-            return None
-
-        request_id = uuid4().hex
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._pending_bridge_requests[request_id] = future
-        try:
-            await self._ws.send(json.dumps({
-                "type": "resolve_media",
-                "requestId": request_id,
-                "mediaToken": media_token,
-            }, ensure_ascii=False))
-            payload = await asyncio.wait_for(future, timeout=30.0)
-            media = payload.get("media")
-            if not isinstance(media, list):
-                return None
-            return [str(path) for path in media if isinstance(path, str)]
-        except Exception as e:
-            logger.warning("WhatsApp bridge media resolve failed for {}: {}", media_token, e)
-            return None
-        finally:
-            self._pending_bridge_requests.pop(request_id, None)
+        deadline = loop.time() + 30.0
+
+        while self._running and loop.time() < deadline:
+            if not self._ws or not self._connected:
+                try:
+                    await asyncio.wait_for(self._bridge_ready.wait(), timeout=max(0.1, deadline - loop.time()))
+                except asyncio.TimeoutError:
+                    break
+                continue
+
+            request_id = uuid4().hex
+            future: asyncio.Future[dict[str, Any]] = loop.create_future()
+            self._pending_bridge_requests[request_id] = future
+            try:
+                await self._ws.send(json.dumps({
+                    "type": "resolve_media",
+                    "requestId": request_id,
+                    "mediaToken": media_token,
+                }, ensure_ascii=False))
+                payload = await asyncio.wait_for(future, timeout=max(0.1, deadline - loop.time()))
+                media = payload.get("media")
+                if not isinstance(media, list):
+                    return None
+                return [str(path) for path in media if isinstance(path, str)]
+            except Exception as e:
+                if loop.time() >= deadline or not self._running:
+                    logger.warning("WhatsApp bridge media resolve failed for {}: {}", media_token, e)
+                    return None
+                await asyncio.sleep(0.1)
+            finally:
+                self._pending_bridge_requests.pop(request_id, None)
+
+        logger.warning("WhatsApp bridge media resolve timed out for {}", media_token)
+        return None
     
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -206,6 +221,10 @@ class WhatsAppChannel(BaseChannel):
         
         msg_type = data.get("type")
         request_id = str(data.get("requestId") or "").strip()
+
+        if msg_type == "hello_ack":
+            self._bridge_ready.set()
+            return
 
         if msg_type == "media_resolved":
             future = self._pending_bridge_requests.get(request_id)

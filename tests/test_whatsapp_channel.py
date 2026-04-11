@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import subprocess
@@ -273,3 +274,42 @@ async def test_whatsapp_bridge_media_resolution_failure_surfaces_notice() -> Non
     assert "bridge interruption" in channel._publish_feedback.await_args.args[1]
     channel._handle_message.assert_awaited_once()
     assert channel._handle_message.await_args.kwargs["media"] is None
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_bridge_media_resolution_retries_after_reconnect() -> None:
+    channel = WhatsAppChannel(
+        WhatsAppConfig(enabled=True, allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._running = True
+
+    class FakeWS:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, object]] = []
+
+        async def send(self, payload: str) -> None:
+            data = json.loads(payload)
+            self.payloads.append(data)
+            if data.get("type") == "resolve_media":
+                await channel._handle_bridge_message(
+                    json.dumps(
+                        {
+                            "type": "media_resolved",
+                            "requestId": data["requestId"],
+                            "media": ["/tmp/reconnected.docx"],
+                        }
+                    )
+                )
+
+    async def _reconnect() -> None:
+        await asyncio.sleep(0.01)
+        channel._ws = FakeWS()
+        channel._connected = True
+        channel._bridge_ready.set()
+
+    reconnect_task = asyncio.create_task(_reconnect())
+    resolved = await channel._resolve_bridge_media("media-retry")
+    await reconnect_task
+
+    assert resolved == ["/tmp/reconnected.docx"]

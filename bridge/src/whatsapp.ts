@@ -5,6 +5,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { mkdir, writeFile } from 'fs/promises';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, extname, join } from 'path';
 import makeWASocket, {
@@ -48,7 +49,7 @@ export interface WhatsAppClientOptions {
 }
 
 interface PendingInboundMediaEntry {
-  msg: any;
+  msg: any | null;
   createdAt: number;
   resolvingPromise?: Promise<string[]>;
   resolvedMedia?: string[];
@@ -91,12 +92,105 @@ export class WhatsAppClient {
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+    this.loadPendingInboundMedia();
   }
 
   setDelayedMediaEnabled(enabled: boolean): void {
     this.delayedMediaEnabled = enabled;
     if (!enabled) {
       this.pendingInboundMedia.clear();
+      this.persistPendingInboundMedia();
+    }
+  }
+
+  private pendingMediaStatePath(): string {
+    return join(this.options.authDir, 'pending-inbound-media.json');
+  }
+
+  private static serializePendingValue(value: any): any {
+    if (typeof value === 'bigint') {
+      return { __type: 'bigint', value: value.toString() };
+    }
+    if (Buffer.isBuffer(value)) {
+      return { __type: 'buffer', value: value.toString('base64') };
+    }
+    if (value instanceof Uint8Array) {
+      return { __type: 'buffer', value: Buffer.from(value).toString('base64') };
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => WhatsAppClient.serializePendingValue(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [key, WhatsAppClient.serializePendingValue(nested)])
+      );
+    }
+    return value;
+  }
+
+  private static deserializePendingValue(value: any): any {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => WhatsAppClient.deserializePendingValue(item));
+    }
+    if (value.__type === 'buffer' && typeof value.value === 'string') {
+      return Buffer.from(value.value, 'base64');
+    }
+    if (value.__type === 'bigint' && typeof value.value === 'string') {
+      return BigInt(value.value);
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, WhatsAppClient.deserializePendingValue(nested)])
+    );
+  }
+
+  private persistPendingInboundMedia(): void {
+    try {
+      mkdirSync(this.options.authDir, { recursive: true });
+      const path = this.pendingMediaStatePath();
+      const tmp = `${path}.tmp`;
+      const serialized = Object.fromEntries(
+        Array.from(this.pendingInboundMedia.entries()).map(([token, entry]) => [
+          token,
+          {
+            createdAt: entry.createdAt,
+            msg: entry.msg === null ? null : WhatsAppClient.serializePendingValue(entry.msg),
+            resolvedMedia: entry.resolvedMedia,
+            resolvedAt: entry.resolvedAt,
+          },
+        ])
+      );
+      writeFileSync(tmp, JSON.stringify(serialized, null, 2));
+      renameSync(tmp, path);
+    } catch (error) {
+      console.error('Failed to persist pending WhatsApp media state:', error);
+    }
+  }
+
+  private loadPendingInboundMedia(): void {
+    try {
+      const raw = readFileSync(this.pendingMediaStatePath(), 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      const now = Date.now();
+      for (const [token, rawEntry] of Object.entries(parsed)) {
+        if (!rawEntry || typeof rawEntry !== 'object') continue;
+        const createdAt = Number((rawEntry as PendingInboundMediaEntry).createdAt || 0);
+        if (!createdAt || now - createdAt > WhatsAppClient.MEDIA_TOKEN_TTL_MS) continue;
+        this.pendingInboundMedia.set(token, {
+          createdAt,
+          msg: (rawEntry as PendingInboundMediaEntry).msg === null
+            ? null
+            : WhatsAppClient.deserializePendingValue((rawEntry as PendingInboundMediaEntry).msg),
+          resolvedMedia: Array.isArray((rawEntry as PendingInboundMediaEntry).resolvedMedia)
+            ? [...((rawEntry as PendingInboundMediaEntry).resolvedMedia as string[])]
+            : undefined,
+          resolvedAt: Number((rawEntry as PendingInboundMediaEntry).resolvedAt || 0) || undefined,
+        });
+      }
+      this.prunePendingInboundMedia(now);
+    } catch {
+      // No persisted media cache yet or unreadable file.
     }
   }
 
@@ -203,12 +297,15 @@ export class WhatsAppClient {
   }
 
   private prunePendingInboundMedia(now: number = Date.now()): void {
+    let changed = false;
     for (const [token, entry] of this.pendingInboundMedia.entries()) {
       if (now - entry.createdAt > WhatsAppClient.MEDIA_TOKEN_TTL_MS) {
         if (entry.resolvingPromise) continue;
         this.pendingInboundMedia.delete(token);
+        changed = true;
       }
     }
+    if (changed) this.persistPendingInboundMedia();
   }
 
   private hasInboundMedia(msg: any): boolean {
@@ -233,6 +330,7 @@ export class WhatsAppClient {
       token = `${baseId}:${suffix}`;
     }
     this.pendingInboundMedia.set(token, { msg, createdAt: Date.now() });
+    this.persistPendingInboundMedia();
     return token;
   }
 
@@ -356,6 +454,7 @@ export class WhatsAppClient {
         }
         entry.resolvedMedia = media;
         entry.resolvedAt = Date.now();
+        this.persistPendingInboundMedia();
         return media;
       } finally {
         entry.resolvingPromise = undefined;
