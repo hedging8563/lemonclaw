@@ -84,11 +84,27 @@ class EmailChannel(BaseChannel):
         poll_seconds = max(5, int(self.config.poll_interval_seconds))
         while self._running:
             try:
-                inbound_items = await asyncio.to_thread(self._fetch_new_messages)
+                inbound_items = await asyncio.to_thread(self._fetch_new_messages, materialize_attachments=False)
                 for item in inbound_items:
                     sender = item["sender"]
                     subject = item.get("subject", "")
                     message_id = item.get("message_id", "")
+                    if not await self._preflight_direct_inbound_access(
+                        sender_id=sender,
+                        chat_id=sender,
+                        content=str(item.get("content") or ""),
+                    ):
+                        continue
+
+                    attachment_paths, attachment_markers, attachments_meta = await asyncio.to_thread(
+                        self._materialize_attachments,
+                        list(item.get("_attachment_specs") or []),
+                    )
+                    content = str(item.get("content_base") or item.get("content") or "")
+                    if attachment_markers:
+                        content = f"{content}\n\n" + "\n".join(attachment_markers)
+                    metadata = dict(item.get("metadata") or {})
+                    metadata["attachments"] = attachments_meta
 
                     if subject:
                         self._last_subject_by_chat[sender] = subject
@@ -98,9 +114,10 @@ class EmailChannel(BaseChannel):
                     await self._handle_message(
                         sender_id=sender,
                         chat_id=sender,
-                        content=item["content"],
-                        media=item.get("media"),
-                        metadata=item.get("metadata", {}),
+                        content=content,
+                        media=attachment_paths or None,
+                        metadata=metadata,
+                        pairing_checked=True,
                     )
             except Exception as e:
                 logger.error("Email polling error: {}", e)
@@ -201,13 +218,14 @@ class EmailChannel(BaseChannel):
             smtp.login(self.config.smtp_username, self.config.smtp_password)
             smtp.send_message(msg)
 
-    def _fetch_new_messages(self) -> list[dict[str, Any]]:
+    def _fetch_new_messages(self, *, materialize_attachments: bool = True) -> list[dict[str, Any]]:
         """Poll IMAP and return parsed unread messages."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
             mark_seen=self.config.mark_seen,
             dedupe=True,
             limit=0,
+            materialize_attachments=materialize_attachments,
         )
 
     def fetch_messages_between_dates(
@@ -234,6 +252,7 @@ class EmailChannel(BaseChannel):
             mark_seen=False,
             dedupe=False,
             limit=max(1, int(limit)),
+            materialize_attachments=True,
         )
 
     def _fetch_messages(
@@ -242,6 +261,7 @@ class EmailChannel(BaseChannel):
         mark_seen: bool,
         dedupe: bool,
         limit: int,
+        materialize_attachments: bool,
     ) -> list[dict[str, Any]]:
         """Fetch messages by arbitrary IMAP search criteria."""
         messages: list[dict[str, Any]] = []
@@ -287,21 +307,32 @@ class EmailChannel(BaseChannel):
                 date_value = parsed.get("Date", "")
                 message_id = parsed.get("Message-ID", "").strip()
                 body = self._extract_text_body(parsed)
-                attachment_paths, attachment_markers, attachments_meta = self._extract_attachments(
-                    parsed,
-                    uid or message_id or "email",
-                )
+                message_key = uid or message_id or "email"
+                attachment_specs = self._extract_attachment_specs(parsed, message_key)
+                attachment_paths: list[str] = []
+                attachment_markers: list[str] = []
+                if materialize_attachments:
+                    attachment_paths, attachment_markers, attachments_meta = self._materialize_attachments(attachment_specs)
+                else:
+                    attachments_meta = self._describe_attachment_specs(attachment_specs)
+                    attachment_markers = [
+                        f"[attachment: {item.get('filename') or f'attachment_{index + 1}'}]"
+                        for index, item in enumerate(attachment_specs)
+                    ]
 
                 if not body:
                     body = "(empty email body)"
 
                 body = body[: self.config.max_body_chars]
-                content = (
+                content_base = (
                     f"Email received.\n"
                     f"From: {sender}\n"
                     f"Subject: {subject}\n"
                     f"Date: {date_value}\n\n"
                     f"{body}"
+                )
+                content = (
+                    content_base
                 )
                 if attachment_markers:
                     content = f"{content}\n\n" + "\n".join(attachment_markers)
@@ -321,6 +352,8 @@ class EmailChannel(BaseChannel):
                         "message_id": message_id,
                         "content": content,
                         "media": attachment_paths,
+                        "content_base": content_base,
+                        "_attachment_specs": attachment_specs,
                         "metadata": metadata,
                     }
                 )
@@ -415,15 +448,10 @@ class EmailChannel(BaseChannel):
         return payload.strip()
 
     @staticmethod
-    def _extract_attachments(msg: Any, message_key: str) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-        media_paths: list[str] = []
-        markers: list[str] = []
+    def _extract_attachment_specs(msg: Any, message_key: str) -> list[dict[str, Any]]:
         attachments: list[dict[str, Any]] = []
         if not msg.is_multipart():
-            return media_paths, markers, attachments
-
-        media_dir = Path.home() / ".lemonclaw" / "media" / "email"
-        media_dir.mkdir(parents=True, exist_ok=True)
+            return attachments
         safe_message_key = _safe_path_segment(message_key, "email")
 
         for index, part in enumerate(msg.walk(), start=1):
@@ -432,19 +460,59 @@ class EmailChannel(BaseChannel):
             filename = part.get_filename() or f"attachment_{index}"
             safe_name = _safe_path_segment(Path(filename).name, f"attachment_{index}")
             payload = part.get_payload(decode=True) or b""
-            file_path = media_dir / f"{safe_message_key}_{index:02d}_{safe_name}"
-            file_path.write_bytes(payload)
+            attachments.append(
+                {
+                    "message_key": safe_message_key,
+                    "index": index,
+                    "filename": safe_name,
+                    "content_type": part.get_content_type(),
+                    "payload": payload,
+                    "size_bytes": len(payload),
+                }
+            )
+
+        return attachments
+
+    @staticmethod
+    def _describe_attachment_specs(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        described: list[dict[str, Any]] = []
+        for item in specs:
+            described.append(
+                {
+                    "filename": str(item.get("filename") or ""),
+                    "content_type": str(item.get("content_type") or ""),
+                    "size_bytes": int(item.get("size_bytes") or 0),
+                }
+            )
+        return described
+
+    @staticmethod
+    def _materialize_attachments(specs: list[dict[str, Any]]) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+        media_paths: list[str] = []
+        markers: list[str] = []
+        attachments: list[dict[str, Any]] = []
+        if not specs:
+            return media_paths, markers, attachments
+
+        media_dir = Path.home() / ".lemonclaw" / "media" / "email"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        for index, item in enumerate(specs, start=1):
+            safe_message_key = _safe_path_segment(str(item.get("message_key") or "email"), "email")
+            safe_name = _safe_path_segment(str(item.get("filename") or f"attachment_{index}"), f"attachment_{index}")
+            payload = item.get("payload")
+            payload_bytes = bytes(payload) if isinstance(payload, (bytes, bytearray)) else b""
+            file_path = media_dir / f"{safe_message_key}_{int(item.get('index') or index):02d}_{safe_name}"
+            file_path.write_bytes(payload_bytes)
             media_paths.append(str(file_path))
             markers.append(f"[attachment: {file_path}]")
             attachments.append(
                 {
                     "filename": safe_name,
-                    "content_type": part.get_content_type(),
+                    "content_type": str(item.get("content_type") or ""),
                     "path": str(file_path),
-                    "size_bytes": len(payload),
+                    "size_bytes": len(payload_bytes),
                 }
             )
-
         return media_paths, markers, attachments
 
     @staticmethod

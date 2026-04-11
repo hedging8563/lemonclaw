@@ -1,6 +1,7 @@
 from email.message import EmailMessage
 from datetime import date
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -198,6 +199,44 @@ def test_fetch_new_messages_sanitizes_attachment_path_when_uid_parse_fails(monke
     assert items[0]["metadata"]["attachments"][0]["path"] == str(attachment_path)
 
 
+def test_fetch_new_messages_can_defer_attachment_materialization(monkeypatch, tmp_path) -> None:
+    raw = _make_raw_email_with_attachment()
+
+    class FakeIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 456 BODY[] {200})", raw), b")"]
+
+        def store(self, _imap_id: bytes, _op: str, _flags: str):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("lemonclaw.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr("lemonclaw.channels.email.Path.home", lambda: tmp_path)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages(materialize_attachments=False)
+
+    assert len(items) == 1
+    assert "[attachment: notes.pdf]" in items[0]["content"]
+    assert items[0]["media"] == []
+    assert items[0]["metadata"]["attachments"][0]["filename"] == "notes.pdf"
+    assert "path" not in items[0]["metadata"]["attachments"][0]
+    assert items[0]["_attachment_specs"]
+    media_dir = tmp_path / ".lemonclaw" / "media" / "email"
+    assert not media_dir.exists()
+
+
 @pytest.mark.asyncio
 async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
     cfg = _make_config()
@@ -206,7 +245,7 @@ async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
 
     called = {"fetch": False}
 
-    def _fake_fetch():
+    def _fake_fetch(*, materialize_attachments: bool = True):
         called["fetch"] = True
         return []
 
@@ -227,16 +266,141 @@ async def test_start_allows_imap_only_mode_when_auto_reply_disabled(monkeypatch)
 
     called = {"fetch": False}
 
-    def _fake_fetch():
+    def _fake_fetch(*, materialize_attachments: bool = True):
+        assert materialize_attachments is False
         called["fetch"] = True
         channel._running = False
         return []
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr("lemonclaw.channels.email.asyncio.sleep", AsyncMock())
     await channel.start()
 
     assert called["fetch"] is True
     assert channel.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_start_does_not_materialize_blocked_sender_attachments(monkeypatch, tmp_path) -> None:
+    cfg = _make_config()
+    cfg.allow_from = ["owner@example.com"]
+    channel = EmailChannel(cfg, MessageBus())
+
+    blocked_item = {
+        "sender": "blocked@example.com",
+        "subject": "Attachment only",
+        "message_id": "<m2@example.com>",
+        "content_base": "Email received.\nFrom: blocked@example.com\nSubject: Attachment only\nDate: now\n\n(empty email body)",
+        "content": "Email received.\nFrom: blocked@example.com\nSubject: Attachment only\nDate: now\n\n(empty email body)\n\n[attachment: notes.pdf]",
+        "media": [],
+        "_attachment_specs": [
+            {
+                "message_key": "456",
+                "index": 1,
+                "filename": "notes.pdf",
+                "content_type": "application/pdf",
+                "payload": b"%PDF-1.4 fake",
+                "size_bytes": 13,
+            }
+        ],
+        "metadata": {
+            "message_id": "<m2@example.com>",
+            "subject": "Attachment only",
+            "date": "now",
+            "sender_email": "blocked@example.com",
+            "uid": "456",
+            "attachments": [
+                {
+                    "filename": "notes.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 13,
+                }
+            ],
+        },
+    }
+
+    async def _fake_publish_feedback(*_args, **_kwargs):
+        channel._running = False
+
+    def _fake_fetch(*, materialize_attachments: bool = True):
+        assert materialize_attachments is False
+        return [blocked_item]
+
+    channel._handle_message = AsyncMock(side_effect=AssertionError("should remain blocked"))
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_publish_feedback", _fake_publish_feedback)
+    monkeypatch.setattr("lemonclaw.channels.email.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("lemonclaw.channels.email.asyncio.sleep", AsyncMock())
+
+    await channel.start()
+
+    media_dir = tmp_path / ".lemonclaw" / "media" / "email"
+    assert not media_dir.exists()
+    assert "blocked@example.com" not in channel._last_subject_by_chat
+    assert "blocked@example.com" not in channel._last_message_id_by_chat
+
+
+@pytest.mark.asyncio
+async def test_start_materializes_allowed_sender_attachments_after_gate(monkeypatch, tmp_path) -> None:
+    cfg = _make_config()
+    cfg.allow_from = ["alice@example.com"]
+    channel = EmailChannel(cfg, MessageBus())
+
+    allowed_item = {
+        "sender": "alice@example.com",
+        "subject": "Attachment only",
+        "message_id": "<m2@example.com>",
+        "content_base": "Email received.\nFrom: alice@example.com\nSubject: Attachment only\nDate: now\n\n(empty email body)",
+        "content": "Email received.\nFrom: alice@example.com\nSubject: Attachment only\nDate: now\n\n(empty email body)\n\n[attachment: notes.pdf]",
+        "media": [],
+        "_attachment_specs": [
+            {
+                "message_key": "456",
+                "index": 1,
+                "filename": "notes.pdf",
+                "content_type": "application/pdf",
+                "payload": b"%PDF-1.4 fake",
+                "size_bytes": 13,
+            }
+        ],
+        "metadata": {
+            "message_id": "<m2@example.com>",
+            "subject": "Attachment only",
+            "date": "now",
+            "sender_email": "alice@example.com",
+            "uid": "456",
+            "attachments": [
+                {
+                    "filename": "notes.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 13,
+                }
+            ],
+        },
+    }
+
+    def _fake_fetch(*, materialize_attachments: bool = True):
+        assert materialize_attachments is False
+        channel._running = False
+        return [allowed_item]
+
+    channel._handle_message = AsyncMock()
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr("lemonclaw.channels.email.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("lemonclaw.channels.email.asyncio.sleep", AsyncMock())
+
+    await channel.start()
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["pairing_checked"] is True
+    assert kwargs["media"] and kwargs["media"][0].endswith("notes.pdf")
+    assert "[attachment: " in kwargs["content"]
+    attachment_meta = kwargs["metadata"]["attachments"][0]
+    assert attachment_meta["path"].endswith("notes.pdf")
+    assert Path(attachment_meta["path"]).exists()
+    assert channel._last_subject_by_chat["alice@example.com"] == "Attachment only"
+    assert channel._last_message_id_by_chat["alice@example.com"] == "<m2@example.com>"
 
 
 @pytest.mark.asyncio

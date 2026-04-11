@@ -224,3 +224,28 @@ def test_redaction_uses_latest_secret_profiles_and_masks_substrings(tmp_path: Pa
 
     assert payload["note"] == "prefix [redacted] suffix"
     assert payload["secret_profile"] == "ops-http"
+
+
+def test_authorize_denies_when_kill_switch_file_is_corrupt(tmp_path: Path):
+    cfg = DummyConfig()
+    kill_path = tmp_path / "governance.json"
+    kill_path.write_text("{not-json", encoding="utf-8")
+    cfg.kill_switch_file = str(kill_path)
+    cfg.audit_log_path = str(tmp_path / "audit.jsonl")
+    runtime = GovernanceRuntime(workspace=tmp_path, config=cfg, agent_id="default")
+
+    token = runtime.issue_token(
+        task_id="task_1",
+        mode="operator",
+        allowed_capabilities=["exec.system"],
+        approval_state="approved",
+    )
+    decision = runtime.authorize(
+        capability_id="exec.system",
+        tool_name="exec",
+        token=token,
+        mode="operator",
+    )
+
+    assert decision.allowed is False
+    assert "kill switch unavailable" in decision.reason

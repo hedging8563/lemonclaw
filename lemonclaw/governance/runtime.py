@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from lemonclaw.governance.audit import append_audit_record, read_audit_records
 from lemonclaw.governance.kill_switch import (
+    KillSwitchLoadError,
     is_kill_switched,
     load_kill_switch_state,
     patch_kill_switch_state,
@@ -390,7 +391,10 @@ class GovernanceRuntime:
         if not allowed:
             return AuthorizationDecision(False, capability, reason)
 
-        state = load_kill_switch_state(self._kill_switch_path)
+        try:
+            state = load_kill_switch_state(self._kill_switch_path, strict=True)
+        except KillSwitchLoadError as exc:
+            return AuthorizationDecision(False, capability, f"kill switch unavailable: {exc}")
         if int(state.get("epoch", 0)) > token.kill_switch_epoch:
             return AuthorizationDecision(False, capability, "kill switch epoch changed")
         if is_kill_switched(

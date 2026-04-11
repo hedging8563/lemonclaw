@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from lemonclaw.governance.kill_switch import load_kill_switch_state, patch_kill_switch_state, save_kill_switch_state
+import pytest
+
+from lemonclaw.governance.kill_switch import (
+    KillSwitchLoadError,
+    load_kill_switch_state,
+    patch_kill_switch_state,
+    save_kill_switch_state,
+)
 from lemonclaw.governance import GovernanceRuntime
 
 
@@ -45,3 +52,11 @@ def test_patch_kill_switch_state_updates_epoch(tmp_path: Path):
     assert updated["global"] is True
     assert updated["capabilities"]["exec.system"] is True
     assert updated["epoch"] == 1
+
+
+def test_load_kill_switch_state_strict_raises_on_corrupt_file(tmp_path: Path):
+    kill_path = tmp_path / "governance.json"
+    kill_path.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(KillSwitchLoadError):
+        load_kill_switch_state(kill_path, strict=True)

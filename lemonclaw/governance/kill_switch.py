@@ -17,15 +17,25 @@ _DEFAULT_STATE = {
 }
 
 
-def load_kill_switch_state(path: Path) -> dict[str, Any]:
+class KillSwitchLoadError(RuntimeError):
+    """Raised when kill-switch state cannot be loaded safely."""
+
+
+def load_kill_switch_state(path: Path, *, strict: bool = False) -> dict[str, Any]:
     try:
         if not path.exists():
             return dict(_DEFAULT_STATE)
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
+            if strict:
+                raise KillSwitchLoadError("kill switch file did not contain a JSON object")
             return dict(_DEFAULT_STATE)
         return {**_DEFAULT_STATE, **data}
-    except Exception:
+    except KillSwitchLoadError:
+        raise
+    except Exception as exc:
+        if strict:
+            raise KillSwitchLoadError(f"failed to load kill switch state: {exc}") from exc
         return dict(_DEFAULT_STATE)
 
 

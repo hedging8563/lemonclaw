@@ -84,15 +84,12 @@ class ConfigWatcher:
         """Hot-reload provider API key and api_base."""
         try:
             p = config.get_provider(config.agents.defaults.model)
-            api_key = p.api_key if p else None
+            api_key = str((p.api_key if p else "") or "")
             api_base = config.get_api_base(config.agents.defaults.model)
 
-            if api_key and api_key != self._provider.api_key:
+            if api_key != self._provider.api_key or api_base != self._provider.api_base:
                 self._provider.update_credentials(api_key, api_base)
-                logger.info("Config watcher: API key hot-reloaded")
-            elif api_base and api_base != self._provider.api_base:
-                self._provider.update_credentials(self._provider.api_key, api_base)
-                logger.info("Config watcher: API base hot-reloaded")
+                logger.info("Config watcher: provider credentials hot-reloaded")
         except Exception:
             logger.exception("Config watcher: failed to reload provider")
 
