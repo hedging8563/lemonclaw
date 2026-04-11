@@ -5,7 +5,8 @@ import pytest
 
 from lemonclaw.bus.events import OutboundMessage
 from lemonclaw.bus.queue import MessageBus
-from lemonclaw.channels.manager import ChannelManager
+from lemonclaw.channels.delivery_context import DELIVERY_CONTEXT_KEY
+from lemonclaw.channels.manager import ChannelManager, _DISPATCH_RETRY_MAX_AGE_MS
 from lemonclaw.config.schema import Config
 
 
@@ -333,5 +334,125 @@ async def test_channel_manager_keeps_requeueing_outbound_past_previous_retry_cap
     assert len(fake.sent_messages) == 1
     assert fake.sent_messages[0].content == "hello after many retries"
     assert fake.sent_messages[0].metadata.get("_dispatch_retry_count", 0) >= 21
+
+    await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_requeues_outbound_while_channel_marked_unavailable_after_failed_start():
+    manager = ChannelManager(Config(), MessageBus())
+    failed = _FakeChannel()
+    failed._running = False
+    manager.channels["telegram"] = failed
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": True,
+        "running": False,
+        "available": False,
+        "error": "startup failed",
+    }
+    done = asyncio.get_running_loop().create_future()
+    done.set_result(None)
+    manager._channel_tasks["telegram"] = done
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="hello after failed start",
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert failed.sent_messages == []
+
+    failed._running = True
+    manager._channel_status["telegram"].update({"available": True, "running": True, "error": ""})
+    await asyncio.sleep(0.2)
+
+    assert len(failed.sent_messages) == 1
+    assert failed.sent_messages[0].content == "hello after failed start"
+
+    await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_preserves_delivery_route_across_temporary_requeue():
+    manager = ChannelManager(Config(), MessageBus())
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": False,
+        "running": False,
+        "available": False,
+        "error": "",
+    }
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="threaded hello",
+            metadata={
+                DELIVERY_CONTEXT_KEY: {
+                    "source_channel": "telegram",
+                    "source_chat_id": "chat-1",
+                    "session_key": "telegram:chat-1",
+                    "route": {
+                        "reply_to_message_id": 321,
+                        "message_thread_id": 456,
+                    },
+                },
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    fake = _FakeChannel()
+    fake._running = True
+    manager.channels["telegram"] = fake
+    manager._channel_status["telegram"].update({"registered": True, "running": True, "available": True})
+    await asyncio.sleep(0.2)
+
+    assert len(fake.sent_messages) == 1
+    assert fake.sent_messages[0].metadata["message_id"] == 321
+    assert fake.sent_messages[0].metadata["message_thread_id"] == 456
+    assert DELIVERY_CONTEXT_KEY not in fake.sent_messages[0].metadata
+
+    await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_channel_manager_terminalizes_stale_temporary_retries():
+    manager = ChannelManager(Config(), MessageBus())
+    manager._channel_status["telegram"] = {
+        "configured_enabled": True,
+        "configured_complete": True,
+        "registered": False,
+        "running": False,
+        "available": False,
+        "error": "",
+    }
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+
+    await manager.bus.publish_outbound(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="chat-1",
+            content="stale retry",
+            metadata={
+                "_dispatch_retry_count": 12,
+                "_dispatch_retry_first_at_ms": manager._now_ms() - (_DISPATCH_RETRY_MAX_AGE_MS + 1_000),
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    status = manager.get_channel_status()["telegram"]
+    assert "dispatch retry window exhausted" in status["last_dispatch_dead_letter_reason"]
+    assert status["last_dispatch_dead_letter_retry_count"] == 13
+    assert manager.bus.outbound_size == 0
 
     await manager.stop_all()

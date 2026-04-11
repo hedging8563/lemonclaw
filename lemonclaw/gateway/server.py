@@ -321,12 +321,18 @@ def create_app(
             logger.exception("Session UI history repair failed")
     if runtime.config_path:
         try:
-            mark_runtime_healthy(
-                Path(runtime.config_path),
-                version=runtime.version,
-                model=runtime.model,
-                instance_id=runtime.instance_id,
-            )
+            runtime_state = load_runtime_state(Path(runtime.config_path))
+            if runtime_state.get("_load_error"):
+                logger.error(
+                    "Runtime state file is unreadable at startup; preserving failed state until repaired"
+                )
+            else:
+                mark_runtime_healthy(
+                    Path(runtime.config_path),
+                    version=runtime.version,
+                    model=runtime.model,
+                    instance_id=runtime.instance_id,
+                )
         except Exception:
             logger.exception("Failed to update runtime healthy state")
     set_context(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,9 @@ _CHANNEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "matrix": ("access_token", "user_id"),
     "mochat": ("claw_token",),
 }
+
+_DISPATCH_RETRY_MAX_ATTEMPTS = 240
+_DISPATCH_RETRY_MAX_AGE_MS = 5 * 60 * 1000
 
 
 class ChannelManager:
@@ -512,6 +516,41 @@ class ChannelManager:
         except (TypeError, ValueError):
             return 0
 
+    @staticmethod
+    def _clone_outbound_message(msg: OutboundMessage, *, metadata: dict[str, Any] | None = None) -> OutboundMessage:
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=msg.content,
+            reply_to=msg.reply_to,
+            media=list(msg.media or []),
+            metadata=deepcopy(metadata if metadata is not None else (msg.metadata or {})),
+        )
+
+    @staticmethod
+    def _now_ms() -> int:
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    def _record_dispatch_dead_letter(
+        self,
+        msg: OutboundMessage,
+        *,
+        retry_count: int,
+        reason: str,
+    ) -> None:
+        now_ms = self._now_ms()
+        status = self._channel_status.setdefault(msg.channel, self._channel_status_base(msg.channel))
+        status["last_dispatch_dead_letter_reason"] = reason
+        status["last_dispatch_dead_letter_at_ms"] = now_ms
+        status["last_dispatch_dead_letter_retry_count"] = retry_count
+        logger.error(
+            "Dropping outbound for {} after retry exhaustion (retry={}, reason={}): {}",
+            msg.channel,
+            retry_count,
+            reason,
+            msg.content[:120],
+        )
+
     def _channel_temporarily_unavailable_for_dispatch(
         self,
         channel_name: str,
@@ -523,23 +562,32 @@ class ChannelManager:
         if channel is None:
             status = self._channel_status.get(channel_name, {})
             return bool(status.get("configured_enabled")) and not bool(status.get("error"))
+        status = self._channel_status.get(channel_name, {})
+        if bool(status.get("configured_enabled")) and (
+            not bool(status.get("available", True)) or bool(str(status.get("error") or "").strip())
+        ):
+            return True
         task = self._channel_tasks.get(channel_name)
         running = getattr(channel, "is_running", True)
         return not bool(running) and bool(task and not task.done())
 
     def _schedule_outbound_retry(self, msg: OutboundMessage, *, reason: str) -> None:
-        metadata = dict(msg.metadata or {})
+        metadata = deepcopy(msg.metadata or {})
         retry_count = self._dispatch_retry_count(msg) + 1
+        first_retry_at_ms = int(metadata.get("_dispatch_retry_first_at_ms") or 0) or self._now_ms()
+        metadata["_dispatch_retry_first_at_ms"] = first_retry_at_ms
+        age_ms = max(0, self._now_ms() - first_retry_at_ms)
+        if retry_count > _DISPATCH_RETRY_MAX_ATTEMPTS or age_ms >= _DISPATCH_RETRY_MAX_AGE_MS:
+            limit_reason = (
+                f"dispatch retry attempts exhausted ({retry_count}>{_DISPATCH_RETRY_MAX_ATTEMPTS})"
+                if retry_count > _DISPATCH_RETRY_MAX_ATTEMPTS
+                else f"dispatch retry window exhausted ({age_ms}ms>={_DISPATCH_RETRY_MAX_AGE_MS}ms)"
+            )
+            self._record_dispatch_dead_letter(msg, retry_count=retry_count, reason=limit_reason)
+            return
         metadata["_dispatch_retry_count"] = retry_count
         metadata["_dispatch_retry_reason"] = reason
-        requeued = OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=msg.content,
-            reply_to=msg.reply_to,
-            media=list(msg.media or []),
-            metadata=metadata,
-        )
+        requeued = self._clone_outbound_message(msg, metadata=metadata)
         delay = min(0.05 * retry_count, 0.5)
         if retry_count == 1 or retry_count % 20 == 0:
             logger.warning(
@@ -574,12 +622,13 @@ class ChannelManager:
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                 )
+                retry_source = self._clone_outbound_message(msg)
                 apply_delivery_route(msg)
                 delivery_policy = get_delivery_policy(msg.metadata)
                 apply_delivery_policy(msg)
                 channel = self.channels.get(msg.channel)
                 if self._channel_temporarily_unavailable_for_dispatch(msg.channel, channel):
-                    self._schedule_outbound_retry(msg, reason="channel_temporarily_unavailable")
+                    self._schedule_outbound_retry(retry_source, reason="channel_temporarily_unavailable")
                     continue
 
                 # ActivityBus broadcast — before progress filter so all IM events are visible

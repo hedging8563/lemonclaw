@@ -28,6 +28,22 @@ describe('normalizeChangedPath', () => {
     expect(shouldConfirmSettingsClose(1, false)).toBe(true);
     expect(shouldConfirmSettingsClose(0, true)).toBe(true);
   });
+
+  it('discards persisted SOUL draft only after a confirmed close', async () => {
+    const { deriveSettingsCloseOutcome } = await import('../src/components/settings/SettingsModal');
+    expect(deriveSettingsCloseOutcome(0, true, false)).toEqual({
+      shouldClose: false,
+      discardSoulDraft: false,
+    });
+    expect(deriveSettingsCloseOutcome(0, true, true)).toEqual({
+      shouldClose: true,
+      discardSoulDraft: true,
+    });
+    expect(deriveSettingsCloseOutcome(0, false, true)).toEqual({
+      shouldClose: true,
+      discardSoulDraft: false,
+    });
+  });
 });
 
 describe('dicloak runtime checklist', () => {

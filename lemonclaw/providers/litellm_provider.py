@@ -704,6 +704,12 @@ class LiteLLMProvider(LLMProvider):
             self.api_base = api_base
         if api_key:
             self._setup_env(api_key, api_base, self.default_model)
+        else:
+            spec = self._gateway or find_by_model(self.default_model)
+            if spec and spec.env_key:
+                os.environ.pop(spec.env_key, None)
+                for env_name, _env_val in spec.env_extras:
+                    os.environ.pop(env_name, None)
         logger.info("Provider credentials updated")
 
     def get_default_model(self) -> str:

@@ -107,6 +107,20 @@ export class WhatsAppClient {
     return join(this.options.authDir, 'pending-inbound-media.json');
   }
 
+  private static readonly persistedPendingMediaOmitKeys = new Set([
+    'caption',
+    'title',
+    'fileName',
+    'contextInfo',
+    'jpegThumbnail',
+    'thumbnailDirectPath',
+    'thumbnailSha256',
+    'thumbnailEncSha256',
+    'streamingSidecar',
+    'scansSidecar',
+    'waveform',
+  ]);
+
   private static serializePendingValue(value: any): any {
     if (typeof value === 'bigint') {
       return { __type: 'bigint', value: value.toString() };
@@ -144,6 +158,55 @@ export class WhatsAppClient {
     );
   }
 
+  private static minimizePersistedPendingValue(value: any): any {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => WhatsAppClient.minimizePersistedPendingValue(item));
+    }
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !WhatsAppClient.persistedPendingMediaOmitKeys.has(key))
+        .map(([key, nested]) => [key, WhatsAppClient.minimizePersistedPendingValue(nested)])
+    );
+  }
+
+  private static serializePendingInboundMessageForPersistence(msg: any): any | null {
+    const message = msg?.message;
+    if (!message || typeof message !== 'object') return null;
+    const mediaField = ['documentMessage', 'imageMessage', 'videoMessage', 'audioMessage']
+      .find((key) => Boolean(message[key]));
+    if (!mediaField) return null;
+    const mediaPayload = message[mediaField];
+    const minimizedMedia = WhatsAppClient.minimizePersistedPendingValue(
+      WhatsAppClient.serializePendingValue(mediaPayload)
+    );
+    if (
+      mediaField === 'documentMessage' &&
+      minimizedMedia &&
+      typeof minimizedMedia === 'object'
+    ) {
+      const explicitName = typeof mediaPayload?.fileName === 'string'
+        ? mediaPayload.fileName
+        : typeof mediaPayload?.title === 'string'
+          ? mediaPayload.title
+          : '';
+      const ext = extname(explicitName) || '.bin';
+      minimizedMedia.fileName = `attachment${ext}`;
+    }
+
+    return {
+      key: {
+        id: typeof msg?.key?.id === 'string' ? msg.key.id : '',
+        remoteJid: typeof msg?.key?.remoteJid === 'string' ? msg.key.remoteJid : '',
+        participant: typeof msg?.key?.participant === 'string' ? msg.key.participant : '',
+        fromMe: Boolean(msg?.key?.fromMe),
+      },
+      message: {
+        [mediaField]: minimizedMedia,
+      },
+    };
+  }
+
   private persistPendingInboundMedia(): void {
     try {
       mkdirSync(this.options.authDir, { recursive: true });
@@ -154,7 +217,7 @@ export class WhatsAppClient {
           token,
           {
             createdAt: entry.createdAt,
-            msg: entry.msg === null ? null : WhatsAppClient.serializePendingValue(entry.msg),
+            msg: entry.msg === null ? null : WhatsAppClient.serializePendingInboundMessageForPersistence(entry.msg),
             resolvedMedia: entry.resolvedMedia,
             resolvedAt: entry.resolvedAt,
           },

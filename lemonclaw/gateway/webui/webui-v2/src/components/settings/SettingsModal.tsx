@@ -177,6 +177,17 @@ export function shouldConfirmSettingsClose(changedCount: number, soulDraftDirty:
   return changedCount > 0 || soulDraftDirty;
 }
 
+export function deriveSettingsCloseOutcome(
+  changedCount: number,
+  soulDraftDirty: boolean,
+  confirmed: boolean,
+): { shouldClose: boolean; discardSoulDraft: boolean } {
+  if (shouldConfirmSettingsClose(changedCount, soulDraftDirty) && !confirmed) {
+    return { shouldClose: false, discardSoulDraft: false };
+  }
+  return { shouldClose: true, discardSoulDraft: soulDraftDirty };
+}
+
 export type DICloakRuntimeChecklistState = 'success' | 'warning' | 'neutral';
 
 export interface DICloakRuntimeChecklistItem {
@@ -487,8 +498,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleClose = () => {
     const soulDirty = hasUnsavedSoulDraft();
-    if (shouldConfirmSettingsClose(changedPaths.size, soulDirty) && !confirm(t('confirm_discard_changes'))) return;
-    if (soulDirty) discardSoulDraft();
+    const needsConfirm = shouldConfirmSettingsClose(changedPaths.size, soulDirty);
+    const outcome = deriveSettingsCloseOutcome(
+      changedPaths.size,
+      soulDirty,
+      !needsConfirm || confirm(t('confirm_discard_changes')),
+    );
+    if (!outcome.shouldClose) return;
+    if (outcome.discardSoulDraft) discardSoulDraft();
     onClose();
   };
 

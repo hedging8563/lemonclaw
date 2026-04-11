@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import os
 
 from lemonclaw.config.watcher import ConfigWatcher
+from lemonclaw.providers.litellm_provider import LiteLLMProvider
 
 
 class _FakeProvider:
@@ -49,3 +51,37 @@ def test_reload_provider_skips_when_credentials_unchanged() -> None:
     watcher._reload_provider(_FakeConfig(api_key="same-key", api_base="https://same.example"))
 
     assert provider.calls == []
+
+
+def test_litellm_provider_clears_gateway_env_when_api_key_removed(monkeypatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "stale-token")
+    provider = LiteLLMProvider(
+        api_key="fresh-token",
+        api_base="https://openrouter.ai/api/v1",
+        default_model="openrouter/openai/gpt-4.1-mini",
+        provider_name="openrouter",
+    )
+
+    provider.update_credentials("", "https://openrouter.ai/api/v1")
+
+    assert provider.api_key == ""
+    assert os.environ.get("OPENROUTER_API_KEY") is None
+    assert provider._effective_api_key() is None
+
+
+def test_litellm_provider_clears_gateway_env_extras_when_api_key_removed(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-token")
+    monkeypatch.setenv("ANTHROPIC_API_BASE", "https://stale.example")
+    provider = LiteLLMProvider(
+        api_key="fresh-token",
+        api_base="https://api.lemondata.cc",
+        default_model="claude-3-5-haiku-latest",
+        provider_name="lemondata_claude",
+    )
+
+    provider.update_credentials("", "https://api.lemondata.cc")
+
+    assert provider.api_key == ""
+    assert os.environ.get("ANTHROPIC_API_KEY") is None
+    assert os.environ.get("ANTHROPIC_API_BASE") is None
+    assert provider._effective_api_key() is None

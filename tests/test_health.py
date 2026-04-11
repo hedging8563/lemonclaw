@@ -224,3 +224,88 @@ def test_readyz_fails_when_restart_state_is_stale(tmp_path):
         "channels_usable": True,
         "restart_state_healthy": False,
     }
+
+
+def test_readyz_fails_when_runtime_state_file_is_corrupt(tmp_path):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    app = create_app(
+        config_path=config_path,
+        auth_token=None,
+        channel_manager=_FakeChannelManager(
+            {
+                "telegram": {
+                    "configured_enabled": True,
+                    "configured_complete": True,
+                    "registered": True,
+                    "available": True,
+                    "running": True,
+                    "error": "",
+                }
+            },
+        ),
+    )
+    config_path.with_name("runtime-state.json").write_text("{not-json", encoding="utf-8")
+    client = TestClient(app)
+
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json()["checks"]["restart_state_healthy"] is False
+
+
+def test_startup_does_not_overwrite_corrupt_runtime_state_file(tmp_path):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    state_path = config_path.with_name("runtime-state.json")
+    state_path.write_text("{not-json", encoding="utf-8")
+
+    app = create_app(
+        config_path=config_path,
+        auth_token=None,
+        channel_manager=_FakeChannelManager(
+            {
+                "telegram": {
+                    "configured_enabled": True,
+                    "configured_complete": True,
+                    "registered": True,
+                    "available": True,
+                    "running": True,
+                    "error": "",
+                }
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    assert state_path.read_text(encoding="utf-8") == "{not-json"
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    assert resp.json()["checks"]["restart_state_healthy"] is False
+
+
+def test_status_surfaces_failed_restart_state_when_runtime_state_file_is_corrupt(tmp_path):
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    app = create_app(
+        config_path=config_path,
+        auth_token=None,
+        channel_manager=_FakeChannelManager(
+            {
+                "telegram": {
+                    "configured_enabled": True,
+                    "configured_complete": True,
+                    "registered": True,
+                    "available": True,
+                    "running": True,
+                    "error": "",
+                }
+            },
+        ),
+    )
+    config_path.with_name("runtime-state.json").write_text("{not-json", encoding="utf-8")
+    client = TestClient(app)
+
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    assert resp.json()["restart_status"]["status"] == "failed"
+    assert resp.json()["restart_status"]["restart_state_healthy"] is False

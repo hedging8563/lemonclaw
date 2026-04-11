@@ -25,14 +25,20 @@ def load_runtime_state(config_path: Path | None) -> dict[str, Any]:
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return {}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        return {
+            "status": "failed",
+            "last_restart_result": "failed",
+            "runtime_errors": [f"runtime state unreadable: {type(exc).__name__}: {exc}"],
+            "_load_error": True,
+        }
 
 
 def _write_runtime_state(config_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     path = get_runtime_state_path(Path(config_path))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
+    payload.pop("_load_error", None)
     tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp_path.replace(path)
     return payload
@@ -63,6 +69,8 @@ def derive_runtime_state_view(payload: dict[str, Any] | None, *, now_ms: int | N
     state["timeout_stage"] = timeout_stage
     state["timeout_at_ms"] = timeout_at_ms
     state["restart_state_healthy"] = (
+        not bool(state.get("_load_error"))
+        and
         status != "failed"
         and last_restart_result != "failed"
         and not bool(timeout_stage)

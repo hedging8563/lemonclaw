@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -79,6 +79,7 @@ test('WhatsAppClient restores pending inbound media cache across client recreati
       message: {
         documentMessage: {
           fileName: 'restored.docx',
+          caption: 'customer secret',
           mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
       },
@@ -94,6 +95,9 @@ test('WhatsAppClient restores pending inbound media cache across client recreati
     client1.setDelayedMediaEnabled(true);
     const token = (client1 as any).registerPendingInboundMedia(msg);
     assert.equal(typeof token, 'string');
+    const persisted = readFileSync(join(authDir, 'pending-inbound-media.json'), 'utf-8');
+    assert.equal(persisted.includes('customer secret'), false);
+    assert.equal(persisted.includes('restored.docx'), false);
 
     const client2 = new WhatsAppClient({
       authDir,
@@ -106,7 +110,7 @@ test('WhatsAppClient restores pending inbound media cache across client recreati
 
     const paths = await client2.resolveInboundMedia(token);
     assert.equal(paths.length, 1);
-    assert.ok(paths[0].endsWith('restored.docx'));
+    assert.ok(paths[0].endsWith('attachment.docx'));
     assert.equal(existsSync(paths[0]), true);
   } finally {
     (WhatsAppClient as any).mediaDownloader = originalDownloader;
