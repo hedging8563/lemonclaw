@@ -144,6 +144,176 @@ class TestHandleStop:
         assert task["current_stage"] == "cancelled"
         assert task["error"] == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_stop_abandons_waiting_outbox_side_effects(self):
+        from lemonclaw.ledger.outbox import OutboxDispatcher
+
+        loop, bus = _make_loop()
+        loop.ledger.ensure_task(
+            task_id="task_stop",
+            session_key="test:c1",
+            agent_id=loop.agent_id,
+            mode="chat",
+            channel="test",
+            goal="stop waiting outbox",
+            status="waiting",
+            current_stage="waiting_outbox",
+        )
+        step = loop.ledger.start_step("task_stop", step_type="tool_call", name="notify", replayable=False)
+        loop.ledger.finish_step(step, status="waiting_outbox")
+        event = loop.ledger.enqueue_outbox(
+            task_id="task_stop",
+            step_id=step.step_id,
+            effect_type="outbound_message",
+            target="telegram:123",
+            payload={"content": "delayed hello"},
+        )
+
+        result = await loop.stop_session("test:c1", channel="test", chat_id="c1")
+
+        assert result["running"] == 0
+        task = loop.ledger.read_task("task_stop")
+        assert task is not None
+        assert task["status"] == "abandoned"
+        assert task["current_stage"] == "abandoned"
+
+        updated = loop.ledger.read_outbox_event(event["event_id"])
+        assert updated is not None
+        assert updated["status"] == "abandoned"
+
+        delivered: list[str] = []
+
+        async def _deliver(outbox_event: dict) -> None:
+            delivered.append(str(outbox_event["event_id"]))
+
+        dispatcher = OutboxDispatcher(loop.ledger, _deliver, poll_interval_s=0.01, batch_size=10)
+        claimed = await dispatcher.dispatch_once()
+
+        assert claimed == 0
+        assert delivered == []
+
+    @pytest.mark.asyncio
+    async def test_runtime_correction_abandons_waiting_outbox_side_effects(self):
+        from lemonclaw.bus.events import InboundMessage, OutboundMessage
+        from lemonclaw.ledger.outbox import OutboxDispatcher
+
+        loop, bus = _make_loop()
+
+        first_started = asyncio.Event()
+        first_cancelled = asyncio.Event()
+        second_started = asyncio.Event()
+        first_event_id: dict[str, str] = {}
+
+        async def fake_process(msg, **kwargs):
+            task_id = str(msg.metadata["_task_id"])
+            if msg.content == "draft answer":
+                step = loop.ledger.start_step(task_id, step_type="tool_call", name="notify", replayable=False)
+                loop.ledger.finish_step(step, status="waiting_outbox")
+                event = loop.ledger.enqueue_outbox(
+                    task_id=task_id,
+                    step_id=step.step_id,
+                    effect_type="outbound_message",
+                    target="telegram:123",
+                    payload={"content": "delayed correction"},
+                )
+                first_event_id["value"] = str(event["event_id"])
+                first_started.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    first_cancelled.set()
+                    raise
+            if msg.content == "actually, correct that":
+                second_started.set()
+                return OutboundMessage(channel="test", chat_id="c1", content="updated answer")
+            raise AssertionError(f"unexpected content: {msg.content!r}")
+
+        loop._process_message = fake_process
+
+        first_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="draft answer")
+        second_msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="actually, correct that")
+
+        first_task = loop._spawn_dispatch_task(first_msg)
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        second_task = loop._spawn_dispatch_task(second_msg)
+        await asyncio.wait_for(first_cancelled.wait(), timeout=1.0)
+        await asyncio.wait_for(second_started.wait(), timeout=1.0)
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=1.0)
+
+        event_id = first_event_id["value"]
+        updated = loop.ledger.read_outbox_event(event_id)
+        assert updated is not None
+        assert updated["status"] == "abandoned"
+
+        delivered: list[str] = []
+
+        async def _deliver(outbox_event: dict) -> None:
+            delivered.append(str(outbox_event["event_id"]))
+
+        dispatcher = OutboxDispatcher(loop.ledger, _deliver, poll_interval_s=0.01, batch_size=10)
+        claimed = await dispatcher.dispatch_once()
+
+        assert claimed == 0
+        assert delivered == []
+
+        outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert outbound.content == "updated answer"
+
+    @pytest.mark.asyncio
+    async def test_external_cancellation_abandons_waiting_outbox_side_effects(self):
+        from lemonclaw.ledger.outbox import OutboxDispatcher
+
+        loop, _bus = _make_loop()
+        started = asyncio.Event()
+        event_id_holder: dict[str, str] = {}
+
+        async def _slow_process(msg, **kwargs):
+            task_id = str(msg.metadata["_task_id"])
+            step = loop.ledger.start_step(task_id, step_type="tool_call", name="notify", replayable=False)
+            loop.ledger.finish_step(step, status="waiting_outbox")
+            event = loop.ledger.enqueue_outbox(
+                task_id=task_id,
+                step_id=step.step_id,
+                effect_type="outbound_message",
+                target="telegram:123",
+                payload={"content": "delayed hello"},
+            )
+            event_id_holder["value"] = str(event["event_id"])
+            started.set()
+            await asyncio.sleep(60)
+
+        loop._process_message = _slow_process
+        direct = asyncio.create_task(
+            loop.process_direct(
+                "long job",
+                session_key="test:c1",
+                channel="test",
+                chat_id="c1",
+            )
+        )
+
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        direct.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await direct
+
+        updated = loop.ledger.read_outbox_event(event_id_holder["value"])
+        assert updated is not None
+        assert updated["status"] == "abandoned"
+
+        delivered: list[str] = []
+
+        async def _deliver(outbox_event: dict) -> None:
+            delivered.append(str(outbox_event["event_id"]))
+
+        dispatcher = OutboxDispatcher(loop.ledger, _deliver, poll_interval_s=0.01, batch_size=10)
+        claimed = await dispatcher.dispatch_once()
+
+        assert claimed == 0
+        assert delivered == []
+
 
 class TestDispatch:
     @pytest.mark.asyncio

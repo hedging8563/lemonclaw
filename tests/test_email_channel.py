@@ -1,5 +1,6 @@
 from email.message import EmailMessage
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -146,6 +147,55 @@ def test_fetch_new_messages_keeps_attachment_only_email(monkeypatch, tmp_path) -
     assert "[attachment:" in items[0]["content"]
     assert items[0]["media"] and items[0]["media"][0].endswith("notes.pdf")
     assert items[0]["metadata"]["attachments"][0]["filename"] == "notes.pdf"
+
+
+def test_fetch_new_messages_sanitizes_attachment_path_when_uid_parse_fails(monkeypatch, tmp_path) -> None:
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Traversal attempt"
+    msg["Message-ID"] = "../../escape/<attacker@example.com>"
+    msg.set_content("")
+    msg.add_attachment(
+        b"malicious-bytes",
+        maintype="application",
+        subtype="octet-stream",
+        filename="../../payload.bin",
+    )
+    raw = msg.as_bytes()
+
+    class FakeIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b'1 (BODY[] {200})', raw), b")"]
+
+        def store(self, _imap_id: bytes, _op: str, _flags: str):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("lemonclaw.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr("lemonclaw.channels.email.Path.home", lambda: tmp_path)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    media_dir = tmp_path / ".lemonclaw" / "media" / "email"
+    attachment_path = Path(items[0]["media"][0])
+    assert attachment_path.exists()
+    assert attachment_path.parent == media_dir
+    assert attachment_path.name.endswith("payload.bin")
+    assert items[0]["metadata"]["attachments"][0]["path"] == str(attachment_path)
 
 
 @pytest.mark.asyncio

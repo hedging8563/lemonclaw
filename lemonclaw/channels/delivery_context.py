@@ -53,6 +53,22 @@ def build_delivery_context(
         for key in ("message_id", "chat_type", "msg_type", "parent_id", "root_id"):
             if meta.get(key):
                 route[key] = meta.get(key)
+    elif channel == "qq":
+        if isinstance(qq_meta := meta.get("qq"), dict):
+            if qq_meta.get("reply_to"):
+                route["reply_to"] = qq_meta.get("reply_to")
+            if "is_group" in qq_meta:
+                route["is_group"] = bool(qq_meta.get("is_group"))
+        elif meta.get("reply_to"):
+            route["reply_to"] = meta.get("reply_to")
+    elif channel == "dingtalk":
+        if isinstance(dingtalk_meta := meta.get("dingtalk"), dict):
+            for key in ("session_webhook", "conversation_id", "conversation_type"):
+                if dingtalk_meta.get(key):
+                    route[key] = dingtalk_meta.get(key)
+        for key in ("session_webhook", "conversation_id", "conversation_type"):
+            if meta.get(key) and key not in route:
+                route[key] = meta.get(key)
 
     return {
         "source_channel": channel,
@@ -226,6 +242,24 @@ def apply_delivery_route(msg: OutboundMessage) -> None:
         for key in ("message_id", "chat_type", "msg_type", "parent_id", "root_id"):
             if route.get(key) and key not in metadata:
                 metadata[key] = route[key]
+    elif msg.channel == "qq":
+        qq_meta = dict(metadata.get("qq") or {})
+        if route.get("reply_to") and not msg.reply_to:
+            msg.reply_to = str(route["reply_to"])
+        if route.get("reply_to") and "reply_to" not in qq_meta:
+            qq_meta["reply_to"] = str(route["reply_to"])
+        if "is_group" in route and "is_group" not in qq_meta:
+            qq_meta["is_group"] = bool(route["is_group"])
+        if qq_meta:
+            metadata["qq"] = qq_meta
+    elif msg.channel == "dingtalk":
+        dingtalk_meta = dict(metadata.get("dingtalk") or {})
+        for key in ("session_webhook", "conversation_id", "conversation_type"):
+            if route.get(key):
+                dingtalk_meta.setdefault(key, route[key])
+                metadata.setdefault(key, route[key])
+        if dingtalk_meta:
+            metadata["dingtalk"] = dingtalk_meta
 
     msg.metadata = metadata
 

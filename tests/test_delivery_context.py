@@ -116,6 +116,89 @@ def test_apply_delivery_route_sets_reply_to_for_discord() -> None:
     assert DELIVERY_CONTEXT_KEY not in msg.metadata
 
 
+def test_build_delivery_context_for_qq_carries_reply_and_group_route() -> None:
+    context = build_delivery_context(
+        channel="qq",
+        chat_id="group-openid",
+        session_key="qq:group-openid",
+        metadata={"qq": {"reply_to": "msg123", "is_group": True}},
+    )
+
+    assert context["route"] == {"reply_to": "msg123", "is_group": True}
+
+
+def test_apply_delivery_route_sets_qq_reply_and_group_metadata() -> None:
+    msg = OutboundMessage(
+        channel="qq",
+        chat_id="group-openid",
+        content="hello",
+        metadata={
+            DELIVERY_CONTEXT_KEY: {
+                "source_channel": "qq",
+                "source_chat_id": "group-openid",
+                "session_key": "qq:group-openid",
+                "route": {"reply_to": "msg123", "is_group": True},
+            }
+        },
+    )
+
+    apply_delivery_route(msg)
+
+    assert msg.reply_to == "msg123"
+    assert msg.metadata["qq"]["reply_to"] == "msg123"
+    assert msg.metadata["qq"]["is_group"] is True
+    assert DELIVERY_CONTEXT_KEY not in msg.metadata
+
+
+def test_build_delivery_context_for_dingtalk_carries_session_webhook() -> None:
+    context = build_delivery_context(
+        channel="dingtalk",
+        chat_id="staff-1",
+        session_key="dingtalk:staff-1",
+        metadata={
+            "dingtalk": {
+                "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                "conversation_id": "cid-1",
+                "conversation_type": "2",
+            }
+        },
+    )
+
+    assert context["route"] == {
+        "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+        "conversation_id": "cid-1",
+        "conversation_type": "2",
+    }
+
+
+def test_apply_delivery_route_sets_dingtalk_route_metadata() -> None:
+    msg = OutboundMessage(
+        channel="dingtalk",
+        chat_id="staff-1",
+        content="hello",
+        metadata={
+            DELIVERY_CONTEXT_KEY: {
+                "source_channel": "dingtalk",
+                "source_chat_id": "staff-1",
+                "session_key": "dingtalk:staff-1",
+                "route": {
+                    "session_webhook": "https://oapi.dingtalk.com/robot/sendBySession?session=abc",
+                    "conversation_id": "cid-1",
+                    "conversation_type": "2",
+                },
+            }
+        },
+    )
+
+    apply_delivery_route(msg)
+
+    assert msg.metadata["session_webhook"] == "https://oapi.dingtalk.com/robot/sendBySession?session=abc"
+    assert msg.metadata["dingtalk"]["session_webhook"] == "https://oapi.dingtalk.com/robot/sendBySession?session=abc"
+    assert msg.metadata["dingtalk"]["conversation_id"] == "cid-1"
+    assert msg.metadata["dingtalk"]["conversation_type"] == "2"
+    assert DELIVERY_CONTEXT_KEY not in msg.metadata
+
+
 def test_attach_delivery_policy_normalizes_and_is_idempotent() -> None:
     metadata = attach_delivery_policy(
         {

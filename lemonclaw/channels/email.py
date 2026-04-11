@@ -23,6 +23,13 @@ from lemonclaw.channels.base import BaseChannel
 from lemonclaw.config.schema import EmailConfig
 
 
+def _safe_path_segment(value: str, default: str) -> str:
+    """Normalize an attacker-controlled value into a single safe path segment."""
+    cleaned = re.sub(r"[^\w\s.\-\u4e00-\u9fff]", "_", value).strip()
+    cleaned = cleaned.strip("._-")
+    return cleaned or default
+
+
 class EmailChannel(BaseChannel):
     """
     Email channel.
@@ -416,14 +423,15 @@ class EmailChannel(BaseChannel):
 
         media_dir = Path.home() / ".lemonclaw" / "media" / "email"
         media_dir.mkdir(parents=True, exist_ok=True)
+        safe_message_key = _safe_path_segment(message_key, "email")
 
         for index, part in enumerate(msg.walk(), start=1):
             if part.get_content_disposition() != "attachment":
                 continue
             filename = part.get_filename() or f"attachment_{index}"
-            safe_name = re.sub(r"[^\w\s.\-\u4e00-\u9fff]", "_", Path(filename).name).strip() or f"attachment_{index}"
+            safe_name = _safe_path_segment(Path(filename).name, f"attachment_{index}")
             payload = part.get_payload(decode=True) or b""
-            file_path = media_dir / f"{message_key}_{index:02d}_{safe_name}"
+            file_path = media_dir / f"{safe_message_key}_{index:02d}_{safe_name}"
             file_path.write_bytes(payload)
             media_paths.append(str(file_path))
             markers.append(f"[attachment: {file_path}]")

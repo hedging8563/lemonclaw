@@ -1000,6 +1000,9 @@ class AgentLoop:
         session_key: str,
         *,
         exclude_task: asyncio.Task | None = None,
+        abandon_outbox: bool = False,
+        outbox_source: str = "chat_command_stop",
+        outbox_reason: str = "task stopped by /stop",
     ) -> int:
         """Cancel active tasks and subagents for a session without emitting UI copy."""
         stop_event = self._stop_events.get(session_key)
@@ -1024,7 +1027,39 @@ class AgentLoop:
             except Exception:
                 logger.debug("Task ended with error during cancellation for session {}", session_key)
         sub_cancelled = await self.subagents.cancel_by_session(session_key)
-        return cancelled + sub_cancelled
+        abandoned = 0
+        if abandon_outbox:
+            abandoned = len(
+                self.ledger.abandon_outbox_events_for_session(
+                    session_key,
+                    source=outbox_source,
+                    reason=outbox_reason,
+                )
+            )
+        return cancelled + sub_cancelled + abandoned
+
+    def _abandon_task_outbox_side_effects(
+        self,
+        task_id: str,
+        *,
+        session_key: str,
+    ) -> int:
+        """Terminalize queued side effects for a task that is being cancelled."""
+        if not task_id:
+            return 0
+
+        source = self._session_cancel_reasons.get(session_key) or "task_cancelled"
+        if source == "user_correction_interrupt":
+            reason = "task interrupted by user correction"
+        else:
+            reason = "task cancelled"
+        return len(
+            self.ledger.abandon_outbox_events_for_task(
+                task_id,
+                source=source,
+                reason=reason,
+            )
+        )
 
     def _annotate_runtime_correction(
         self,
@@ -1195,7 +1230,13 @@ class AgentLoop:
             msg.metadata = metadata
             return True
         self._session_cancel_reasons[msg.session_key] = "user_correction_interrupt"
-        await self._cancel_session_work(msg.session_key, exclude_task=current_task)
+        await self._cancel_session_work(
+            msg.session_key,
+            exclude_task=current_task,
+            abandon_outbox=True,
+            outbox_source="user_correction_interrupt",
+            outbox_reason="task interrupted by user correction",
+        )
         self._session_cancel_reasons.pop(msg.session_key, None)
         self._annotate_runtime_correction(
             interrupted_tasks=interrupted_tasks,
@@ -1701,7 +1742,7 @@ class AgentLoop:
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
-        total = await self._cancel_session_work(msg.session_key)
+        total = await self._cancel_session_work(msg.session_key, abandon_outbox=True)
         lang = session_lang(self.sessions._load(msg.session_key))
         content = t("stop_tasks", lang, n=total) if total else t("stop_none", lang)
         await self.bus.publish_outbound(OutboundMessage(
@@ -1843,6 +1884,10 @@ class AgentLoop:
                             ))
                 except asyncio.CancelledError:
                     logger.info("Task cancelled for session {}", msg.session_key)
+                    self._abandon_task_outbox_side_effects(
+                        str(metadata["_task_id"]),
+                        session_key=msg.session_key,
+                    )
                     self.ledger.update_task(str(metadata["_task_id"]), status="abandoned", current_stage="cancelled")
                     self._finish_trigger_failure(
                         metadata,
@@ -4028,6 +4073,10 @@ class AgentLoop:
                         result_summary=(response.content if response else "")[:500],
                     )
                 except asyncio.CancelledError:
+                    self._abandon_task_outbox_side_effects(
+                        str(direct_metadata["_task_id"]),
+                        session_key=session_key,
+                    )
                     self.ledger.update_task(
                         str(direct_metadata["_task_id"]),
                         status="abandoned",

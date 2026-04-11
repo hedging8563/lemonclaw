@@ -148,9 +148,25 @@ class OutboxDispatcher:
         for event in claimed:
             event_id = str(event.get("event_id") or "")
             task_id = str(event.get("task_id") or "")
+            current = await asyncio.to_thread(self._ledger.read_outbox_event, event_id)
+            if not current or str(current.get("status") or "") != "claimed":
+                logger.info(
+                    "outbox: skipped {} because it is no longer claimed (status={})",
+                    event_id,
+                    str((current or {}).get("status") or "missing"),
+                )
+                continue
             try:
                 result = await self._on_deliver(event)
             except PermanentOutboxError as exc:
+                current = await asyncio.to_thread(self._ledger.read_outbox_event, event_id)
+                if not current or str(current.get("status") or "") != "claimed":
+                    logger.info(
+                        "outbox: dropped permanent failure for {} because it is no longer claimed (status={})",
+                        event_id,
+                        str((current or {}).get("status") or "missing"),
+                    )
+                    continue
                 updated = await asyncio.to_thread(
                     self._ledger.mark_outbox_failed,
                     event_id,
@@ -169,6 +185,14 @@ class OutboxDispatcher:
                 if updated and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
             except Exception as exc:
+                current = await asyncio.to_thread(self._ledger.read_outbox_event, event_id)
+                if not current or str(current.get("status") or "") != "claimed":
+                    logger.info(
+                        "outbox: dropped retry for {} because it is no longer claimed (status={})",
+                        event_id,
+                        str((current or {}).get("status") or "missing"),
+                    )
+                    continue
                 updated = await asyncio.to_thread(
                     self._ledger.mark_outbox_retry,
                     event_id,
@@ -190,6 +214,14 @@ class OutboxDispatcher:
                 if updated and status in {"failed", "expired"} and task_id:
                     await asyncio.to_thread(finalize_task, self._ledger, task_id)
             else:
+                current = await asyncio.to_thread(self._ledger.read_outbox_event, event_id)
+                if not current or str(current.get("status") or "") != "claimed":
+                    logger.info(
+                        "outbox: dropped sent result for {} because it is no longer claimed (status={})",
+                        event_id,
+                        str((current or {}).get("status") or "missing"),
+                    )
+                    continue
                 updated = await asyncio.to_thread(
                     self._ledger.mark_outbox_sent,
                     event_id,

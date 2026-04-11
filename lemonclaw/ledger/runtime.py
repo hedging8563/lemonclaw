@@ -108,6 +108,53 @@ class TaskLedgerSharedMixin:
         open_outbox = [event for event in outbox_events if str(event.get("status") or "") in OUTBOX_ACTIVE_STATUSES]
         return failed_outbox, expired_outbox, retryable_outbox, open_outbox
 
+    def abandon_outbox_events_for_session(
+        self,
+        session_key: str,
+        *,
+        source: str,
+        reason: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Terminalize active outbox work for every task in a session."""
+        abandoned: list[dict[str, Any]] = []
+        for task in self.list_tasks(limit=max(1, int(limit)), session_key=session_key):
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            abandoned.extend(
+                self.abandon_outbox_events_for_task(
+                    task_id,
+                    source=source,
+                    reason=reason,
+                )
+            )
+        return abandoned
+
+    def abandon_outbox_events_for_task(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        """Terminalize active outbox work for a single task."""
+        if not task_id or not self.is_valid_task_id(task_id):
+            return []
+
+        abandoned: list[dict[str, Any]] = []
+        for event in self.materialize_outbox_events_for_task(task_id):
+            if str(event.get("status") or "") not in OUTBOX_ACTIVE_STATUSES:
+                continue
+            updated = self.abandon_outbox_event(
+                str(event["event_id"]),
+                source=source,
+                reason=reason,
+            )
+            if updated is not None:
+                abandoned.append(updated)
+        return abandoned
+
     def _execute_retry_outbox_recovery(
         self,
         task_id: str,
@@ -2813,6 +2860,8 @@ class TaskLedger:
         "request_task_resume",
         "build_resume_candidate",
         "execute_safe_resume",
+        "abandon_outbox_events_for_task",
+        "abandon_outbox_events_for_session",
         "enqueue_outbox",
         "update_outbox_event",
         "materialize_outbox_events",
