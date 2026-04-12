@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from lemonclaw.agent.memory import (
+    CONSOLIDATION_CONVERSATION_MAX_CHARS,
+    CONSOLIDATION_MESSAGE_MAX_CHARS,
     CONSOLIDATION_TIMEOUT,
     HISTORY_KEEP_ENTRIES,
     HISTORY_MAX_ENTRIES,
@@ -159,6 +161,50 @@ class TestSessionTruncation:
         )
         assert result is False
         assert len(mock_session.messages) == original_count
+
+    @pytest.mark.asyncio
+    async def test_long_consolidation_input_is_trimmed_before_provider_call(self, store):
+        from lemonclaw.providers.base import LLMResponse
+
+        provider = AsyncMock()
+
+        async def fake_chat(*, messages, **_kwargs):
+            system_prompt = messages[0]["content"]
+            if "compress conversation chunks" in system_prompt:
+                return LLMResponse(content="- User shared a very large batch of historical context.")
+            return LLMResponse(
+                content=json.dumps({
+                    "history_entry": "[2026-03-01 10:00] Consolidated a long session safely.",
+                    "memory_update": "# Memory\nLong session processed.",
+                })
+            )
+
+        provider.chat.side_effect = fake_chat
+
+        session = MagicMock()
+        session.key = "long:session"
+        session.last_consolidated = 0
+        session.messages = [
+            {
+                "role": "user",
+                "content": "x" * (CONSOLIDATION_MESSAGE_MAX_CHARS + 5000),
+                "timestamp": f"2026-03-01T10:{index:02d}",
+            }
+            for index in range(60)
+        ]
+
+        result = await store.consolidate(
+            session, provider, "test-model",
+            memory_window=10,
+        )
+
+        assert result is True
+        assert provider.chat.await_count >= 2
+        chunk_prompt = provider.chat.await_args_list[0].kwargs["messages"][1]["content"]
+        final_prompt = provider.chat.await_args_list[-1].kwargs["messages"][1]["content"]
+        assert "... (truncated " in chunk_prompt
+        assert "[Chunk summary " in final_prompt
+        assert len(final_prompt) < CONSOLIDATION_CONVERSATION_MAX_CHARS + 5000
 
 
 # ── HISTORY.md rolling truncation ─────────────────────────────────────

@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -22,6 +22,11 @@ CONSOLIDATION_TIMEOUT = 30  # seconds
 # HISTORY.md rolling window — truncate when exceeding this many entries.
 HISTORY_MAX_ENTRIES = 200
 HISTORY_KEEP_ENTRIES = 150
+CONSOLIDATION_MESSAGE_MAX_CHARS = 2000
+CONSOLIDATION_CONVERSATION_MAX_CHARS = 80_000
+CONSOLIDATION_HEAD_BUDGET_RATIO = 0.35
+CONSOLIDATION_CHUNK_MAX_CHARS = 24_000
+CONSOLIDATION_CHUNK_SUMMARY_MAX_TOKENS = 900
 
 _JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 
@@ -397,6 +402,250 @@ class MemoryStore:
     def write_core(self, content: str) -> None:
         self.core_file.write_text(content, encoding="utf-8")
 
+    @staticmethod
+    def _stringify_message_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        text_parts.append(text)
+                        continue
+                text_parts.append(json.dumps(item, ensure_ascii=False, default=str))
+            return "\n".join(part for part in text_parts if part)
+        if isinstance(content, set):
+            return json.dumps(sorted(content), ensure_ascii=False, default=str)
+        if isinstance(content, (dict, tuple)):
+            return json.dumps(content, ensure_ascii=False, default=str)
+        return str(content)
+
+    @staticmethod
+    def _truncate_consolidation_text(text: str, max_chars: int = CONSOLIDATION_MESSAGE_MAX_CHARS) -> tuple[str, bool]:
+        if len(text) <= max_chars:
+            return text, False
+        omitted = len(text) - max_chars
+        return f"{text[:max_chars]}... (truncated {omitted} chars)", True
+
+    @classmethod
+    def _fit_consolidation_lines(
+        cls,
+        lines: list[str],
+        *,
+        max_chars: int = CONSOLIDATION_CONVERSATION_MAX_CHARS,
+    ) -> tuple[list[str], int]:
+        total_chars = sum(len(line) + 1 for line in lines)
+        if total_chars <= max_chars:
+            return lines, 0
+
+        head_budget = max(0, int(max_chars * CONSOLIDATION_HEAD_BUDGET_RATIO))
+        tail_budget = max(0, max_chars - head_budget)
+
+        head: list[str] = []
+        head_chars = 0
+        head_index = 0
+        while head_index < len(lines):
+            candidate = lines[head_index]
+            candidate_len = len(candidate) + 1
+            if head and head_chars + candidate_len > head_budget:
+                break
+            if not head and candidate_len > max_chars:
+                break
+            if head_chars + candidate_len > max_chars:
+                break
+            head.append(candidate)
+            head_chars += candidate_len
+            head_index += 1
+
+        tail: list[str] = []
+        tail_chars = 0
+        tail_index = len(lines) - 1
+        while tail_index >= head_index:
+            candidate = lines[tail_index]
+            candidate_len = len(candidate) + 1
+            if tail and head_chars + tail_chars + candidate_len > max_chars:
+                break
+            if not tail and head_chars + candidate_len > max_chars:
+                break
+            if tail_chars + candidate_len > tail_budget and head:
+                break
+            tail.append(candidate)
+            tail_chars += candidate_len
+            tail_index -= 1
+
+        tail.reverse()
+        omitted = max(len(lines) - len(head) - len(tail), 0)
+        if omitted <= 0:
+            return head + tail, 0
+
+        omission_note = (
+            f"[Consolidation note] Omitted {omitted} middle messages to stay within the input budget."
+        )
+        omission_len = len(omission_note) + 1
+        while head and head_chars + tail_chars + omission_len > max_chars:
+            removed = head.pop()
+            head_chars -= len(removed) + 1
+            omitted += 1
+        while tail and head_chars + tail_chars + omission_len > max_chars:
+            removed = tail.pop(0)
+            tail_chars -= len(removed) + 1
+            omitted += 1
+
+        return head + [omission_note] + tail, omitted
+
+    @classmethod
+    def _build_consolidation_lines(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[str], dict[str, int]]:
+        lines: list[str] = []
+        truncated_messages = 0
+        skipped_messages = 0
+
+        for message in messages:
+            raw_content = message.get("content")
+            if not raw_content:
+                skipped_messages += 1
+                continue
+
+            content = cls._stringify_message_content(raw_content).strip()
+            if not content:
+                skipped_messages += 1
+                continue
+
+            content, was_truncated = cls._truncate_consolidation_text(content)
+            if was_truncated:
+                truncated_messages += 1
+
+            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
+            timestamp = str(message.get("timestamp", "?"))[:16]
+            role = str(message.get("role", "unknown")).upper()
+            lines.append(f"[{timestamp}] {role}{tools}: {content}")
+
+        return lines, {
+            "truncated_messages": truncated_messages,
+            "skipped_messages": skipped_messages,
+            "omitted_messages": 0,
+            "chunk_summaries": 0,
+            "chunk_fallbacks": 0,
+            "emitted_lines": len(lines),
+        }
+
+    @staticmethod
+    def _estimate_lines_chars(lines: list[str]) -> int:
+        return sum(len(line) + 1 for line in lines)
+
+    @classmethod
+    def _chunk_consolidation_lines(
+        cls,
+        lines: list[str],
+        *,
+        max_chars: int = CONSOLIDATION_CHUNK_MAX_CHARS,
+    ) -> list[list[str]]:
+        chunks: list[list[str]] = []
+        current: list[str] = []
+        current_chars = 0
+
+        for line in lines:
+            line_len = len(line) + 1
+            if current and current_chars + line_len > max_chars:
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append(line)
+            current_chars += line_len
+
+        if current:
+            chunks.append(current)
+        return chunks
+
+    @staticmethod
+    def _consolidation_line_timestamp(line: str) -> str:
+        match = re.match(r"^\[([^\]]+)\]", line)
+        return match.group(1) if match else "?"
+
+    async def _summarize_consolidation_chunk(
+        self,
+        chunk_lines: list[str],
+        provider: LLMProvider,
+        model: str,
+    ) -> str | None:
+        if not chunk_lines:
+            return None
+
+        chunk_text = "\n".join(chunk_lines)
+        first_ts = self._consolidation_line_timestamp(chunk_lines[0])
+        last_ts = self._consolidation_line_timestamp(chunk_lines[-1])
+        try:
+            response = await provider.chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You compress conversation chunks for a later memory consolidation step. "
+                            "Return plain markdown bullets only. Preserve durable facts, user preferences, "
+                            "decisions, blockers, commitments, tool outcomes, and next steps. "
+                            "Keep the same language as the user's messages."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Summarize this conversation chunk from {first_ts} to {last_ts}.\n"
+                            "Do not write prose paragraphs. Use concise bullets only.\n\n"
+                            f"{chunk_text}"
+                        ),
+                    },
+                ],
+                model=model,
+                temperature=0.0,
+                max_tokens=CONSOLIDATION_CHUNK_SUMMARY_MAX_TOKENS,
+            )
+        except Exception:
+            logger.warning("Memory consolidation chunk summarization failed", exc_info=True)
+            return None
+
+        summary = str(response.content or "").strip()
+        if not summary:
+            logger.warning("Memory consolidation chunk summarization returned empty content")
+            return None
+
+        return f"[Chunk summary {first_ts} → {last_ts}]\n{summary}"
+
+    async def _prepare_consolidation_lines(
+        self,
+        messages: list[dict[str, Any]],
+        provider: LLMProvider,
+        model: str,
+    ) -> tuple[list[str], dict[str, int]]:
+        lines, stats = self._build_consolidation_lines(messages)
+        if self._estimate_lines_chars(lines) <= CONSOLIDATION_CONVERSATION_MAX_CHARS:
+            stats["emitted_lines"] = len(lines)
+            return lines, stats
+
+        chunks = self._chunk_consolidation_lines(lines)
+        reduced_lines: list[str] = []
+        for chunk in chunks:
+            summary = await self._summarize_consolidation_chunk(chunk, provider, model)
+            if summary:
+                reduced_lines.append(summary)
+                stats["chunk_summaries"] += 1
+                continue
+
+            fallback_lines, omitted = self._fit_consolidation_lines(chunk, max_chars=CONSOLIDATION_CHUNK_MAX_CHARS)
+            reduced_lines.append("\n".join(fallback_lines))
+            stats["chunk_fallbacks"] += 1
+            stats["omitted_messages"] += omitted
+
+        if self._estimate_lines_chars(reduced_lines) > CONSOLIDATION_CONVERSATION_MAX_CHARS:
+            reduced_lines, omitted = self._fit_consolidation_lines(reduced_lines)
+            stats["omitted_messages"] += omitted
+
+        stats["emitted_lines"] = len(reduced_lines)
+        return reduced_lines, stats
+
     async def consolidate(
         self,
         session: Session,
@@ -432,12 +681,26 @@ class MemoryStore:
                     return True
                 logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
 
-            lines = []
-            for m in old_messages:
-                if not m.get("content"):
-                    continue
-                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-                lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            lines, line_stats = await self._prepare_consolidation_lines(old_messages, provider, model)
+            if not lines:
+                logger.info("Memory consolidation skipped: no usable message content after normalization")
+                return True
+            if (
+                line_stats["truncated_messages"] > 0
+                or line_stats["omitted_messages"] > 0
+                or line_stats["skipped_messages"] > 0
+                or line_stats["chunk_summaries"] > 0
+                or line_stats["chunk_fallbacks"] > 0
+            ):
+                logger.warning(
+                    "Memory consolidation input prepared: truncated_messages={}, omitted_messages={}, skipped_messages={}, chunk_summaries={}, chunk_fallbacks={}, emitted_lines={}",
+                    line_stats["truncated_messages"],
+                    line_stats["omitted_messages"],
+                    line_stats["skipped_messages"],
+                    line_stats["chunk_summaries"],
+                    line_stats["chunk_fallbacks"],
+                    line_stats["emitted_lines"],
+                )
 
             current_memory = self.read_long_term()
             prompt = f"""Process this conversation and return exactly one JSON object with your consolidation.
