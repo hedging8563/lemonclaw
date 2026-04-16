@@ -24,11 +24,14 @@ from lemonclaw.governance.redaction import redact_sensitive_text, redact_sensiti
 from lemonclaw.utils.helpers import strip_fences
 
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
+_TOOL_TOKEN_RE = re.compile(r"`([A-Za-z][A-Za-z0-9_:-]{1,64})`")
 _TERMINAL_LEARNING_STATUSES = {"promoted", "discarded", "promotion_skipped", "ineligible"}
 _IGNORED_TRACE_TOOLS = {"message", "notify", "task_checkpoint"}
 _REPO_EVIDENCE_TOOLS = {"read_file", "write_file", "edit_file", "list_dir", "glob", "grep", "git", "coding"}
 _DEFAULT_SURFACES = ("chat", "conductor", "cron", "heartbeat")
 _DEFAULT_EVALUATOR_MODEL = "gpt-5.4-pro"
+_DEFAULT_RENDERER_MODEL = ""
 _DEFAULT_PREFIX = "lc-auto--"
 
 
@@ -73,6 +76,36 @@ def _normalize_triggers(value: Any) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()]
 
 
+def _normalize_text(value: str | None) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _parse_frontmatter_markdown(markdown: str) -> tuple[dict[str, Any], str]:
+    match = _FRONTMATTER_RE.match(markdown or "")
+    if not match:
+        return {}, str(markdown or "")
+    try:
+        parsed = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return {}, str(markdown or "")
+    meta = parsed if isinstance(parsed, dict) else {}
+    return meta, str(markdown or "")[match.end():]
+
+
+def _extract_markdown_sections(markdown: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for raw_line in str(markdown or "").splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("## "):
+            current = line[3:].strip().lower()
+            sections.setdefault(current, [])
+            continue
+        if current:
+            sections.setdefault(current, []).append(line)
+    return sections
+
+
 class SkillLearningService:
     """Extract, evaluate, and promote managed workspace skills from task truth."""
 
@@ -110,6 +143,9 @@ class SkillLearningService:
         self.promotion_scope = _normalize_scope(_obj_get(config, "promotion_scope", "workspace"))
         evaluator_model = str(_obj_get(config, "evaluator_model", _DEFAULT_EVALUATOR_MODEL) or "").strip()
         self.evaluator_model = evaluator_model or _DEFAULT_EVALUATOR_MODEL
+        renderer_model = str(_obj_get(config, "renderer_model", _DEFAULT_RENDERER_MODEL) or "").strip()
+        self.renderer_model = renderer_model
+        self.allow_llm_render = bool(_obj_get(config, "allow_llm_render", True))
         managed_prefix = str(_obj_get(config, "managed_skill_prefix", _DEFAULT_PREFIX) or "").strip()
         self.managed_skill_prefix = managed_prefix if re.match(r"^[a-z0-9][a-z0-9-]{2,31}$", managed_prefix) else _DEFAULT_PREFIX
         try:
@@ -184,6 +220,14 @@ class SkillLearningService:
             learning_payload["reason"] = "candidate_extraction_failed"
             return self._persist_learning_state(task_id, task, learning_payload)
         learning_payload["candidate"] = candidate
+
+        render_result = await self._render_with_fallback(candidate, bundle=bundle)
+        learning_payload["renderer"] = render_result["renderer"]
+        learning_payload["render_validation"] = render_result["render_validation"]
+        learning_payload["rendered_skill_markdown"] = render_result["rendered_skill_markdown"]
+        candidate["renderer"] = dict(render_result["renderer"])
+        candidate["render_validation"] = dict(render_result["render_validation"])
+        candidate["rendered_skill_markdown"] = render_result["rendered_skill_markdown"]
 
         replay = self._replay_candidate(candidate)
         learning_payload["replay"] = replay
@@ -413,11 +457,26 @@ class SkillLearningService:
         else:
             scope = "workspace"
 
+        tool_names = list(dict.fromkeys(
+            str(item.get("tool_name") or "").strip()
+            for item in useful_trace
+            if str(item.get("tool_name") or "").strip()
+        ))
         benchmark = self._build_candidate_benchmark(
             skill_name,
             trigger_examples,
-            steps,
+            tool_names,
             verification_steps,
+        )
+        template_skill_markdown = self._render_skill_markdown_template(
+            skill_name=skill_name,
+            title=title,
+            description=f"Managed auto-generated skill distilled from task execution: {title}",
+            trigger_examples=trigger_examples,
+            scope=scope,
+            steps=steps,
+            verification_steps=verification_steps,
+            failure_signals=failure_signals[:8],
         )
         return {
             "slug": slug_base,
@@ -428,6 +487,7 @@ class SkillLearningService:
             "trigger_examples": trigger_examples,
             "required_inputs": required_inputs,
             "steps": steps,
+            "tool_names": tool_names,
             "verification_steps": verification_steps,
             "failure_signals": failure_signals[:8],
             "source_task_ids": [str(task.get("task_id") or "")],
@@ -435,16 +495,8 @@ class SkillLearningService:
             "workflow_fingerprint": workflow_fingerprint,
             "workflow_signature": workflow_signature,
             "benchmark": benchmark,
-            "skill_markdown": self._render_skill_markdown(
-                skill_name=skill_name,
-                title=title,
-                description=f"Managed auto-generated skill distilled from task execution: {title}",
-                trigger_examples=trigger_examples,
-                scope=scope,
-                steps=steps,
-                verification_steps=verification_steps,
-                failure_signals=failure_signals[:8],
-            ),
+            "template_skill_markdown": template_skill_markdown,
+            "skill_markdown": template_skill_markdown,
         }
 
     def _build_workflow_identity(
@@ -485,7 +537,7 @@ class SkillLearningService:
         self,
         skill_name: str,
         trigger_examples: list[str],
-        steps: list[str],
+        tool_names: list[str],
         verification_steps: list[str],
     ) -> dict[str, Any]:
         positive = trigger_examples[0]
@@ -504,7 +556,7 @@ class SkillLearningService:
             }
         )
         prompt_must_not_contain = [f"### Skill: {name}" for name in conflict_skills[:3]]
-        prompt_must_contain = [step[:120] for step in steps[:2]]
+        prompt_must_contain = [f"`{tool_name}`" for tool_name in tool_names[:2]]
         if verification_steps:
             prompt_must_contain.append(verification_steps[0][:120])
         neighbor_cases: list[dict[str, Any]] = []
@@ -551,7 +603,7 @@ class SkillLearningService:
             ],
         }
 
-    def _render_skill_markdown(
+    def _render_skill_markdown_template(
         self,
         *,
         skill_name: str,
@@ -597,6 +649,216 @@ class SkillLearningService:
         parts.extend(f"- {item}" for item in failure_signals)
         return "\n".join(parts).strip() + "\n"
 
+    async def _render_with_fallback(
+        self,
+        candidate: dict[str, Any],
+        *,
+        bundle: dict[str, Any],
+    ) -> dict[str, Any]:
+        template_markdown = str(candidate.get("template_skill_markdown") or candidate.get("skill_markdown") or "")
+        if not template_markdown:
+            return {
+                "renderer": {
+                    "strategy": "template_fallback",
+                    "model": "",
+                    "reason": "missing_template_markdown",
+                },
+                "render_validation": {
+                    "passed": False,
+                    "failures": ["missing_template_markdown"],
+                    "used_fallback": True,
+                },
+                "rendered_skill_markdown": "",
+            }
+
+        if not self.allow_llm_render:
+            return {
+                "renderer": {
+                    "strategy": "template_only",
+                    "model": "",
+                    "reason": "llm_render_disabled",
+                },
+                "render_validation": {
+                    "passed": True,
+                    "failures": [],
+                    "used_fallback": False,
+                },
+                "rendered_skill_markdown": template_markdown,
+            }
+
+        rendered = await self._render_skill_markdown_llm(candidate, bundle=bundle)
+        if not rendered:
+            return {
+                "renderer": {
+                    "strategy": "template_fallback",
+                    "model": self.renderer_model or self.evaluator_model,
+                    "reason": "renderer_unavailable",
+                },
+                "render_validation": {
+                    "passed": False,
+                    "failures": ["renderer_unavailable"],
+                    "used_fallback": True,
+                },
+                "rendered_skill_markdown": template_markdown,
+            }
+
+        validation = self._validate_rendered_skill(rendered, candidate)
+        if not validation["passed"]:
+            return {
+                "renderer": {
+                    "strategy": "template_fallback",
+                    "model": self.renderer_model or self.evaluator_model,
+                    "reason": "render_validation_failed",
+                },
+                "render_validation": {
+                    **validation,
+                    "used_fallback": True,
+                },
+                "rendered_skill_markdown": template_markdown,
+            }
+
+        return {
+            "renderer": {
+                "strategy": "llm",
+                "model": self.renderer_model or self.evaluator_model,
+                "reason": "rendered",
+            },
+            "render_validation": {
+                **validation,
+                "used_fallback": False,
+            },
+            "rendered_skill_markdown": rendered,
+        }
+
+    async def _render_skill_markdown_llm(
+        self,
+        candidate: dict[str, Any],
+        *,
+        bundle: dict[str, Any],
+    ) -> str | None:
+        model = str(self.renderer_model or self.evaluator_model or "").strip()
+        provider = None
+        try:
+            provider = self._provider_resolver(model)
+        except Exception:
+            logger.exception("Skill learning: failed to resolve renderer provider for {}", model)
+            return None
+        if provider is None:
+            return None
+
+        render_payload = {
+            "candidate": {
+                "skill_name": candidate.get("skill_name"),
+                "title": candidate.get("title"),
+                "description": candidate.get("description"),
+                "scope": candidate.get("scope"),
+                "trigger_examples": candidate.get("trigger_examples"),
+                "required_inputs": candidate.get("required_inputs"),
+                "steps": candidate.get("steps"),
+                "tool_names": candidate.get("tool_names"),
+                "verification_steps": candidate.get("verification_steps"),
+                "failure_signals": candidate.get("failure_signals"),
+                "workflow_fingerprint": candidate.get("workflow_fingerprint"),
+            },
+            "template_skill_markdown": candidate.get("template_skill_markdown"),
+            "bundle_summary": {
+                "task": {
+                    "goal": _ensure_mapping(bundle.get("task")).get("goal"),
+                    "status": _ensure_mapping(bundle.get("task")).get("status"),
+                },
+                "summary": _ensure_mapping(bundle.get("summary")),
+                "conductor": _ensure_mapping(bundle.get("conductor")),
+            },
+        }
+        prompt = (
+            "Rewrite the provided managed skill markdown so it reads more naturally and clearly, but do not change the underlying facts.\n"
+            "Rules:\n"
+            "1. Keep YAML frontmatter valid.\n"
+            "2. Preserve name, triggers, managed=true, pattern=pipeline, and scope.\n"
+            "3. Keep every verification bullet, failure-signal bullet, and required-input bullet verbatim.\n"
+            "4. You may rewrite the title, introduction, and pipeline bullet wording.\n"
+            "5. Every pipeline bullet must still mention its original tool in backticks.\n"
+            "6. Do not introduce any new tool names or new high-risk actions.\n"
+            "7. Return ONLY the full markdown document."
+        )
+        try:
+            response = await provider.chat(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": json.dumps(redact_sensitive_value(render_payload), ensure_ascii=False)},
+                ],
+                model=model,
+                temperature=0.2,
+                max_tokens=2048,
+            )
+        except Exception:
+            logger.exception("Skill learning: renderer failed for {}", candidate.get("skill_name"))
+            return None
+        rendered = strip_fences(response.content or "").strip()
+        return rendered or None
+
+    def _validate_rendered_skill(
+        self,
+        rendered_markdown: str,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        failures: list[str] = []
+        meta, _body = _parse_frontmatter_markdown(rendered_markdown)
+        if not meta:
+            return {"passed": False, "failures": ["invalid_frontmatter"]}
+
+        if str(meta.get("name") or "").strip() != str(candidate.get("skill_name") or ""):
+            failures.append("name_mismatch")
+
+        rendered_triggers = _normalize_triggers(meta.get("triggers"))
+        expected_triggers = [str(item).strip() for item in list(candidate.get("trigger_examples") or []) if str(item).strip()]
+        if any(trigger not in rendered_triggers for trigger in expected_triggers):
+            failures.append("trigger_examples_changed")
+
+        lemonclaw_meta = _ensure_mapping(_ensure_mapping(meta.get("metadata")).get("lemonclaw"))
+        if str(lemonclaw_meta.get("pattern") or "").strip() != "pipeline":
+            failures.append("pattern_mismatch")
+        if str(lemonclaw_meta.get("scope") or "").strip() != str(candidate.get("scope") or "").strip():
+            failures.append("scope_mismatch")
+
+        sections = _extract_markdown_sections(rendered_markdown)
+        for heading in ("trigger examples", "required inputs", "pipeline", "verification", "failure signals"):
+            if heading not in sections:
+                failures.append(f"missing_section:{heading}")
+
+        normalized_markdown = _normalize_text(rendered_markdown)
+        for item in list(candidate.get("required_inputs") or []):
+            if _normalize_text(str(item)) not in normalized_markdown:
+                failures.append(f"required_input_missing:{item}")
+        for item in list(candidate.get("verification_steps") or []):
+            if _normalize_text(str(item)) not in normalized_markdown:
+                failures.append(f"verification_missing:{item}")
+        for item in list(candidate.get("failure_signals") or []):
+            if _normalize_text(str(item)) not in normalized_markdown:
+                failures.append(f"failure_signal_missing:{item}")
+
+        pipeline_lines = [
+            line for line in sections.get("pipeline", [])
+            if line.strip().startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s+", line.strip())
+        ]
+        if len(pipeline_lines) < len(list(candidate.get("steps") or [])):
+            failures.append("pipeline_step_count_reduced")
+
+        candidate_tool_names = {
+            str(item).strip()
+            for item in list(candidate.get("tool_names") or [])
+            if str(item).strip()
+        }
+        rendered_tool_names = {token for token in _TOOL_TOKEN_RE.findall(rendered_markdown) if "_" in token or "-" in token}
+        for tool_name in candidate_tool_names:
+            if f"`{tool_name}`" not in rendered_markdown:
+                failures.append(f"tool_anchor_missing:{tool_name}")
+        extra_tool_names = sorted(tool_name for tool_name in rendered_tool_names if tool_name not in candidate_tool_names)
+        if extra_tool_names:
+            failures.append(f"unexpected_tools:{', '.join(extra_tool_names[:5])}")
+
+        return {"passed": not failures, "failures": failures}
+
     def _replay_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
         benchmark_payload = dict(candidate.get("benchmark") or {})
         with tempfile.TemporaryDirectory(prefix="lc_skill_replay_") as tmp:
@@ -613,7 +875,13 @@ class SkillLearningService:
                 )
             skill_dir = replay_skills_root / str(candidate["skill_name"])
             skill_dir.mkdir(parents=True, exist_ok=True)
-            (skill_dir / "SKILL.md").write_text(str(candidate["skill_markdown"]), encoding="utf-8")
+            skill_markdown = str(
+                candidate.get("rendered_skill_markdown")
+                or candidate.get("template_skill_markdown")
+                or candidate.get("skill_markdown")
+                or ""
+            )
+            (skill_dir / "SKILL.md").write_text(skill_markdown, encoding="utf-8")
 
             benchmark = SkillBenchmark(
                 skill=str(benchmark_payload.get("skill") or candidate["skill_name"]),
@@ -681,6 +949,7 @@ class SkillLearningService:
                 "steps": candidate.get("steps"),
                 "verification_steps": candidate.get("verification_steps"),
                 "failure_signals": candidate.get("failure_signals"),
+                "skill_markdown": candidate.get("rendered_skill_markdown") or candidate.get("template_skill_markdown") or candidate.get("skill_markdown"),
             },
             "bundle": {
                 "task": _ensure_mapping(bundle.get("task")),
@@ -826,7 +1095,12 @@ class SkillLearningService:
                 }
             )
 
-        skill_markdown = str(candidate["skill_markdown"])
+        skill_markdown = str(
+            candidate.get("rendered_skill_markdown")
+            or candidate.get("template_skill_markdown")
+            or candidate.get("skill_markdown")
+            or ""
+        )
         skill_path.write_text(skill_markdown, encoding="utf-8")
         sidecar = {
             "version": 1,
@@ -837,6 +1111,8 @@ class SkillLearningService:
             "workflow_fingerprint": candidate.get("workflow_fingerprint"),
             "workflow_signature": candidate.get("workflow_signature"),
             "status": "approved",
+            "renderer": dict(candidate.get("renderer") or {}),
+            "render_validation": dict(candidate.get("render_validation") or {}),
             "replay": replay,
             "evaluator": evaluator,
             "promoted_at_ms": _now_ms(),

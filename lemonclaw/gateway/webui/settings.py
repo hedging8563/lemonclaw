@@ -64,6 +64,8 @@ _WRITABLE_PATHS: set[str] = {
     "agents.learning.require_replay",
     "agents.learning.promotion_scope",
     "agents.learning.evaluator_model",
+    "agents.learning.renderer_model",
+    "agents.learning.allow_llm_render",
     "agents.learning.managed_skill_prefix",
     "agents.learning.min_tool_steps_for_extraction",
     # Channels (top-level flags)

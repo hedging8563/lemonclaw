@@ -293,6 +293,8 @@ class AgentLearningConfig(Base):
     require_replay: bool = True
     promotion_scope: Literal["workspace", "repo"] = "workspace"
     evaluator_model: str = "gpt-5.4-pro"
+    renderer_model: str = ""
+    allow_llm_render: bool = True
     managed_skill_prefix: str = "lc-auto--"
     min_tool_steps_for_extraction: int = 2
 
