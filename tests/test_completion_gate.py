@@ -243,7 +243,10 @@ def test_completion_gate_exposes_surface_replay_pointer_from_verification_metada
                     "channel": "telegram",
                     "chat_id": "123",
                     "thread_id": "456",
+                    "topic_id": "topic-1",
                     "message_id": "789",
+                    "reply_to_message_id": "654",
+                    "message_thread_id": "321",
                     "task_id": "task_1",
                     "step_id": "step_abc",
                     "note": "replay pointer",
@@ -260,7 +263,55 @@ def test_completion_gate_exposes_surface_replay_pointer_from_verification_metada
     assert result.passed is True
     assert result.verification["surface_replay_pointer"]["kind"] == "task_bundle"
     assert result.verification["surface_replay_pointer"]["thread_id"] == "456"
+    assert result.verification["surface_replay_pointer"]["topic_id"] == "topic-1"
+    assert result.verification["surface_replay_pointer"]["reply_to_message_id"] == "654"
+    assert result.verification["surface_replay_pointer"]["message_thread_id"] == "321"
     assert result.verification["surface_replay_pointer"]["step_id"] == "step_abc"
+
+
+def test_completion_gate_does_not_treat_recorded_evidence_as_accepted(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="verify me carefully",
+        metadata={
+            "verification": {
+                "requirements": {
+                    "min_tool_traces": 1,
+                    "required_evidence": ["artifact_bundle"],
+                },
+                "tool_trace": [
+                    {
+                        "tool_name": "read_file",
+                        "status": "completed",
+                        "ok": True,
+                    }
+                ],
+                "acceptance_evidence": [
+                    {
+                        "kind": "artifact_bundle",
+                        "status": "recorded",
+                    }
+                ],
+            }
+        },
+    )
+    step = ledger.start_step("task_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+
+    result = finalize_task(ledger, "task_1")
+
+    assert result is not None
+    assert result.passed is False
+    assert result.reason == "verification requirements remain: evidence:artifact_bundle"
+    assert result.verification["accepted_evidence_count"] == 0
+    assert result.verification["missing_requirements"] == ["evidence:artifact_bundle"]
+    assert result.verification["acceptance_evidence_summary"]["count"] == 1
+    assert result.verification["acceptance_evidence_summary"]["accepted_count"] == 0
 
 
 def test_completion_gate_rolls_back_when_final_state_write_fails(tmp_path: Path):

@@ -22,6 +22,7 @@ from lemonclaw.ledger.types import (
     OUTBOX_FAILURE_STATUSES,
     OUTBOX_SUCCESS_STATUSES,
     OUTBOX_TERMINAL_STATUSES,
+    VERIFICATION_ACCEPTED_STATUSES,
     describe_outbox_effect_type,
     infer_delivery_outcome,
     is_supported_outbox_effect_type,
@@ -147,12 +148,13 @@ class TaskLedgerSharedMixin:
         display = dict(display_state or {})
         candidate_map = dict(candidate or {})
         step_list = list(steps or [])
+        task_status = str(task.get("status") or "").strip()
+        task_stage = str(task.get("current_stage") or "").strip()
+        conductor_phase = str(dict(conductor_map.get("observability") or {}).get("phase") or "").strip()
+        task_settled = task_status in {"completed", "abandoned"} or task_stage in {"done", "abandoned"}
+        task_terminal = task_settled or task_status == "failed" or task_stage in {"error", "hard_recovery", "stale_recovery"}
 
-        phase = (
-            str(dict(conductor_map.get("observability") or {}).get("phase") or "").strip()
-            or str(task.get("current_stage") or "").strip()
-            or str(task.get("status") or "").strip()
-        )
+        phase = (task_stage or task_status) if task_terminal else (conductor_phase or task_stage or task_status)
         headline = (
             str(dict(conductor_map.get("generator") or {}).get("summary") or "").strip()
             or str(dict(conductor_map.get("planner") or {}).get("summary") or "").strip()
@@ -174,7 +176,7 @@ class TaskLedgerSharedMixin:
                 if not isinstance(item, dict):
                     continue
                 status = str(item.get("status") or "").strip().lower()
-                if status not in {"accepted", "complete", "completed", "passed", "ok", "recorded"}:
+                if status not in VERIFICATION_ACCEPTED_STATUSES:
                     continue
                 summary = str(item.get("summary") or item.get("kind") or "").strip()
                 if summary and summary not in completed_items:
@@ -213,9 +215,18 @@ class TaskLedgerSharedMixin:
         elif state_key in {"resume_dispatch_failed", "resume_manual_only", "waiting_outbox", "failed", "waiting"}:
             current_blocker = str(display.get("detail") or task.get("error") or "")
 
+        explicit_next_action = str(metadata.get("next_action") or "").strip()
+        candidate_action = str(candidate_map.get("recommended_action") or "").strip().lower()
+        if candidate_action == "noop":
+            candidate_next_action = "no action needed"
+        elif task_settled:
+            candidate_next_action = ""
+        else:
+            candidate_next_action = cls._humanize_code(candidate_action)
         next_action = (
-            str(metadata.get("next_action") or "").strip()
-            or cls._humanize_code(candidate_map.get("recommended_action"))
+            explicit_next_action
+            or ("no action needed" if task_settled else "")
+            or candidate_next_action
             or ("collect missing verification evidence" if missing else "")
             or ("retry delivery / outbox" if active_outbox > 0 else "")
             or ("review queued resume" if state_key == "resume_requested" else "")
@@ -997,6 +1008,7 @@ class TaskLedgerSharedMixin:
                 "completion_gate": task.get("completion_gate"),
                 "recovery": metadata.get("recovery"),
                 "recovery_history": list(metadata.get("recovery_history") or []),
+                "recovery_history_count": len(metadata.get("recovery_history") or []),
                 "retrieval": dict(metadata.get("retrieval") or {}),
                 "conductor": conductor,
                 "verification": verification,
@@ -1058,6 +1070,7 @@ class TaskLedgerSharedMixin:
 
     def build_resume_candidate(self, task_id: str) -> dict[str, Any] | None:
         """Describe the safest next recovery action for a task."""
+        self._require_valid_task_id(task_id)
         task = self.read_task(task_id)
         if not task:
             return None
@@ -1076,7 +1089,11 @@ class TaskLedgerSharedMixin:
         recommended_action = "manual_resume"
         safe_to_execute = False
         reason = "manual intervention required"
-        if retryable_outbox:
+        if status in {"completed", "abandoned"}:
+            recommended_action = "noop"
+            safe_to_execute = False
+            reason = "task already settled"
+        elif retryable_outbox:
             recommended_action = "retry_outbox"
             safe_to_execute = True
             reason = self._build_retry_outbox_reason(
@@ -2231,70 +2248,11 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
 
     def read_task_view(self, task_id: str) -> dict[str, Any] | None:
         """Return task + materialized steps + summary for observer UIs."""
-        task = self.read_task(task_id)
-        if not task:
-            return None
-
-        steps = self.materialize_steps(task_id)
-        display_state = self.describe_task_display_state(task)
-        status_counts: dict[str, int] = {}
-        for step in steps:
-            key = str(step.get("status") or "unknown")
-            status_counts[key] = status_counts.get(key, 0) + 1
-
-        outbox = self.materialize_outbox_events_for_task(task_id)
-        outbox_lifecycle = self.summarize_outbox_lifecycle(outbox)
-        metadata = dict(task.get("metadata") or {})
-        conductor = dict(metadata.get("conductor") or {})
-        verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
-        candidate = self.build_resume_candidate(task_id)
-        progress_read_model = self._build_progress_read_model(
-            task,
-            display_state=display_state,
-            verification=verification,
-            outbox_lifecycle=outbox_lifecycle,
-            conductor=conductor,
-            candidate=candidate,
-            steps=steps,
-        )
-
-        return {
-            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle, candidate=candidate),
-            "steps": steps,
-            "summary": {
-                "step_count": len(steps),
-                "status_counts": status_counts,
-                "last_successful_step": task.get("last_successful_step"),
-                "resume_from_step": task.get("resume_from_step"),
-                "current_stage": task.get("current_stage"),
-                "display_state": display_state,
-                "completion_gate": task.get("completion_gate"),
-                "recovery": metadata.get("recovery"),
-                "recovery_history": list(metadata.get("recovery_history") or []),
-                "recovery_history_count": len(metadata.get("recovery_history") or []),
-                "outbox_count": len(outbox),
-                "outbox_status_counts": outbox_lifecycle["status_counts"],
-                "outbox_effect_type_counts": outbox_lifecycle["effect_type_counts"],
-                "outbox_delivery_outcome_counts": outbox_lifecycle["delivery_outcome_counts"],
-                "outbox_terminal_count": outbox_lifecycle["terminal_count"],
-                "outbox_active_count": outbox_lifecycle["active_count"],
-                "retrieval": dict(metadata.get("retrieval") or {}),
-                "conductor": conductor,
-                "verification": verification,
-                "session_runtime": self._build_session_runtime_summary(task),
-                "progress_read_model": progress_read_model,
-            },
-        }
+        return super().read_task_view(task_id)
 
     def infer_resume_from_step(self, task_id: str) -> str | None:
         """Infer the best step boundary to resume from for a task."""
-        self._require_valid_task_id(task_id)
-        steps = self.materialize_steps(task_id)
-        for status in ("waiting_outbox", "failed", "waiting", "retrying", "running", "pending"):
-            for step in reversed(steps):
-                if str(step.get("status") or "") == status:
-                    return str(step.get("step_id") or "")
-        return None
+        return super().infer_resume_from_step(task_id)
 
     def request_task_resume(
         self,
@@ -2303,116 +2261,11 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         source: str,
     ) -> dict[str, Any] | None:
         """Mark a task as awaiting resume from the inferred step boundary."""
-        self._require_valid_task_id(task_id)
-        task = self.read_task(task_id)
-        if not task:
-            return None
-
-        now = _now_ms()
-        resume_from_step = self.infer_resume_from_step(task_id)
-        metadata = dict(task.get("metadata") or {})
-        recovery = dict(metadata.get("recovery") or {})
-        recovery.update({
-            "source": source,
-            "action": "resume_requested",
-            "manual_review_required": False,
-            "requested_at_ms": now,
-        })
-        metadata["recovery"] = recovery
-        self._append_recovery_history(
-            metadata,
-            source=source,
-            action="resume_requested",
-            reason=f"resume requested from {resume_from_step or 'task boundary'}",
-            details={"resume_from_step": resume_from_step or "", "previous_status": str(task.get("status") or "")},
-            at_ms=now,
-        )
-        self.update_task(
-            task_id,
-            status="waiting",
-            current_stage="resume_requested",
-            resume_from_step=resume_from_step,
-            error=None,
-            metadata=metadata,
-        )
-        return self.read_task(task_id)
+        return super().request_task_resume(task_id, source=source)
 
     def build_resume_candidate(self, task_id: str) -> dict[str, Any] | None:
         """Describe the safest next recovery action for a task."""
-        self._require_valid_task_id(task_id)
-        task = self.read_task(task_id)
-        if not task:
-            return None
-
-        steps = self.materialize_steps(task_id)
-        outbox_events = self.materialize_outbox_events_for_task(task_id)
-        resume_context = dict(task.get("resume_context") or {})
-        resume_from_step = str(task.get("resume_from_step") or self.infer_resume_from_step(task_id) or "")
-        resume_step = next((step for step in steps if str(step.get("step_id") or "") == resume_from_step), None)
-        failed_outbox, expired_outbox, retryable_outbox, open_outbox = self._retryable_outbox_events(outbox_events)
-
-        # Classify steps by replayability
-        failed_steps = [s for s in steps if str(s.get("status") or "") == "failed"]
-        replayable_failed = [s for s in failed_steps if s.get("replayable", True)]
-        non_replayable_failed = [s for s in failed_steps if not s.get("replayable", True)]
-
-        recommended_action = "manual_resume"
-        safe_to_execute = False
-        reason = "manual intervention required"
-        if retryable_outbox:
-            recommended_action = "retry_outbox"
-            safe_to_execute = True
-            reason = self._build_retry_outbox_reason(
-                failed_count=len(failed_outbox),
-                expired_count=len(expired_outbox),
-            )
-        elif non_replayable_failed:
-            recommended_action = "manual_resume"
-            safe_to_execute = False
-            reason = f"{len(non_replayable_failed)} failed step(s) have side effects and cannot be replayed automatically"
-        elif replayable_failed and not open_outbox:
-            if not bool(resume_context.get("auto_resume_allowed", True)):
-                recommended_action = "manual_resume"
-                safe_to_execute = False
-                reason = str(
-                    resume_context.get("resume_disabled_reason")
-                    or "Automatic resume is disabled for this task; operator action is required."
-                )
-            else:
-                recommended_action = "replay_failed_steps"
-                safe_to_execute = True
-                reason = (
-                    f"{len(replayable_failed)} failed step(s) are replayable and can be resumed safely. "
-                    "A dedicated resume executor will supersede those failed steps and continue the task in-place."
-                )
-        elif not open_outbox and str(task.get("status") or "") in {"waiting", "verifying"}:
-            recommended_action = "recheck"
-            safe_to_execute = True
-            reason = "task can be safely rechecked through CompletionGate"
-        elif open_outbox:
-            recommended_action = "wait_outbox"
-            safe_to_execute = False
-            reason = "outbox delivery is still in progress"
-        elif str(task.get("status") or "") in {"completed", "abandoned"}:
-            recommended_action = "noop"
-            safe_to_execute = False
-            reason = "task already settled"
-
-        return {
-            "task_id": task_id,
-            "status": str(task.get("status") or ""),
-            "current_stage": str(task.get("current_stage") or ""),
-            "resume_from_step": resume_from_step or None,
-            "resume_step": dict(resume_step or {}) if resume_step else None,
-            "failed_outbox_count": len(failed_outbox),
-            "expired_outbox_count": len(expired_outbox),
-            "open_outbox_count": len(open_outbox),
-            "replayable_failed_count": len(replayable_failed),
-            "non_replayable_failed_count": len(non_replayable_failed),
-            "recommended_action": recommended_action,
-            "safe_to_execute": safe_to_execute,
-            "reason": reason,
-        }
+        return super().build_resume_candidate(task_id)
 
     def execute_safe_resume(
         self,
@@ -2421,41 +2274,7 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         source: str,
     ) -> dict[str, Any] | None:
         """Execute the current safe recovery action when one exists."""
-        candidate = self.build_resume_candidate(task_id)
-        if not candidate:
-            return None
-        if not candidate.get("safe_to_execute"):
-            raise ValueError(str(candidate.get("reason") or "manual intervention required"))
-
-        action = str(candidate.get("recommended_action") or "")
-        if action == "retry_outbox":
-            self._execute_retry_outbox_recovery(
-                task_id,
-                source=source,
-                failed_count=int(candidate.get("failed_outbox_count") or 0),
-                expired_count=int(candidate.get("expired_outbox_count") or 0),
-            )
-        elif action == "replay_failed_steps":
-            raise ValueError("replay_failed_steps is not executable until a dedicated resume executor is wired")
-        elif action == "recheck":
-            from lemonclaw.ledger.completion_gate import finalize_task
-
-            result = finalize_task(self, task_id)
-            task = self.read_task(task_id)
-            if task:
-                metadata = dict(task.get("metadata") or {})
-                self._append_recovery_history(
-                    metadata,
-                    source=source,
-                    action="safe_resume_execute",
-                    reason=str((result.to_dict() if result else {}).get("reason") or ""),
-                    details={"task_id": task_id, "mode": "recheck"},
-                )
-                self.update_task(task_id, metadata=metadata)
-        else:
-            raise ValueError(f"unsupported safe resume action: {action}")
-
-        return self.build_resume_candidate(task_id)
+        return super().execute_safe_resume(task_id, source=source)
 
     def enqueue_outbox(
         self,

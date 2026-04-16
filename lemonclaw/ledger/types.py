@@ -33,7 +33,7 @@ OUTBOX_SUCCESS_STATUSES = frozenset({"sent", "compensated"})
 OUTBOX_FAILURE_STATUSES = frozenset({"failed", "expired"})
 OUTBOX_ABANDONED_STATUSES = frozenset({"abandoned"})
 OUTBOX_TERMINAL_STATUSES = OUTBOX_SUCCESS_STATUSES | OUTBOX_FAILURE_STATUSES | OUTBOX_ABANDONED_STATUSES
-_VERIFICATION_ACCEPTED_STATUSES = frozenset({"accepted", "complete", "completed", "passed", "ok", "recorded"})
+VERIFICATION_ACCEPTED_STATUSES = frozenset({"accepted", "complete", "completed", "passed", "ok"})
 VERIFICATION_EVIDENCE_STATUSES = (
     "recorded",
     "accepted",
@@ -143,7 +143,7 @@ def build_acceptance_evidence_summary(verification: dict[str, Any] | None) -> di
         status_counts[status] = status_counts.get(status, 0) + 1
         if kind:
             kind_counts[kind] = kind_counts.get(kind, 0) + 1
-        if status in _VERIFICATION_ACCEPTED_STATUSES:
+        if status in VERIFICATION_ACCEPTED_STATUSES:
             accepted_count += 1
 
     return {
@@ -164,33 +164,7 @@ def build_surface_replay_pointer(verification: dict[str, Any] | None) -> dict[st
     if not isinstance(pointer, dict):
         return {}
 
-    normalized: dict[str, Any] = {}
-    for field, limit in (
-        ("kind", 80),
-        ("channel", 80),
-        ("chat_id", 120),
-        ("thread_id", 120),
-        ("message_id", 120),
-        ("task_id", 120),
-        ("step_id", 120),
-        ("url", 500),
-        ("note", 300),
-    ):
-        value = pointer.get(field)
-        if value in (None, "", []):
-            continue
-        text = str(value).strip()[:limit]
-        if text:
-            normalized[field] = text
-    for field in ("source",):
-        value = pointer.get(field)
-        if value not in (None, "", []):
-            normalized[field] = value
-    for field in ("at_ms",):
-        value = pointer.get(field)
-        if value not in (None, "", []):
-            normalized[field] = value
-    return normalized
+    return normalize_replay_pointer(pointer)
 
 
 def _normalize_text(value: Any, *, limit: int = 500) -> str:
@@ -418,10 +392,10 @@ def summarize_verification_metadata(
     accepted_kinds: set[str] = set()
     for item in acceptance_evidence:
         kind = str(item.get("kind") or "").strip()
-        status = str(item.get("status") or "accepted").strip().lower()
+        status = str(item.get("status") or "recorded").strip().lower()
         if not kind:
             continue
-        if status in _VERIFICATION_ACCEPTED_STATUSES:
+        if status in VERIFICATION_ACCEPTED_STATUSES:
             accepted_evidence.append(item)
             accepted_kinds.add(kind)
 

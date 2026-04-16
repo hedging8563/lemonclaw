@@ -996,6 +996,31 @@ def test_build_resume_candidate_blocks_auto_resume_when_resume_context_disallows
     assert "explicit delivery target" in candidate["reason"]
 
 
+def test_json_task_ledger_uses_noop_resume_candidate_for_settled_tasks(tmp_path: Path):
+    ledger = TaskLedger(tmp_path, backend="json")
+    ledger.ensure_task(
+        task_id="task_1",
+        session_key="cli:direct",
+        agent_id="default",
+        mode="chat",
+        channel="cli",
+        goal="already done",
+        status="completed",
+        current_stage="done",
+    )
+
+    candidate = ledger.build_resume_candidate("task_1")
+    view = ledger.read_task_view("task_1")
+
+    assert candidate is not None
+    assert candidate["recommended_action"] == "noop"
+    assert candidate["safe_to_execute"] is False
+    assert candidate["reason"] == "task already settled"
+    assert view is not None
+    assert view["summary"]["progress_read_model"]["phase"] == "done"
+    assert view["summary"]["progress_read_model"]["next_action"] == "no action needed"
+
+
 def test_execute_safe_resume_rejects_replayable_failed_steps_until_executor_exists(tmp_path: Path):
     ledger = TaskLedger(tmp_path)
     ledger.ensure_task(

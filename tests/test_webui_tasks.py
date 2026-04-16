@@ -168,6 +168,7 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["recovery_history"][-1]["source"] == "unit_test"
     assert data["summary"]["recovery_history"][-1]["recovery_id"].startswith("rc_")
     assert data["summary"]["recovery_history"][-1]["ref"]["step_id"] == step.step_id
+    assert data["summary"]["recovery_history_count"] == 1
     assert data["summary"]["session_runtime"]["delivery"]["mode"] == "replace"
     assert data["summary"]["progress_read_model"]["phase"] == "done"
     assert data["summary"]["retrieval"]["latency_ms"] == 9
@@ -365,6 +366,11 @@ def test_tasks_api_exposes_verification_summary(tmp_path):
                 "ui_channel_replay": {
                     "channel": "telegram",
                     "chat_id": "123",
+                    "thread_id": "thread-1",
+                    "topic_id": "topic-1",
+                    "message_id": "789",
+                    "reply_to_message_id": "654",
+                    "message_thread_id": "321",
                 },
             }
         },
@@ -387,16 +393,21 @@ def test_tasks_api_exposes_verification_summary(tmp_path):
     assert verification["acceptance_evidence_summary"]["accepted_count"] == 1
     assert verification["surface_replay_pointer"]["channel"] == "telegram"
     assert verification["surface_replay_pointer"]["chat_id"] == "123"
+    assert verification["surface_replay_pointer"]["topic_id"] == "topic-1"
+    assert verification["surface_replay_pointer"]["reply_to_message_id"] == "654"
+    assert verification["surface_replay_pointer"]["message_thread_id"] == "321"
 
     export_json = client.get("/api/tasks/task_verify/export", params={"format": "json"})
     assert export_json.status_code == 200
     assert export_json.json()["task"]["verification"]["acceptance_evidence_summary"]["accepted_count"] == 1
     assert export_json.json()["summary"]["verification"]["surface_replay_pointer"]["channel"] == "telegram"
+    assert export_json.json()["summary"]["verification"]["surface_replay_pointer"]["topic_id"] == "topic-1"
 
     pm_json = client.get("/api/tasks/task_verify/postmortem", params={"format": "json"})
     assert pm_json.status_code == 200
     assert pm_json.json()["task"]["verification"]["acceptance_evidence_summary"]["count"] == 1
     assert pm_json.json()["summary"]["verification"]["surface_replay_pointer"]["chat_id"] == "123"
+    assert pm_json.json()["summary"]["verification"]["surface_replay_pointer"]["message_thread_id"] == "321"
 
 
 def test_info_api_includes_channel_status_snapshot(tmp_path):
@@ -1063,6 +1074,8 @@ def test_task_exports_include_conductor_chain(tmp_path):
         mode="operator",
         channel="telegram",
         goal="ship the campaign package",
+        status="completed",
+        current_stage="done",
         metadata={
             "next_action": "review merged package",
             "conductor": {
@@ -1116,7 +1129,7 @@ def test_task_exports_include_conductor_chain(tmp_path):
     pm_json = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "json"})
     assert pm_json.status_code == 200
     assert pm_json.json()["conductor"]["evaluator"]["plan_status"] == "accepted"
-    assert pm_json.json()["summary"]["progress_read_model"]["phase"] == "monitoring"
+    assert pm_json.json()["summary"]["progress_read_model"]["phase"] == "done"
 
     pm_md = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "md"})
     assert pm_md.status_code == 200
