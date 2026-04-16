@@ -351,7 +351,9 @@ async def test_manager_activity_broadcast_includes_progress_kind() -> None:
 
     event = activity_bus.broadcast.await_args.args[0]
     assert event["type"] == "progress"
+    assert event["message_state"] == "progress"
     assert event["progress_kind"] == "tool_hint"
+    assert event["delivery_mode"] == "kickoff_progress_final"
 
 
 @pytest.mark.asyncio
@@ -388,5 +390,7 @@ async def test_manager_activity_uses_delivery_context_session_key_even_after_str
 
     event = activity_bus.broadcast.await_args.args[0]
     assert event["session_key"] == "telegram:-100123:987"
+    assert event["message_state"] == "final"
+    assert event["delivery_mode"] == "final_only"
     assert len(sent) == 1
     assert DELIVERY_CONTEXT_KEY not in sent[0].metadata

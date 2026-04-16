@@ -21,6 +21,7 @@ from lemonclaw.agent.skill_eval import (
 )
 from lemonclaw.agent.skills import SkillsLoader
 from lemonclaw.governance.redaction import redact_sensitive_text, redact_sensitive_value
+from lemonclaw.ledger.types import merge_verification_metadata
 from lemonclaw.utils.helpers import strip_fences
 
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -231,6 +232,18 @@ class SkillLearningService:
 
         replay = self._replay_candidate(candidate)
         learning_payload["replay"] = replay
+        self._append_learning_verification(
+            task_id,
+            acceptance_evidence=[
+                {
+                    "kind": "managed_skill_replay",
+                    "status": "accepted" if replay.get("passed") else "rejected",
+                    "summary": f"managed skill replay {'passed' if replay.get('passed') else 'failed'} for {candidate.get('skill_name')}",
+                    "task_id": task_id,
+                    "artifact_id": str(candidate.get("skill_name") or ""),
+                }
+            ],
+        )
         if self.require_replay and not replay.get("passed"):
             learning_payload["status"] = "discarded"
             learning_payload["reason"] = "replay_failed"
@@ -238,6 +251,18 @@ class SkillLearningService:
 
         evaluator = await self._evaluate_candidate(candidate, bundle=bundle, replay=replay)
         learning_payload["evaluator"] = evaluator
+        self._append_learning_verification(
+            task_id,
+            acceptance_evidence=[
+                {
+                    "kind": "managed_skill_evaluator",
+                    "status": "accepted" if evaluator.get("accepted") else "rejected",
+                    "summary": str(evaluator.get("reason") or f"managed skill evaluator {'accepted' if evaluator.get('accepted') else 'rejected'}"),
+                    "task_id": task_id,
+                    "artifact_id": str(candidate.get("skill_name") or ""),
+                }
+            ],
+        )
         if evaluator.get("status") == "promotion_skipped":
             learning_payload["status"] = "promotion_skipped"
             learning_payload["reason"] = str(evaluator.get("reason") or "evaluator_unavailable")
@@ -263,6 +288,23 @@ class SkillLearningService:
         learning_payload["status"] = _normalize_status(promoted.get("status")) or "promotion_skipped"
         learning_payload["reason"] = str(promoted.get("reason") or "")
         return self._persist_learning_state(task_id, task, learning_payload)
+
+    def _append_learning_verification(
+        self,
+        task_id: str,
+        *,
+        acceptance_evidence: list[dict[str, Any]],
+    ) -> None:
+        task = self.ledger.read_task(task_id)
+        if not task:
+            return
+        metadata = _ensure_mapping(task.get("metadata"))
+        verification = merge_verification_metadata(
+            metadata.get("verification"),
+            acceptance_evidence=acceptance_evidence,
+        )
+        metadata["verification"] = verification
+        self.ledger.update_task(task_id, metadata=metadata)
 
     def _build_task_bundle(self, task_id: str) -> dict[str, Any] | None:
         from lemonclaw.ledger.task_exports import build_task_bundle
@@ -1143,7 +1185,8 @@ class SkillLearningService:
         }
 
     def _persist_learning_state(self, task_id: str, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-        metadata = _ensure_mapping(task.get("metadata"))
+        latest_task = self.ledger.read_task(task_id) or task
+        metadata = _ensure_mapping(latest_task.get("metadata"))
         learning = _ensure_mapping(metadata.get("learning"))
         learning.update(payload)
         learning["updated_at_ms"] = int(payload.get("updated_at_ms") or _now_ms())

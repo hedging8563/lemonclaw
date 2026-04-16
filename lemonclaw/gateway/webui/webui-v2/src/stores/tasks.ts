@@ -83,6 +83,49 @@ export interface RetrievalMeta {
   rule_sources?: Record<string, string>;
 }
 
+export interface SessionRuntimeSummary {
+  session_key?: string;
+  identity?: {
+    channel?: string;
+    account?: string;
+    chat?: string;
+    thread?: string;
+    topic?: string;
+  };
+  runtime?: {
+    timezone?: string;
+    run_mode?: string;
+  };
+  delivery?: {
+    mode?: string;
+    preserve_message_identity?: boolean;
+    message_id?: string;
+    reply_to_message_id?: string;
+    message_thread_id?: string;
+  };
+}
+
+export interface ProgressArtifactSummary {
+  artifact_id?: string;
+  kind?: string;
+  title?: string;
+  source?: string;
+}
+
+export interface ProgressReadModel {
+  phase?: string;
+  headline?: string;
+  completed_items?: string[];
+  current_blocker?: string;
+  next_action?: string;
+  latest_artifacts?: ProgressArtifactSummary[];
+  waiting_on?: string[];
+  last_updated_ms?: number;
+  session_runtime?: SessionRuntimeSummary;
+  step_trace_count?: number;
+  tool_trace_count?: number;
+}
+
 export interface TaskSummary {
   step_count?: number;
   status_counts?: Record<string, number>;
@@ -96,6 +139,9 @@ export interface TaskSummary {
   outbox_terminal_count?: number;
   recovery_history?: RecoveryHistoryEntry[];
   retrieval?: RetrievalMeta;
+  verification?: Record<string, any>;
+  session_runtime?: SessionRuntimeSummary;
+  progress_read_model?: ProgressReadModel;
 }
 
 export interface OutboxEventRecord {
@@ -146,6 +192,9 @@ export interface TaskRecord {
   resume_context?: Record<string, any>;
   metadata?: Record<string, any>;
   retrieval?: RetrievalMeta;
+  verification?: Record<string, any>;
+  session_runtime?: SessionRuntimeSummary;
+  progress_read_model?: ProgressReadModel;
   queue?: {
     queued_at_ms?: number;
     source?: string;

@@ -72,6 +72,7 @@ from lemonclaw.ledger.task_exports import (
     render_task_export_markdown,
     render_task_postmortem_markdown,
 )
+from lemonclaw.ledger.types import merge_verification_metadata
 from lemonclaw.triggers import TriggerRuntime
 
 if TYPE_CHECKING:
@@ -482,7 +483,7 @@ class AgentLoop:
         metadata["retrieval"] = dict(retrieval_meta)
         self.ledger.update_task(task_id, metadata=metadata)
 
-    def _append_agentbridge_repo_change_memory(
+    def _append_repo_change_memory(
         self,
         *,
         msg: InboundMessage,
@@ -491,18 +492,27 @@ class AgentLoop:
     ) -> tuple[str, dict[str, Any]]:
         metadata = dict(msg.metadata or {})
         agentbridge_meta = metadata.get("agentbridge")
-        if msg.channel != "agentbridge" and not isinstance(agentbridge_meta, dict):
-            return memory_ctx, retrieval_meta
-        if not isinstance(agentbridge_meta, dict):
-            return memory_ctx, retrieval_meta
-
-        repo_change = load_repo_change_memory(
-            self.workspace,
-            client_id=str(agentbridge_meta.get("client_id") or ""),
-            workspace_id=str(agentbridge_meta.get("workspace_id") or "default"),
-            thread_id=str(agentbridge_meta.get("thread_id") or "default"),
-            metadata=dict(agentbridge_meta.get("metadata") or {}) if isinstance(agentbridge_meta.get("metadata"), dict) else {},
-        )
+        repo_change = None
+        if msg.channel == "agentbridge" or isinstance(agentbridge_meta, dict):
+            if not isinstance(agentbridge_meta, dict):
+                return memory_ctx, retrieval_meta
+            repo_change = load_repo_change_memory(
+                self.workspace,
+                client_id=str(agentbridge_meta.get("client_id") or ""),
+                workspace_id=str(agentbridge_meta.get("workspace_id") or "default"),
+                thread_id=str(agentbridge_meta.get("thread_id") or "default"),
+                metadata=dict(agentbridge_meta.get("metadata") or {}) if isinstance(agentbridge_meta.get("metadata"), dict) else {},
+            )
+        elif msg.channel in {"cli", "system", "internal"} or bool(metadata.get("_repo_aware")):
+            session_context = dict(metadata.get("_session_context") or {}) if isinstance(metadata.get("_session_context"), dict) else {}
+            identity = dict(session_context.get("identity") or {}) if isinstance(session_context.get("identity"), dict) else {}
+            repo_change = load_repo_change_memory(
+                self.workspace,
+                client_id=str(metadata.get("_agent_id") or msg.channel or "local"),
+                workspace_id=str(self.workspace.name or "workspace"),
+                thread_id=str(identity.get("thread") or msg.session_key or "default"),
+                metadata=metadata,
+            )
         if not repo_change:
             return memory_ctx, retrieval_meta
 
@@ -1242,6 +1252,29 @@ class AgentLoop:
         )
         return task_metadata
 
+    @staticmethod
+    def _runtime_correction_evidence(
+        *,
+        runtime_correction: dict[str, Any],
+        task_id: str,
+    ) -> list[dict[str, Any]]:
+        kind = str(runtime_correction.get("kind") or "").strip() or "correction"
+        summary = (
+            f"continue request linked to active task ({kind})"
+            if kind == "continue"
+            else f"user correction applied to in-flight task ({kind})"
+        )
+        evidence = {
+            "kind": "correction_applied",
+            "status": "accepted",
+            "summary": summary,
+            "task_id": task_id,
+        }
+        supersedes = [str(item) for item in list(runtime_correction.get("supersedes_task_ids") or []) if str(item)]
+        if supersedes:
+            evidence["note"] = f"supersedes: {', '.join(supersedes[:3])}"
+        return [evidence]
+
     async def _interrupt_active_session_for_correction(
         self,
         msg: InboundMessage,
@@ -1852,6 +1885,7 @@ class AgentLoop:
         is_internal = msg.channel == "internal"
         request_id = (msg.metadata or {}).get("_request_id") if is_internal else None
         metadata = self._prepare_dispatch_metadata(msg)
+        task_id = str(metadata["_task_id"])
         task_metadata = self._task_trigger_metadata(metadata)
         runtime_correction = metadata.get("_runtime_correction")
         if isinstance(runtime_correction, dict) and runtime_correction:
@@ -1861,7 +1895,13 @@ class AgentLoop:
                 runtime_correction=runtime_correction,
                 session_key=msg.session_key,
             )
-        task_id = str(metadata["_task_id"])
+            task_metadata["verification"] = merge_verification_metadata(
+                task_metadata.get("verification"),
+                acceptance_evidence=self._runtime_correction_evidence(
+                    runtime_correction=runtime_correction,
+                    task_id=task_id,
+                ),
+            )
         self.ledger.ensure_task(
             task_id=task_id,
             session_key=msg.session_key,
@@ -2497,7 +2537,7 @@ class AgentLoop:
 
         history = session.get_history(max_messages=self.memory_window)
         memory_ctx, rules_ctx, retrieval_meta = await self.context.resolve_retrieval_context(msg.content)
-        memory_ctx, retrieval_meta = self._append_agentbridge_repo_change_memory(
+        memory_ctx, retrieval_meta = self._append_repo_change_memory(
             msg=msg,
             memory_ctx=memory_ctx,
             retrieval_meta=retrieval_meta,
@@ -4087,9 +4127,25 @@ class AgentLoop:
                 direct_metadata.setdefault("_mode", "chat" if channel not in {"system", "internal", "cron"} else ("cron" if channel == "cron" else "operator"))
                 direct_metadata.setdefault("run_mode", self._default_run_mode(channel=channel, mode=str(direct_metadata.get("_mode") or "")))
                 direct_metadata.setdefault("_agent_id", self.agent_id)
+                task_id = str(direct_metadata["_task_id"])
                 task_metadata = self._task_trigger_metadata(direct_metadata)
+                runtime_correction = direct_metadata.get("_runtime_correction")
+                if isinstance(runtime_correction, dict) and runtime_correction:
+                    task_metadata = {**task_metadata, "runtime_correction": dict(runtime_correction)}
+                    task_metadata = self._append_runtime_correction_history(
+                        task_metadata=task_metadata,
+                        runtime_correction=runtime_correction,
+                        session_key=session_key,
+                    )
+                    task_metadata["verification"] = merge_verification_metadata(
+                        task_metadata.get("verification"),
+                        acceptance_evidence=self._runtime_correction_evidence(
+                            runtime_correction=runtime_correction,
+                            task_id=task_id,
+                        ),
+                    )
                 self.ledger.ensure_task(
-                    task_id=str(direct_metadata["_task_id"]),
+                    task_id=task_id,
                     session_key=session_key,
                     agent_id=self.agent_id,
                     mode=str(direct_metadata["_mode"]),
@@ -4110,7 +4166,7 @@ class AgentLoop:
                     ),
                     metadata=task_metadata or None,
                 )
-                self._link_trigger_task(direct_metadata, str(direct_metadata["_task_id"]), session_key)
+                self._link_trigger_task(direct_metadata, task_id, session_key)
                 if outbound_sink:
                     direct_metadata["_outbound_sink"] = outbound_sink
                 msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content,

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 
 
 def test_task_ledger_writes_task_and_steps(tmp_path: Path):
@@ -112,6 +112,83 @@ def test_task_ledger_facade_exposes_enrich_task_for_observer(tmp_path: Path):
 
     assert enriched is not None
     assert enriched["display_state"]["key"] == "running"
+
+
+def test_task_ledger_view_surfaces_session_runtime_and_progress_read_model(tmp_path: Path):
+    ledger = TaskLedger(tmp_path)
+    ledger.ensure_task(
+        task_id="task_progress_1",
+        session_key="telegram:123:456",
+        agent_id="default",
+        mode="chat",
+        channel="telegram",
+        goal="ship the release notes",
+        current_stage="waiting_outbox",
+        resume_context=build_task_resume_context(
+            channel="telegram",
+            chat_id="123",
+            sender_id="u1",
+            session_key="telegram:123:456",
+            timezone="Asia/Shanghai",
+            run_mode="interactive",
+            session_context={
+                "session_key": "telegram:123:456",
+                "identity": {
+                    "channel": "telegram",
+                    "account": "",
+                    "chat": "123",
+                    "thread": "456",
+                    "topic": "456",
+                },
+                "timezone": "Asia/Shanghai",
+                "run_mode": "interactive",
+            },
+            delivery_context={"route": {"reply_to_message_id": 321, "message_thread_id": 456}},
+            delivery_policy={"mode": "replace", "preserve_message_identity": True},
+        ),
+        metadata={
+            "next_action": "review artifact bundle",
+            "verification": {
+                "requirements": {"required_evidence": ["artifact_bundle"]},
+                "acceptance_evidence": [],
+            },
+            "conductor": {
+                "planner": {"summary": "Ship the release package"},
+                "subtasks": [
+                    {"id": "t1", "description": "Collect release notes", "status": "completed"},
+                    {"id": "t2", "description": "Publish the package", "status": "running"},
+                ],
+                "artifacts": {
+                    "count": 1,
+                    "items": [{"artifact_id": "artifact_bundle", "kind": "bundle", "title": "Release bundle", "source": "conductor"}],
+                },
+            },
+        },
+    )
+    step = ledger.start_step("task_progress_1", step_type="tool_call", name="read_file")
+    ledger.finish_step(step, status="completed")
+    ledger.enqueue_outbox(
+        task_id="task_progress_1",
+        step_id="step_notify",
+        effect_type="outbound_message",
+        target="telegram:123",
+        payload={"content": "hello"},
+    )
+
+    view = ledger.read_task_view("task_progress_1")
+    assert view is not None
+    task = view["task"]
+    progress = view["summary"]["progress_read_model"]
+    session_runtime = view["summary"]["session_runtime"]
+
+    assert task["session_runtime"]["identity"]["thread"] == "456"
+    assert session_runtime["runtime"]["timezone"] == "Asia/Shanghai"
+    assert session_runtime["delivery"]["preserve_message_identity"] is True
+    assert progress["phase"] == "waiting_outbox"
+    assert progress["next_action"] == "review artifact bundle"
+    assert progress["completed_items"][0] == "Collect release notes"
+    assert progress["latest_artifacts"][0]["artifact_id"] == "artifact_bundle"
+    assert "artifact_bundle" in " ".join(progress["waiting_on"])
 
 
 def test_task_ledger_rejects_invalid_task_id(tmp_path: Path):

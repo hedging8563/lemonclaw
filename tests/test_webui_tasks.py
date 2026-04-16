@@ -9,7 +9,7 @@ from lemonclaw.config.loader import save_config
 from lemonclaw.config.schema import Config
 from lemonclaw.gateway.server import create_app
 from lemonclaw.gateway.webui.auth import create_session_cookie
-from lemonclaw.ledger.runtime import TaskLedger
+from lemonclaw.ledger.runtime import TaskLedger, build_task_resume_context
 from lemonclaw.session.manager import SessionManager
 from lemonclaw.triggers import TriggerRuntime
 from lemonclaw.watchdog.service import WatchdogService
@@ -99,7 +99,30 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
         channel="telegram",
         goal="say hello",
         current_stage="execute",
+        resume_context=build_task_resume_context(
+            channel="telegram",
+            chat_id="123",
+            sender_id="u1",
+            session_key="telegram:123",
+            timezone="Asia/Shanghai",
+            run_mode="interactive",
+            session_context={
+                "session_key": "telegram:123",
+                "identity": {
+                    "channel": "telegram",
+                    "account": "",
+                    "chat": "123",
+                    "thread": "",
+                    "topic": "",
+                },
+                "timezone": "Asia/Shanghai",
+                "run_mode": "interactive",
+            },
+            delivery_context={"route": {"reply_to_message_id": 321}},
+            delivery_policy={"mode": "replace", "preserve_message_identity": True},
+        ),
         metadata={
+            "next_action": "review generated answer",
             "retrieval": {
                 "strategy": "hybrid",
                 "latency_ms": 9,
@@ -134,6 +157,8 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["task"]["task_id"] == "task_1"
     assert data["task"]["display_state"]["key"] == "completed"
     assert data["task"]["retrieval"]["strategy"] == "hybrid"
+    assert data["task"]["session_runtime"]["runtime"]["timezone"] == "Asia/Shanghai"
+    assert data["task"]["progress_read_model"]["next_action"] == "review generated answer"
     assert data["task"]["retrieval"]["structured"]["session_summary"] == "hybrid trace"
     assert data["summary"]["step_count"] == 1
     assert data["summary"]["status_counts"]["completed"] == 1
@@ -143,6 +168,8 @@ def test_tasks_api_returns_materialized_task_detail(tmp_path):
     assert data["summary"]["recovery_history"][-1]["source"] == "unit_test"
     assert data["summary"]["recovery_history"][-1]["recovery_id"].startswith("rc_")
     assert data["summary"]["recovery_history"][-1]["ref"]["step_id"] == step.step_id
+    assert data["summary"]["session_runtime"]["delivery"]["mode"] == "replace"
+    assert data["summary"]["progress_read_model"]["phase"] == "done"
     assert data["summary"]["retrieval"]["latency_ms"] == 9
     assert data["summary"]["retrieval"]["structured"]["fact_slots"][0]["name"] == "tech"
 
@@ -189,6 +216,11 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
                         "preserve_message_identity": True,
                     }
                 },
+            },
+            "verification": {
+                "acceptance_evidence": [
+                    {"kind": "correction_applied", "status": "accepted", "summary": "user correction applied", "task_id": "task_new"}
+                ]
             }
         },
     )
@@ -210,6 +242,7 @@ def test_tasks_api_exposes_runtime_correction_metadata(tmp_path):
     assert runtime_correction["supersedes_task_stages"] == ["dispatch"]
     assert runtime_correction["interrupted_task_count"] == 1
     assert runtime_correction["delivery_intent"]["delivery_policy"]["mode"] == "replace"
+    assert new_data["task"]["verification"]["acceptance_evidence"][0]["kind"] == "correction_applied"
 
 
 def test_tasks_api_exposes_runtime_correction_resume_context_and_history(tmp_path):
@@ -1031,6 +1064,7 @@ def test_task_exports_include_conductor_chain(tmp_path):
         channel="telegram",
         goal="ship the campaign package",
         metadata={
+            "next_action": "review merged package",
             "conductor": {
                 "planner": {"complexity": "complex", "summary": "Ship campaign package"},
                 "generator": {"subtask_count": 2, "completed_count": 1, "failed_count": 0, "running_count": 1},
@@ -1070,19 +1104,24 @@ def test_task_exports_include_conductor_chain(tmp_path):
     assert export_json.status_code == 200
     assert export_json.json()["summary"]["conductor"]["planner"]["summary"] == "Ship campaign package"
     assert export_json.json()["conductor"]["artifacts"]["count"] == 2
+    assert export_json.json()["summary"]["progress_read_model"]["next_action"] == "review merged package"
 
     bundle_md = client.get("/api/tasks/task_conductor_export/bundle", params={"format": "md"})
     assert bundle_md.status_code == 200
     assert "## Conductor Chain" in bundle_md.text
+    assert "## Progress" in bundle_md.text
+    assert "Next Action: review merged package" in bundle_md.text
     assert "### Subtasks" in bundle_md.text
 
     pm_json = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "json"})
     assert pm_json.status_code == 200
     assert pm_json.json()["conductor"]["evaluator"]["plan_status"] == "accepted"
+    assert pm_json.json()["summary"]["progress_read_model"]["phase"] == "monitoring"
 
     pm_md = client.get("/api/tasks/task_conductor_export/postmortem", params={"format": "md"})
     assert pm_md.status_code == 200
     assert "## Conductor Chain" in pm_md.text
+    assert "## Progress" in pm_md.text
 
 
 def test_task_postmortem_api_includes_outbox_lifecycle(tmp_path):

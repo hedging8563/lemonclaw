@@ -607,6 +607,16 @@ class ChannelManager:
         task = asyncio.create_task(_requeue_later())
         self._dispatch_retry_tasks.add(task)
 
+    @staticmethod
+    def _activity_message_state(metadata: dict[str, Any]) -> str:
+        if metadata.get("_final"):
+            return "final"
+        if metadata.get("_chunk"):
+            return "delta"
+        if metadata.get("_progress"):
+            return "progress"
+        return "final"
+
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
@@ -644,6 +654,7 @@ class ChannelManager:
                         event_type = "message"
                     event: dict[str, Any] = {
                         "type": event_type,
+                        "message_state": self._activity_message_state(meta),
                         "session_key": delivery_session_key or self._activity_session_key(msg),
                         "channel": msg.channel,
                         "role": "assistant",
@@ -656,6 +667,7 @@ class ChannelManager:
                         event["first"] = True
                     if delivery_policy:
                         event["delivery_policy"] = dict(delivery_policy)
+                    event["delivery_mode"] = get_channel_capability(msg.channel).delivery_mode
                     await self.activity_bus.broadcast(event)
 
                 if msg.metadata.get("_progress"):

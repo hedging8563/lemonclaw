@@ -6,9 +6,11 @@ import {
   type RecoveryHistoryEntry,
   loadTaskPanel,
   operatorQueueTasks,
+  type ProgressReadModel,
   recoverySummary,
   recoveryTasks,
   sessionTasks,
+  type SessionRuntimeSummary,
   setTaskSurfaceNavigation,
   taskActionBusy,
   taskDetails,
@@ -476,6 +478,112 @@ function renderStringChips(values: string[] | undefined) {
   );
 }
 
+function renderSessionRuntimeSummary(sessionRuntime?: SessionRuntimeSummary | null) {
+  if (!sessionRuntime) return null;
+  const identity = sessionRuntime.identity || {};
+  const runtime = sessionRuntime.runtime || {};
+  const delivery = sessionRuntime.delivery || {};
+  return (
+    <div style={{ display: 'grid', gap: '6px' }}>
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        {t('task_session_runtime')}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_session_runtime_identity')}</div>
+          <div style={summaryDetailStyle}>{identity.channel || '—'} · {identity.chat || '—'}</div>
+          <div style={summaryDetailStyle}>
+            {identity.thread ? `${t('task_session_runtime_thread')}: ${identity.thread}` : t('task_session_runtime_thread_empty')}
+          </div>
+          {identity.topic ? <div style={summaryDetailStyle}>{t('task_session_runtime_topic')}: {identity.topic}</div> : null}
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_session_runtime_runtime')}</div>
+          <div style={summaryDetailStyle}>{runtime.run_mode || '—'}</div>
+          <div style={summaryDetailStyle}>{runtime.timezone || '—'}</div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_session_runtime_delivery')}</div>
+          <div style={summaryDetailStyle}>{delivery.mode || '—'}</div>
+          <div style={summaryDetailStyle}>
+            {delivery.preserve_message_identity ? t('task_session_runtime_preserve_identity') : t('task_session_runtime_preserve_identity_off')}
+          </div>
+          {delivery.message_thread_id ? <div style={summaryDetailStyle}>{t('task_session_runtime_message_thread')}: {delivery.message_thread_id}</div> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderProgressReadModel(progress?: ProgressReadModel | null) {
+  if (!progress) return null;
+  const completedItems = progress.completed_items || [];
+  const waitingOn = progress.waiting_on || [];
+  const latestArtifacts = progress.latest_artifacts || [];
+  return (
+    <div style={{ display: 'grid', gap: '8px' }}>
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+        {t('task_progress_read_model')}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_progress_phase')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{progress.phase || '—'}</div>
+          <div style={summaryDetailStyle}>{progress.headline || '—'}</div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_progress_blocker')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: '1.5', wordBreak: 'break-word' }}>
+            {progress.current_blocker || t('task_progress_blocker_none')}
+          </div>
+        </div>
+        <div style={summaryCardStyle}>
+          <div style={summaryLabelStyle}>{t('task_progress_next_action')}</div>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: '1.5', wordBreak: 'break-word' }}>
+            {progress.next_action || '—'}
+          </div>
+        </div>
+      </div>
+      {completedItems.length > 0 ? (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            {t('task_progress_completed_items')}
+          </div>
+          {renderStringChips(completedItems)}
+        </div>
+      ) : null}
+      {waitingOn.length > 0 ? (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            {t('task_progress_waiting_on')}
+          </div>
+          {renderStringChips(waitingOn)}
+        </div>
+      ) : null}
+      {latestArtifacts.length > 0 ? (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)' }}>
+            {t('task_progress_latest_artifacts')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {latestArtifacts.map((artifact, index) => (
+              <div key={`${artifact.artifact_id || artifact.title || 'artifact'}-${index}`} style={{ border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', background: 'rgba(255,255,255,0.03)', display: 'grid', gap: '4px' }}>
+                <div style={{ fontSize: '13px', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                  {artifact.title || artifact.artifact_id || '—'}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
+                  {artifact.kind || '—'} · {artifact.source || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {renderSessionRuntimeSummary(progress.session_runtime || null)}
+    </div>
+  );
+}
+
 function renderStructuredRetrieval(structured?: RetrievalMeta['structured'] | null) {
   const sessionSummary = String(structured?.session_summary || '').trim();
   const factSlots = structured?.fact_slots || [];
@@ -616,13 +724,15 @@ function renderTaskDetailBody(
   const recovery = task.metadata?.recovery || {};
   const runtimeCorrection = task.metadata?.runtime_correction || null;
   const retrieval = detail.summary?.retrieval || task.retrieval || task.metadata?.retrieval || null;
+  const progressReadModel = detail.summary?.progress_read_model || task.progress_read_model || null;
   const structuredRetrieval = retrieval?.structured || null;
   const route = formatResumeRoute(task);
   const showResumeStats = Boolean(detail.summary?.last_successful_step || detail.summary?.resume_from_step);
-  const summaryReason = showSuggestedAction && candidate ? formatCandidateReason(candidate) : formatDisplayDetail(detail.summary?.display_state || state);
+  const summaryReason = progressReadModel?.current_blocker || (showSuggestedAction && candidate ? formatCandidateReason(candidate) : formatDisplayDetail(detail.summary?.display_state || state));
   const story = buildTaskOperatorStory(task, detail);
   const operatorSummary = summarizeTaskOperatorState(task, detail);
   const operatorActionLabel = operatorSummary.actionKey ? t(operatorSummary.actionKey as any) : null;
+  const frontstageNextAction = progressReadModel?.next_action || story.nextStep;
   const statusTone = toneStyles(state?.tone || 'muted');
 
   return (
@@ -647,7 +757,7 @@ function renderTaskDetailBody(
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
               <span style={{ ...pillStyle(true), cursor: 'default', color: toneStyles(operatorSummary.tone).color, borderColor: toneStyles(operatorSummary.tone).borderColor, background: toneStyles(operatorSummary.tone).background }}>
-                {operatorActionLabel || story.nextStep}
+                {operatorActionLabel || frontstageNextAction}
               </span>
               <span style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.45, wordBreak: 'break-word' }}>
                 {story.happened}
@@ -779,6 +889,16 @@ function renderTaskDetailBody(
           </div>
         </details>
       )}
+      {progressReadModel ? (
+        <details style={{ ...summaryCardStyle, padding: '10px 12px' }} open>
+          <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('task_progress_read_model')}
+          </summary>
+          <div style={{ marginTop: '10px' }}>
+            {renderProgressReadModel(progressReadModel)}
+          </div>
+        </details>
+      ) : null}
       {retrieval && (
         <details id="task-retrieval-panel" ref={retrievalSectionRef} style={{ ...summaryCardStyle, padding: '10px 12px', ...linkedCardStyle(highlightRetrieval) }}>
           <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-ui)', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>

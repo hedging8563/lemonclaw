@@ -146,10 +146,36 @@ def append_conductor_markdown(lines: list[str], conductor: dict[str, Any] | None
             )
 
 
+def append_progress_markdown(lines: list[str], progress: dict[str, Any] | None) -> None:
+    lines.extend(["", "## Progress"])
+    if not progress:
+        lines.append("- none")
+        return
+    lines.extend([
+        f"- Phase: {progress.get('phase') or '—'}",
+        f"- Headline: {progress.get('headline') or '—'}",
+        f"- Blocker: {progress.get('current_blocker') or '—'}",
+        f"- Next Action: {progress.get('next_action') or '—'}",
+    ])
+    completed_items = [str(item) for item in list(progress.get("completed_items") or []) if str(item)]
+    if completed_items:
+        lines.append(f"- Completed Items: {', '.join(completed_items)}")
+    waiting_on = [str(item) for item in list(progress.get("waiting_on") or []) if str(item)]
+    if waiting_on:
+        lines.append(f"- Waiting On: {', '.join(waiting_on)}")
+    latest_artifacts = [dict(item) for item in list(progress.get("latest_artifacts") or []) if isinstance(item, dict)]
+    if latest_artifacts:
+        lines.append("")
+        lines.append("### Latest Artifacts")
+        for item in latest_artifacts:
+            lines.append(f"- {item.get('title') or item.get('artifact_id') or '—'} · {item.get('kind') or '—'} · {item.get('source') or '—'}")
+
+
 def render_task_export_markdown(export_view: dict[str, Any], task_id: str) -> str:
     summary = export_view.get("summary") or {}
     task = export_view.get("task") or {}
     retrieval = summary.get("retrieval") or task.get("retrieval") or {}
+    progress = summary.get("progress_read_model") or task.get("progress_read_model") or {}
     lines = [
         f"# Task Export: {task.get('task_id') or task_id}",
         "",
@@ -171,6 +197,7 @@ def render_task_export_markdown(export_view: dict[str, Any], task_id: str) -> st
     else:
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
+    append_progress_markdown(lines, progress)
     append_conductor_markdown(lines, export_view.get("conductor") or summary.get("conductor"))
     learning = dict(export_view.get("learning") or {})
     lines.extend([
@@ -214,6 +241,7 @@ def render_task_bundle_markdown(bundle: dict[str, Any], task_id: str) -> str:
     trigger = bundle.get("trigger") or {}
     postmortem = bundle.get("postmortem") or {}
     retrieval = summary.get("retrieval") or task.get("retrieval") or {}
+    progress = summary.get("progress_read_model") or task.get("progress_read_model") or {}
     lines = [
         f"# Task Bundle: {task.get('task_id') or task_id}",
         "",
@@ -234,6 +262,7 @@ def render_task_bundle_markdown(bundle: dict[str, Any], task_id: str) -> str:
     else:
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
+    append_progress_markdown(lines, progress)
     append_conductor_markdown(lines, bundle.get("conductor") or summary.get("conductor"))
     learning = dict(bundle.get("learning") or {})
     lines.extend([
@@ -277,6 +306,7 @@ def render_task_postmortem_markdown(postmortem: dict[str, Any], task_id: str) ->
     lifecycle = dict(outbox.get("lifecycle") or {})
     trigger = postmortem.get("trigger") or {}
     retrieval = dict((task.get("metadata") or {}).get("retrieval") or {})
+    progress = dict((postmortem.get("summary") or {}).get("progress_read_model") or (task.get("progress_read_model") or {}))
     lines = [
         f"# Task Postmortem: {task.get('task_id') or task_id}",
         "",
@@ -295,6 +325,7 @@ def render_task_postmortem_markdown(postmortem: dict[str, Any], task_id: str) ->
     else:
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
+    append_progress_markdown(lines, progress)
     append_conductor_markdown(lines, postmortem.get("conductor") or postmortem.get("summary", {}).get("conductor"))
     lines.extend([
         "",

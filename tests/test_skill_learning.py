@@ -59,6 +59,12 @@ async def _wait_for_learning(loop) -> None:
         await asyncio.gather(*list(loop._learning_tasks))
 
 
+def _write_repo_change_sidecar(workspace: Path, payload: dict) -> None:
+    sidecar_dir = workspace / ".lemonclaw-state" / "repo-change-memory"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    (sidecar_dir / f"{workspace.name}.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_process_direct_promotes_managed_skill_and_exports_learning(make_agent_loop, echo_provider, tmp_workspace):
     (tmp_workspace / "notes.txt").write_text("release notes", encoding="utf-8")
@@ -96,6 +102,10 @@ async def test_process_direct_promotes_managed_skill_and_exports_learning(make_a
     assert learning["surface"] == "chat"
     assert learning["replay"]["passed"] is True
     assert learning["evaluator"]["accepted"] is True
+    verification = dict((task.get("metadata") or {}).get("verification") or {})
+    evidence = list(verification.get("acceptance_evidence") or [])
+    assert any(item.get("kind") == "managed_skill_replay" and item.get("status") == "accepted" for item in evidence)
+    assert any(item.get("kind") == "managed_skill_evaluator" and item.get("status") == "accepted" for item in evidence)
     assert "private thoughts" not in json.dumps(learning["react_trace"], ensure_ascii=False)
     assert all("thought" not in item for item in learning["react_trace"])
     assert learning["eligibility"]["eligible"] is True
@@ -457,6 +467,35 @@ async def test_learning_uses_template_when_renderer_unavailable(make_agent_loop,
     assert learning["renderer"]["reason"] == "renderer_unavailable"
     assert learning["status"] == "promoted"
     assert learning["evaluator"]["accepted"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_direct_loads_repo_change_memory_for_cli(make_agent_loop, echo_provider, tmp_workspace):
+    _write_repo_change_sidecar(
+        tmp_workspace,
+        {
+            "summary": "prefer internal service adapters",
+            "preferred_internal_apis": ["service.adapters.run"],
+            "path_conventions": ["keep runtime changes in lemonclaw/lemonclaw/"],
+            "historical_patch_patterns": ["wire config + tests together"],
+        },
+    )
+    loop, _bus = make_agent_loop(learning_config=_learning_config(allow_llm_render=False))
+    echo_provider.responses = [LLMResponse(content="Done")]
+
+    await loop.process_direct(
+        "Review the repo and tell me what to change",
+        session_key="cli:repo-aware",
+        metadata={"_task_id": "task_cli_repo_change", "_repo_aware": True},
+    )
+    await _wait_for_learning(loop)
+
+    task = loop.ledger.read_task("task_cli_repo_change")
+    retrieval = dict((task.get("metadata") or {}).get("retrieval") or {})
+    assert retrieval["repo_change_memory_count"] == 1
+    assert "repo_change_memory" in retrieval["hit_sources"]
+    retrieval_objects = list(dict(retrieval.get("structured") or {}).get("retrieval_objects") or [])
+    assert any(item.get("kind") == "repo_change_memory" for item in retrieval_objects)
 
 
 @pytest.mark.asyncio

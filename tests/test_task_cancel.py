@@ -577,6 +577,9 @@ class TestSteeringLoop:
         assert new_task["resume_context"]["runtime_correction"]["supersedes_task_ids"] == [first_task_id]
         assert new_task["resume_context"]["runtime_correction"]["supersedes_task_stages"] == ["dispatch"]
         assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        verification = dict(new_task["metadata"].get("verification") or {})
+        evidence = list(verification.get("acceptance_evidence") or [])
+        assert any(item.get("kind") == "correction_applied" for item in evidence)
         assert new_task["metadata"]["recovery_history"][-1]["details"]["supersedes_task_stages"] == ["dispatch"]
         assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "replace"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
@@ -632,6 +635,9 @@ class TestSteeringLoop:
         assert runtime_correction["message_preview"] == "please, only patch the text"
         assert runtime_correction["interrupted_task_count"] == 1
         assert new_task["resume_context"]["runtime_correction"]["kind"] == "constraint_patch"
+        verification = dict(new_task["metadata"].get("verification") or {})
+        evidence = list(verification.get("acceptance_evidence") or [])
+        assert any(item.get("kind") == "correction_applied" for item in evidence)
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_received"
 
     @pytest.mark.asyncio
@@ -711,6 +717,9 @@ class TestSteeringLoop:
         assert new_task["resume_context"]["runtime_correction"]["continued_task_ids"] == [first_task_id]
         assert new_task["resume_context"]["runtime_correction"]["continued_task_stages"] == ["dispatch"]
         assert new_task["resume_context"]["runtime_correction"]["delivery_intent"]["delivery_policy"]["preserve_message_identity"] is True
+        verification = dict(new_task["metadata"].get("verification") or {})
+        evidence = list(verification.get("acceptance_evidence") or [])
+        assert any(item.get("kind") == "correction_applied" for item in evidence)
         assert new_task["metadata"]["recovery_history"][-1]["details"]["continued_task_stages"] == ["dispatch"]
         assert new_task["metadata"]["recovery_history"][-1]["details"]["delivery_intent"]["delivery_policy"]["mode"] == "final_only"
         assert new_task["metadata"]["recovery_history"][-1]["action"] == "runtime_correction_continue"

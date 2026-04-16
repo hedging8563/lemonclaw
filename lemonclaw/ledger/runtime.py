@@ -91,6 +91,185 @@ class TaskLedgerSharedMixin:
     """Shared ledger behavior that is backend-agnostic."""
 
     @staticmethod
+    def _humanize_code(value: Any) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw)).strip()
+
+    @staticmethod
+    def _build_session_runtime_summary(task: dict[str, Any]) -> dict[str, Any]:
+        resume_context = dict(task.get("resume_context") or {})
+        session_context = dict(resume_context.get("session_context") or {})
+        identity = dict(session_context.get("identity") or {})
+        delivery_context = dict(resume_context.get("delivery_context") or {})
+        route = dict(delivery_context.get("route") or {}) if isinstance(delivery_context.get("route"), dict) else {}
+        delivery_policy = dict(resume_context.get("delivery_policy") or {})
+
+        return {
+            "session_key": str(resume_context.get("session_key") or task.get("session_key") or ""),
+            "identity": {
+                "channel": str(identity.get("channel") or resume_context.get("channel") or task.get("channel") or ""),
+                "account": str(identity.get("account") or ""),
+                "chat": str(identity.get("chat") or resume_context.get("chat_id") or ""),
+                "thread": str(identity.get("thread") or ""),
+                "topic": str(identity.get("topic") or ""),
+            },
+            "runtime": {
+                "timezone": str(session_context.get("timezone") or resume_context.get("timezone") or ""),
+                "run_mode": str(session_context.get("run_mode") or resume_context.get("run_mode") or ""),
+            },
+            "delivery": {
+                "mode": str(delivery_policy.get("mode") or ""),
+                "preserve_message_identity": bool(delivery_policy.get("preserve_message_identity")),
+                "message_id": str(resume_context.get("message_id") or route.get("message_id") or ""),
+                "reply_to_message_id": str(route.get("reply_to_message_id") or ""),
+                "message_thread_id": str(route.get("message_thread_id") or ""),
+            },
+        }
+
+    @classmethod
+    def _build_progress_read_model(
+        cls,
+        task: dict[str, Any],
+        *,
+        display_state: dict[str, Any] | None,
+        verification: dict[str, Any] | None,
+        outbox_lifecycle: dict[str, Any] | None,
+        conductor: dict[str, Any] | None,
+        candidate: dict[str, Any] | None,
+        steps: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        metadata = dict(task.get("metadata") or {})
+        verification_map = dict(verification or {})
+        outbox_map = dict(outbox_lifecycle or {})
+        conductor_map = dict(conductor or {})
+        display = dict(display_state or {})
+        candidate_map = dict(candidate or {})
+        step_list = list(steps or [])
+
+        phase = (
+            str(dict(conductor_map.get("observability") or {}).get("phase") or "").strip()
+            or str(task.get("current_stage") or "").strip()
+            or str(task.get("status") or "").strip()
+        )
+        headline = (
+            str(dict(conductor_map.get("generator") or {}).get("summary") or "").strip()
+            or str(dict(conductor_map.get("planner") or {}).get("summary") or "").strip()
+            or str(display.get("detail") or "").strip()
+            or str(task.get("goal") or "").strip()[:180]
+        )
+
+        completed_items: list[str] = []
+        for item in list(conductor_map.get("subtasks") or []):
+            if not isinstance(item, dict) or str(item.get("status") or "") != "completed":
+                continue
+            summary = str(item.get("description") or item.get("id") or "").strip()
+            if summary and summary not in completed_items:
+                completed_items.append(summary[:160])
+            if len(completed_items) >= 5:
+                break
+        if len(completed_items) < 5:
+            for item in list(verification_map.get("acceptance_evidence") or []):
+                if not isinstance(item, dict):
+                    continue
+                status = str(item.get("status") or "").strip().lower()
+                if status not in {"accepted", "complete", "completed", "passed", "ok", "recorded"}:
+                    continue
+                summary = str(item.get("summary") or item.get("kind") or "").strip()
+                if summary and summary not in completed_items:
+                    completed_items.append(summary[:160])
+                if len(completed_items) >= 5:
+                    break
+        if len(completed_items) < 5 and task.get("last_successful_step"):
+            completed_items.append(str(task.get("last_successful_step") or "")[:160])
+
+        waiting_on: list[str] = []
+        missing = [str(item) for item in list(verification_map.get("missing_requirements") or []) if str(item)]
+        for item in missing:
+            if item not in waiting_on:
+                waiting_on.append(item)
+        active_outbox = int(outbox_map.get("active_count") or 0)
+        if active_outbox > 0:
+            waiting_on.append(f"outbox:{active_outbox}")
+        recovery = dict(metadata.get("recovery") or {})
+        if recovery.get("manual_review_required"):
+            waiting_on.append("manual_review")
+        state_key = str(display.get("key") or "").strip()
+        if state_key == "resume_requested":
+            waiting_on.append("resume_queue")
+        if state_key == "resume_dispatch_failed":
+            waiting_on.append("resume_dispatch")
+        if candidate_map.get("recommended_action") == "wait_outbox":
+            waiting_on.append("delivery_retry")
+
+        current_blocker = ""
+        if missing:
+            current_blocker = f"verification requirements: {', '.join(missing[:3])}"
+        elif active_outbox > 0:
+            current_blocker = f"waiting on outbox delivery ({active_outbox})"
+        elif recovery.get("manual_review_required"):
+            current_blocker = str(recovery.get("reason") or "manual review required")
+        elif state_key in {"resume_dispatch_failed", "resume_manual_only", "waiting_outbox", "failed", "waiting"}:
+            current_blocker = str(display.get("detail") or task.get("error") or "")
+
+        next_action = (
+            str(metadata.get("next_action") or "").strip()
+            or cls._humanize_code(candidate_map.get("recommended_action"))
+            or ("collect missing verification evidence" if missing else "")
+            or ("retry delivery / outbox" if active_outbox > 0 else "")
+            or ("review queued resume" if state_key == "resume_requested" else "")
+            or str(display.get("label") or "").strip()
+        )
+
+        latest_artifacts: list[dict[str, Any]] = []
+        artifacts_block = dict(conductor_map.get("artifacts") or {})
+        for item in list(artifacts_block.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            latest_artifacts.append(
+                {
+                    "artifact_id": str(item.get("artifact_id") or item.get("id") or ""),
+                    "kind": str(item.get("kind") or ""),
+                    "title": str(item.get("title") or item.get("label") or ""),
+                    "source": str(item.get("source") or ""),
+                }
+            )
+            if len(latest_artifacts) >= 4:
+                break
+        if len(latest_artifacts) < 4:
+            for item in list(verification_map.get("acceptance_evidence") or []):
+                if not isinstance(item, dict):
+                    continue
+                artifact_id = str(item.get("artifact_id") or "").strip()
+                if not artifact_id:
+                    continue
+                latest_artifacts.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "kind": str(item.get("kind") or ""),
+                        "title": str(item.get("summary") or artifact_id)[:160],
+                        "source": "verification",
+                    }
+                )
+                if len(latest_artifacts) >= 4:
+                    break
+
+        return {
+            "phase": phase,
+            "headline": headline,
+            "completed_items": completed_items[:5],
+            "current_blocker": current_blocker[:240],
+            "next_action": next_action[:200],
+            "latest_artifacts": latest_artifacts,
+            "waiting_on": waiting_on[:6],
+            "last_updated_ms": int(task.get("updated_at_ms") or 0),
+            "session_runtime": cls._build_session_runtime_summary(task),
+            "step_trace_count": len(step_list),
+            "tool_trace_count": int(verification_map.get("tool_trace_count") or 0),
+        }
+
+    @staticmethod
     def _build_retry_outbox_reason(*, failed_count: int, expired_count: int) -> str:
         if failed_count and expired_count:
             return f"{failed_count} failed and {expired_count} expired outbox event(s) can be retried safely"
@@ -461,7 +640,7 @@ class TaskLedgerSharedMixin:
         *,
         candidate: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        enriched = self.enrich_task_for_observer(task) or task
+        enriched = self.enrich_task_for_observer(task, candidate=candidate) or task
         recovery = ((enriched.get("metadata") or {}).get("recovery") or {}) if isinstance(enriched, dict) else {}
         resume_context = dict(enriched.get("resume_context") or {}) if isinstance(enriched, dict) else {}
         queued_at_ms = int(
@@ -486,6 +665,15 @@ class TaskLedgerSharedMixin:
         }
         item = dict(enriched)
         item["queue"] = queue
+        item["progress_read_model"] = self._build_progress_read_model(
+            task,
+            display_state=dict(enriched.get("display_state") or {}),
+            verification=dict(enriched.get("verification") or {}),
+            outbox_lifecycle=dict(enriched.get("outbox_lifecycle") or {}),
+            conductor=dict(((enriched.get("metadata") or {}).get("conductor") or {})),
+            candidate=candidate,
+            steps=[],
+        )
         return item
 
     def list_operator_queue_view(
@@ -637,19 +825,35 @@ class TaskLedgerSharedMixin:
         *,
         verification: dict[str, Any] | None = None,
         outbox_lifecycle: dict[str, Any] | None = None,
+        candidate: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Add observer-friendly derived fields without mutating stored task data."""
         if not task:
             return None
         enriched = dict(task)
-        enriched["display_state"] = self.describe_task_display_state(task)
-        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
-        enriched["verification"] = (
+        display_state = self.describe_task_display_state(task)
+        metadata = dict((task.get("metadata") or {}))
+        conductor = dict(metadata.get("conductor") or {})
+        verification_map = (
             dict(verification)
             if isinstance(verification, dict)
             else summarize_verification_metadata((task.get("metadata") or {}).get("verification"))
         )
-        enriched["outbox_lifecycle"] = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
+        outbox_lifecycle_map = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
+        enriched["display_state"] = display_state
+        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
+        enriched["verification"] = verification_map
+        enriched["outbox_lifecycle"] = outbox_lifecycle_map
+        enriched["session_runtime"] = self._build_session_runtime_summary(task)
+        enriched["progress_read_model"] = self._build_progress_read_model(
+            task,
+            display_state=display_state,
+            verification=verification_map,
+            outbox_lifecycle=outbox_lifecycle_map,
+            conductor=conductor,
+            candidate=candidate,
+            steps=[],
+        )
         return enriched
 
     def mark_task_stale(
@@ -763,9 +967,19 @@ class TaskLedgerSharedMixin:
         metadata = dict(task.get("metadata") or {})
         conductor = dict(metadata.get("conductor") or {})
         verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
+        candidate = self.build_resume_candidate(task_id)
+        progress_read_model = self._build_progress_read_model(
+            task,
+            display_state=display_state,
+            verification=verification,
+            outbox_lifecycle=outbox_lifecycle,
+            conductor=conductor,
+            candidate=candidate,
+            steps=steps,
+        )
 
         return {
-            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle),
+            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle, candidate=candidate),
             "steps": steps,
             "summary": {
                 "step_count": len(steps),
@@ -786,6 +1000,8 @@ class TaskLedgerSharedMixin:
                 "retrieval": dict(metadata.get("retrieval") or {}),
                 "conductor": conductor,
                 "verification": verification,
+                "session_runtime": self._build_session_runtime_summary(task),
+                "progress_read_model": progress_read_model,
             },
         }
 
@@ -1889,19 +2105,35 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         *,
         verification: dict[str, Any] | None = None,
         outbox_lifecycle: dict[str, Any] | None = None,
+        candidate: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Add observer-friendly derived fields without mutating stored task data."""
         if not task:
             return None
         enriched = dict(task)
-        enriched["display_state"] = self.describe_task_display_state(task)
-        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
-        enriched["verification"] = (
+        display_state = self.describe_task_display_state(task)
+        metadata = dict((task.get("metadata") or {}))
+        conductor = dict(metadata.get("conductor") or {})
+        verification_map = (
             dict(verification)
             if isinstance(verification, dict)
             else summarize_verification_metadata((task.get("metadata") or {}).get("verification"))
         )
-        enriched["outbox_lifecycle"] = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
+        outbox_lifecycle_map = dict(outbox_lifecycle) if isinstance(outbox_lifecycle, dict) else {}
+        enriched["display_state"] = display_state
+        enriched["retrieval"] = dict((task.get("metadata") or {}).get("retrieval") or {})
+        enriched["verification"] = verification_map
+        enriched["outbox_lifecycle"] = outbox_lifecycle_map
+        enriched["session_runtime"] = self._build_session_runtime_summary(task)
+        enriched["progress_read_model"] = self._build_progress_read_model(
+            task,
+            display_state=display_state,
+            verification=verification_map,
+            outbox_lifecycle=outbox_lifecycle_map,
+            conductor=conductor,
+            candidate=candidate,
+            steps=[],
+        )
         return enriched
 
     def mark_task_stale(
@@ -2015,9 +2247,19 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
         metadata = dict(task.get("metadata") or {})
         conductor = dict(metadata.get("conductor") or {})
         verification = summarize_verification_metadata(metadata.get("verification"), steps=steps)
+        candidate = self.build_resume_candidate(task_id)
+        progress_read_model = self._build_progress_read_model(
+            task,
+            display_state=display_state,
+            verification=verification,
+            outbox_lifecycle=outbox_lifecycle,
+            conductor=conductor,
+            candidate=candidate,
+            steps=steps,
+        )
 
         return {
-            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle),
+            "task": self.enrich_task_for_observer(task, verification=verification, outbox_lifecycle=outbox_lifecycle, candidate=candidate),
             "steps": steps,
             "summary": {
                 "step_count": len(steps),
@@ -2039,6 +2281,8 @@ class JsonTaskLedger(TaskLedgerSharedMixin):
                 "retrieval": dict(metadata.get("retrieval") or {}),
                 "conductor": conductor,
                 "verification": verification,
+                "session_runtime": self._build_session_runtime_summary(task),
+                "progress_read_model": progress_read_model,
             },
         }
 
