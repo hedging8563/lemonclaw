@@ -93,6 +93,59 @@ def _normalize_model_key(model_id: str | None) -> str:
     return str(model_id or '').strip().lower()
 
 
+def _humanize_runtime_model_label(model_id: str) -> str:
+    raw = str(model_id or "").strip()
+    if not raw:
+        return raw
+
+    bare_id = raw.split("/")[-1]
+    brand_labels = {
+        "claude": "Claude",
+        "deepseek": "DeepSeek",
+        "gemini": "Gemini",
+        "glm": "GLM",
+        "gpt": "GPT",
+        "grok": "Grok",
+        "kimi": "Kimi",
+        "minimax": "MiniMax",
+    }
+    word_labels = {
+        "codex": "Codex",
+        "flash": "Flash",
+        "haiku": "Haiku",
+        "mini": "Mini",
+        "opus": "Opus",
+        "preview": "Preview",
+        "pro": "Pro",
+        "r1": "R1",
+        "sonnet": "Sonnet",
+        "v3": "V3",
+    }
+
+    tokens = [token for token in bare_id.replace("_", "-").split("-") if token]
+    if not tokens:
+        return raw
+
+    rendered: list[str] = []
+    for token in tokens:
+        lowered = token.lower()
+        if lowered in brand_labels:
+            rendered.append(brand_labels[lowered])
+        elif lowered in word_labels:
+            rendered.append(word_labels[lowered])
+        elif token[:1].isalpha() and any(char.isdigit() for char in token):
+            rendered.append(token.upper())
+        elif token.isalpha() and len(token) <= 3:
+            rendered.append(token.upper())
+        else:
+            rendered.append(token)
+
+    if len(rendered) >= 2 and rendered[0] in {"GLM", "GPT"} and rendered[1][:1].isdigit():
+        rendered = [f"{rendered[0]}-{rendered[1]}", *rendered[2:]]
+
+    return " ".join(rendered)
+
+
 def _runtime_model_entry(model_id: str, *, hidden: bool, profile: str | None) -> ModelEntry:
     builtin = _BUILTIN_MODEL_MAP.get(model_id)
     if builtin:
@@ -110,7 +163,7 @@ def _runtime_model_entry(model_id: str, *, hidden: bool, profile: str | None) ->
 
     return ModelEntry(
         id=model_id,
-        label=model_id,
+        label=_humanize_runtime_model_label(model_id),
         tier="standard",
         description="Managed runtime policy model",
         fallback=None,

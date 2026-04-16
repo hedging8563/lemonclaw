@@ -70,7 +70,21 @@ def test_direct_runtime_config_preserves_policy_models_absent_from_builtin_catal
     apply_runtime_model_policy(config)
 
     visible = [entry.id for entry in MODEL_CATALOG if not entry.hidden]
+    visible_labels = [entry.label for entry in MODEL_CATALOG if not entry.hidden]
     assert visible == policy_models
+    assert visible_labels == [
+        "GPT-5.4",
+        "GPT-5.4 Mini",
+        "Claude Opus 4.6",
+        "Claude Sonnet 4.6",
+        "Gemini 3.1 Pro",
+        "MiniMax M2.7",
+        "Kimi K2.5",
+        "Grok 4.2",
+        "DeepSeek V3.2",
+        "GLM-5",
+        "GPT-5.1 Codex Mini",
+    ]
     assert get_runtime_default_model("chat") == "gpt-5.4"
     assert get_runtime_default_model("vision") == "gpt-5.1-codex-mini"
     assert get_model_runtime_meta("grok-4.2", scene="chat") == {
