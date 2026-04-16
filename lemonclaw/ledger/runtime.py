@@ -440,11 +440,13 @@ class TaskLedgerSharedMixin:
         outbox_events = [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)]
         summary = dict(task_view.get("summary") or {})
         conductor = dict(summary.get("conductor") or {})
+        learning = dict((((task_view.get("task") or {}).get("metadata") or {}).get("learning") or {}))
         postmortem = {
             "task": task_view.get("task"),
             "summary": summary,
             "candidate": self.build_resume_candidate(task_id),
             "conductor": conductor,
+            "learning": learning,
             "outbox": {
                 "events": outbox_events,
                 "lifecycle": self.summarize_outbox_lifecycle(outbox_events),
@@ -505,6 +507,7 @@ class TaskLedgerSharedMixin:
         task_view = self.read_task_view(task_id)
         if not task_view:
             return None
+        learning = dict((((task_view.get("task") or {}).get("metadata") or {}).get("learning") or {}))
         export = {
             "task": task_view.get("task"),
             "summary": task_view.get("summary"),
@@ -512,6 +515,7 @@ class TaskLedgerSharedMixin:
             "outbox_events": [self.enrich_outbox_event_for_observer(event) for event in self.materialize_outbox_events_for_task(task_id)],
             "candidate": self.build_resume_candidate(task_id),
             "conductor": dict(((task_view.get("summary") or {}).get("conductor") or {})),
+            "learning": learning,
             "postmortem": self.build_task_postmortem_view(task_id),
             "exported_at_ms": _now_ms(),
         }

@@ -107,6 +107,7 @@ class ConfigWatcher:
                 max_tool_iterations=defaults.max_tool_iterations,
                 system_prompt=defaults.system_prompt,
                 disabled_skills=defaults.disabled_skills,
+                learning_config=config.agents.learning,
             )
         except Exception:
             logger.exception("Config watcher: failed to reload agent defaults")

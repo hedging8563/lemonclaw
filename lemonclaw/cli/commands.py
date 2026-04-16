@@ -629,11 +629,13 @@ def gateway(
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        learning_config=config.agents.learning,
         governance_config=config.governance,
         trigger_runtime=trigger_runtime,
         provider_factory=provider_factory,
     )
     agent.config_path = get_config_path()
+    cron._learning_service = agent.learning
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -956,10 +958,12 @@ def agent(
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        learning_config=config.agents.learning,
         governance_config=config.governance,
         provider_factory=provider_factory,
     )
     agent_loop.config_path = get_config_path()
+    cron._learning_service = agent_loop.learning
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
@@ -1438,6 +1442,7 @@ def cron_run(
         default_timezone=config.agents.defaults.timezone,
         system_prompt=config.agents.defaults.system_prompt,
         disabled_skills=config.agents.defaults.disabled_skills,
+        learning_config=config.agents.learning,
         governance_config=config.governance,
         provider_factory=provider_factory,
     )
@@ -1445,6 +1450,7 @@ def cron_run(
 
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path, task_ledger=TaskLedger(config.workspace_path))
+    service._learning_service = agent_loop.learning
 
     result_holder = []
 

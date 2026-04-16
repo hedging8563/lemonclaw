@@ -56,6 +56,7 @@ def build_task_bundle(
         "summary": export_view.get("summary") or {},
         "candidate": export_view.get("candidate") or {},
         "conductor": export_view.get("conductor") or postmortem.get("conductor") or {},
+        "learning": export_view.get("learning") or postmortem.get("learning") or {},
         "postmortem": postmortem,
         "trigger": trigger,
     }
@@ -171,6 +172,15 @@ def render_task_export_markdown(export_view: dict[str, Any], task_id: str) -> st
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
     append_conductor_markdown(lines, export_view.get("conductor") or summary.get("conductor"))
+    learning = dict(export_view.get("learning") or {})
+    lines.extend([
+        "",
+        "## Learning",
+        "",
+        "```json",
+        json.dumps(learning, ensure_ascii=False, indent=2),
+        "```",
+    ])
     lines.extend([
         "",
         "## Recovery History",
@@ -225,6 +235,15 @@ def render_task_bundle_markdown(bundle: dict[str, Any], task_id: str) -> str:
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
     append_conductor_markdown(lines, bundle.get("conductor") or summary.get("conductor"))
+    learning = dict(bundle.get("learning") or {})
+    lines.extend([
+        "",
+        "## Learning",
+        "",
+        "```json",
+        json.dumps(learning, ensure_ascii=False, indent=2),
+        "```",
+    ])
     lines.extend([
         "",
         "## Candidate",
@@ -277,6 +296,14 @@ def render_task_postmortem_markdown(postmortem: dict[str, Any], task_id: str) ->
         lines.append("- none")
     append_retrieval_markdown(lines, retrieval)
     append_conductor_markdown(lines, postmortem.get("conductor") or postmortem.get("summary", {}).get("conductor"))
+    lines.extend([
+        "",
+        "## Learning",
+        "",
+        "```json",
+        json.dumps(postmortem.get("learning") or {}, ensure_ascii=False, indent=2),
+        "```",
+    ])
     lines.extend([
         "",
         "## Outbox Lifecycle",

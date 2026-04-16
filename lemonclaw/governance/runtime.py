@@ -50,6 +50,7 @@ _SANDBOX_GUARDED_CAPABILITIES = {
     "cron.read",
     "cron.write",
     "message.send",
+    "skill.write.managed",
 }
 _CAPABILITY_SPECS: dict[str, dict[str, Any]] = {
     "http.read": {
@@ -160,6 +161,14 @@ _CAPABILITY_SPECS: dict[str, dict[str, Any]] = {
         "side_effect_level": "local",
         "identity_mode": IdentityMode.SERVICE_ACCOUNT,
         "supports_cancel": True,
+    },
+    "skill.write.managed": {
+        "tool_name": "skill_learning",
+        "category": "learning",
+        "risk_level": RiskLevel.LOCAL_MUTATION,
+        "side_effect_level": "local",
+        "identity_mode": IdentityMode.SERVICE_ACCOUNT,
+        "filesystem_scope": "workspace",
     },
     "cron.read": {
         "tool_name": "cron",
@@ -424,6 +433,7 @@ class GovernanceRuntime:
         ended_at: float,
         params: dict[str, Any],
         result_status: str,
+        artifact_refs: list[str] | None = None,
         warnings: list[str] | None = None,
     ) -> None:
         try:
@@ -452,6 +462,7 @@ class GovernanceRuntime:
                     "global": bool(state.get("global")),
                 },
                 tenant_id=token.tenant_id if token else "",
+                artifact_refs=[str(item) for item in list(artifact_refs or []) if str(item)],
                 secret_profile=capability.secret_profile,
                 sandbox_profile=capability.sandbox_profile,
                 approval_policy=capability.approval_policy.value,

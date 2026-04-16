@@ -281,10 +281,27 @@ class AgentDefaults(Base):
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to disable
 
 
+class AgentLearningConfig(Base):
+    """Learning-loop runtime configuration."""
+
+    enabled: bool = False
+    surfaces: list[Literal["chat", "conductor", "cron", "heartbeat"]] = Field(
+        default_factory=lambda: ["chat", "conductor", "cron", "heartbeat"]
+    )
+    record_react_trace: bool = True
+    auto_promote: bool = True
+    require_replay: bool = True
+    promotion_scope: Literal["workspace", "repo"] = "workspace"
+    evaluator_model: str = "gpt-5.4-pro"
+    managed_skill_prefix: str = "lc-auto--"
+    min_tool_steps_for_extraction: int = 2
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    learning: AgentLearningConfig = Field(default_factory=AgentLearningConfig)
 
 
 class ProviderConfig(Base):

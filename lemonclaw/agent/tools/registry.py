@@ -154,6 +154,7 @@ class ToolRegistry:
                 self._append_tool_trace(
                     task_id=task_id,
                     trace={
+                        "iteration_index": int(call_context.get("_react_iteration") or 0),
                         "tool_name": name,
                         "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
                         "capability_id": capability_id,
@@ -164,6 +165,7 @@ class ToolRegistry:
                         "ended_at_ms": ended_at_ms,
                         "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
                         "result_summary": blocked_error,
+                        "artifact_refs": [],
                         "warnings": governance_warnings,
                     },
                 )
@@ -214,6 +216,16 @@ class ToolRegistry:
             else:
                 result = redact_sensitive_value(result)
             normalized = tool.normalize_result(result)
+            artifact_refs: list[str] = []
+            raw_artifacts = normalized.get("artifacts")
+            if isinstance(raw_artifacts, list):
+                for item in raw_artifacts:
+                    if isinstance(item, dict):
+                        ref = str(item.get("artifact_id") or item.get("id") or item.get("path") or item.get("uri") or "").strip()
+                    else:
+                        ref = str(item or "").strip()
+                    if ref:
+                        artifact_refs.append(ref)
             ended_at_ms = int(time.time() * 1000)
             if step:
                 step_status = str(normalized.get("step_status") or ("completed" if normalized.get("ok") else "failed"))
@@ -227,6 +239,7 @@ class ToolRegistry:
             self._append_tool_trace(
                 task_id=task_id,
                 trace={
+                    "iteration_index": int(call_context.get("_react_iteration") or 0),
                     "tool_name": name,
                     "step_id": str(getattr(step, "step_id", "") or call_context.get("_step_id") or ""),
                     "capability_id": capability_id,
@@ -237,6 +250,7 @@ class ToolRegistry:
                     "ended_at_ms": ended_at_ms,
                     "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
                     "result_summary": redact_sensitive_text(str(normalized.get("summary") or ""))[:500],
+                    "artifact_refs": artifact_refs,
                     "warnings": governance_warnings,
                 },
             )
@@ -287,6 +301,7 @@ class ToolRegistry:
             self._append_tool_trace(
                 task_id=task_id,
                 trace={
+                    "iteration_index": int((context or {}).get("_react_iteration") or 0),
                     "tool_name": name,
                     "step_id": str(getattr(step, "step_id", "") or ""),
                     "capability_id": capability_id,
@@ -297,6 +312,7 @@ class ToolRegistry:
                     "ended_at_ms": int(time.time() * 1000),
                     "params_summary": json.dumps(redact_sensitive_value(params), ensure_ascii=False)[:500],
                     "result_summary": safe_error[:500],
+                    "artifact_refs": [],
                     "warnings": governance_warnings,
                 },
             )

@@ -117,6 +117,7 @@ class CronService:
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
         task_ledger: TaskLedger | None = None,
+        learning_service: Any | None = None,
         trigger_runtime: TriggerRuntime | None = None,
     ):
         self.store_path = store_path
@@ -126,6 +127,7 @@ class CronService:
         self._timer_task: asyncio.Task | None = None
         self._running = False
         self._task_ledger = task_ledger
+        self._learning_service = learning_service
         self._trigger_runtime = trigger_runtime
     
     def _load_store(self) -> CronStore:
@@ -460,7 +462,17 @@ class CronService:
             if step:
                 self._task_ledger.finish_step(step, status="completed")
             if self._task_ledger:
-                finalize_task(self._task_ledger, task_id)
+                gate_result = finalize_task(self._task_ledger, task_id)
+                if gate_result and gate_result.passed and self._learning_service is not None:
+                    try:
+                        await self._learning_service.maybe_promote_for_task(
+                            task_id,
+                            preferred_surface="cron",
+                            mode="cron",
+                            actor_identity="cron",
+                        )
+                    except Exception:
+                        logger.exception("Cron learning runtime failed for {}", task_id)
             trigger_result_summary = str(response or "")[:500]
             logger.info("Cron: job '{}' completed", job.name)
 

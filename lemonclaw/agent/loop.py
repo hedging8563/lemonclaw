@@ -19,6 +19,7 @@ from loguru import logger
 from lemonclaw.agent.context import ContextBuilder
 from lemonclaw.agent.lemondata_runtime import build_lemondata_runtime_block
 from lemonclaw.agent.locale import detect_lang, session_lang, t
+from lemonclaw.agent.learning import SkillLearningService
 from lemonclaw.agent.subagent import SubagentManager
 from lemonclaw.agent.tools.coding import CodingTool
 from lemonclaw.agent.tools.cron import CronTool
@@ -174,6 +175,7 @@ class AgentLoop:
         system_prompt: str = "",
         disabled_skills: list[str] | None = None,
         governance_config: Any | None = None,
+        learning_config: Any | None = None,
         trigger_runtime: TriggerRuntime | None = None,
         provider_factory: Callable[[str | None], LLMProvider] | None = None,
     ):
@@ -223,6 +225,15 @@ class AgentLoop:
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
+        )
+        self.learning = SkillLearningService(
+            workspace=workspace,
+            ledger=self.ledger,
+            provider_resolver=self._provider_for_model,
+            governance=self.governance,
+            agent_id=agent_id,
+            builtin_skills_dir=self.context.skills.builtin_skills,
+            config=learning_config,
         )
 
         self._running = False
@@ -541,6 +552,7 @@ class AgentLoop:
         max_tool_iterations: int | None = None,
         system_prompt: str | None = None,
         disabled_skills: list[str] | None = None,
+        learning_config: Any | None = None,
     ) -> None:
         """Hot-reload agent defaults. Only affects new sessions; existing sessions keep their overrides."""
         changed: list[str] = []
@@ -568,6 +580,9 @@ class AgentLoop:
         if disabled_skills is not None and set(disabled_skills) != self.context.skills._disabled:
             self.context.skills._disabled = set(disabled_skills)
             changed.append(f"disabled_skills={disabled_skills}")
+        if learning_config is not None:
+            self.learning.update_config(learning_config)
+            changed.append("learning_config updated")
         analyze_image_tool = self.tools.get("analyze_image")
         if analyze_image_tool is not None and hasattr(analyze_image_tool, "_default_model"):
             from lemonclaw.providers.catalog import get_runtime_default_model
@@ -1538,6 +1553,7 @@ class AgentLoop:
                     tool_ctx = dict(tool_context_extra or {})
                     if session_key:
                         tool_ctx["_session_key"] = session_key
+                    tool_ctx["_react_iteration"] = iteration
                     if not tool_ctx:
                         tool_ctx = None
 
@@ -1844,7 +1860,16 @@ class AgentLoop:
             async with lock:
                 try:
                     response = await self._process_message(msg, stop_event=stop_event)
-                    finalize_task(self.ledger, str(metadata["_task_id"]))
+                    gate_result = finalize_task(self.ledger, str(metadata["_task_id"]))
+                    if gate_result and gate_result.passed:
+                        try:
+                            await self.learning.maybe_promote_for_task(
+                                str(metadata["_task_id"]),
+                                mode=str(metadata.get("_mode") or "chat"),
+                                actor_identity=str(metadata.get("_actor_identity") or metadata.get("_agent_id") or self.agent_id),
+                            )
+                        except Exception:
+                            logger.exception("Learning runtime failed for task {}", metadata.get("_task_id"))
                     self._finish_trigger_success(
                         metadata,
                         task_id=str(metadata["_task_id"]),
@@ -4065,7 +4090,16 @@ class AgentLoop:
                         on_chunk=on_chunk,
                         stop_event=stop_event,
                     )
-                    finalize_task(self.ledger, str(direct_metadata["_task_id"]))
+                    gate_result = finalize_task(self.ledger, str(direct_metadata["_task_id"]))
+                    if gate_result and gate_result.passed:
+                        try:
+                            await self.learning.maybe_promote_for_task(
+                                str(direct_metadata["_task_id"]),
+                                mode=str(direct_metadata.get("_mode") or "chat"),
+                                actor_identity=str(direct_metadata.get("_actor_identity") or direct_metadata.get("_agent_id") or self.agent_id),
+                            )
+                        except Exception:
+                            logger.exception("Learning runtime failed for task {}", direct_metadata.get("_task_id"))
                     self._finish_trigger_success(
                         direct_metadata,
                         task_id=str(direct_metadata["_task_id"]),

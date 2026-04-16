@@ -57,6 +57,15 @@ _WRITABLE_PATHS: set[str] = {
     "agents.defaults.output_cost_per_1k_tokens",
     "agents.defaults.system_prompt",
     "agents.defaults.disabled_skills",
+    "agents.learning.enabled",
+    "agents.learning.surfaces",
+    "agents.learning.record_react_trace",
+    "agents.learning.auto_promote",
+    "agents.learning.require_replay",
+    "agents.learning.promotion_scope",
+    "agents.learning.evaluator_model",
+    "agents.learning.managed_skill_prefix",
+    "agents.learning.min_tool_steps_for_extraction",
     # Channels (top-level flags)
     "channels.send_progress",
     "channels.send_tool_hints",
@@ -1107,6 +1116,7 @@ def get_settings_routes(
                     "agents.defaults.system_prompt": ("system_prompt", ["systemPrompt", "system_prompt"]),
                     "agents.defaults.disabled_skills": ("disabled_skills", ["disabledSkills", "disabled_skills"]),
                 }
+                learning_changed = any(path.startswith("agents.learning.") for path in changed_paths)
                 for path in changed_paths:
                     mapping = field_map.get(path)
                     if not mapping:
@@ -1116,6 +1126,8 @@ def get_settings_routes(
                         if jk in file_defaults:
                             update_kwargs[kwarg_name] = file_defaults[jk]
                             break
+                if learning_changed:
+                    update_kwargs["learning_config"] = raw.get("agents", {}).get("learning", {})
                 if update_kwargs:
                     agent_loop.update_defaults(**update_kwargs)
             except Exception:
@@ -1257,6 +1269,7 @@ def get_settings_routes(
                     max_tool_iterations=defaults.max_tool_iterations,
                     system_prompt=defaults.system_prompt,
                     disabled_skills=defaults.disabled_skills,
+                    learning_config=config.agents.learning,
                 )
 
         return _json({
