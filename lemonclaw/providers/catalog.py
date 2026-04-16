@@ -93,15 +93,32 @@ def _normalize_model_key(model_id: str | None) -> str:
     return str(model_id or '').strip().lower()
 
 
-def _is_builtin_model(model_id: str) -> bool:
-    return model_id in _BUILTIN_MODEL_MAP
+def _runtime_model_entry(model_id: str, *, hidden: bool, profile: str | None) -> ModelEntry:
+    builtin = _BUILTIN_MODEL_MAP.get(model_id)
+    if builtin:
+        return ModelEntry(
+            id=builtin.id,
+            label=builtin.label,
+            tier=builtin.tier,
+            description=builtin.description,
+            fallback=None,
+            hidden=hidden,
+            source="runtime-policy",
+            profile=profile,
+            aliases=(),
+        )
 
-
-def _is_vision_capable(model_id: str) -> bool:
-    entry = _BUILTIN_MODEL_MAP.get(model_id)
-    if not entry:
-        return False
-    return model_id in {"gpt-4.1-mini", "claude-haiku-4-5", "gemini-3.1-pro-preview", "claude-sonnet-4-6"}
+    return ModelEntry(
+        id=model_id,
+        label=model_id,
+        tier="standard",
+        description="Managed runtime policy model",
+        fallback=None,
+        hidden=hidden,
+        source="runtime-policy",
+        profile=profile,
+        aliases=(),
+    )
 
 
 def _extract_chat_models(chat: dict[str, Any]) -> list[str]:
@@ -109,11 +126,7 @@ def _extract_chat_models(chat: dict[str, Any]) -> list[str]:
     if not isinstance(raw_models, list) or not raw_models:
         raw_models = chat.get("visibleModels")
 
-    return [
-        model_id
-        for model_id in _dedupe([str(item) for item in list(raw_models or [])])
-        if _is_builtin_model(model_id)
-    ]
+    return _dedupe([str(item) for item in list(raw_models or [])])
 
 
 def _extract_vision_chain(vision: dict[str, Any]) -> list[str]:
@@ -124,11 +137,7 @@ def _extract_vision_chain(vision: dict[str, Any]) -> list[str]:
             *[str(item) for item in list(vision.get("fallbackModels") or [])],
         ]
 
-    return [
-        model_id
-        for model_id in _dedupe([str(item) for item in list(raw_chain or [])])
-        if _is_builtin_model(model_id) and _is_vision_capable(model_id)
-    ] or list(_DEFAULT_VISION_CHAIN)
+    return _dedupe([str(item) for item in list(raw_chain or [])]) or list(_DEFAULT_VISION_CHAIN)
 
 
 def _reset_to_builtin() -> None:
@@ -156,7 +165,7 @@ def _coerce_direct_config(policy: dict[str, Any]) -> dict[str, Any]:
         memory = policy["memory"]
         available_models = _extract_chat_models(chat)
         default_model = str(chat.get("defaultModel") or "").strip()
-        if not _is_builtin_model(default_model):
+        if not default_model:
             default_model = _DEFAULTS["chat"]
         if default_model not in available_models:
             available_models.insert(0, default_model)
@@ -193,10 +202,9 @@ def _coerce_direct_config(policy: dict[str, Any]) -> dict[str, Any]:
             for entry in catalog
             if bool(entry.get("visible", False)) and bool(entry.get("enabled", True))
         ])
-        if _is_builtin_model(model_id)
     ]
     default_model = str(defaults.get("chat") or "").strip()
-    if not _is_builtin_model(default_model):
+    if not default_model:
         default_model = _DEFAULTS["chat"]
     if default_model not in available_models:
         available_models.insert(0, default_model)
@@ -206,7 +214,6 @@ def _coerce_direct_config(policy: dict[str, Any]) -> dict[str, Any]:
     vision_chain = [
         model_id
         for model_id in _dedupe([str(defaults.get("vision") or ""), *[str(item) for item in vision_models]])
-        if _is_builtin_model(model_id) and _is_vision_capable(model_id)
     ] or list(_DEFAULT_VISION_CHAIN)
 
     preferred_embedding_model = str(internal_memory.get("preferredEmbeddingModel") or _DEFAULT_MEMORY_ORDER[0]).strip()
@@ -302,20 +309,7 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
 
     visible_entries = []
     for model_id in chat_ids:
-        builtin = _BUILTIN_MODEL_MAP.get(model_id)
-        if not builtin:
-            continue
-        visible_entries.append(ModelEntry(
-            id=builtin.id,
-            label=builtin.label,
-            tier=builtin.tier,
-            description=builtin.description,
-            fallback=None,
-            hidden=False,
-            source="runtime-policy",
-            profile="chat",
-            aliases=(),
-        ))
+        visible_entries.append(_runtime_model_entry(model_id, hidden=False, profile="chat"))
 
     hidden_entries = []
     for builtin in _BUILTIN_MODEL_CATALOG:
@@ -333,6 +327,10 @@ def apply_runtime_model_policy(policy: dict[str, Any] | None) -> None:
             profile=profile,
             aliases=(),
         ))
+    for model_id in vision_chain:
+        if model_id in chat_ids or model_id in _BUILTIN_MODEL_MAP:
+            continue
+        hidden_entries.append(_runtime_model_entry(model_id, hidden=True, profile="vision"))
 
     MODEL_CATALOG[:] = [*visible_entries, *hidden_entries]
     MODEL_MAP.clear()

@@ -38,6 +38,48 @@ def test_apply_direct_runtime_config_updates_chat_vision_and_memory():
     assert get_runtime_memory_policy()["embeddingOrder"] == ["text-embedding-005", "gemini-embedding-001"]
 
 
+def test_direct_runtime_config_preserves_policy_models_absent_from_builtin_catalog():
+    policy_models = [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "gemini-3.1-pro-preview",
+        "minimax-m2.7",
+        "kimi-k2.5",
+        "grok-4.2",
+        "deepseek-v3-2",
+        "glm-5",
+        "gpt-5.1-codex-mini",
+    ]
+    config = {
+        "chat": {
+            "defaultModel": "gpt-5.4",
+            "visibleModels": policy_models,
+        },
+        "vision": {
+            "primaryModel": "gpt-5.1-codex-mini",
+            "fallbackModels": ["gpt-4.1-mini", "claude-haiku-4-5"],
+        },
+        "memory": {
+            "indexMode": "auto",
+            "embeddingOrder": ["text-embedding-005"],
+        },
+    }
+
+    apply_runtime_model_policy(config)
+
+    visible = [entry.id for entry in MODEL_CATALOG if not entry.hidden]
+    assert visible == policy_models
+    assert get_runtime_default_model("chat") == "gpt-5.4"
+    assert get_runtime_default_model("vision") == "gpt-5.1-codex-mini"
+    assert get_model_runtime_meta("grok-4.2", scene="chat") == {
+        "source": "runtime-policy",
+        "profile": "chat",
+        "runtimePolicyActive": True,
+    }
+
+
 def test_apply_legacy_direct_runtime_config_shape_remains_supported():
     config = {
         "chat": {
