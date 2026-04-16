@@ -104,6 +104,33 @@ def _is_vision_capable(model_id: str) -> bool:
     return model_id in {"gpt-4.1-mini", "claude-haiku-4-5", "gemini-3.1-pro-preview", "claude-sonnet-4-6"}
 
 
+def _extract_chat_models(chat: dict[str, Any]) -> list[str]:
+    raw_models = chat.get("availableModels")
+    if not isinstance(raw_models, list) or not raw_models:
+        raw_models = chat.get("visibleModels")
+
+    return [
+        model_id
+        for model_id in _dedupe([str(item) for item in list(raw_models or [])])
+        if _is_builtin_model(model_id)
+    ]
+
+
+def _extract_vision_chain(vision: dict[str, Any]) -> list[str]:
+    raw_chain = vision.get("chain")
+    if not isinstance(raw_chain, list) or not raw_chain:
+        raw_chain = [
+            str(vision.get("primaryModel") or ""),
+            *[str(item) for item in list(vision.get("fallbackModels") or [])],
+        ]
+
+    return [
+        model_id
+        for model_id in _dedupe([str(item) for item in list(raw_chain or [])])
+        if _is_builtin_model(model_id) and _is_vision_capable(model_id)
+    ] or list(_DEFAULT_VISION_CHAIN)
+
+
 def _reset_to_builtin() -> None:
     MODEL_CATALOG[:] = list(_BUILTIN_MODEL_CATALOG)
     MODEL_MAP.clear()
@@ -127,22 +154,14 @@ def _coerce_direct_config(policy: dict[str, Any]) -> dict[str, Any]:
         chat = policy["chat"]
         vision = policy["vision"]
         memory = policy["memory"]
-        available_models = [
-            model_id
-            for model_id in _dedupe([str(item) for item in list(chat.get("availableModels") or [])])
-            if _is_builtin_model(model_id)
-        ]
+        available_models = _extract_chat_models(chat)
         default_model = str(chat.get("defaultModel") or "").strip()
         if not _is_builtin_model(default_model):
             default_model = _DEFAULTS["chat"]
         if default_model not in available_models:
             available_models.insert(0, default_model)
 
-        vision_chain = [
-            model_id
-            for model_id in _dedupe([str(item) for item in list(vision.get("chain") or [])])
-            if _is_builtin_model(model_id) and _is_vision_capable(model_id)
-        ] or list(_DEFAULT_VISION_CHAIN)
+        vision_chain = _extract_vision_chain(vision)
 
         embedding_order = _dedupe([str(item) for item in list(memory.get("embeddingOrder") or [])]) or list(_DEFAULT_MEMORY_ORDER)
 
@@ -394,6 +413,10 @@ def get_model_tiers() -> list[tuple[str, list[ModelEntry]]]:
     return [(TIER_LABELS.get(tier, tier.title()), grouped[tier]) for tier in sorted(grouped, key=lambda t: TIER_ORDER.get(t, 99))]
 
 
+def get_visible_models() -> list[ModelEntry]:
+    return [m for m in MODEL_CATALOG if not m.hidden]
+
+
 def fuzzy_match(query: str) -> ModelEntry | None:
     q = query.lower().strip()
     if not q:
@@ -424,17 +447,8 @@ def fuzzy_match(query: str) -> ModelEntry | None:
 
 def format_model_list(current_model: str | None = None) -> str:
     resolved_current = resolve_model_id(current_model) if current_model else None
-    lines: list[str] = []
-    grouped: dict[str, list[ModelEntry]] = {}
-    for m in MODEL_CATALOG:
-        if m.hidden:
-            continue
-        grouped.setdefault(m.tier, []).append(m)
-    for tier in sorted(grouped, key=lambda t: TIER_ORDER.get(t, 99)):
-        label = TIER_LABELS.get(tier, tier.title())
-        lines.append(f"\n**{label}**")
-        for m in grouped[tier]:
-            marker = ' ← current' if resolved_current and m.id == resolved_current else ''
-            lines.append(f"  `{m.id}` — {m.description}{marker}")
-    header = 'Available models (use `/model <name>` to switch):\n'
-    return header + '\n'.join(lines)
+    lines = ['Available models (use `/model <name>` to switch):']
+    for m in get_visible_models():
+        marker = ' ← current' if resolved_current and m.id == resolved_current else ''
+        lines.append(f"- `{m.id}` — {m.description}{marker}")
+    return '\n'.join(lines)

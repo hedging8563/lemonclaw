@@ -538,6 +538,13 @@ async def test_send_model_list_attaches_inline_keyboard(telegram_channel: Telegr
     assert kwargs["reply_markup"] is not None
     assert "Select model" in kwargs["text"]
     assert "Source:" not in kwargs["text"]
+    button_texts = [
+        button.text
+        for row in kwargs["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    assert not any(text in {"👑 Flagship", "⚡ Standard", "💡 Economy", "🔬 Specialist"} for text in button_texts)
+    assert not any(button.callback_data == "noop" for row in kwargs["reply_markup"].inline_keyboard for button in row)
     bot.send_message_draft.assert_not_awaited()
 
 

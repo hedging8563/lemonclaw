@@ -25,10 +25,14 @@ def test_sync_runtime_model_policy_prefers_direct_config_payload_and_updates_def
     direct_config = {
         'chat': {
             'defaultModel': 'gpt-5.2',
-            'availableModels': ['gpt-5.2', 'gpt-5.4', 'claude-sonnet-4-6'],
+            'visibleModels': ['gpt-5.2', 'gpt-5.4', 'claude-sonnet-4-6'],
         },
         'vision': {
-            'chain': ['gemini-3.1-pro-preview', 'gpt-4.1-mini'],
+            'primaryModel': 'gemini-3.1-pro-preview',
+            'fallbackModels': ['gpt-4.1-mini'],
+        },
+        'coding': {
+            'defaultModel': 'gpt-5.3-codex',
         },
         'memory': {
             'indexMode': 'hybrid',
@@ -60,6 +64,7 @@ def test_sync_runtime_model_policy_prefers_direct_config_payload_and_updates_def
     assert captured['headers']['Authorization'] == 'Bearer sk-test'
     assert config.agents.defaults.model == 'gpt-5.2'
     assert config.lemondata.default_model == 'gpt-5.2'
+    assert config.tools.coding.model == 'gpt-5.3-codex'
     assert get_runtime_default_model('vision') == 'gemini-3.1-pro-preview'
     assert get_runtime_memory_policy()['embeddingOrder'] == ['text-embedding-005', 'gemini-embedding-001']
     assert (tmp_path / 'runtime-model-policy.json').exists()

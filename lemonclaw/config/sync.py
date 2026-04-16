@@ -279,6 +279,11 @@ def _sync_runtime_model_policy(config: Config) -> bool:
     legacy_policy = payload.get("policy") if isinstance(payload, dict) else None
     policy = direct_config if isinstance(direct_config, dict) else legacy_policy
     changed = False
+    coding_default = ""
+    if isinstance(direct_config, dict) and isinstance(direct_config.get("coding"), dict):
+        coding_default = str(direct_config["coding"].get("defaultModel") or "").strip()
+    if not coding_default and isinstance(legacy_policy, dict):
+        coding_default = str((legacy_policy.get("defaults") or {}).get("coding") or "").strip()
 
     if isinstance(policy, dict):
         serialized = json.dumps(policy, ensure_ascii=False, indent=2) + "\n"
@@ -294,10 +299,9 @@ def _sync_runtime_model_policy(config: Config) -> bool:
     else:
         return _clear_runtime_model_policy(config, config_dir=config_dir)
 
-    if isinstance(legacy_policy, dict):
-        coding_default = str((legacy_policy.get("defaults") or {}).get("coding") or "").strip()
+    if coding_default:
         current_coding_model = str(config.tools.coding.model or "").strip()
-        if coding_default and (not current_coding_model or current_coding_model in _MANAGED_CODING_MODELS):
+        if not current_coding_model or current_coding_model in _MANAGED_CODING_MODELS:
             if config.tools.coding.model != coding_default:
                 config.tools.coding.model = coding_default
                 changed = True

@@ -188,7 +188,6 @@ class TelegramChannel(BaseChannel):
 
         # Inline keyboard callback handler (for /model buttons)
         self._app.add_handler(CallbackQueryHandler(self._on_model_callback, pattern=r"^model:"))
-        self._app.add_handler(CallbackQueryHandler(self._on_noop_callback, pattern=r"^noop$"))
 
         inbound_message_filter = (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) & ~filters.COMMAND
 
@@ -717,35 +716,23 @@ class TelegramChannel(BaseChannel):
     # ── Inline keyboard for /model ────────────────────────────────────────
 
     def _build_model_keyboard(self, current_model: str | None) -> InlineKeyboardMarkup:
-        """Build a compact inline keyboard with model buttons grouped by tier."""
-        from lemonclaw.providers.catalog import get_model_tiers
-
-        tier_emoji = {"Flagship": "👑", "Standard": "⚡", "Economy": "💡", "Specialist": "🔬"}
+        """Build a compact inline keyboard in runtime policy order."""
+        from lemonclaw.providers.catalog import get_visible_models
 
         buttons: list[list[InlineKeyboardButton]] = []
-        for tier_label, models in get_model_tiers():
-            emoji = tier_emoji.get(tier_label, "▸")
-            # Tier header (non-clickable, full width)
-            buttons.append([InlineKeyboardButton(f"{emoji} {tier_label}", callback_data="noop")])
-            # Model buttons — compact labels, 2 per row
-            row: list[InlineKeyboardButton] = []
-            for m in models:
-                label = m.label.removeprefix("Claude ")
-                check = " ✓" if current_model and m.id == current_model else ""
-                row.append(InlineKeyboardButton(f"{label}{check}", callback_data=f"model:{m.id}"))
-                if len(row) == 2:
-                    buttons.append(row)
-                    row = []
-            if row:
+        row: list[InlineKeyboardButton] = []
+        for m in get_visible_models():
+            label = m.label.removeprefix("Claude ")
+            check = " ✓" if current_model and m.id == current_model else ""
+            row.append(InlineKeyboardButton(f"{label}{check}", callback_data=f"model:{m.id}"))
+            if len(row) == 2:
                 buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
 
         buttons.append([InlineKeyboardButton("✕ Close", callback_data="model:close")])
         return InlineKeyboardMarkup(buttons)
-
-    async def _on_noop_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Acknowledge tier-header button taps (no action)."""
-        if update.callback_query:
-            await update.callback_query.answer()
 
     async def _on_model_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle inline keyboard button presses for model selection."""

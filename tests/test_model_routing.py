@@ -128,12 +128,13 @@ class TestFuzzyMatch:
 
 class TestFormatModelList:
 
-    def test_contains_all_tiers(self):
+    def test_lists_models_without_tier_headings(self):
         output = format_model_list()
-        assert "Flagship" in output
-        assert "Standard" in output
-        assert "Economy" in output
-        assert "Specialist" in output
+        assert "**Flagship**" not in output
+        assert "**Standard**" not in output
+        assert "**Economy**" not in output
+        assert "**Specialist**" not in output
+        assert "`gpt-5.4`" in output
 
     def test_current_model_marker(self):
         output = format_model_list("gpt-5.2")
@@ -151,7 +152,7 @@ class TestFormatModelList:
 
     def test_runtime_model_list_shows_current_builtin_without_legacy_alias_hints(self):
         apply_runtime_model_policy({
-            'chat': {'defaultModel': 'gpt-5.4', 'availableModels': ['gpt-5.4', 'deepseek-v3-2']},
+            'chat': {'defaultModel': 'gpt-5.4', 'visibleModels': ['gpt-5.4', 'deepseek-v3-2']},
             'vision': {'chain': ['gpt-4.1-mini']},
             'memory': {'indexMode': 'auto', 'embeddingOrder': ['text-embedding-005']},
         })
@@ -160,6 +161,7 @@ class TestFormatModelList:
             assert "deepseek-v3-2" in output
             assert "← current" in output
             assert "legacy:" not in output
+            assert output.index("`gpt-5.4`") < output.index("`deepseek-v3-2`")
         finally:
             apply_runtime_model_policy(None)
 

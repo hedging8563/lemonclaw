@@ -17,10 +17,11 @@ def test_apply_direct_runtime_config_updates_chat_vision_and_memory():
     config = {
         "chat": {
             "defaultModel": "gpt-5.2",
-            "availableModels": ["gpt-5.2", "gpt-5.4", "claude-sonnet-4-6"],
+            "visibleModels": ["gpt-5.2", "gpt-5.4", "claude-sonnet-4-6"],
         },
         "vision": {
-            "chain": ["gemini-3.1-pro-preview", "gpt-4.1-mini"],
+            "primaryModel": "gemini-3.1-pro-preview",
+            "fallbackModels": ["gpt-4.1-mini"],
         },
         "memory": {
             "indexMode": "hybrid",
@@ -35,6 +36,31 @@ def test_apply_direct_runtime_config_updates_chat_vision_and_memory():
     assert get_fallback_chain("gpt-5.2", scene="chat") == ["gpt-5.2"]
     assert get_fallback_chain("gemini-3.1-pro-preview", scene="vision") == ["gemini-3.1-pro-preview", "gpt-4.1-mini"]
     assert get_runtime_memory_policy()["embeddingOrder"] == ["text-embedding-005", "gemini-embedding-001"]
+
+
+def test_apply_legacy_direct_runtime_config_shape_remains_supported():
+    config = {
+        "chat": {
+            "defaultModel": "gpt-5.2",
+            "availableModels": ["gpt-5.2", "gpt-5.4", "claude-sonnet-4-6"],
+        },
+        "vision": {
+            "chain": ["gemini-3.1-pro-preview", "gpt-4.1-mini"],
+        },
+        "memory": {
+            "indexMode": "hybrid",
+            "embeddingOrder": ["text-embedding-005", "gemini-embedding-001"],
+        },
+    }
+
+    apply_runtime_model_policy(config)
+
+    assert [entry.id for entry in MODEL_CATALOG if not entry.hidden] == [
+        "gpt-5.2",
+        "gpt-5.4",
+        "claude-sonnet-4-6",
+    ]
+    assert get_runtime_default_model("vision") == "gemini-3.1-pro-preview"
 
 
 def test_apply_runtime_policy_resets_to_builtin_when_none():
