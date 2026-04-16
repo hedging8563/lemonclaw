@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,6 +34,12 @@ def _learning_config(**overrides):
     return config
 
 
+async def _wait_for_learning(loop) -> None:
+    await asyncio.sleep(0)
+    if loop._learning_tasks:
+        await asyncio.gather(*list(loop._learning_tasks))
+
+
 @pytest.mark.asyncio
 async def test_process_direct_promotes_managed_skill_and_exports_learning(make_agent_loop, echo_provider, tmp_workspace):
     (tmp_workspace / "notes.txt").write_text("release notes", encoding="utf-8")
@@ -61,6 +68,7 @@ async def test_process_direct_promotes_managed_skill_and_exports_learning(make_a
         session_key="cli:skill-learning",
         metadata={"_task_id": "task_skill_learning_1"},
     )
+    await _wait_for_learning(loop)
 
     assert result == "Done"
     task = loop.ledger.read_task("task_skill_learning_1")
@@ -72,6 +80,7 @@ async def test_process_direct_promotes_managed_skill_and_exports_learning(make_a
     assert "private thoughts" not in json.dumps(learning["react_trace"], ensure_ascii=False)
     assert all("thought" not in item for item in learning["react_trace"])
     assert learning["eligibility"]["eligible"] is True
+    assert learning["candidate"]["workflow_fingerprint"]
 
     promoted_skill = dict(learning["promoted_skill"])
     skill_path = Path(promoted_skill["path"])
@@ -122,6 +131,7 @@ async def test_learning_replaces_managed_skill_only_when_score_improves(make_age
             session_key=f"cli:{task_id}",
             metadata={"_task_id": task_id},
         )
+        await _wait_for_learning(loop)
 
     await _run("task_skill_learning_replace_1", 0.40)
     await _run("task_skill_learning_replace_2", 0.95)
@@ -139,6 +149,138 @@ async def test_learning_replaces_managed_skill_only_when_score_improves(make_age
     archive_path = Path(sidecar["replacement_history"][-1]["path"])
     assert (archive_path / "SKILL.md").exists()
     assert (archive_path / "skill.asset.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_learning_does_not_replace_existing_skill_when_same_title_maps_to_different_workflow(
+    make_agent_loop,
+    echo_provider,
+    tmp_workspace,
+):
+    (tmp_workspace / "notes.txt").write_text("release notes", encoding="utf-8")
+    loop, _bus = make_agent_loop(learning_config=_learning_config())
+
+    async def _run(task_id: str, tool_calls: list[ToolCallRequest]) -> dict:
+        echo_provider._call_count = 0
+        echo_provider.responses = [
+            LLMResponse(content="", tool_calls=tool_calls),
+            LLMResponse(content="Done"),
+            LLMResponse(content=json.dumps({
+                "accepted": True,
+                "score": 0.91,
+                "risks": [],
+                "reason": "scored",
+                "scope_override": "repo",
+            })),
+        ]
+        await loop.process_direct(
+            "Review notes and summarize next steps",
+            session_key=f"cli:{task_id}",
+            metadata={"_task_id": task_id},
+        )
+        await _wait_for_learning(loop)
+        task = loop.ledger.read_task(task_id)
+        return dict((task.get("metadata") or {}).get("learning") or {})
+
+    first_learning = await _run(
+        "task_skill_learning_collision_1",
+        [
+            ToolCallRequest(id="call-1", name="list_dir", arguments={"path": "."}),
+            ToolCallRequest(id="call-2", name="read_file", arguments={"path": "notes.txt"}),
+        ],
+    )
+    second_learning = await _run(
+        "task_skill_learning_collision_2",
+        [
+            ToolCallRequest(id="call-1", name="list_dir", arguments={"path": "."}),
+            ToolCallRequest(id="call-2", name="glob", arguments={"pattern": "*.txt"}),
+        ],
+    )
+
+    assert first_learning["status"] == "promoted"
+    assert second_learning["status"] == "discarded"
+    assert first_learning["candidate"]["workflow_fingerprint"] != second_learning["candidate"]["workflow_fingerprint"]
+    assert second_learning["reason"] == "replay_failed"
+    assert Path(first_learning["promoted_skill"]["path"]).exists()
+    assert "promoted_skill" not in second_learning
+
+
+@pytest.mark.asyncio
+async def test_learning_replay_rejects_existing_skill_trigger_conflict(make_agent_loop, echo_provider, tmp_workspace):
+    (tmp_workspace / "notes.txt").write_text("release notes", encoding="utf-8")
+    existing_skill = tmp_workspace / "skills" / "manual-review"
+    existing_skill.mkdir(parents=True, exist_ok=True)
+    (existing_skill / "SKILL.md").write_text(
+        """---
+name: manual-review
+description: Existing skill with overlapping trigger
+triggers:
+  - Review notes and summarize next steps
+metadata:
+  lemonclaw:
+    pattern: pipeline
+---
+
+# Manual Review
+""",
+        encoding="utf-8",
+    )
+    loop, _bus = make_agent_loop(learning_config=_learning_config())
+    echo_provider.responses = [
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(id="call-1", name="list_dir", arguments={"path": "."}),
+                ToolCallRequest(id="call-2", name="read_file", arguments={"path": "notes.txt"}),
+            ],
+        ),
+        LLMResponse(content="Done"),
+    ]
+
+    result = await loop.process_direct(
+        "Review notes and summarize next steps",
+        session_key="cli:skill-learning-conflict",
+        metadata={"_task_id": "task_skill_learning_conflict"},
+    )
+    await _wait_for_learning(loop)
+
+    assert result == "Done"
+    task = loop.ledger.read_task("task_skill_learning_conflict")
+    learning = dict((task.get("metadata") or {}).get("learning") or {})
+    assert learning["status"] == "discarded"
+    assert learning["reason"] == "replay_failed"
+    assert learning["replay"]["passed"] is False
+    assert "promoted_skill" not in learning
+
+
+@pytest.mark.asyncio
+async def test_process_direct_returns_before_background_learning_finishes(make_agent_loop, echo_provider):
+    loop, _bus = make_agent_loop(learning_config=_learning_config())
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_learning(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return {"status": "promoted"}
+
+    loop.learning.maybe_promote_for_task = _slow_learning
+    echo_provider.responses = [LLMResponse(content="Done")]
+
+    result = await asyncio.wait_for(
+        loop.process_direct(
+            "Say hello",
+            session_key="cli:skill-learning-background",
+            metadata={"_task_id": "task_skill_learning_background"},
+        ),
+        timeout=0.5,
+    )
+
+    assert result == "Done"
+    await asyncio.wait_for(started.wait(), timeout=0.5)
+    assert loop._learning_tasks
+    release.set()
+    await _wait_for_learning(loop)
 
 
 @pytest.mark.asyncio

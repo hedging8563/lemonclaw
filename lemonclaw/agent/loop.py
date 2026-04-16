@@ -244,6 +244,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._learning_tasks: set[asyncio.Task] = set()  # Strong refs to background learning promotions
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._consolidation_epochs: dict[str, int] = {}  # session_key -> supersede generation
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
@@ -425,6 +426,41 @@ class AgentLoop:
     def _schedule_background_consolidation(self, session_key: str) -> None:
         task = asyncio.create_task(self._run_background_consolidation(session_key))
         self._track_background_task(task, bucket=self._consolidation_tasks, label=f"session_consolidation:{session_key}")
+
+    async def _run_learning_promotion(
+        self,
+        *,
+        task_id: str,
+        mode: str,
+        actor_identity: str,
+        preferred_surface: str | None = None,
+    ) -> None:
+        await self.learning.maybe_promote_for_task(
+            task_id,
+            preferred_surface=preferred_surface,
+            mode=mode,
+            actor_identity=actor_identity,
+        )
+
+    def _schedule_learning_promotion(
+        self,
+        *,
+        task_id: str,
+        mode: str,
+        actor_identity: str,
+        preferred_surface: str | None = None,
+    ) -> None:
+        if not task_id:
+            return
+        task = asyncio.create_task(
+            self._run_learning_promotion(
+                task_id=task_id,
+                mode=mode,
+                actor_identity=actor_identity,
+                preferred_surface=preferred_surface,
+            )
+        )
+        self._track_background_task(task, bucket=self._learning_tasks, label=f"task_learning:{task_id}")
 
     async def _archive_session_snapshot(self, session_key: str, snapshot: Session) -> None:
         """Persist a cleared session immediately, and archive memory in the background."""
@@ -1861,21 +1897,18 @@ class AgentLoop:
                 try:
                     response = await self._process_message(msg, stop_event=stop_event)
                     gate_result = finalize_task(self.ledger, str(metadata["_task_id"]))
-                    if gate_result and gate_result.passed:
-                        try:
-                            await self.learning.maybe_promote_for_task(
-                                str(metadata["_task_id"]),
-                                mode=str(metadata.get("_mode") or "chat"),
-                                actor_identity=str(metadata.get("_actor_identity") or metadata.get("_agent_id") or self.agent_id),
-                            )
-                        except Exception:
-                            logger.exception("Learning runtime failed for task {}", metadata.get("_task_id"))
                     self._finish_trigger_success(
                         metadata,
                         task_id=str(metadata["_task_id"]),
                         session_key=msg.session_key,
                         result_summary=(response.content if response else "")[:500],
                     )
+                    if gate_result and gate_result.passed:
+                        self._schedule_learning_promotion(
+                            task_id=str(metadata["_task_id"]),
+                            mode=str(metadata.get("_mode") or "chat"),
+                            actor_identity=str(metadata.get("_actor_identity") or metadata.get("_agent_id") or self.agent_id),
+                        )
 
                     # Internal request-response: resolve Future instead of outbound
                     if request_id:
@@ -4091,21 +4124,18 @@ class AgentLoop:
                         stop_event=stop_event,
                     )
                     gate_result = finalize_task(self.ledger, str(direct_metadata["_task_id"]))
-                    if gate_result and gate_result.passed:
-                        try:
-                            await self.learning.maybe_promote_for_task(
-                                str(direct_metadata["_task_id"]),
-                                mode=str(direct_metadata.get("_mode") or "chat"),
-                                actor_identity=str(direct_metadata.get("_actor_identity") or direct_metadata.get("_agent_id") or self.agent_id),
-                            )
-                        except Exception:
-                            logger.exception("Learning runtime failed for task {}", direct_metadata.get("_task_id"))
                     self._finish_trigger_success(
                         direct_metadata,
                         task_id=str(direct_metadata["_task_id"]),
                         session_key=session_key,
                         result_summary=(response.content if response else "")[:500],
                     )
+                    if gate_result and gate_result.passed:
+                        self._schedule_learning_promotion(
+                            task_id=str(direct_metadata["_task_id"]),
+                            mode=str(direct_metadata.get("_mode") or "chat"),
+                            actor_identity=str(direct_metadata.get("_actor_identity") or direct_metadata.get("_agent_id") or self.agent_id),
+                        )
                 except asyncio.CancelledError:
                     self._abandon_task_outbox_side_effects(
                         str(direct_metadata["_task_id"]),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -18,6 +19,7 @@ from lemonclaw.agent.skill_eval import (
     SkillBenchmarkCase,
     evaluate_skill_benchmark,
 )
+from lemonclaw.agent.skills import SkillsLoader
 from lemonclaw.governance.redaction import redact_sensitive_text, redact_sensitive_value
 from lemonclaw.utils.helpers import strip_fences
 
@@ -59,6 +61,16 @@ def _truncate(text: str | None, *, limit: int = 500) -> str:
 
 def _ensure_mapping(value: Any) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, dict) else {}
+
+
+def _normalize_triggers(value: Any) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    elif value is None:
+        raw = []
+    else:
+        raw = str(value).split(",")
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
 class SkillLearningService:
@@ -337,8 +349,14 @@ class SkillLearningService:
         slug_base = _SAFE_SLUG_RE.sub("-", title.lower()).strip("-")
         if not slug_base:
             slug_base = f"{surface}-{str(task.get('task_id') or '')[-8:] or 'auto'}"
-        slug_base = slug_base[:48].rstrip("-")
-        skill_name = f"{self.managed_skill_prefix}{slug_base}"
+        slug_base = slug_base[:36].rstrip("-")
+        workflow_fingerprint, workflow_signature = self._build_workflow_identity(
+            task,
+            export_view,
+            bundle,
+            useful_trace,
+        )
+        skill_name = f"{self.managed_skill_prefix}{slug_base}-{workflow_fingerprint}"
 
         steps: list[str] = []
         for index, item in enumerate(useful_trace, start=1):
@@ -395,7 +413,12 @@ class SkillLearningService:
         else:
             scope = "workspace"
 
-        benchmark = self._build_candidate_benchmark(skill_name, trigger_examples, steps, verification_steps)
+        benchmark = self._build_candidate_benchmark(
+            skill_name,
+            trigger_examples,
+            steps,
+            verification_steps,
+        )
         return {
             "slug": slug_base,
             "skill_name": skill_name,
@@ -409,6 +432,8 @@ class SkillLearningService:
             "failure_signals": failure_signals[:8],
             "source_task_ids": [str(task.get("task_id") or "")],
             "scope": scope,
+            "workflow_fingerprint": workflow_fingerprint,
+            "workflow_signature": workflow_signature,
             "benchmark": benchmark,
             "skill_markdown": self._render_skill_markdown(
                 skill_name=skill_name,
@@ -422,6 +447,40 @@ class SkillLearningService:
             ),
         }
 
+    def _build_workflow_identity(
+        self,
+        task: dict[str, Any],
+        export_view: dict[str, Any],
+        bundle: dict[str, Any],
+        useful_trace: list[dict[str, Any]],
+    ) -> tuple[str, dict[str, Any]]:
+        conductor = _ensure_mapping(export_view.get("conductor") or bundle.get("conductor"))
+        conductor_subtasks = [dict(item) for item in list(conductor.get("subtasks") or []) if isinstance(item, dict)]
+        signature = {
+            "tools": [
+                {
+                    "tool_name": str(item.get("tool_name") or "").strip(),
+                    "iteration_index": int(item.get("iteration_index") or 0),
+                    "artifact_count": len([ref for ref in list(item.get("artifact_refs") or []) if str(ref)]),
+                    "result_state": _normalize_status(item.get("result_state")),
+                    "replayable": bool(item.get("replayable")),
+                }
+                for item in useful_trace[:8]
+                if str(item.get("tool_name") or "").strip()
+            ],
+            "conductor_subtasks": [
+                _truncate(item.get("description"), limit=120).lower()
+                for item in conductor_subtasks[:5]
+                if _truncate(item.get("description"), limit=120)
+            ],
+            "conductor_artifact_count": int(_ensure_mapping(conductor.get("artifacts")).get("count") or 0),
+            "repo_evidence": self._has_repo_evidence(task, useful_trace, bundle),
+        }
+        digest = hashlib.sha1(
+            json.dumps(signature, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:10]
+        return digest, signature
+
     def _build_candidate_benchmark(
         self,
         skill_name: str,
@@ -430,20 +489,60 @@ class SkillLearningService:
         verification_steps: list[str],
     ) -> dict[str, Any]:
         positive = trigger_examples[0]
+        runtime_loader = SkillsLoader(self.workspace, builtin_skills_dir=self.builtin_skills_dir)
+        workspace_skill_names = {
+            skill["name"]
+            for skill in runtime_loader.list_skills(filter_unavailable=True)
+            if skill.get("source") == "workspace" and skill["name"] != skill_name
+        }
+        conflict_skills = sorted(
+            {
+                matched
+                for sample in trigger_examples[:3]
+                for matched in runtime_loader.match_skills(sample)
+                if matched in workspace_skill_names
+            }
+        )
+        prompt_must_not_contain = [f"### Skill: {name}" for name in conflict_skills[:3]]
         prompt_must_contain = [step[:120] for step in steps[:2]]
         if verification_steps:
             prompt_must_contain.append(verification_steps[0][:120])
+        neighbor_cases: list[dict[str, Any]] = []
+        seen_samples = {sample.lower() for sample in trigger_examples}
+        candidate_names = conflict_skills + [
+            name for name in sorted(workspace_skill_names)
+            if name not in conflict_skills
+        ]
+        for other_name in candidate_names:
+            triggers = _normalize_triggers((_ensure_mapping(runtime_loader.get_skill_metadata(other_name))).get("triggers"))
+            sample = next((item for item in triggers if item.lower() not in seen_samples), "")
+            if not sample:
+                continue
+            seen_samples.add(sample.lower())
+            neighbor_cases.append(
+                {
+                    "name": f"neighbor-{len(neighbor_cases) + 1}",
+                    "message": sample[:240],
+                    "expect_triggered": False,
+                    "required_skills": [other_name],
+                }
+            )
+            if len(neighbor_cases) >= 4:
+                break
         return {
             "skill": skill_name,
             "mode": "chat",
-            "ignore_requirements": True,
+            "ignore_requirements": False,
             "cases": [
                 {
                     "name": "source-task",
                     "message": positive,
                     "expect_triggered": True,
                     "prompt_must_contain": prompt_must_contain,
+                    "prompt_must_not_contain": prompt_must_not_contain,
+                    "conflict_skills": conflict_skills,
                 },
+                *neighbor_cases,
                 {
                     "name": "negative-control",
                     "message": "Tell me a joke about rainbows.",
@@ -503,7 +602,16 @@ class SkillLearningService:
         with tempfile.TemporaryDirectory(prefix="lc_skill_replay_") as tmp:
             temp_root = Path(tmp)
             workspace = temp_root / "workspace"
-            skill_dir = workspace / "skills" / str(candidate["skill_name"])
+            source_skills_root = self.workspace / "skills"
+            replay_skills_root = workspace / "skills"
+            if source_skills_root.exists():
+                shutil.copytree(
+                    source_skills_root,
+                    replay_skills_root,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("archive"),
+                )
+            skill_dir = replay_skills_root / str(candidate["skill_name"])
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(str(candidate["skill_markdown"]), encoding="utf-8")
 
@@ -516,6 +624,8 @@ class SkillLearningService:
                         name=str(case.get("name") or f"case-{index}"),
                         message=str(case.get("message") or ""),
                         expect_triggered=bool(case.get("expect_triggered", True)),
+                        required_skills=[str(item) for item in list(case.get("required_skills") or []) if str(item)],
+                        conflict_skills=[str(item) for item in list(case.get("conflict_skills") or []) if str(item)],
                         prompt_must_contain=[str(item) for item in list(case.get("prompt_must_contain") or []) if str(item)],
                         prompt_must_not_contain=[str(item) for item in list(case.get("prompt_must_not_contain") or []) if str(item)],
                     )
@@ -724,6 +834,8 @@ class SkillLearningService:
             "source_task_ids": [task_id],
             "source_surface": surface,
             "scope": candidate.get("scope"),
+            "workflow_fingerprint": candidate.get("workflow_fingerprint"),
+            "workflow_signature": candidate.get("workflow_signature"),
             "status": "approved",
             "replay": replay,
             "evaluator": evaluator,
